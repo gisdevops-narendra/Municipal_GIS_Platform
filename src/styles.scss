@@ -269,3 +269,36 @@ a {
 .legend__swatch[hidden] {
   display: none;
 }
+
+/* ---------------------------------------------------------------------- */
+/* Measurement Tool — map overlays (created by MapService, outside Angular) */
+/* ---------------------------------------------------------------------- */
+.measure-tooltip {
+  padding: 2px 7px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-ink-900);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  box-shadow: var(--shadow-panel);
+  pointer-events: none;
+}
+
+.measure-tooltip--static {
+  border-style: solid;
+  font-weight: 600;
+}
+
+.measure-segment {
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+  color: var(--color-ink-700);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  white-space: nowrap;
+  pointer-events: none;
+}

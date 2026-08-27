@@ -26,6 +26,7 @@ import { FeatureInfoComponent } from './components/feature-info/feature-info.com
 import { GisSearchComponent } from './components/gis-search/gis-search.component';
 import { AttributeExternalFilter, AttributeTableComponent, MapClickFeatureRef } from './components/attribute-table/attribute-table.component';
 import { QueryBuilderComponent } from './components/query-builder/query-builder.component';
+import { MeasureComponent } from './components/measure/measure.component';
 
 const CRS_PATTERN = /^EPSG:\d{4,6}$/;
 
@@ -59,7 +60,7 @@ const TOOLS: WsTool[] = [
   { id: 'attributes', label: 'Attribute Table', icon: 'pi pi-table', group: 'explore', dock: 'bottom', available: true },
   { id: 'bookmarks', label: 'Bookmarks', icon: 'pi pi-bookmark', group: 'explore', dock: 'left', available: false },
   { id: 'query', label: 'Query Builder', icon: 'pi pi-filter', group: 'analysis', dock: 'left', available: true },
-  { id: 'measure', label: 'Measure', icon: 'pi pi-arrows-h', group: 'analysis', dock: 'left', available: false },
+  { id: 'measure', label: 'Measure', icon: 'pi pi-arrows-h', group: 'analysis', dock: 'left', available: true },
   { id: 'buffer', label: 'Buffer & Overlay', icon: 'pi pi-circle', group: 'analysis', dock: 'left', available: false },
   { id: 'statistics', label: 'Statistics', icon: 'pi pi-chart-bar', group: 'analysis', dock: 'bottom', available: false },
   { id: 'print', label: 'Print Layout', icon: 'pi pi-print', group: 'output', dock: 'left', available: false },
@@ -90,7 +91,8 @@ const TOOLS: WsTool[] = [
     FeatureInfoComponent,
     GisSearchComponent,
     AttributeTableComponent,
-    QueryBuilderComponent
+    QueryBuilderComponent,
+    MeasureComponent
   ],
   // One OpenLayers Map per visit, shared by the map surface and every dock
   // panel — see MapService's own doc comment for why this is a

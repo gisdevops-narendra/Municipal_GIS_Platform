@@ -11,19 +11,41 @@ import ImageWMS from 'ol/source/ImageWMS';
 import VectorSource from 'ol/source/Vector';
 import GeoJSON from 'ol/format/GeoJSON';
 import Draw, { createBox } from 'ol/interaction/Draw';
-import { Fill, Stroke, Style, Circle as CircleStyle } from 'ol/style';
+import Overlay from 'ol/Overlay';
+import LineString from 'ol/geom/LineString';
+import Polygon, { fromCircle } from 'ol/geom/Polygon';
+import CircleGeom from 'ol/geom/Circle';
+import { Fill, Stroke, Style, Circle as CircleStyle, Text as TextStyle } from 'ol/style';
+import { getArea, getLength } from 'ol/sphere';
 import { defaults as defaultControls } from 'ol/control';
 import ScaleLine from 'ol/control/ScaleLine';
 import MousePosition from 'ol/control/MousePosition';
 import { createStringXY } from 'ol/coordinate';
 import { fromLonLat, transformExtent } from 'ol/proj';
 import { createEmpty, extend as extendExtent, isEmpty as isEmptyExtent } from 'ol/extent';
+import type Geometry from 'ol/geom/Geometry';
 import { forkJoin, map as rxMap, Observable, of } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import { GisLayer } from '../../../core/models/gis-layer.model';
 
 const MAP_PROJECTION = 'EPSG:3857';
 const LAYER_PROJECTION = 'EPSG:4326';
+
+export type MeasureDrawType = 'LineString' | 'Polygon' | 'Circle';
+
+/** Geodesic measurement of the geometry currently (or last) drawn by the
+ *  Measurement Tool. All figures are SI — metres / square metres. */
+export interface MeasureResult {
+  type: MeasureDrawType;
+  /** total line length, polygon perimeter, or circle circumference */
+  lengthM: number;
+  /** polygon or circle area (undefined for a line) */
+  areaM2?: number;
+  /** circle radius (undefined otherwise) */
+  radiusM?: number;
+  /** per-segment lengths for a line or a polygon ring */
+  segmentsM: number[];
+}
 
 /** Generic fallback view (roughly India) used only when no layer on this
  *  municipality's workspace has a usable bounding box yet (e.g. a freshly
@@ -119,6 +141,16 @@ export class MapService {
   private drawInteraction: Draw | null = null;
   private readonly geoJson = new GeoJSON();
 
+  /** Dedicated measurement layer/overlays — never touches the GIS layers. */
+  private measureLayer: VectorLayer<VectorSource> | null = null;
+  private measureDraw: Draw | null = null;
+  private measureGeomListener: (() => void) | null = null;
+  private measureTooltip: Overlay | null = null;
+  private measureSegments: Overlay[] = [];
+  /** epoch ms until which map single-clicks are ignored — covers the
+   *  trailing click that ends a draw/measure gesture. */
+  private suppressClickUntil = 0;
+
   /** Geometries (EPSG:4326) of the currently highlighted/selected features —
    *  read by the Query Builder for "use current selection as spatial input". */
   readonly selectionGeometries = signal<Record<string, unknown>[]>([]);
@@ -186,12 +218,14 @@ export class MapService {
 
   destroy(): void {
     this.cancelDraw();
+    this.clearMeasure();
     this.map?.setTarget(undefined);
     this.map = null;
     this.managedLayers.clear();
     this.selectionLayer = null;
     this.queryLayer = null;
     this.drawLayer = null;
+    this.measureLayer = null;
     this.selectionGeometries.set([]);
   }
 
@@ -265,6 +299,7 @@ export class MapService {
    *  `cancelDraw` / `clearDraw` remove it. */
   beginDraw(kind: 'Point' | 'Line' | 'Rectangle' | 'Polygon'): Observable<Record<string, unknown>> {
     this.cancelDraw();
+    this.stopMeasure();
     const source = this.ensureDrawSource();
     source.clear();
 
@@ -278,6 +313,7 @@ export class MapService {
       });
       this.drawInteraction.on('drawstart', () => source.clear());
       this.drawInteraction.on('drawend', (event) => {
+        this.suppressClickUntil = Date.now() + 400;
         const geom = (event as unknown as { feature: Feature }).feature.getGeometry();
         if (geom) {
           const geojson = this.geoJson.writeGeometryObject(geom, {
@@ -304,6 +340,281 @@ export class MapService {
   clearDraw(): void {
     this.cancelDraw();
     this.drawLayer?.getSource()?.clear();
+  }
+
+  // ----- measurement tool -----
+
+  /**
+   * Starts a geodesic measurement. Only ever one measurement interaction is
+   * active — any previous one (and the query-draw interaction) is removed
+   * first. `onChange` fires live while the user draws; `onComplete` fires on
+   * finish. The finished geometry + its label stay on the dedicated
+   * measurement layer until `stopMeasure` / `clearMeasure`.
+   */
+  startMeasure(
+    type: MeasureDrawType,
+    onChange: (result: MeasureResult) => void,
+    onComplete: (result: MeasureResult) => void
+  ): void {
+    this.cancelDraw();
+    this.stopMeasure();
+    if (!this.map) return;
+
+    const source = this.ensureMeasureSource();
+    this.measureDraw = new Draw({
+      source,
+      type,
+      style: this.measureSketchStyle()
+    });
+
+    this.measureDraw.on('drawstart', (event) => {
+      const feature = (event as unknown as { feature: Feature }).feature;
+      const geometry = feature.getGeometry() as Geometry;
+      this.ensureMeasureTooltip();
+      const update = () => {
+        const result = this.measureGeometry(geometry, type);
+        this.positionMeasureLabels(geometry, type, result);
+        onChange(result);
+      };
+      update();
+      geometry.on('change', update);
+      this.measureGeomListener = () => geometry.un('change', update);
+    });
+
+    this.measureDraw.on('drawend', (event) => {
+      this.suppressClickUntil = Date.now() + 400;
+      const geometry = (event as unknown as { feature: Feature }).feature.getGeometry() as Geometry;
+      this.measureGeomListener?.();
+      this.measureGeomListener = null;
+      const result = this.measureGeometry(geometry, type);
+      this.positionMeasureLabels(geometry, type, result, true);
+      // hand the sketch's labels over as finished graphics: keep them on the
+      // map, but release the refs so the next measurement gets fresh ones
+      this.measureTooltip?.getElement()?.classList.add('measure-tooltip--static');
+      this.measureTooltip?.set('measureLabel', true);
+      this.measureTooltip = null;
+      this.measureSegments = [];
+      if (this.measureDraw && this.map) {
+        this.map.removeInteraction(this.measureDraw);
+      }
+      this.measureDraw = null;
+      onComplete(result);
+    });
+
+    this.map.addInteraction(this.measureDraw);
+  }
+
+  /** Removes the active measurement interaction. An in-progress (unfinished)
+   *  sketch and its labels are discarded; finished measurements are kept. */
+  stopMeasure(): void {
+    this.measureGeomListener?.();
+    this.measureGeomListener = null;
+    if (this.measureDraw && this.map) {
+      this.map.removeInteraction(this.measureDraw);
+    }
+    this.measureDraw = null;
+    if (this.measureTooltip) {
+      this.removeOverlay(this.measureTooltip);
+      this.measureTooltip = null;
+      for (const overlay of this.measureSegments) {
+        this.removeOverlay(overlay);
+      }
+      this.measureSegments = [];
+    }
+  }
+
+  /** Removes the active interaction AND every finished measurement graphic. */
+  clearMeasure(): void {
+    this.stopMeasure();
+    this.measureLayer?.getSource()?.clear();
+    for (const overlay of (this.map?.getOverlays().getArray() ?? []).slice()) {
+      if (overlay.get('measureLabel')) {
+        this.removeOverlay(overlay);
+      }
+    }
+    this.measureSegments = [];
+  }
+
+  private measureGeometry(geometry: Geometry, type: MeasureDrawType): MeasureResult {
+    const projection = MAP_PROJECTION;
+    if (type === 'LineString') {
+      const line = geometry as LineString;
+      const coords = line.getCoordinates();
+      return {
+        type,
+        lengthM: getLength(line, { projection }),
+        segmentsM: this.segmentLengths(coords, projection)
+      };
+    }
+    if (type === 'Polygon') {
+      const polygon = geometry as Polygon;
+      const ring = polygon.getLinearRing(0);
+      const ringCoords = ring ? ring.getCoordinates() : [];
+      return {
+        type,
+        areaM2: getArea(polygon, { projection }),
+        lengthM: ring ? getLength(new LineString(ringCoords), { projection }) : 0,
+        segmentsM: this.segmentLengths(ringCoords, projection)
+      };
+    }
+    // Circle
+    const circle = geometry as CircleGeom;
+    const polygon = fromCircle(circle, 128);
+    const circumference = getLength(polygon, { projection });
+    return {
+      type,
+      lengthM: circumference,
+      areaM2: getArea(polygon, { projection }),
+      radiusM: circumference / (2 * Math.PI),
+      segmentsM: []
+    };
+  }
+
+  private segmentLengths(coords: number[][], projection: string): number[] {
+    const segments: number[] = [];
+    for (let i = 1; i < coords.length; i++) {
+      segments.push(getLength(new LineString([coords[i - 1], coords[i]]), { projection }));
+    }
+    return segments;
+  }
+
+  private positionMeasureLabels(
+    geometry: Geometry,
+    type: MeasureDrawType,
+    result: MeasureResult,
+    persistent = false
+  ): void {
+    // main label
+    const anchor = this.measureAnchor(geometry, type);
+    if (this.measureTooltip && anchor) {
+      this.measureTooltip.setPosition(anchor);
+      const element = this.measureTooltip.getElement();
+      if (element) {
+        element.textContent = this.mainLabel(result);
+      }
+    }
+
+    // per-segment labels (lines + polygon rings), capped so long paths
+    // don't flood the map with overlays
+    if (!this.map) return;
+    const coords = this.ringCoords(geometry, type);
+    const wanted = coords.length > 1 && result.segmentsM.length <= 40 ? result.segmentsM.length : 0;
+
+    while (this.measureSegments.length > wanted) {
+      this.removeOverlay(this.measureSegments.pop() as Overlay);
+    }
+    while (this.measureSegments.length < wanted) {
+      const el = document.createElement('div');
+      el.className = 'measure-segment';
+      const overlay = new Overlay({ element: el, offset: [0, 0], positioning: 'center-center', stopEvent: false });
+      overlay.set('measureLabel', true);
+      overlay.set('measureSegment', true);
+      this.map.addOverlay(overlay);
+      this.measureSegments.push(overlay);
+    }
+    for (let i = 0; i < wanted; i++) {
+      const mid = [
+        (coords[i][0] + coords[i + 1][0]) / 2,
+        (coords[i][1] + coords[i + 1][1]) / 2
+      ];
+      this.measureSegments[i].setPosition(mid);
+      const el = this.measureSegments[i].getElement();
+      if (el) {
+        el.textContent = this.formatSegment(result.segmentsM[i]);
+      }
+    }
+
+    if (persistent && this.measureTooltip) {
+      this.measureTooltip.set('measureLabel', true);
+    }
+  }
+
+  private measureAnchor(geometry: Geometry, type: MeasureDrawType): number[] | undefined {
+    if (type === 'Polygon') {
+      return (geometry as Polygon).getInteriorPoint().getCoordinates().slice(0, 2);
+    }
+    if (type === 'Circle') {
+      return (geometry as CircleGeom).getCenter();
+    }
+    const coords = (geometry as LineString).getCoordinates();
+    return coords.length ? coords[coords.length - 1] : undefined;
+  }
+
+  private ringCoords(geometry: Geometry, type: MeasureDrawType): number[][] {
+    if (type === 'LineString') return (geometry as LineString).getCoordinates();
+    if (type === 'Polygon') {
+      const ring = (geometry as Polygon).getLinearRing(0);
+      return ring ? ring.getCoordinates() : [];
+    }
+    return [];
+  }
+
+  private mainLabel(result: MeasureResult): string {
+    if (result.type === 'Polygon' && result.areaM2 != null) {
+      return this.metricArea(result.areaM2);
+    }
+    if (result.type === 'Circle' && result.radiusM != null) {
+      return `r ${this.formatSegment(result.radiusM)}`;
+    }
+    return this.formatSegment(result.lengthM);
+  }
+
+  private formatSegment(metres: number): string {
+    return metres >= 1000 ? `${(metres / 1000).toFixed(2)} km` : `${Math.round(metres)} m`;
+  }
+
+  private metricArea(squareMetres: number): string {
+    if (squareMetres >= 1_000_000) return `${(squareMetres / 1_000_000).toFixed(2)} km²`;
+    if (squareMetres >= 10_000) return `${(squareMetres / 10_000).toFixed(2)} ha`;
+    return `${Math.round(squareMetres)} m²`;
+  }
+
+  private ensureMeasureSource(): VectorSource {
+    if (!this.measureLayer) {
+      this.measureLayer = new VectorLayer({
+        source: new VectorSource(),
+        style: this.measureFinishedStyle(),
+        zIndex: 10001,
+        properties: { measureOverlay: true }
+      });
+      this.map?.addLayer(this.measureLayer);
+    }
+    return this.measureLayer.getSource() as VectorSource;
+  }
+
+  private ensureMeasureTooltip(): void {
+    if (this.measureTooltip) return;
+    const element = document.createElement('div');
+    element.className = 'measure-tooltip';
+    this.measureTooltip = new Overlay({
+      element,
+      offset: [0, -12],
+      positioning: 'bottom-center',
+      stopEvent: false
+    });
+    this.map?.addOverlay(this.measureTooltip);
+  }
+
+  private removeOverlay(overlay: Overlay): void {
+    this.map?.removeOverlay(overlay);
+    overlay.getElement()?.remove();
+  }
+
+  private measureSketchStyle(): Style {
+    return new Style({
+      stroke: new Stroke({ color: '#1c2430', width: 2, lineDash: [7, 5] }),
+      fill: new Fill({ color: 'rgba(28, 36, 48, 0.08)' }),
+      image: new CircleStyle({ radius: 5, stroke: new Stroke({ color: '#1c2430', width: 2 }), fill: new Fill({ color: '#fff' }) })
+    });
+  }
+
+  private measureFinishedStyle(): Style {
+    return new Style({
+      stroke: new Stroke({ color: '#1c2430', width: 2 }),
+      fill: new Fill({ color: 'rgba(28, 36, 48, 0.06)' }),
+      image: new CircleStyle({ radius: 4, stroke: new Stroke({ color: '#1c2430', width: 2 }), fill: new Fill({ color: '#fff' }) }),
+      text: new TextStyle({ font: '11px "IBM Plex Mono", monospace', fill: new Fill({ color: '#1c2430' }) })
+    });
   }
 
   /** Zooms/pans the map to frame the given GeoJSON (EPSG:4326) geometries. */
@@ -414,10 +725,14 @@ export class MapService {
 
   /** Registers a handler for single-clicks on the map, receiving the
    *  clicked coordinate in the map's own projection (EPSG:3857) — ready to
-   *  pass straight into getFeatureInfo. Keeps `ol/Map` itself out of
-   *  component code. */
+   *  pass straight into getFeatureInfo. Suppressed while a measurement or
+   *  query-draw interaction is active so those clicks don't also trigger
+   *  Identify. */
   onSingleClick(handler: (coordinate: number[]) => void): void {
-    this.map?.on('singleclick', (event) => handler(event.coordinate));
+    this.map?.on('singleclick', (event) => {
+      if (this.measureDraw || this.drawInteraction || Date.now() < this.suppressClickUntil) return;
+      handler(event.coordinate);
+    });
   }
 
   setLayerVisibility(layerId: string, visible: boolean): void {

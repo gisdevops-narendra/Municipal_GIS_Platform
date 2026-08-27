@@ -49,6 +49,13 @@
           @case ('legend') {
             <app-legend [layers]="layers()" [inline]="true" />
           }
+          @case ('measure') {
+            @if (layersReady()) {
+              <app-measure />
+            } @else {
+              <p class="gis-ws__hint">{{ layersError() ?? 'Loading map…' }}</p>
+            }
+          }
           @case ('query') {
             @if (layersReady()) {
               <app-query-builder

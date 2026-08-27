@@ -1,0 +1,79 @@
+<div class="measure">
+  <label class="measure__field">
+    <span class="measure__label">Measurement</span>
+    <p-select
+      class="measure__select"
+      [options]="kinds"
+      optionLabel="label"
+      optionValue="value"
+      [ngModel]="kind()"
+      (onChange)="onKindChange($event.value)"
+      appendTo="body"
+    />
+  </label>
+
+  <div class="measure__units">
+    <label class="measure__field">
+      <span class="measure__label">Length unit</span>
+      <p-select
+        class="measure__select"
+        [options]="lengthUnits"
+        optionLabel="label"
+        optionValue="value"
+        [ngModel]="lengthUnit()"
+        (ngModelChange)="lengthUnit.set($event)"
+        appendTo="body"
+      />
+    </label>
+
+    @if (showAreaUnit()) {
+      <label class="measure__field">
+        <span class="measure__label">Area unit</span>
+        <p-select
+          class="measure__select"
+          [options]="areaUnits"
+          optionLabel="label"
+          optionValue="value"
+          [ngModel]="areaUnit()"
+          (ngModelChange)="areaUnit.set($event)"
+          appendTo="body"
+        />
+      </label>
+    }
+  </div>
+
+  <div class="measure__result">
+    @if (drawing() && !result()) {
+      <p class="measure__hint">{{ drawHint }}</p>
+    } @else if (resultRows().length > 0) {
+      <dl class="measure__figures">
+        @for (row of resultRows(); track row.label) {
+          <div class="measure__figure">
+            <dt>{{ row.label }}</dt>
+            <dd>{{ row.value }}</dd>
+          </div>
+        }
+      </dl>
+      @if (segments().length > 0) {
+        <div class="measure__segments">
+          <span class="measure__label">Segments</span>
+          <ol>
+            @for (segment of segments(); track segment.index) {
+              <li><span>{{ segment.index }}</span>{{ segment.value }}</li>
+            }
+          </ol>
+        </div>
+      }
+      @if (drawing()) {
+        <p class="measure__hint">{{ drawHint }}</p>
+      }
+    } @else {
+      <p class="measure__hint measure__hint--muted">No measurement yet.</p>
+    }
+  </div>
+
+  <div class="measure__controls">
+    <button pButton type="button" label="Draw" icon="pi pi-pencil" class="p-button-sm measure__draw" (click)="start()"></button>
+    <button pButton type="button" label="Clear" icon="pi pi-eraser" class="p-button-sm p-button-text" (click)="clear()"></button>
+  </div>
+</div>
