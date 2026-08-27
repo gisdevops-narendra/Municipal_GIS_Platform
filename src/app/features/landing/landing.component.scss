@@ -1,0 +1,150 @@
+.hero {
+  padding: 72px 0 88px;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.hero__inner {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 56px;
+  align-items: center;
+}
+
+.hero__heading {
+  font-size: 42px;
+  line-height: 1.12;
+  margin: 14px 0 18px;
+  max-width: 15ch;
+}
+
+.hero__lede {
+  font-size: 16.5px;
+  max-width: 46ch;
+  margin-bottom: 30px;
+}
+
+.hero__actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Decorative "sheet reference" panel — reinforces the survey-sheet motif */
+.hero__panel {
+  padding: 22px 24px;
+}
+
+.hero__panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  border-bottom: 1px dashed var(--color-line-strong);
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+}
+
+.hero__panel-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  color: var(--color-ink-500);
+}
+
+.hero__panel-value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-primary-700);
+  font-weight: 600;
+}
+
+.hero__panel-list {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+}
+
+.hero__panel-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--color-line);
+  font-size: 13px;
+}
+
+.hero__panel-list li:last-child {
+  border-bottom: none;
+}
+
+.hero__panel-list li span:first-child {
+  color: var(--color-ink-900);
+  font-weight: 500;
+}
+
+.hero__panel-list li span:last-child {
+  color: var(--color-ink-500);
+  text-align: right;
+}
+
+.hero__panel-footer {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--color-ink-300);
+  padding-top: 10px;
+  border-top: 1px dashed var(--color-line-strong);
+}
+
+.capabilities {
+  padding: 72px 0 96px;
+}
+
+.capabilities__heading {
+  font-size: 26px;
+  max-width: 22ch;
+  margin: 12px 0 34px;
+}
+
+.capabilities__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+
+.capability-card {
+  padding: 22px 20px;
+}
+
+.capability-card__title {
+  font-size: 15.5px;
+  margin-bottom: 8px;
+}
+
+.capability-card__desc {
+  font-size: 13.5px;
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .hero__inner {
+    grid-template-columns: 1fr;
+  }
+
+  .hero__heading {
+    max-width: none;
+    font-size: 34px;
+  }
+
+  .capabilities__grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .hero {
+    padding: 48px 0 56px;
+  }
+
+  .capabilities__grid {
+    grid-template-columns: 1fr;
+  }
+}

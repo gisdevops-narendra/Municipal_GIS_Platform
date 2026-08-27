@@ -1,0 +1,198 @@
+<app-site-header />
+
+<main class="users-shell contour-field">
+  <div class="page-container users-shell__inner">
+    <div class="users-card survey-panel">
+      <div class="users-card__header">
+        <div>
+          <span class="eyebrow">Administration</span>
+          <h1 class="users-card__heading">Users</h1>
+        </div>
+        @if (isOwner()) {
+          <button pButton type="button" label="Add User" (click)="openCreateDialog()"></button>
+        }
+      </div>
+
+      <div class="users-card__filters">
+        <input
+          pInputText
+          type="search"
+          placeholder="Search by name or email"
+          class="users-card__search"
+          [ngModel]="searchTerm()"
+          (ngModelChange)="onSearchChange($event)"
+        />
+        <p-select
+          [options]="departmentOptions"
+          optionLabel="label"
+          optionValue="value"
+          placeholder="All departments"
+          [ngModel]="departmentFilter()"
+          (onChange)="onDepartmentFilterChange($event.value)"
+        ></p-select>
+        <p-select
+          [options]="statusOptions"
+          optionLabel="label"
+          optionValue="value"
+          placeholder="All statuses"
+          [ngModel]="statusFilter()"
+          (onChange)="onStatusFilterChange($event.value)"
+        ></p-select>
+      </div>
+
+      @if (pageError(); as message) {
+        <p-message severity="error" [text]="message" styleClass="w-full users-card__message" />
+      }
+
+      @if (loading()) {
+        <p class="users-card__lede">Loading users…</p>
+      } @else if (users().length === 0) {
+        <p class="users-card__lede">No users match these filters.</p>
+      } @else {
+        <p-table [value]="users()" styleClass="users-table" [rowHover]="true">
+          <ng-template pTemplate="header">
+            <tr>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Department</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th>Created</th>
+              @if (isOwner()) {
+                <th>Actions</th>
+              }
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="body" let-user>
+            <tr>
+              <td>{{ user.fullName }}</td>
+              <td class="users-table__mono">{{ user.email }}</td>
+              <td>{{ user.department?.name || '—' }}</td>
+              <td>
+                @if (user.systemRole === 'MUNICIPALITY_OWNER') {
+                  Municipality Owner
+                } @else if (user.systemRole === 'DEPARTMENT_HEAD') {
+                  Department Head
+                } @else {
+                  Department User
+                }
+              </td>
+              <td>
+                <p-tag [severity]="user.status === 'ACTIVE' ? 'success' : 'secondary'" [value]="user.status"></p-tag>
+              </td>
+              <td>{{ user.createdAt | date: 'mediumDate' }}</td>
+              @if (isOwner()) {
+                <td class="users-table__actions">
+                  @if (user.systemRole !== 'MUNICIPALITY_OWNER') {
+                    <button pButton type="button" label="Edit" class="p-button-text p-button-sm" (click)="openEditDialog(user)"></button>
+                    <button
+                      pButton
+                      type="button"
+                      [label]="user.status === 'ACTIVE' ? 'Deactivate' : 'Activate'"
+                      class="p-button-text p-button-sm"
+                      (click)="toggleStatus(user)"
+                    ></button>
+                  } @else {
+                    <span class="users-table__owner-note">Owner account</span>
+                  }
+                </td>
+              }
+            </tr>
+          </ng-template>
+        </p-table>
+      }
+    </div>
+  </div>
+</main>
+
+<p-dialog
+  [visible]="dialogVisible()"
+  (visibleChange)="dialogVisible.set($event)"
+  [modal]="true"
+  [header]="editingUser() ? 'Edit User' : 'Add User'"
+  [style]="{ width: '480px' }"
+  (onHide)="closeDialog()"
+>
+  @if (createdTemporaryPassword(); as tempPassword) {
+    <div class="users-form">
+      <p-message severity="success" text="User created. Share this temporary password with them securely — it will not be shown again." styleClass="w-full" />
+      <div class="users-form__temp-password">{{ tempPassword }}</div>
+      <p class="field-hint">
+        They must sign in with this password and will be required to set a new one immediately. There is no automated
+        invitation email in this version — please share it out of band (e.g. in person or a secure message).
+      </p>
+      <div class="users-form__actions">
+        <button pButton type="button" label="Done" (click)="dialogVisible.set(false)"></button>
+      </div>
+    </div>
+  } @else {
+    <form [formGroup]="form" (ngSubmit)="submit()" class="users-form">
+      <div class="users-form__field">
+        <label class="field-label" for="user-name">Full Name</label>
+        <input pInputText id="user-name" formControlName="fullName" class="w-full" />
+        @if (f.fullName.invalid && f.fullName.touched) {
+          <div class="field-error">Full name is required.</div>
+        }
+      </div>
+
+      @if (!editingUser()) {
+        <div class="users-form__field">
+          <label class="field-label" for="user-email">Email</label>
+          <input pInputText id="user-email" formControlName="email" class="w-full" />
+          @if (f.email.invalid && f.email.touched) {
+            <div class="field-error">A valid email is required.</div>
+          }
+        </div>
+      }
+
+      <div class="users-form__field">
+        <label class="field-label" for="user-mobile">Mobile Number</label>
+        <input pInputText id="user-mobile" formControlName="mobileNumber" class="w-full" />
+        @if (f.mobileNumber.invalid && f.mobileNumber.touched) {
+          <div class="field-error">Enter a valid mobile number.</div>
+        }
+      </div>
+
+      <div class="users-form__field">
+        <label class="field-label" for="user-department">Department</label>
+        <p-select
+          inputId="user-department"
+          [options]="departmentFormOptions"
+          optionLabel="label"
+          optionValue="value"
+          placeholder="No department"
+          formControlName="departmentId"
+          [showClear]="true"
+          styleClass="w-full"
+        ></p-select>
+      </div>
+
+      <div class="users-form__field">
+        <label class="field-label" for="user-role">Role</label>
+        <p-select
+          inputId="user-role"
+          [options]="roleOptions"
+          optionLabel="label"
+          optionValue="value"
+          formControlName="role"
+          styleClass="w-full"
+        ></p-select>
+        <div class="field-hint">
+          Department Head gets VIEW/UPLOAD/APPROVE by default on their department's layers; Department User gets
+          VIEW/UPLOAD. Fine-tune per layer under GIS Layers → Permissions.
+        </div>
+      </div>
+
+      @if (formError(); as message) {
+        <p-message severity="error" [text]="message" styleClass="w-full" />
+      }
+
+      <div class="users-form__actions">
+        <button pButton type="button" label="Cancel" class="p-button-text" (click)="dialogVisible.set(false)"></button>
+        <button pButton type="submit" [label]="editingUser() ? 'Save Changes' : 'Create User'" [loading]="formSubmitting()"></button>
+      </div>
+    </form>
+  }
+</p-dialog>
+
+<app-site-footer />

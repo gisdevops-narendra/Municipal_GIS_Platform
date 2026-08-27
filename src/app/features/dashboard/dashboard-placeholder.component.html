@@ -1,0 +1,122 @@
+<app-site-header />
+
+<main class="dashboard-shell contour-field">
+  <div class="page-container dashboard-shell__inner">
+    <header class="dashboard-head">
+      <span class="eyebrow">Municipal Dashboard</span>
+      <h1 class="dashboard-head__title">Municipal GIS at a glance</h1>
+      <p class="dashboard-head__lede">
+        A quick summary of the GIS layers, departments, and data available for your municipality.
+      </p>
+    </header>
+
+    @if (currentUser(); as user) {
+      <div class="dashboard-grid">
+        <section class="dashboard-card survey-panel dashboard-card--identity">
+          <span class="eyebrow">Signed in</span>
+          <dl class="identity">
+            <div class="identity__fact">
+              <dt>Name</dt>
+              <dd>{{ user.name }}</dd>
+            </div>
+            <div class="identity__fact">
+              <dt>Municipality</dt>
+              <dd>{{ user.municipality.name }}</dd>
+            </div>
+            <div class="identity__fact">
+              <dt>Role</dt>
+              <dd>{{ roleLabel(user.systemRole) }}</dd>
+            </div>
+            @if (user.department; as department) {
+              <div class="identity__fact">
+                <dt>Department</dt>
+                <dd>{{ department.name }}</dd>
+              </div>
+            }
+            <div class="identity__fact">
+              <dt>Email</dt>
+              <dd>{{ user.email }}</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section class="dashboard-card survey-panel dashboard-card--overview">
+          <span class="eyebrow">GIS Overview</span>
+          <h2 class="dashboard-card__heading">Municipal GIS Layers</h2>
+          @if (gisSummary(); as summary) {
+            <div class="dashboard-stats">
+              <a routerLink="/gis" class="dashboard-stat">
+                <span class="dashboard-stat__value">{{ summary.totalLayers }}</span>
+                <span class="dashboard-stat__label">Total Layers</span>
+              </a>
+              <a routerLink="/gis" class="dashboard-stat">
+                <span class="dashboard-stat__value">{{ summary.publishedLayers }}</span>
+                <span class="dashboard-stat__label">Published Layers</span>
+              </a>
+              <a routerLink="/gis/uploads" class="dashboard-stat">
+                <span class="dashboard-stat__value">{{ summary.draftLayers }}</span>
+                <span class="dashboard-stat__label">Draft Layers</span>
+              </a>
+              <a routerLink="/departments" class="dashboard-stat">
+                <span class="dashboard-stat__value">{{ summary.departments }}</span>
+                <span class="dashboard-stat__label">Departments</span>
+              </a>
+              <a routerLink="/gis/uploads" class="dashboard-stat">
+                <span class="dashboard-stat__value">{{ summary.dataSources }}</span>
+                <span class="dashboard-stat__label">GIS Data Sources</span>
+              </a>
+            </div>
+          } @else if (gisSummaryLoading()) {
+            <p class="dashboard-card__note">Loading GIS summary…</p>
+          } @else {
+            <p class="dashboard-card__note">Could not load the GIS summary. Please try again.</p>
+          }
+        </section>
+
+        <section class="dashboard-card survey-panel dashboard-card--depts">
+          <span class="eyebrow">Departments</span>
+          <h2 class="dashboard-card__heading">GIS Data by Department</h2>
+          @if (departmentSummariesLoading()) {
+            <p class="dashboard-card__note">Loading department summary…</p>
+          } @else if (departmentSummaries().length === 0) {
+            <p class="dashboard-card__note">No departments have been set up yet.</p>
+          } @else {
+            <ul class="dashboard-dept-list">
+              @for (dept of departmentSummaries(); track dept.departmentId) {
+                <li class="dashboard-dept-list__item">
+                  <a
+                    class="dashboard-dept-list__link"
+                    routerLink="/gis"
+                    [queryParams]="{ department: dept.departmentId }"
+                    [attr.aria-label]="'View ' + dept.departmentName + ' layers on the map'"
+                  >
+                    <span class="dashboard-dept-list__name">{{ dept.departmentName }}</span>
+                    <span class="dashboard-dept-list__count">
+                      {{ dept.layerCount }} {{ dept.layerCount === 1 ? 'layer' : 'layers' }}
+                    </span>
+                  </a>
+                </li>
+              }
+            </ul>
+          }
+        </section>
+      </div>
+    } @else {
+      <div class="dashboard-card survey-panel dashboard-card--state">
+        @if (loading()) {
+          <p class="dashboard-card__note">Loading your municipality…</p>
+        } @else if (notRegistered()) {
+          <p class="dashboard-card__note">
+            No municipality is linked to this account yet. Complete municipality registration to
+            continue.
+          </p>
+          <a routerLink="/register" pButton label="Register a municipality" class="p-button-outlined"></a>
+        } @else if (errorMessage()) {
+          <p class="dashboard-card__note">{{ errorMessage() }}</p>
+        }
+      </div>
+    }
+  </div>
+</main>
+
+<app-site-footer />

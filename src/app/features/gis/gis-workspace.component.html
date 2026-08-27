@@ -1,0 +1,237 @@
+<app-site-header />
+
+<div
+  class="gis-ws"
+  [class.gis-ws--left-open]="activeLeftTool()"
+  [class.gis-ws--bottom-open]="activeBottomTool()"
+>
+  <!-- ============ tool rail ============ -->
+  <nav class="gis-ws__rail" aria-label="GIS tools">
+    @for (group of toolsByGroup(); track group.id) {
+      <div class="gis-ws__rail-group" role="group" [attr.aria-label]="group.label">
+        @for (tool of group.tools; track tool.id) {
+          <button
+            type="button"
+            class="gis-ws__rail-btn"
+            [class.is-active]="isToolActive(tool)"
+            [class.is-soon]="!tool.available"
+            [pTooltip]="tool.available ? tool.label : tool.label + ' · coming soon'"
+            tooltipPosition="right"
+            [attr.aria-pressed]="isToolActive(tool)"
+            (click)="activateTool(tool)"
+          >
+            <i [class]="tool.icon" aria-hidden="true"></i>
+          </button>
+        }
+      </div>
+    }
+  </nav>
+
+  <!-- ============ left dock ============ -->
+  @if (activeLeftTool(); as tool) {
+    <aside class="gis-ws__left" [style.width.px]="leftWidth()">
+      <header class="gis-ws__panel-head">
+        <span class="gis-ws__panel-title">{{ tool.label }}</span>
+        <button type="button" class="gis-ws__icon-btn" aria-label="Close panel" (click)="closeLeft()">
+          <i class="pi pi-times" aria-hidden="true"></i>
+        </button>
+      </header>
+
+      <div class="gis-ws__panel-body">
+        @switch (tool.id) {
+          @case ('layers') {
+            @if (layersReady()) {
+              <app-layer-panel [layers]="layers()" [highlightLayerId]="highlightLayerId()" />
+            } @else {
+              <p class="gis-ws__hint">{{ layersError() ?? 'Loading layers…' }}</p>
+            }
+          }
+          @case ('legend') {
+            <app-legend [layers]="layers()" [inline]="true" />
+          }
+          @case ('workspace') {
+            @if (workspace(); as ws) {
+              @if (ws.status === 'PROVISIONING_FAILED') {
+                <p-message severity="warn" styleClass="w-full gis-ws__ws-warn">
+                  <span>GeoServer provisioning hasn't completed for this workspace yet.</span>
+                  @if (isOwner()) {
+                    <button pButton type="button" label="Retry Provisioning" class="p-button-sm" [loading]="retrying()" (click)="retryProvisioning()"></button>
+                  }
+                </p-message>
+              }
+              <dl class="gis-ws__facts">
+                <div><dt>Municipality</dt><dd>{{ municipalityName() ?? '—' }}</dd></div>
+                <div><dt>Workspace</dt><dd>{{ ws.name }}</dd></div>
+                <div><dt>Code</dt><dd class="mono">{{ ws.code }}</dd></div>
+                @if (ws.description) { <div><dt>Description</dt><dd>{{ ws.description }}</dd></div> }
+                <div><dt>Storage CRS</dt><dd class="mono">{{ ws.defaultCrs }}</dd></div>
+                <div><dt>Display CRS</dt><dd class="mono">{{ ws.displayCrs }}</dd></div>
+                <div><dt>GeoServer workspace</dt><dd class="mono">{{ ws.geoserverWorkspace }}</dd></div>
+                <div>
+                  <dt>Status</dt>
+                  <dd><p-tag [severity]="ws.status === 'ACTIVE' ? 'success' : ws.status === 'PROVISIONING' ? 'info' : 'danger'" [value]="ws.status"></p-tag></dd>
+                </div>
+                <div>
+                  <dt>GeoServer</dt>
+                  <dd>
+                    @if (geoserverReachable() === true) { <p-tag severity="success" value="Reachable"></p-tag> }
+                    @else if (geoserverReachable() === false) { <p-tag severity="danger" value="Unreachable"></p-tag> }
+                    @else { <span class="gis-ws__hint">Checking…</span> }
+                  </dd>
+                </div>
+              </dl>
+              @if (isOwner()) {
+                <button pButton type="button" label="Configure workspace" icon="pi pi-cog" class="p-button-outlined p-button-sm gis-ws__ws-config" (click)="openEditDialog()"></button>
+              }
+            } @else if (loading()) {
+              <p class="gis-ws__hint">Loading workspace…</p>
+            } @else {
+              <p class="gis-ws__hint">{{ pageError() ?? 'Workspace unavailable.' }}</p>
+            }
+          }
+          @default {
+            <div class="gis-ws__soon">
+              <i class="pi pi-clock" aria-hidden="true"></i>
+              <p><strong>{{ tool.label }}</strong> is on the roadmap. This panel is reserved for it so the layout won't change when it ships.</p>
+            </div>
+          }
+        }
+      </div>
+
+      <div class="gis-ws__resize gis-ws__resize--x" (pointerdown)="startLeftResize($event)" title="Drag to resize"></div>
+    </aside>
+  }
+
+  <!-- ============ stage: map + bottom dock + status bar ============ -->
+  <div class="gis-ws__stage">
+    <div class="gis-ws__map">
+      <app-municipal-map
+        [layers]="layers()"
+        [scaleLineTarget]="scaleSlot"
+        [mousePositionTarget]="coordSlot"
+        (featureInfoResults)="onFeatureInfoResults($event)"
+        (featureInfoLoading)="onFeatureInfoLoading($event)"
+        (featureInfoError)="onFeatureInfoError($event)"
+        (mapReady)="onMapReady()"
+      />
+      <app-map-controls />
+
+      @if (layersReady()) {
+        <app-gis-search
+          class="gis-ws__search"
+          (layerSelected)="onSearchLayerSelected($event)"
+          (featureSelected)="onSearchFeatureSelected($event)"
+        />
+      }
+
+      @if (layersLoading()) {
+        <div class="gis-ws__overlay"><span class="gis-ws__hint">Loading GIS layers…</span></div>
+      } @else if (layersError()) {
+        <div class="gis-ws__overlay"><p-message severity="error" [text]="layersError()!" /></div>
+      } @else if (layers().length === 0) {
+        <div class="gis-ws__overlay"><span class="gis-ws__hint">No GIS layers are available for this municipality yet.</span></div>
+      }
+    </div>
+
+    <!-- bottom dock -->
+    @if (activeBottomTool(); as tool) {
+      <section class="gis-ws__bottom" [style.height.px]="bottomHeight()">
+        <div class="gis-ws__resize gis-ws__resize--y" (pointerdown)="startBottomResize($event)" title="Drag to resize"></div>
+        <header class="gis-ws__panel-head">
+          <span class="gis-ws__panel-title">{{ tool.label }}</span>
+          <button type="button" class="gis-ws__icon-btn" aria-label="Close panel" (click)="closeBottom()">
+            <i class="pi pi-times" aria-hidden="true"></i>
+          </button>
+        </header>
+        <div class="gis-ws__panel-body">
+          @switch (tool.id) {
+            @case ('identify') {
+              <app-feature-info
+                [loading]="featureInfoLoading()"
+                [error]="featureInfoError()"
+                [results]="featureInfoResults()"
+              />
+            }
+            @default {
+              <div class="gis-ws__soon">
+                <i class="pi pi-clock" aria-hidden="true"></i>
+                <p><strong>{{ tool.label }}</strong> is on the roadmap. This dock is reserved for it.</p>
+              </div>
+            }
+          }
+        </div>
+      </section>
+    }
+
+    <!-- status bar -->
+    <footer class="gis-ws__status">
+      <span class="gis-ws__status-item">{{ municipalityName() ?? '—' }}</span>
+      @if (workspace(); as ws) {
+        <span class="gis-ws__status-item mono">{{ ws.displayCrs }}</span>
+      }
+      <span class="gis-ws__status-item mono">
+        <span class="gis-ws__status-key">Scale</span><span #scaleSlot class="gis-ws__status-slot"></span>
+      </span>
+      <span class="gis-ws__status-item mono">
+        <span class="gis-ws__status-key">Lon, Lat</span><span #coordSlot class="gis-ws__status-slot">—</span>
+      </span>
+      <span class="gis-ws__status-spacer"></span>
+      @if (geoserverReachable() !== null) {
+        <span class="gis-ws__status-item">
+          <span class="gis-ws__status-dot" [class.is-ok]="geoserverReachable()" [class.is-bad]="geoserverReachable() === false"></span>
+          GeoServer
+        </span>
+      }
+    </footer>
+  </div>
+</div>
+
+<p-dialog
+  [visible]="dialogVisible()"
+  (visibleChange)="dialogVisible.set($event)"
+  [modal]="true"
+  header="Configure GIS Workspace"
+  [style]="{ width: '480px' }"
+  [breakpoints]="{ '560px': '95vw' }"
+>
+  <form [formGroup]="form" (ngSubmit)="submit()" class="gis-ws__form">
+    <div class="gis-ws__form-field">
+      <label class="field-label" for="gis-name">Name</label>
+      <input pInputText id="gis-name" formControlName="name" class="w-full" />
+      @if (f.name.invalid && f.name.touched) {
+        <div class="field-error">Name is required (2–150 characters).</div>
+      }
+    </div>
+
+    <div class="gis-ws__form-field">
+      <label class="field-label" for="gis-description">Description</label>
+      <textarea pTextarea id="gis-description" formControlName="description" class="w-full" rows="3"></textarea>
+    </div>
+
+    <div class="gis-ws__form-field">
+      <label class="field-label" for="gis-default-crs">Storage CRS</label>
+      <input pInputText id="gis-default-crs" formControlName="defaultCrs" class="w-full" placeholder="EPSG:32643" />
+      <div class="field-hint">Projected CRS used for stored spatial data. Not every municipality uses the same UTM zone.</div>
+      @if (f.defaultCrs.invalid && f.defaultCrs.touched) {
+        <div class="field-error">Must look like "EPSG:32643".</div>
+      }
+    </div>
+
+    <div class="gis-ws__form-field">
+      <label class="field-label" for="gis-display-crs">Display CRS</label>
+      <input pInputText id="gis-display-crs" formControlName="displayCrs" class="w-full" placeholder="EPSG:4326" />
+      @if (f.displayCrs.invalid && f.displayCrs.touched) {
+        <div class="field-error">Must look like "EPSG:4326".</div>
+      }
+    </div>
+
+    @if (formError(); as message) {
+      <p-message severity="error" [text]="message" styleClass="w-full" />
+    }
+
+    <div class="gis-ws__form-actions">
+      <button pButton type="button" label="Cancel" class="p-button-text" (click)="dialogVisible.set(false)"></button>
+      <button pButton type="submit" label="Save Changes" [loading]="formSubmitting()"></button>
+    </div>
+  </form>
+</p-dialog>

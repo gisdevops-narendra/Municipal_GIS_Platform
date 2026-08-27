@@ -1,0 +1,80 @@
+<div class="layer-panel">
+  <span class="eyebrow">Layers</span>
+
+  <div class="layer-panel__scroll">
+    @if (canonicalLayers.length > 0) {
+      <div class="layer-panel__group">
+        <h3 class="layer-panel__group-title">Canonical Layers</h3>
+        <ul class="layer-panel__list">
+          @for (layer of canonicalLayers; track layer.id) {
+            <li class="layer-panel__item" [class.layer-panel__item--highlight]="layer.id === highlightLayerId">
+              <p-checkbox
+                [inputId]="'layer-' + layer.id"
+                [binary]="true"
+                [ngModel]="isVisible(layer.id)"
+                (onChange)="onToggle(layer.id, $event)"
+              ></p-checkbox>
+              <label [for]="'layer-' + layer.id" class="layer-panel__label">{{ layer.name }}</label>
+              @if (isVisible(layer.id)) {
+                <img
+                  class="layer-panel__swatch"
+                  [src]="legendUrl(layer)"
+                  [alt]="layer.name + ' legend'"
+                  (error)="$any($event.target).hidden = true"
+                  (load)="$any($event.target).hidden = false"
+                />
+              }
+            </li>
+          }
+        </ul>
+      </div>
+    }
+
+    @if (departmentGroups.length > 0) {
+      <div class="layer-panel__group">
+        <h3 class="layer-panel__group-title">Department Layers</h3>
+        @for (group of departmentGroups; track group.departmentId) {
+          <div class="layer-panel__subgroup">
+            <h4 class="layer-panel__subgroup-title">{{ group.departmentName }}</h4>
+            <ul class="layer-panel__list">
+              @for (layer of group.layers; track layer.id) {
+                <li class="layer-panel__item" [class.layer-panel__item--highlight]="layer.id === highlightLayerId">
+                  <p-checkbox
+                    [inputId]="'layer-' + layer.id"
+                    [binary]="true"
+                    [ngModel]="isVisible(layer.id)"
+                    (onChange)="onToggle(layer.id, $event)"
+                  ></p-checkbox>
+                  <label [for]="'layer-' + layer.id" class="layer-panel__label">{{ layer.name }}</label>
+                  @if (isVisible(layer.id)) {
+                    <img
+                      class="layer-panel__swatch"
+                      [src]="legendUrl(layer)"
+                      [alt]="layer.name + ' legend'"
+                      (error)="$any($event.target).hidden = true"
+                      (load)="$any($event.target).hidden = false"
+                    />
+                  }
+                </li>
+              }
+            </ul>
+          </div>
+        }
+      </div>
+    }
+  </div>
+
+  <div class="layer-panel__basemap">
+    <label for="basemap-select" class="layer-panel__group-title">Basemap</label>
+    <p-select
+      inputId="basemap-select"
+      [options]="basemapOptions"
+      optionLabel="label"
+      optionValue="id"
+      [ngModel]="activeBasemap()"
+      (onChange)="onBasemapChange($event.value)"
+      appendTo="body"
+      styleClass="layer-panel__basemap-select"
+    />
+  </div>
+</div>

@@ -1,0 +1,125 @@
+:host {
+  display: block;
+  height: 100%;
+}
+
+.layer-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  height: 100%;
+  overflow: hidden;
+}
+
+.layer-panel__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.layer-panel__basemap {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-line);
+}
+
+.layer-panel__basemap ::ng-deep .layer-panel__basemap-select {
+  width: 100%;
+}
+
+.layer-panel__group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.layer-panel__group-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-ink-500);
+}
+
+.layer-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.layer-panel__subgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 10px;
+  border-left: 2px solid var(--color-line);
+
+  & + & {
+    margin-top: 4px;
+  }
+}
+
+.layer-panel__subgroup-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-ink-700, var(--color-ink-900));
+}
+
+.layer-panel__item--highlight {
+  border-radius: 6px;
+  outline: 2px solid var(--color-accent-600);
+  outline-offset: 2px;
+  animation: layer-panel-highlight-fade 2.4s ease-out forwards;
+}
+
+@keyframes layer-panel-highlight-fade {
+  0%,
+  60% {
+    background: var(--color-accent-100);
+  }
+  100% {
+    background: transparent;
+    outline-color: transparent;
+  }
+}
+
+.layer-panel__department {
+  display: block;
+  font-size: 11px;
+  color: var(--color-ink-500);
+}
+
+.layer-panel__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.layer-panel__label {
+  font-size: 13.5px;
+  color: var(--color-ink-900);
+  cursor: pointer;
+}
+
+.layer-panel__swatch {
+  max-width: 22px;
+  max-height: 18px;
+  object-fit: contain;
+  flex-shrink: 0;
+  margin-left: auto;
+  border: 1px solid var(--color-line);
+  border-radius: 2px;
+  background: var(--color-surface);
+}

@@ -1,0 +1,106 @@
+.users-shell {
+  padding: 48px 0 80px;
+  min-height: calc(100vh - 72px - 90px);
+}
+
+.users-card {
+  padding: 32px 36px 36px;
+}
+
+.users-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.users-card__heading {
+  font-size: 22px;
+  margin: 6px 0 0;
+}
+
+.users-card__lede {
+  font-size: 13.5px;
+  color: var(--color-ink-500);
+}
+
+.users-card__message {
+  margin-bottom: 16px;
+  display: block;
+}
+
+.users-card__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.users-card__search {
+  flex: 1 1 220px;
+  min-width: 200px;
+}
+
+.users-table {
+  font-size: 13.5px;
+}
+
+.users-table__mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.users-table__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.users-table__owner-note {
+  font-size: 12px;
+  color: var(--color-ink-500);
+  font-style: italic;
+}
+
+.users-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.users-form__field {
+  display: flex;
+  flex-direction: column;
+}
+
+.users-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.users-form__temp-password {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: center;
+  padding: 14px;
+  border: 1px dashed var(--color-line-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  color: var(--color-ink-900);
+  user-select: all;
+}
+
+@media (max-width: 720px) {
+  .users-card {
+    padding: 24px 18px 28px;
+  }
+
+  .users-card__header {
+    flex-direction: column;
+  }
+}

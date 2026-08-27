@@ -1,0 +1,123 @@
+<app-site-header />
+
+<main class="layers-shell contour-field">
+  <div class="page-container layers-shell__inner">
+    <div class="layers-card survey-panel">
+      <div class="layers-card__header">
+        <div>
+          <span class="eyebrow">GIS</span>
+          <h1 class="layers-card__heading">GIS Layers</h1>
+        </div>
+      </div>
+
+      @if (pageError(); as message) {
+        <p-message severity="error" [text]="message" styleClass="w-full layers-card__message" />
+      }
+      @if (actionError(); as message) {
+        <p-message severity="error" [text]="message" styleClass="w-full layers-card__message" />
+      }
+
+      @if (loading()) {
+        <p class="layers-card__lede">Loading layers…</p>
+      } @else if (layers().length === 0) {
+        <p class="layers-card__lede">No GIS layers are visible to you yet.</p>
+      } @else {
+        <p-table [value]="layers()" styleClass="layers-table" [rowHover]="true">
+          <ng-template pTemplate="header">
+            <tr>
+              <th>Layer Name</th>
+              <th>Department</th>
+              <th>Ownership</th>
+              <th>Geometry Type</th>
+              <th>Status</th>
+              <th>Version</th>
+              <th>Actions</th>
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="body" let-layer>
+            <tr>
+              <td>{{ layer.name }}</td>
+              <td>{{ layer.departmentName || '—' }}</td>
+              <td>
+                <p-tag
+                  [severity]="layer.ownershipType === 'CANONICAL' ? 'info' : 'success'"
+                  [value]="layer.ownershipType"
+                ></p-tag>
+              </td>
+              <td>{{ layer.geometryType || '—' }}</td>
+              <td><p-tag severity="success" value="ACTIVE"></p-tag></td>
+              <td>v{{ layer.version }}</td>
+              <td class="layers-table__actions">
+                <button pButton type="button" label="View" class="p-button-text p-button-sm" (click)="viewDetail(layer)"></button>
+                @if (isOwner) {
+                  <button
+                    pButton
+                    type="button"
+                    label="Permissions"
+                    class="p-button-text p-button-sm"
+                    (click)="openPermissions(layer)"
+                  ></button>
+                  <button
+                    pButton
+                    type="button"
+                    label="Export"
+                    class="p-button-text p-button-sm"
+                    [loading]="exporting() === layer.id"
+                    (click)="export(layer)"
+                  ></button>
+                }
+              </td>
+            </tr>
+          </ng-template>
+        </p-table>
+      }
+    </div>
+  </div>
+</main>
+
+<p-dialog
+  [visible]="!!detailLayer()"
+  (visibleChange)="!$event ? closeDetail() : null"
+  [modal]="true"
+  header="Layer Details"
+  [style]="{ width: '480px' }"
+>
+  @if (detailLayer(); as layer) {
+    <dl class="layers-detail">
+      <div class="layers-detail__row">
+        <dt>Name</dt>
+        <dd>{{ layer.name }} <span class="layers-detail__mono">({{ layer.code }})</span></dd>
+      </div>
+      <div class="layers-detail__row">
+        <dt>Ownership</dt>
+        <dd>{{ layer.ownershipType }}</dd>
+      </div>
+      @if (layer.departmentName) {
+        <div class="layers-detail__row">
+          <dt>Department</dt>
+          <dd>{{ layer.departmentName }}</dd>
+        </div>
+      }
+      <div class="layers-detail__row">
+        <dt>Geometry</dt>
+        <dd>{{ layer.geometryType || '—' }}</dd>
+      </div>
+      <div class="layers-detail__row">
+        <dt>Version</dt>
+        <dd>v{{ layer.version }}</dd>
+      </div>
+      <div class="layers-detail__row">
+        <dt>GeoServer</dt>
+        <dd class="layers-detail__mono">{{ layer.geoserverWorkspace }}:{{ layer.geoserverLayer }}</dd>
+      </div>
+      @if (layer.description) {
+        <div class="layers-detail__row">
+          <dt>Description</dt>
+          <dd>{{ layer.description }}</dd>
+        </div>
+      }
+    </dl>
+  }
+</p-dialog>
+
+<app-site-footer />

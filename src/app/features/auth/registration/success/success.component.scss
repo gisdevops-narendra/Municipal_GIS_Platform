@@ -1,0 +1,127 @@
+.success-shell {
+  padding: 64px 0 88px;
+}
+
+.success-shell__inner {
+  display: flex;
+  justify-content: center;
+}
+
+.success-card {
+  width: 100%;
+  max-width: 520px;
+  padding: 36px 38px 30px;
+  text-align: center;
+}
+
+.success-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--color-success-100);
+  color: var(--color-success-600);
+  margin-bottom: 16px;
+}
+
+.success-card__heading {
+  font-size: 22px;
+  margin: 8px 0 6px;
+}
+
+.success-card__lede {
+  font-size: 13.5px;
+  margin-bottom: 24px;
+}
+
+.success-summary {
+  margin: 0 0 26px;
+  text-align: left;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.success-summary__row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  padding: 12px 16px;
+  font-size: 13.5px;
+  border-bottom: 1px solid var(--color-line);
+  align-items: center;
+}
+
+.success-summary__row:last-child {
+  border-bottom: none;
+}
+
+.success-summary__row dt {
+  color: var(--color-ink-500);
+  font-weight: 500;
+}
+
+.success-summary__row dd {
+  margin: 0;
+  color: var(--color-ink-900);
+}
+
+.role-badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--color-primary-700);
+  background: var(--color-primary-100);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  margin-right: 6px;
+}
+
+.next-steps {
+  text-align: left;
+  margin-bottom: 28px;
+}
+
+.next-steps__title {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-ink-500);
+  margin-bottom: 10px;
+}
+
+.next-steps__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.next-steps__list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--color-line);
+  font-size: 13.5px;
+  color: var(--color-ink-700);
+}
+
+.next-steps__list li:last-child {
+  border-bottom: none;
+}
+
+.next-steps__index {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-primary-600);
+  font-weight: 600;
+}
+
+.w-full {
+  width: 100%;
+}

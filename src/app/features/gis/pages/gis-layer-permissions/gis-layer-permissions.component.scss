@@ -1,0 +1,119 @@
+.perms-shell {
+  padding: 48px 0 80px;
+  min-height: calc(100vh - 72px - 90px);
+}
+
+.perms-card {
+  padding: 32px 36px 36px;
+}
+
+.perms-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.perms-card__heading {
+  font-size: 22px;
+  margin: 6px 0 0;
+}
+
+.perms-card__layer-name {
+  font-weight: 400;
+  color: var(--color-ink-500);
+  font-size: 16px;
+}
+
+.perms-card__lede {
+  font-size: 13.5px;
+  color: var(--color-ink-500);
+}
+
+.perms-card__message {
+  margin-bottom: 16px;
+  display: block;
+}
+
+.perms-card__hint {
+  font-size: 12px;
+  color: var(--color-ink-500);
+  margin: 6px 0 24px;
+}
+
+.perms-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+
+  th,
+  td {
+    text-align: center;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--color-line);
+  }
+
+  th:first-child,
+  td:first-child {
+    text-align: left;
+    font-weight: 500;
+    width: 180px;
+  }
+}
+
+.perms-table--owner {
+  margin-bottom: 4px;
+}
+
+.perms-table__owner-cell {
+  color: var(--color-success-600);
+  font-weight: 600;
+}
+
+.perms-department {
+  margin-top: 28px;
+}
+
+.perms-department__title {
+  font-size: 15px;
+  margin: 0 0 10px;
+}
+
+.perms-add {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--color-line);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.perms-add__row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.perms-add__select {
+  min-width: 240px;
+}
+
+@media (max-width: 720px) {
+  .perms-card {
+    padding: 24px 18px 28px;
+  }
+
+  .perms-card__header {
+    flex-direction: column;
+  }
+
+  .perms-table {
+    font-size: 12px;
+
+    th,
+    td {
+      padding: 6px 4px;
+    }
+  }
+}

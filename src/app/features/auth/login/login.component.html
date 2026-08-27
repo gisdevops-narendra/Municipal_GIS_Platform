@@ -1,0 +1,45 @@
+<app-site-header [showActions]="false" />
+
+<main class="auth-shell contour-field">
+  <div class="page-container auth-shell__inner">
+    <div class="auth-card survey-panel">
+      <span class="eyebrow">Sign in</span>
+      <h1 class="auth-card__heading">Sign in to your Municipal GIS</h1>
+      <p class="auth-card__lede">
+        You'll sign in on your municipality's secure identity provider. Enter your email below to
+        continue, or leave it blank.
+      </p>
+
+      <form [formGroup]="form" (ngSubmit)="onSubmit()" novalidate>
+        <div class="field">
+          <label class="field-label" for="email">Email</label>
+          <input
+            id="email"
+            type="email"
+            pInputText
+            formControlName="email"
+            class="w-full"
+            autocomplete="email"
+            placeholder="you@municipality.gov.in"
+          />
+          @if (email.invalid && email.touched) {
+            <div class="field-error">
+              <span>Enter a valid email address.</span>
+            </div>
+          }
+        </div>
+
+        <button pButton type="submit" label="Login" class="w-full" [loading]="redirecting"></button>
+      </form>
+
+      <div class="auth-card__divider"></div>
+
+      <p class="auth-card__footer-text">
+        New municipality?
+        <a routerLink="/register">Register your municipality</a>
+      </p>
+    </div>
+  </div>
+</main>
+
+<app-site-footer />

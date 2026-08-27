@@ -1,0 +1,35 @@
+.map-controls {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 10;
+}
+
+/* Zoom / reset / fullscreen as one connected control block with a single
+   card outline, rather than separate floating buttons. */
+.map-controls__group {
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+  overflow: hidden;
+}
+
+.map-controls__btn.p-button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 0 !important;
+  color: var(--color-ink-700);
+
+  & + & {
+    border-top: 1px solid var(--color-line);
+  }
+
+  &:hover {
+    background: var(--color-surface-alt);
+    color: var(--color-primary-600);
+  }
+}

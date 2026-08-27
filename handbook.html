@@ -1,0 +1,724 @@
+<title>Municipal GIS Handbook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --paper:#f5f3ed;
+    --paper-raised:#fbfaf6;
+    --ink:#1c2430;
+    --ink-soft:#5a6270;
+    --ink-faint:#8b93a0;
+    --line:#dcd7c9;
+    --line-strong:#c7c1b0;
+    --accent:#3c6e5b;
+    --accent-ink:#f2f7f4;
+    --accent-soft:#e4ece7;
+    --amber:#a97d2f;
+    --amber-soft:#f1e6d2;
+    --owner:#3c6e5b;
+    --head:#2f5d8a;
+    --user:#8b6b3d;
+    --ok:#3c6e5b;
+    --warn:#a9702f;
+    --code-bg:#eee9db;
+    --shadow:0 1px 2px rgba(28,36,48,0.06), 0 6px 20px -8px rgba(28,36,48,0.12);
+    --serif:'Source Serif 4', Georgia, 'Times New Roman', serif;
+    --sans:'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --mono:'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#161a20;
+      --paper-raised:#1c212a;
+      --ink:#eae7de;
+      --ink-soft:#a6adb8;
+      --ink-faint:#6c7280;
+      --line:#2b313b;
+      --line-strong:#3a414d;
+      --accent:#6fae97;
+      --accent-ink:#0f1713;
+      --accent-soft:#1f2b26;
+      --amber:#d6a34f;
+      --amber-soft:#2c2416;
+      --owner:#6fae97;
+      --head:#7ea9d6;
+      --user:#d6a34f;
+      --ok:#6fae97;
+      --warn:#d6a34f;
+      --code-bg:#20262f;
+      --shadow:0 1px 2px rgba(0,0,0,0.3), 0 10px 30px -10px rgba(0,0,0,0.5);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#161a20;
+    --paper-raised:#1c212a;
+    --ink:#eae7de;
+    --ink-soft:#a6adb8;
+    --ink-faint:#6c7280;
+    --line:#2b313b;
+    --line-strong:#3a414d;
+    --accent:#6fae97;
+    --accent-ink:#0f1713;
+    --accent-soft:#1f2b26;
+    --amber:#d6a34f;
+    --amber-soft:#2c2416;
+    --owner:#6fae97;
+    --head:#7ea9d6;
+    --user:#d6a34f;
+    --ok:#6fae97;
+    --warn:#d6a34f;
+    --code-bg:#20262f;
+    --shadow:0 1px 2px rgba(0,0,0,0.3), 0 10px 30px -10px rgba(0,0,0,0.5);
+  }
+
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  @media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto;} *{animation-duration:0.001ms !important; transition-duration:0.001ms !important;} }
+
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:var(--sans);
+    font-size:16px;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* faint survey-grid ground, echoes the app's own contour/survey styling */
+  body{
+    background-image:
+      linear-gradient(var(--line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size:64px 64px;
+    background-attachment:fixed;
+    background-position:-1px -1px;
+  }
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) body{ background-image:none; } }
+  :root[data-theme="dark"] body{ background-image:none; }
+
+  a{color:var(--accent);}
+  a:focus-visible, button:focus-visible, summary:focus-visible{
+    outline:2px solid var(--accent);
+    outline-offset:2px;
+  }
+
+  code, .mono{
+    font-family:var(--mono);
+    font-size:0.86em;
+    background:var(--code-bg);
+    border-radius:3px;
+    padding:0.12em 0.4em;
+    color:var(--ink);
+  }
+
+  h1,h2,h3{
+    font-family:var(--serif);
+    font-weight:600;
+    text-wrap:balance;
+    color:var(--ink);
+    margin:0;
+  }
+
+  .eyebrow{
+    font-family:var(--mono);
+    font-size:11.5px;
+    letter-spacing:0.12em;
+    text-transform:uppercase;
+    color:var(--accent);
+    font-weight:500;
+  }
+
+  .wrap{max-width:1180px;margin:0 auto;padding:0 32px;}
+
+  /* ---------- top bar ---------- */
+  .topbar{
+    position:sticky;top:0;z-index:40;
+    background:color-mix(in srgb, var(--paper) 88%, transparent);
+    backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line);
+  }
+  .topbar__inner{
+    max-width:1180px;margin:0 auto;padding:0 32px;
+    display:flex;align-items:center;gap:28px;
+    height:56px;
+    overflow-x:auto;
+    scrollbar-width:none;
+  }
+  .topbar__inner::-webkit-scrollbar{display:none;}
+  .topbar__mark{
+    font-family:var(--mono);
+    font-size:13px;
+    font-weight:500;
+    color:var(--ink);
+    white-space:nowrap;
+    display:flex;align-items:center;gap:8px;
+  }
+  .topbar__mark::before{
+    content:"";
+    width:9px;height:9px;
+    border:1.4px solid var(--accent);
+    transform:rotate(45deg);
+    flex-shrink:0;
+  }
+  .topbar nav{display:flex;gap:2px;white-space:nowrap;}
+  .topbar nav a{
+    font-size:12.5px;
+    color:var(--ink-soft);
+    text-decoration:none;
+    padding:7px 10px;
+    border-radius:5px;
+    transition:background 0.12s ease, color 0.12s ease;
+  }
+  .topbar nav a:hover{color:var(--ink);background:var(--accent-soft);}
+  .topbar nav a.active{color:var(--accent);font-weight:600;}
+
+  /* ---------- header ---------- */
+  header.hero{
+    padding:64px 0 40px;
+    border-bottom:1px solid var(--line);
+  }
+  .hero__grid{
+    display:grid;
+    grid-template-columns:1fr auto;
+    gap:32px;
+    align-items:end;
+  }
+  .hero h1{font-size:clamp(30px,4vw,42px);line-height:1.12;margin-top:10px;max-width:14ch;}
+  .hero p{
+    font-size:15.5px;
+    color:var(--ink-soft);
+    max-width:56ch;
+    margin-top:14px;
+  }
+  .role-legend{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    padding:16px 18px;
+    background:var(--paper-raised);
+    border:1px solid var(--line);
+    border-radius:8px;
+    box-shadow:var(--shadow);
+    min-width:230px;
+  }
+  .role-legend__title{font-size:10.5px;letter-spacing:0.1em;text-transform:uppercase;color:var(--ink-faint);font-family:var(--mono);margin-bottom:2px;}
+  .role-row{display:flex;align-items:center;gap:9px;font-size:12.5px;}
+  .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+  .dot--owner{background:var(--owner);}
+  .dot--head{background:var(--head);}
+  .dot--user{background:var(--user);}
+  .role-row b{font-weight:600;color:var(--ink);}
+  .role-row span{color:var(--ink-soft);}
+
+  @media (max-width:720px){
+    .hero__grid{grid-template-columns:1fr;}
+    .role-legend{min-width:0;}
+  }
+
+  /* ---------- sections ---------- */
+  main{padding:8px 0 100px;}
+  section.chapter{
+    display:grid;
+    grid-template-columns:150px 1fr;
+    gap:36px;
+    padding:52px 0;
+    border-bottom:1px solid var(--line);
+  }
+  section.chapter:last-child{border-bottom:none;}
+  .chapter__rail{position:sticky;top:76px;align-self:start;}
+  .chapter__num{
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--accent);
+    letter-spacing:0.04em;
+  }
+  .chapter__who{
+    margin-top:10px;
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    font-size:11px;
+    font-family:var(--mono);
+    color:var(--ink-faint);
+    border:1px solid var(--line-strong);
+    border-radius:20px;
+    padding:3px 9px 3px 7px;
+  }
+  .chapter__body{min-width:0;}
+  .chapter__body h2{font-size:23px;margin-bottom:6px;}
+  .chapter__lede{color:var(--ink-soft);font-size:14.5px;max-width:62ch;margin-bottom:26px;}
+
+  @media (max-width:820px){
+    section.chapter{grid-template-columns:1fr;gap:14px;}
+    .chapter__rail{position:static;display:flex;align-items:center;gap:12px;}
+  }
+
+  /* ---------- steps ---------- */
+  ol.steps{list-style:none;margin:0;padding:0;counter-reset:step;display:flex;flex-direction:column;gap:0;}
+  ol.steps li{
+    counter-increment:step;
+    position:relative;
+    padding:16px 0 16px 46px;
+    border-top:1px solid var(--line);
+  }
+  ol.steps li:first-child{border-top:none;}
+  ol.steps li::before{
+    content:counter(step);
+    position:absolute;left:0;top:16px;
+    width:28px;height:28px;
+    border:1px solid var(--line-strong);
+    border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font-family:var(--mono);font-size:12px;color:var(--accent);
+    background:var(--paper-raised);
+  }
+  ol.steps b{display:block;font-size:14.5px;margin-bottom:3px;color:var(--ink);}
+  ol.steps p{margin:0;font-size:13.8px;color:var(--ink-soft);max-width:60ch;}
+
+  /* ---------- plain lists ---------- */
+  ul.plain{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;}
+  ul.plain li{
+    padding-left:16px;
+    position:relative;
+    font-size:14.3px;
+    color:var(--ink-soft);
+    max-width:64ch;
+  }
+  ul.plain li::before{
+    content:"";
+    position:absolute;left:0;top:0.65em;
+    width:6px;height:1.4px;
+    background:var(--accent);
+  }
+  ul.plain b{color:var(--ink);font-weight:600;}
+
+  /* ---------- field note callouts ---------- */
+  .note{
+    border-left:2.5px solid var(--accent);
+    background:var(--accent-soft);
+    padding:12px 16px;
+    border-radius:0 6px 6px 0;
+    font-size:13.4px;
+    color:var(--ink);
+    margin:18px 0;
+    max-width:66ch;
+  }
+  .note b{
+    display:block;
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    color:var(--accent);
+    margin-bottom:5px;
+  }
+  .note.warn{border-left-color:var(--warn);background:var(--amber-soft);}
+  .note.warn b{color:var(--warn);}
+
+  .example{
+    border:1px solid var(--line);
+    background:var(--paper-raised);
+    border-radius:8px;
+    padding:16px 18px;
+    margin:18px 0;
+    box-shadow:var(--shadow);
+  }
+  .example__title{
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+    margin-bottom:10px;
+  }
+
+  /* ---------- tables ---------- */
+  .table-scroll{overflow-x:auto;margin:18px 0;}
+  table{
+    border-collapse:collapse;
+    width:100%;
+    font-size:13.3px;
+    min-width:480px;
+  }
+  th,td{
+    text-align:left;
+    padding:9px 14px;
+    border-bottom:1px solid var(--line);
+    vertical-align:top;
+  }
+  th{
+    font-family:var(--mono);
+    font-size:10.5px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+    font-weight:500;
+    white-space:nowrap;
+  }
+  td.mono, th.mono{font-family:var(--mono);font-size:12.3px;}
+  tr:last-child td{border-bottom:none;}
+
+  .pill{
+    display:inline-flex;
+    align-items:center;
+    font-family:var(--mono);
+    font-size:10.5px;
+    padding:2.5px 8px;
+    border-radius:20px;
+    border:1px solid var(--line-strong);
+    white-space:nowrap;
+  }
+  .pill--owner{color:var(--owner);border-color:var(--owner);}
+  .pill--head{color:var(--head);border-color:var(--head);}
+  .pill--user{color:var(--user);border-color:var(--user);}
+  .pill--dim{color:var(--ink-faint);border-color:var(--line-strong);}
+
+  .check{color:var(--ok);font-weight:600;}
+  .cross{color:var(--ink-faint);}
+
+  /* ---------- route grid (quick reference) ---------- */
+  .route-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-top:18px;}
+  .route{background:var(--paper-raised);padding:14px 16px;}
+  .route__label{font-size:12.5px;color:var(--ink);font-weight:600;margin-bottom:4px;}
+  .route__path{font-family:var(--mono);font-size:12px;color:var(--accent);word-break:break-all;}
+
+  /* ---------- footer ---------- */
+  footer{
+    border-top:1px solid var(--line);
+    padding:26px 0 60px;
+  }
+  footer p{
+    font-size:12px;
+    color:var(--ink-faint);
+    font-family:var(--mono);
+  }
+</style>
+
+<div class="topbar">
+  <div class="topbar__inner" id="topnav">
+    <span class="topbar__mark">MUNICIPAL GIS</span>
+    <nav>
+      <a href="#overview">Overview</a>
+      <a href="#login">Login</a>
+      <a href="#dashboard">Dashboard</a>
+      <a href="#departments">Departments</a>
+      <a href="#users">Users</a>
+      <a href="#upload">Upload data</a>
+      <a href="#review">Review &amp; publish</a>
+      <a href="#permissions">Permissions</a>
+      <a href="#map">Map viewer</a>
+      <a href="#reference">Reference</a>
+    </nav>
+  </div>
+</div>
+
+<header class="hero">
+  <div class="wrap hero__grid">
+    <div>
+      <span class="eyebrow">User handbook</span>
+      <h1>Running your municipality on the GIS platform</h1>
+      <p>Everything a Municipality Owner, Department Head, or Department User needs to log in, set up departments and staff, get real GIS data onto the map, and control who can see what — walked through with the Ahmedabad Municipal Corporation setup as a live example.</p>
+    </div>
+    <div class="role-legend">
+      <span class="role-legend__title">Who does what</span>
+      <div class="role-row"><span class="dot dot--owner"></span><b>Owner</b><span>— runs the whole municipality</span></div>
+      <div class="role-row"><span class="dot dot--head"></span><b>Dept. Head</b><span>— approves their department's data</span></div>
+      <div class="role-row"><span class="dot dot--user"></span><b>Dept. User</b><span>— uploads their department's data</span></div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- 1 — OVERVIEW -->
+  <section class="chapter" id="overview">
+    <div class="chapter__rail">
+      <div class="chapter__num">01 — Read first</div>
+    </div>
+    <div class="chapter__body">
+      <h2>How the platform is organized</h2>
+      <p class="chapter__lede">One thing to understand before anything else: every municipality is its own sealed world.</p>
+
+      <ul class="plain">
+        <li><b>One account, one municipality.</b> When you log in, you only ever see your own municipality's departments, users, and GIS data — Ahmedabad Municipal Corporation staff can never see Somnath's data, or vice versa, no matter what.</li>
+        <li><b>Three roles, always exactly three.</b> <span class="mono">MUNICIPALITY_OWNER</span>, <span class="mono">DEPARTMENT_HEAD</span>, <span class="mono">DEPARTMENT_USER</span>. The Owner is created automatically when the municipality registers; everyone else is created by the Owner and assigned to a department.</li>
+        <li><b>GIS data has a lifecycle.</b> A file doesn't appear on the map the moment it's uploaded — it moves through <span class="mono">validate → review → approve → publish</span> first. This is deliberate: it's the same checkpoint a paper survey would go through before being filed as an official record.</li>
+        <li><b>Two kinds of layers.</b> <b>Canonical</b> layers (municipal boundary, wards, zones) are reference data anyone in the municipality can see. <b>Department</b> layers (a water pipeline network, a road centerline dataset) belong to one department, and are only visible to others if that department — or the Owner — decides to share them.</li>
+      </ul>
+
+      <div class="example">
+        <div class="example__title">Example — Ahmedabad Municipal Corporation</div>
+        <div class="table-scroll">
+          <table>
+            <tr><th>Department</th><th>Head</th><th>User</th><th>Layers</th></tr>
+            <tr><td>Road Department</td><td class="mono">roads.head@ahmedabad.gov.in</td><td class="mono">roads.user@ahmedabad.gov.in</td><td>Road Centerline, Footpaths, Traffic Signals</td></tr>
+            <tr><td>Water Department</td><td class="mono">water.head@ahmedabad.gov.in</td><td class="mono">water.user@ahmedabad.gov.in</td><td>Water Pipeline, Valves, Borewells + 5 more</td></tr>
+            <tr><td>Tourism Department</td><td class="mono">tourism.head@ahmedabad.gov.in</td><td class="mono">tourism.user@ahmedabad.gov.in</td><td>Heritage Sites, Libraries, Sabarmati River</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 — LOGIN -->
+  <section class="chapter" id="login">
+    <div class="chapter__rail">
+      <div class="chapter__num">02 — Getting in</div>
+      <div class="chapter__who">everyone</div>
+    </div>
+    <div class="chapter__body">
+      <h2>Log in</h2>
+      <p class="chapter__lede">Open the app and sign in with the email and password an Owner gave you.</p>
+
+      <ol class="steps">
+        <li><b>Go to the site.</b><p>Open the app in your browser (during development, <span class="mono">http://localhost:4200</span>) and choose <b>Login</b> in the top bar.</p></li>
+        <li><b>Sign in.</b><p>Enter your email and password. This screen is handled by the platform's identity service (Keycloak) — the same login page is shared by every municipality, so there's nothing municipality-specific to pick here.</p></li>
+        <li><b>Land on your dashboard.</b><p>A successful login takes you straight to your Dashboard, already scoped to your municipality and role — no extra selection step.</p></li>
+      </ol>
+
+      <div class="note warn">
+        <b>No account yet?</b>
+        A brand-new municipality is created from the <b>Register Municipality</b> link on the landing page — that flow creates the municipality and its first Owner account together. Every other account (Department Heads and Users) is created afterward by that Owner from the <b>Users</b> page — see Chapter 05.
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 — DASHBOARD -->
+  <section class="chapter" id="dashboard">
+    <div class="chapter__rail">
+      <div class="chapter__num">03 — Home base</div>
+      <div class="chapter__who">everyone</div>
+    </div>
+    <div class="chapter__body">
+      <h2>Dashboard</h2>
+      <p class="chapter__lede">The first thing you see after logging in — a scoped summary of your municipality's GIS data, not a generic landing page.</p>
+
+      <ul class="plain">
+        <li><b>Your identity card.</b> Your name, municipality, role, and department (if any).</li>
+        <li><b>GIS overview cards.</b> Total Layers, Published Layers, Draft Layers, Departments, and GIS Data Sources — each one is a live count of what <i>you</i> are actually allowed to see, not a raw municipality-wide number. Click any card to jump straight to the map.</li>
+        <li><b>GIS data by department.</b> One row per department with how many layers you can view in it. Click a row to open the map already filtered and zoomed to that department's data.</li>
+      </ul>
+
+      <div class="note">
+        <b>Why the numbers can differ per person</b>
+        Two people at the same municipality can see different counts on this exact same dashboard. A Road Department User sees 0 layers under "Water Department" unless the Owner has specifically granted their department cross-access — the dashboard reflects permissions, not just the raw data that exists.
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 — DEPARTMENTS -->
+  <section class="chapter" id="departments">
+    <div class="chapter__rail">
+      <div class="chapter__num">04 — Structure</div>
+      <div class="chapter__who">Owner</div>
+    </div>
+    <div class="chapter__body">
+      <h2>Set up departments</h2>
+      <p class="chapter__lede">Departments are the organizational unit everything else attaches to — GIS layers, users, and permissions. Set these up before creating staff accounts.</p>
+
+      <ol class="steps">
+        <li><b>Open Departments.</b><p>From the top navigation. Only an Owner can create, rename, or deactivate a department — Heads and Users can view the list but not edit it.</p></li>
+        <li><b>Create a department.</b><p>Give it a name (e.g. <span class="mono">Water Department</span>) and a short code (e.g. <span class="mono">WATER</span>) — the code is normalized to uppercase automatically and is what appears in generated layer names and internal references.</p></li>
+        <li><b>Repeat for each real department.</b><p>One row per operational unit that will own its own GIS data — in Ahmedabad's case: Road, Water, and Tourism.</p></li>
+      </ol>
+
+      <div class="note warn">
+        <b>Name departments after real units, not data types</b>
+        A department owns whatever data that real-world team is responsible for — "Water Department" ends up owning valves, pipelines, and pumping stations together. Don't create a separate department per dataset.
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 — USERS -->
+  <section class="chapter" id="users">
+    <div class="chapter__rail">
+      <div class="chapter__num">05 — Staff</div>
+      <div class="chapter__who">Owner</div>
+    </div>
+    <div class="chapter__body">
+      <h2>Add staff accounts</h2>
+      <p class="chapter__lede">Every account below the Owner is created here, assigned to exactly one department and one role.</p>
+
+      <ol class="steps">
+        <li><b>Open Users, then Add User.</b><p>Fill in name, email, and phone number, then choose a <b>Department</b> and a <b>Role</b>.</p></li>
+        <li><b>Choose the role deliberately.</b><p><span class="pill pill--head">DEPARTMENT_HEAD</span> can approve data their department uploads by default. <span class="pill pill--user">DEPARTMENT_USER</span> can upload but not approve their own work — someone else in the chain has to sign off.</p></li>
+        <li><b>Share the generated password.</b><p>Creating a user generates a one-time temporary password. Pass it to that person through a separate, secure channel — they'll be prompted to set their own password the first time they log in.</p></li>
+      </ol>
+
+      <div class="example">
+        <div class="example__title">Example — the six Ahmedabad staff accounts</div>
+        <div class="table-scroll">
+          <table>
+            <tr><th>Name</th><th>Email</th><th>Role</th><th>Department</th></tr>
+            <tr><td>Rakesh Patel</td><td class="mono">roads.head@ahmedabad.gov.in</td><td><span class="pill pill--head">HEAD</span></td><td>Road Department</td></tr>
+            <tr><td>Sneha Shah</td><td class="mono">roads.user@ahmedabad.gov.in</td><td><span class="pill pill--user">USER</span></td><td>Road Department</td></tr>
+            <tr><td>Kiran Joshi</td><td class="mono">water.head@ahmedabad.gov.in</td><td><span class="pill pill--head">HEAD</span></td><td>Water Department</td></tr>
+            <tr><td>Meera Desai</td><td class="mono">water.user@ahmedabad.gov.in</td><td><span class="pill pill--user">USER</span></td><td>Water Department</td></tr>
+            <tr><td>Anil Trivedi</td><td class="mono">tourism.head@ahmedabad.gov.in</td><td><span class="pill pill--head">HEAD</span></td><td>Tourism Department</td></tr>
+            <tr><td>Priya Mehta</td><td class="mono">tourism.user@ahmedabad.gov.in</td><td><span class="pill pill--user">USER</span></td><td>Tourism Department</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 — UPLOAD -->
+  <section class="chapter" id="upload">
+    <div class="chapter__rail">
+      <div class="chapter__num">06 — Bringing in data</div>
+      <div class="chapter__who">Head / User</div>
+    </div>
+    <div class="chapter__body">
+      <h2>Upload GIS data</h2>
+      <p class="chapter__lede">From <b>GIS Data</b> in the navigation. Accepts a zipped Shapefile, a GeoJSON file, or a CSV with coordinate columns.</p>
+
+      <ol class="steps">
+        <li><b>Choose the file.</b><p>A <span class="mono">.zip</span> containing a complete Shapefile (<span class="mono">.shp .shx .dbf .prj</span>), a <span class="mono">.geojson</span>, or a <span class="mono">.csv</span>.</p></li>
+        <li><b>Describe the layer.</b><p>Give it a name (e.g. "Water Pipeline"), an optional description, and choose its ownership: <b>Department</b> (belongs to your department, the normal case) or <b>Canonical</b> (municipality-wide reference data — Owner only).</p></li>
+        <li><b>CSV only — map the coordinates.</b><p>If your file is a CSV, point the wizard at your latitude/longitude or X/Y columns and confirm the coordinate system they're in. Shapefiles and GeoJSON carry this information already, so this step is skipped for them.</p></li>
+        <li><b>Validation runs automatically.</b><p>The platform inspects the file and reports back the feature count, geometry type, detected coordinate system, and attribute fields — or a clear error if something's wrong (a corrupt archive, a missing <span class="mono">.prj</span>, an unreadable column).</p></li>
+        <li><b>Submit for review.</b><p>Once validation succeeds, submit it — this hands the upload to whoever can approve it (see next chapter). It is <i>not</i> on the map yet.</p></li>
+      </ol>
+
+      <div class="note">
+        <b>What "validated" actually checks</b>
+        Geometry reads cleanly, the coordinate system is known (or you confirmed it), and the data imports without errors. It does not check whether the content itself is correct — a Water Department User uploading Water Department data is still expected to know what they're uploading.
+      </div>
+    </div>
+  </section>
+
+  <!-- 7 — REVIEW -->
+  <section class="chapter" id="review">
+    <div class="chapter__rail">
+      <div class="chapter__num">07 — Sign-off</div>
+      <div class="chapter__who">Head / Owner</div>
+    </div>
+    <div class="chapter__body">
+      <h2>Review, approve &amp; publish</h2>
+      <p class="chapter__lede">A second checkpoint before anything reaches the live map — by default, the person who uploaded a layer is never the one who approves it.</p>
+
+      <ol class="steps">
+        <li><b>Approve or reject.</b><p>Whoever has <span class="mono">APPROVE</span> on that department — a Department Head, by default — reviews the validated upload and either approves it or rejects it with a reason the uploader can see.</p></li>
+        <li><b>Publish.</b><p>An approved upload still isn't live — publishing is a separate, deliberately narrower permission. By default <i>nobody</i> but the Owner has <span class="mono">PUBLISH</span>; the Owner can extend it to a Head if that department should self-publish.</p></li>
+        <li><b>Re-uploads replace, they don't duplicate.</b><p>Publishing a file with the same layer name as an existing layer replaces its data as a new version — the layer keeps the same identity on the map and in permissions, it just points at fresher data.</p></li>
+      </ol>
+
+      <div class="example">
+        <div class="example__title">Worked example</div>
+        <p style="margin:0;font-size:13.6px;color:var(--ink-soft);max-width:60ch;">Sneha (Roads, User) uploads an updated Footpaths file and submits it for review. Rakesh (Roads, Head) opens <b>GIS Data</b>, reviews the validation summary, and approves it. Because Roads hasn't been granted <span class="mono">PUBLISH</span>, the file sits as <span class="mono">APPROVED</span> until the Owner publishes it — at which point it appears on the map for everyone with VIEW access.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8 — PERMISSIONS -->
+  <section class="chapter" id="permissions">
+    <div class="chapter__rail">
+      <div class="chapter__num">08 — Access control</div>
+      <div class="chapter__who">Owner</div>
+    </div>
+    <div class="chapter__body">
+      <h2>Manage layers &amp; permissions</h2>
+      <p class="chapter__lede"><b>GIS Layers</b> in the navigation lists every published layer. Open one to reach its permission matrix.</p>
+
+      <ul class="plain">
+        <li><b>Six permissions, per layer, per department:</b> <span class="mono">VIEW</span>, <span class="mono">UPLOAD</span>, <span class="mono">APPROVE</span>, <span class="mono">PUBLISH</span>, <span class="mono">EXPORT</span>, <span class="mono">MANAGE</span>.</li>
+        <li><b>A department's own layers start with sensible defaults</b> — its Head gets VIEW/UPLOAD/APPROVE, its Users get VIEW/UPLOAD. Nobody gets PUBLISH, EXPORT, or MANAGE until the Owner grants it.</li>
+        <li><b>Cross-department sharing is one checkbox.</b> To let Road Department view Water's pipeline layer, open the Water Pipeline layer's permission page and grant VIEW to the Roads role — that's the entire mechanism behind Water User seeing 1 Road layer in the earlier dashboard example.</li>
+        <li><b>Only the Owner reaches this page.</b> Everyone else only sees the layers and permissions that already apply to them.</li>
+      </ul>
+
+      <div class="note warn">
+        <b>MANAGE is the permission that grants other permissions</b>
+        Hand it out sparingly — a department with MANAGE on a layer can change who else can view, upload, approve, publish, or export it.
+      </div>
+    </div>
+  </section>
+
+  <!-- 9 — MAP -->
+  <section class="chapter" id="map">
+    <div class="chapter__rail">
+      <div class="chapter__num">09 — The map</div>
+      <div class="chapter__who">everyone</div>
+    </div>
+    <div class="chapter__body">
+      <h2>Use the map viewer</h2>
+      <p class="chapter__lede"><b>Municipal GIS</b> in the navigation — or arrive here directly by clicking through from the Dashboard.</p>
+
+      <ul class="plain">
+        <li><b>Layer panel, grouped by who owns the data.</b> "Canonical Layers" at the top (boundary, wards, zones), then "Department Layers" broken into its own heading per department — Road, Water, Tourism each get their own list rather than one mixed pile. Only layers you have VIEW access to appear at all.</li>
+        <li><b>Toggle a layer on to see it and its legend swatch</b> next to its checkbox — off again to hide it, without reloading the map.</li>
+        <li><b>Search</b> the box above the map for a layer name, road name, or ward name — results are split into matching layers and matching individual features, and both respect the same view permissions as everything else.</li>
+        <li><b>Click anywhere on the map</b> with a layer turned on to inspect the feature there — its attributes open in a panel, read-only.</li>
+        <li><b>Standard controls</b> sit in the corner: zoom in/out, reset to the municipality's own extent, fullscreen, a basemap switcher (OpenStreetMap plus two alternates), a scale bar, and live cursor coordinates.</li>
+      </ul>
+
+      <div class="note">
+        <b>This is a viewer, not an editor</b>
+        Nothing on the map can be drawn, moved, or edited here — correcting a feature means fixing the source file and going through the upload → review → publish cycle again.
+      </div>
+    </div>
+  </section>
+
+  <!-- 10 — REFERENCE -->
+  <section class="chapter" id="reference">
+    <div class="chapter__rail">
+      <div class="chapter__num">10 — Reference</div>
+    </div>
+    <div class="chapter__body">
+      <h2>Roles, permissions &amp; routes</h2>
+      <p class="chapter__lede">Two tables to keep handy, plus where in the app to find everything above.</p>
+
+      <div class="table-scroll">
+        <table>
+          <tr><th>Action</th><th><span class="pill pill--owner">Owner</span></th><th><span class="pill pill--head">Head</span></th><th><span class="pill pill--user">User</span></th></tr>
+          <tr><td>View own department's layers</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td></tr>
+          <tr><td>Upload to own department</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td></tr>
+          <tr><td>Approve own department's uploads</td><td class="check">✓</td><td class="check">✓</td><td class="cross">—</td></tr>
+          <tr><td>Publish (any department)</td><td class="check">✓</td><td class="cross">granted only</td><td class="cross">—</td></tr>
+          <tr><td>Create departments &amp; users</td><td class="check">✓</td><td class="cross">—</td><td class="cross">—</td></tr>
+          <tr><td>Edit layer permissions</td><td class="check">✓</td><td class="cross">—</td><td class="cross">—</td></tr>
+          <tr><td>Create canonical layers</td><td class="check">✓</td><td class="cross">—</td><td class="cross">—</td></tr>
+        </table>
+      </div>
+
+      <div class="route-grid">
+        <div class="route"><div class="route__label">Dashboard</div><div class="route__path">/dashboard</div></div>
+        <div class="route"><div class="route__label">Departments</div><div class="route__path">/departments</div></div>
+        <div class="route"><div class="route__label">Users</div><div class="route__path">/users</div></div>
+        <div class="route"><div class="route__label">Map viewer</div><div class="route__path">/gis</div></div>
+        <div class="route"><div class="route__label">GIS data / uploads</div><div class="route__path">/gis/uploads</div></div>
+        <div class="route"><div class="route__label">GIS layers</div><div class="route__path">/gis/layers</div></div>
+        <div class="route"><div class="route__label">Layer permissions</div><div class="route__path">/gis/layers/:id/permissions</div></div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="wrap">
+  <p>Municipal GIS Handbook — reflects the platform as configured for Ahmedabad Municipal Corporation.</p>
+</footer>
+
+<script>
+(function(){
+  var links = Array.prototype.slice.call(document.querySelectorAll('#topnav a'));
+  var sections = links.map(function(a){ return document.querySelector(a.getAttribute('href')); }).filter(Boolean);
+  if(!('IntersectionObserver' in window) || sections.length === 0) return;
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(entry){
+      var id = '#' + entry.target.id;
+      var link = links.find(function(a){ return a.getAttribute('href') === id; });
+      if(!link) return;
+      if(entry.isIntersecting){
+        links.forEach(function(a){ a.classList.remove('active'); });
+        link.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  sections.forEach(function(s){ io.observe(s); });
+})();
+</script>

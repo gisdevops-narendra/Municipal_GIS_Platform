@@ -1,0 +1,139 @@
+.upload-wizard {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 520px;
+  max-width: 100%;
+}
+
+.upload-wizard__steps {
+  display: flex;
+  gap: 16px;
+  border-bottom: 1px solid var(--color-line);
+  padding-bottom: 10px;
+}
+
+.upload-wizard__step {
+  font-size: 12px;
+  color: var(--color-ink-500);
+
+  &--active {
+    color: var(--color-ink-900);
+    font-weight: 600;
+  }
+}
+
+.upload-wizard__form,
+.upload-wizard__validation,
+.upload-wizard__preview {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.upload-wizard__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.upload-wizard__field-row {
+  display: flex;
+  gap: 12px;
+
+  .upload-wizard__field {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .upload-wizard__field-row {
+    flex-direction: column;
+  }
+}
+
+.upload-wizard__csv-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+}
+
+.upload-wizard__hint {
+  font-size: 12.5px;
+  color: var(--color-ink-500);
+  margin: 0;
+}
+
+.upload-wizard__dropzone-hint {
+  font-size: 13px;
+  color: var(--color-ink-500);
+  text-align: center;
+  padding: 20px 0;
+}
+
+.upload-wizard__file-name {
+  font-size: 12.5px;
+  color: var(--color-ink-700);
+  margin: 0;
+}
+
+.upload-wizard__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.upload-wizard__summary {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 16px;
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+}
+
+.upload-wizard__summary-row {
+  display: contents;
+
+  dt {
+    font-size: 12px;
+    color: var(--color-ink-500);
+  }
+
+  dd {
+    margin: 0;
+    font-size: 13px;
+  }
+}
+
+.upload-wizard__field-tag {
+  margin: 2px 4px 2px 0;
+}
+
+.upload-wizard__warnings,
+.upload-wizard__errors {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
+.upload-wizard__warnings {
+  color: var(--color-accent-600);
+}
+
+.upload-wizard__errors {
+  color: var(--color-error-600);
+}
+
+.upload-wizard__preview-map {
+  height: 360px;
+  position: relative;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  overflow: hidden;
+}

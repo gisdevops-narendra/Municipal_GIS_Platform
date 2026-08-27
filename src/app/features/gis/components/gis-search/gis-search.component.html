@@ -1,0 +1,58 @@
+<div class="gis-search">
+  <div class="gis-search__input-row">
+    <i class="pi pi-search gis-search__icon" aria-hidden="true"></i>
+    <input
+      pInputText
+      type="text"
+      class="gis-search__input"
+      placeholder="Search layers, roads, wards…"
+      [ngModel]="query()"
+      (ngModelChange)="onInput($event)"
+      (focus)="onFocus()"
+      aria-label="Search GIS layers and features"
+    />
+    @if (query()) {
+      <button
+        pButton
+        type="button"
+        icon="pi pi-times"
+        class="p-button-text p-button-sm gis-search__clear"
+        aria-label="Clear search"
+        (click)="clear()"
+      ></button>
+    }
+  </div>
+
+  @if (open()) {
+    <div class="gis-search__results">
+      @if (loading()) {
+        <div class="gis-search__status">Searching…</div>
+      } @else if (!hasResults()) {
+        <div class="gis-search__status">No layers or features match "{{ query() }}".</div>
+      } @else {
+        @if (result().layers.length > 0) {
+          <div class="gis-search__group">
+            <span class="gis-search__group-title">Layers</span>
+            @for (match of result().layers; track match.id) {
+              <button type="button" class="gis-search__result" (click)="selectLayer(match)">
+                <span class="gis-search__result-title">{{ match.name }}</span>
+                <span class="gis-search__result-meta">{{ match.departmentName ?? 'Canonical' }}</span>
+              </button>
+            }
+          </div>
+        }
+        @if (result().features.length > 0) {
+          <div class="gis-search__group">
+            <span class="gis-search__group-title">Features</span>
+            @for (match of result().features; track $index) {
+              <button type="button" class="gis-search__result" (click)="selectFeature(match)">
+                <span class="gis-search__result-title">{{ featureLabel(match) }}</span>
+                <span class="gis-search__result-meta">{{ match.layerName }}</span>
+              </button>
+            }
+          </div>
+        }
+      }
+    </div>
+  }
+</div>

@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Silent SSO check</title>
+  </head>
+  <body>
+    <script>
+      // Loaded by Keycloak in a hidden iframe when the app initializes with
+      // onLoad: 'check-sso'. It lets the app silently detect an existing
+      // Keycloak session without a visible redirect/flicker for anonymous
+      // visitors (e.g. the public landing page).
+      parent.postMessage(location.href, location.origin);
+    </script>
+  </body>
+</html>

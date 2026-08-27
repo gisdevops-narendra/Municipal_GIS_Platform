@@ -1,0 +1,207 @@
+<div class="upload-wizard">
+  <div class="upload-wizard__steps">
+    <span class="upload-wizard__step" [class.upload-wizard__step--active]="step() === 'FILE_INFO'">1. File &amp; Layer Info</span>
+    <span class="upload-wizard__step" [class.upload-wizard__step--active]="step() === 'VALIDATION'">2. Validation</span>
+    <span class="upload-wizard__step" [class.upload-wizard__step--active]="step() === 'PREVIEW'">3. Preview &amp; Submit</span>
+  </div>
+
+  @if (step() === 'FILE_INFO') {
+    <form [formGroup]="form" (ngSubmit)="submitUpload()" class="upload-wizard__form">
+      <div class="upload-wizard__field">
+        <label class="field-label">File</label>
+        <p-fileupload
+          mode="advanced"
+          [customUpload]="true"
+          [multiple]="false"
+          accept=".zip,.geojson,.json,.csv"
+          [showUploadButton]="false"
+          [showCancelButton]="false"
+          chooseLabel="Choose File"
+          (onSelect)="onFileSelect($event)"
+        >
+          <ng-template #empty>
+            <p class="upload-wizard__dropzone-hint">Drag and drop a Shapefile ZIP, GeoJSON, or CSV file here.</p>
+          </ng-template>
+        </p-fileupload>
+        @if (selectedFile(); as file) {
+          <p class="upload-wizard__file-name">Selected: {{ file.name }} ({{ (file.size / 1024).toFixed(0) }} KB)</p>
+        }
+      </div>
+
+      <div class="upload-wizard__field">
+        <label class="field-label" for="wiz-layer-name">Layer Name</label>
+        <input pInputText id="wiz-layer-name" formControlName="layerName" class="w-full" placeholder="e.g. Streetlights" />
+        @if (f.layerName.invalid && f.layerName.touched) {
+          <div class="field-error">Layer name is required (2-150 characters).</div>
+        }
+      </div>
+
+      <div class="upload-wizard__field">
+        <label class="field-label" for="wiz-description">Description</label>
+        <textarea pTextarea id="wiz-description" formControlName="description" class="w-full" rows="2"></textarea>
+      </div>
+
+      @if (isOwner) {
+        <div class="upload-wizard__field">
+          <label class="field-label" for="wiz-ownership">Ownership</label>
+          <p-select
+            inputId="wiz-ownership"
+            [options]="[{ label: 'Department', value: 'DEPARTMENT' }, { label: 'Canonical (municipality-wide)', value: 'CANONICAL' }]"
+            optionLabel="label"
+            optionValue="value"
+            formControlName="ownershipType"
+            styleClass="w-full"
+            (onChange)="onOwnershipChange($event.value)"
+          ></p-select>
+        </div>
+      }
+
+      @if (f.ownershipType.value === 'DEPARTMENT') {
+        <div class="upload-wizard__field">
+          <label class="field-label" for="wiz-department">Department</label>
+          <p-select
+            inputId="wiz-department"
+            [options]="departmentOptions"
+            optionLabel="label"
+            optionValue="value"
+            formControlName="departmentId"
+            placeholder="Select a department"
+            styleClass="w-full"
+            [disabled]="!isOwner"
+          ></p-select>
+        </div>
+      }
+
+      @if (isCsv) {
+        <div class="upload-wizard__csv-fields">
+          <p class="upload-wizard__hint">
+            Coordinate columns are auto-detected from common names (latitude/longitude, lat/lon, x/y). Only fill these in if detection is ambiguous.
+          </p>
+          <div class="upload-wizard__field-row">
+            <div class="upload-wizard__field">
+              <label class="field-label" for="wiz-lat">Latitude column</label>
+              <input pInputText id="wiz-lat" formControlName="latitudeField" class="w-full" />
+            </div>
+            <div class="upload-wizard__field">
+              <label class="field-label" for="wiz-lon">Longitude column</label>
+              <input pInputText id="wiz-lon" formControlName="longitudeField" class="w-full" />
+            </div>
+          </div>
+          <div class="upload-wizard__field-row">
+            <div class="upload-wizard__field">
+              <label class="field-label" for="wiz-x">X column</label>
+              <input pInputText id="wiz-x" formControlName="xField" class="w-full" />
+            </div>
+            <div class="upload-wizard__field">
+              <label class="field-label" for="wiz-y">Y column</label>
+              <input pInputText id="wiz-y" formControlName="yField" class="w-full" />
+            </div>
+          </div>
+          <div class="upload-wizard__field">
+            <label class="field-label" for="wiz-source-crs">Source CRS</label>
+            <input pInputText id="wiz-source-crs" formControlName="sourceCrs" class="w-full" placeholder="EPSG:4326" />
+            <div class="field-hint">Required if using X/Y columns — never assumed to be WGS84.</div>
+          </div>
+        </div>
+      }
+
+      @if (uploading()) {
+        <div class="upload-wizard__field">
+          <p-progressBar [value]="uploadPercent()" [showValue]="true"></p-progressBar>
+          <p class="upload-wizard__hint">Uploading…</p>
+        </div>
+      }
+
+      @if (submitError(); as message) {
+        <p-message severity="error" [text]="message" styleClass="w-full" />
+      }
+
+      <div class="upload-wizard__actions">
+        <button pButton type="button" label="Cancel" class="p-button-text" (click)="close()"></button>
+        <button pButton type="submit" label="Upload &amp; Validate" [loading]="uploading()"></button>
+      </div>
+    </form>
+  }
+
+  @if (step() === 'VALIDATION') {
+    @if (upload(); as u) {
+      <div class="upload-wizard__validation">
+        @if (u.status === 'DRAFT') {
+          <p-message severity="success" text="File structure valid — ready for review." styleClass="w-full" />
+        } @else {
+          <p-message severity="error" [text]="u.errorMessage || 'Validation failed.'" styleClass="w-full" />
+        }
+
+        @if (u.validation.summary; as summary) {
+          <dl class="upload-wizard__summary">
+            <div class="upload-wizard__summary-row">
+              <dt>CRS</dt>
+              <dd>{{ summary.sourceCrs || '—' }} → {{ summary.targetCrs }}</dd>
+            </div>
+            <div class="upload-wizard__summary-row">
+              <dt>Geometry</dt>
+              <dd>{{ summary.geometryType || '—' }}</dd>
+            </div>
+            <div class="upload-wizard__summary-row">
+              <dt>Features</dt>
+              <dd>{{ summary.featureCount }}</dd>
+            </div>
+            <div class="upload-wizard__summary-row">
+              <dt>Fields</dt>
+              <dd>
+                @for (field of summary.fields; track field.name) {
+                  <p-tag styleClass="upload-wizard__field-tag" [value]="field.name + ' — ' + field.type"></p-tag>
+                }
+              </dd>
+            </div>
+          </dl>
+
+          @if (summary.warnings.length > 0) {
+            <ul class="upload-wizard__warnings">
+              @for (warning of summary.warnings; track warning) {
+                <li>⚠ {{ warning }}</li>
+              }
+            </ul>
+          }
+          @if (summary.errors.length > 0) {
+            <ul class="upload-wizard__errors">
+              @for (error of summary.errors; track error) {
+                <li>✗ {{ error }}</li>
+              }
+            </ul>
+          }
+        }
+
+        <div class="upload-wizard__actions">
+          <button pButton type="button" label="Back" class="p-button-text" (click)="backToFileInfo()"></button>
+          @if (u.status === 'DRAFT') {
+            <button pButton type="button" label="Next: Preview" (click)="goToPreview()"></button>
+          }
+        </div>
+      </div>
+    }
+  }
+
+  @if (step() === 'PREVIEW') {
+    <div class="upload-wizard__preview">
+      @if (previewLoading()) {
+        <p class="upload-wizard__hint">Loading preview…</p>
+      } @else if (previewLayer()) {
+        <div class="upload-wizard__preview-map">
+          <app-municipal-map [layers]="previewLayers()" />
+        </div>
+      } @else {
+        <p-message severity="warn" text="Preview could not be loaded." styleClass="w-full" />
+      }
+
+      @if (submitError(); as message) {
+        <p-message severity="error" [text]="message" styleClass="w-full" />
+      }
+
+      <div class="upload-wizard__actions">
+        <button pButton type="button" label="Back" class="p-button-text" (click)="step.set('VALIDATION')"></button>
+        <button pButton type="button" label="Submit for Review" [loading]="submitting()" (click)="submitForReview()"></button>
+      </div>
+    </div>
+  }
+</div>

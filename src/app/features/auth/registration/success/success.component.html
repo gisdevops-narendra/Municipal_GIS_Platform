@@ -1,0 +1,45 @@
+<app-site-header [showActions]="false" />
+
+<main class="success-shell contour-field">
+  <div class="page-container success-shell__inner">
+    <div class="success-card survey-panel">
+      <div class="success-card__icon" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="14" cy="14" r="12.5" stroke="currentColor" stroke-width="1.6" />
+          <path d="M8.5 14.5L12 18L19.5 9.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </div>
+
+      <span class="eyebrow">Registration complete</span>
+      <h1 class="success-card__heading">Municipality created successfully</h1>
+      <p class="success-card__lede">Your municipality workspace is ready to be configured.</p>
+
+      <dl class="success-summary">
+        <div class="success-summary__row">
+          <dt>Municipality</dt>
+          <dd>{{ municipality().name }}</dd>
+        </div>
+        <div class="success-summary__row">
+          <dt>Account</dt>
+          <dd><span class="role-badge">Municipality Owner</span> {{ owner()?.fullName }}</dd>
+        </div>
+      </dl>
+
+      <div class="next-steps">
+        <span class="next-steps__title">Next steps</span>
+        <ol class="next-steps__list">
+          @for (step of nextSteps; track step.label; let i = $index) {
+            <li>
+              <span class="next-steps__index">{{ (i + 1).toString().padStart(2, '0') }}</span>
+              <span>{{ step.label }}</span>
+            </li>
+          }
+        </ol>
+      </div>
+
+      <button pButton type="button" label="Go to Login" class="w-full" (click)="onGoToLogin()"></button>
+    </div>
+  </div>
+</main>
+
+<app-site-footer />

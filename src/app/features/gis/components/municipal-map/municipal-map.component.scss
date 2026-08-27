@@ -1,0 +1,73 @@
+:host {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.municipal-map {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: var(--color-surface-alt);
+
+  // OpenLayers renders its own DOM (attribution control etc.) outside
+  // Angular's template, so component-scoped encapsulation can't reach it —
+  // ::ng-deep is the pragmatic, standard way to style a third-party
+  // library's own markup from here. Base OL styling comes from ol/ol.css,
+  // registered globally in angular.json.
+  ::ng-deep .ol-attribution {
+    font-size: 10.5px;
+  }
+
+  // Task 9 §8/§9: scale + mouse coordinates, tucked into the bottom-left
+  // corner (the button stack lives top-right — see map-controls) so
+  // neither crowds the other or the map content itself.
+  // OpenLayers does not add its `.ol-control` class (and therefore no
+  // positioning) to a control given a custom className, so these two need
+  // an explicit `position: absolute` of their own — without it they render
+  // as static full-width blocks across the top of the map.
+  ::ng-deep .gis-scale-line {
+    position: absolute;
+    left: 10px;
+    bottom: 10px;
+    z-index: 5;
+    background: none;
+
+    .ol-scale-line-inner {
+      background: var(--color-surface);
+      color: var(--color-ink-700, var(--color-ink-900));
+      border: 1px solid var(--color-line);
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 11px;
+      box-shadow: var(--shadow-panel);
+    }
+  }
+
+  ::ng-deep .gis-mouse-position {
+    position: absolute;
+    left: 10px;
+    bottom: 40px;
+    top: auto;
+    right: auto;
+    z-index: 5;
+    min-height: 20px;
+    display: flex;
+    align-items: center;
+    background: var(--color-surface);
+    color: var(--color-ink-700, var(--color-ink-900));
+    border: 1px solid var(--color-line);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    box-shadow: var(--shadow-panel);
+    pointer-events: none;
+  }
+
+  // No coordinate string yet (pointer hasn't entered the map) — don't
+  // leave an empty bordered box sitting in the corner.
+  ::ng-deep .gis-mouse-position:empty {
+    display: none;
+  }
+}

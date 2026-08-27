@@ -1,0 +1,209 @@
+.site-header {
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-line);
+}
+
+/* ---------- top bar: brand (far left) · account (far right) ---------- */
+.site-header__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 64px;
+  padding: 0 var(--content-gutter);
+}
+
+.site-header__brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  color: var(--color-ink-900);
+  flex-shrink: 0;
+}
+
+.site-header__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  background: var(--color-primary-100);
+  color: var(--color-primary-700);
+  flex-shrink: 0;
+}
+
+.site-header__wordmark {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+  min-width: 0;
+}
+
+.site-header__title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 15.5px;
+  color: var(--color-ink-900);
+  white-space: nowrap;
+}
+
+.site-header__subtitle {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-ink-500);
+  white-space: nowrap;
+}
+
+.site-header__account {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+/* ---------- user profile chip ---------- */
+.user-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 12px 4px 4px;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-surface);
+  max-width: 240px;
+}
+
+.user-chip__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--color-primary-600);
+  color: #fff;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+.user-chip__meta {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+  min-width: 0;
+}
+
+.user-chip__name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-ink-900);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-chip__sub {
+  font-size: 10.5px;
+  color: var(--color-ink-500);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.site-header__logout {
+  flex-shrink: 0;
+}
+
+.site-header__register--compact {
+  display: none;
+}
+
+/* ---------- primary navigation row ---------- */
+.site-header__nav {
+  border-top: 1px solid var(--color-line);
+  background: var(--color-surface);
+}
+
+.site-header__nav-inner {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 46px;
+  /* pull the first link's text edge back under the wordmark */
+  padding: 0 calc(var(--content-gutter) - 14px);
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.site-header__nav-inner::-webkit-scrollbar {
+  display: none;
+}
+
+.site-header__nav-inner a {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  font-size: 13px;
+  color: var(--color-ink-500);
+  text-decoration: none;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+  transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+
+.site-header__nav-inner a:hover {
+  color: var(--color-ink-900);
+  background: var(--color-surface-alt);
+}
+
+.site-header__nav-inner a.is-active {
+  color: var(--color-primary-700);
+  font-weight: 600;
+  border-bottom-color: var(--color-primary-600);
+}
+
+/* ---------- responsive ---------- */
+@media (max-width: 640px) {
+  .site-header__bar {
+    min-height: 58px;
+    gap: 12px;
+  }
+
+  .site-header__subtitle {
+    display: none;
+  }
+
+  .user-chip {
+    padding: 3px;
+    border: none;
+    background: transparent;
+  }
+
+  .user-chip__meta {
+    display: none;
+  }
+
+  .site-header__logout ::ng-deep .p-button-label {
+    display: none;
+  }
+
+  .site-header__logout ::ng-deep .p-button-icon {
+    margin: 0;
+  }
+
+  .site-header__register--full {
+    display: none;
+  }
+
+  .site-header__register--compact {
+    display: inline-flex;
+  }
+}

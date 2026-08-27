@@ -1,0 +1,221 @@
+<app-site-header />
+
+<main class="uploads-shell contour-field">
+  <div class="page-container uploads-shell__inner">
+    <div class="uploads-card survey-panel">
+      <div class="uploads-card__header">
+        <div>
+          <span class="eyebrow">GIS</span>
+          <h1 class="uploads-card__heading">GIS Data</h1>
+        </div>
+        <button pButton type="button" label="Upload Data" (click)="openWizard()"></button>
+      </div>
+
+      @if (pageError(); as message) {
+        <p-message severity="error" [text]="message" styleClass="w-full uploads-card__message" />
+      }
+      @if (actionError(); as message) {
+        <p-message severity="error" [text]="message" styleClass="w-full uploads-card__message" />
+      }
+
+      @if (loading()) {
+        <p class="uploads-card__lede">Loading uploads…</p>
+      } @else if (uploads().length === 0) {
+        <p class="uploads-card__lede">No GIS uploads yet. Click "Upload Data" to add your first layer.</p>
+      } @else {
+        <p-table [value]="uploads()" styleClass="uploads-table" [rowHover]="true">
+          <ng-template pTemplate="header">
+            <tr>
+              <th>File</th>
+              <th>Layer</th>
+              <th>Department</th>
+              <th>Format</th>
+              <th>Status</th>
+              <th>Features</th>
+              <th>Uploaded</th>
+              <th>Actions</th>
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="body" let-upload>
+            <tr>
+              <td class="uploads-table__mono">{{ upload.filename }}</td>
+              <td>{{ upload.layer.name }}</td>
+              <td>{{ upload.layer.departmentName || (upload.layer.ownershipType === 'CANONICAL' ? 'Canonical' : '—') }}</td>
+              <td>{{ upload.fileFormat }}</td>
+              <td><p-tag [severity]="statusSeverity(upload.status)" [value]="upload.status"></p-tag></td>
+              <td>{{ upload.validation.featureCount ?? '—' }}</td>
+              <td>{{ upload.createdAt | date: 'short' }}</td>
+              <td class="uploads-table__actions">
+                <button pButton type="button" label="View" class="p-button-text p-button-sm" (click)="viewDetail(upload)"></button>
+                @if (canValidate(upload)) {
+                  <button
+                    pButton
+                    type="button"
+                    label="Retry Validate"
+                    class="p-button-text p-button-sm"
+                    [loading]="isBusy(upload, 'validate')"
+                    (click)="retryValidate(upload)"
+                  ></button>
+                }
+                @if (canSubmitForReview(upload)) {
+                  <button
+                    pButton
+                    type="button"
+                    label="Submit for Review"
+                    class="p-button-text p-button-sm"
+                    [loading]="isBusy(upload, 'submit')"
+                    (click)="submitForReview(upload)"
+                  ></button>
+                }
+                @if (canApproveOrReject(upload)) {
+                  <button
+                    pButton
+                    type="button"
+                    label="Approve"
+                    class="p-button-text p-button-sm"
+                    [loading]="isBusy(upload, 'approve')"
+                    (click)="approve(upload)"
+                  ></button>
+                  <button
+                    pButton
+                    type="button"
+                    label="Reject"
+                    class="p-button-text p-button-sm p-button-danger"
+                    (click)="openRejectDialog(upload)"
+                  ></button>
+                }
+                @if (canPublish(upload)) {
+                  <button
+                    pButton
+                    type="button"
+                    label="Publish"
+                    class="p-button-text p-button-sm"
+                    [loading]="isBusy(upload, 'publish')"
+                    (click)="publish(upload)"
+                  ></button>
+                }
+              </td>
+            </tr>
+          </ng-template>
+        </p-table>
+
+        <div class="uploads-pagination">
+          <button pButton type="button" label="Previous" class="p-button-text p-button-sm" [disabled]="page() <= 1" (click)="previousPage()"></button>
+          <span class="uploads-pagination__label">Page {{ page() }} of {{ totalPages }} ({{ total() }} total)</span>
+          <button pButton type="button" label="Next" class="p-button-text p-button-sm" [disabled]="page() >= totalPages" (click)="nextPage()"></button>
+        </div>
+      }
+    </div>
+  </div>
+</main>
+
+@if (wizardVisible() && currentUser(); as user) {
+  <p-dialog
+    [visible]="wizardVisible()"
+    (visibleChange)="wizardVisible.set($event)"
+    [modal]="true"
+    header="Upload GIS Data"
+    [style]="{ width: 'auto', maxWidth: '95vw' }"
+    [breakpoints]="{ '600px': '95vw' }"
+  >
+    <app-upload-wizard [currentUser]="user" (closed)="onWizardClosed()" (submittedForReview)="onWizardSubmitted()" />
+  </p-dialog>
+}
+
+<p-dialog
+  [visible]="!!detailUpload()"
+  (visibleChange)="!$event ? closeDetail() : null"
+  [modal]="true"
+  header="Upload Details"
+  [style]="{ width: '560px' }"
+>
+  @if (detailUpload(); as upload) {
+    <dl class="uploads-detail">
+      <div class="uploads-detail__row">
+        <dt>File</dt>
+        <dd>{{ upload.filename }} ({{ upload.fileFormat }}, {{ (upload.fileSize / 1024).toFixed(0) }} KB)</dd>
+      </div>
+      <div class="uploads-detail__row">
+        <dt>Layer</dt>
+        <dd>{{ upload.layer.name }} <span class="uploads-detail__mono">({{ upload.layer.code }})</span></dd>
+      </div>
+      <div class="uploads-detail__row">
+        <dt>Status</dt>
+        <dd><p-tag [severity]="statusSeverity(upload.status)" [value]="upload.status"></p-tag></dd>
+      </div>
+      @if (upload.errorMessage) {
+        <div class="uploads-detail__row">
+          <dt>Error</dt>
+          <dd>{{ upload.errorMessage }}</dd>
+        </div>
+      }
+      @if (upload.validation.summary; as summary) {
+        <div class="uploads-detail__row">
+          <dt>CRS</dt>
+          <dd>{{ summary.sourceCrs || '—' }} → {{ summary.targetCrs }}</dd>
+        </div>
+        <div class="uploads-detail__row">
+          <dt>Geometry</dt>
+          <dd>{{ summary.geometryType || '—' }} ({{ summary.featureCount }} features)</dd>
+        </div>
+        @if (summary.warnings.length > 0) {
+          <div class="uploads-detail__row">
+            <dt>Warnings</dt>
+            <dd>
+              <ul class="uploads-detail__list">
+                @for (warning of summary.warnings; track warning) {
+                  <li>{{ warning }}</li>
+                }
+              </ul>
+            </dd>
+          </div>
+        }
+      }
+      @if (upload.review.rejectionReason) {
+        <div class="uploads-detail__row">
+          <dt>Rejection Reason</dt>
+          <dd>{{ upload.review.rejectionReason }}</dd>
+        </div>
+      }
+      <div class="uploads-detail__row">
+        <dt>Uploaded</dt>
+        <dd>{{ upload.createdAt | date: 'medium' }}</dd>
+      </div>
+    </dl>
+  }
+</p-dialog>
+
+<p-dialog
+  [visible]="!!rejectTarget()"
+  (visibleChange)="!$event ? rejectTarget.set(null) : null"
+  [modal]="true"
+  header="Reject Upload"
+  [style]="{ width: '440px' }"
+>
+  @if (rejectTarget(); as target) {
+    <div class="uploads-reject">
+      <p class="uploads-card__lede">Reject "{{ target.layer.name }}"? Provide a reason so the uploader knows what to fix.</p>
+      <textarea
+        pTextarea
+        class="w-full"
+        rows="3"
+        [ngModel]="rejectionReason()"
+        (ngModelChange)="rejectionReason.set($event)"
+        placeholder="Reason for rejection"
+      ></textarea>
+      <div class="uploads-reject__actions">
+        <button pButton type="button" label="Cancel" class="p-button-text" (click)="rejectTarget.set(null)"></button>
+        <button
+          pButton
+          type="button"
+          label="Reject"
+          class="p-button-danger"
+          [disabled]="rejectionReason().trim().length < 3"
+          (click)="confirmReject()"
+        ></button>
+      </div>
+    </div>
+  }
+</p-dialog>
+
+<app-site-footer />

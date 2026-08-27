@@ -1,0 +1,12 @@
+node_modules
+/dist
+/coverage
+*.log
+# Keep environment variables out of version control
+.env
+!.env.example
+
+# Runtime upload artifacts (not source)
+/storage
+
+/generated/prisma

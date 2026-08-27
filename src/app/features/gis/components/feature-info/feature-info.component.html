@@ -1,0 +1,61 @@
+<div class="feature-info">
+  @if (loading) {
+    <p class="feature-info__status">Loading feature information…</p>
+  } @else if (error) {
+    <p-message severity="error" [text]="error" styleClass="w-full" />
+  } @else if (results.length === 0) {
+    <p class="feature-info__status">
+      No feature found here. Click a feature on the map with its layer turned on to inspect its attributes.
+    </p>
+  } @else {
+    @if (results.length > 1) {
+      <div class="feature-info__results">
+        <span class="feature-info__results-label">Layers at this point</span>
+        <div class="feature-info__results-list">
+          @for (result of results; track result.layer.id; let i = $index) {
+            <button
+              type="button"
+              class="feature-info__result-btn"
+              [class.is-active]="i === selectedIndex()"
+              (click)="selectResult(i)"
+            >
+              {{ result.layer.name }}
+            </button>
+          }
+        </div>
+      </div>
+    }
+
+    @if (selectedResult; as result) {
+      <div class="feature-info__detail">
+        <h3 class="feature-info__layer-name">{{ result.layer.name }}</h3>
+
+        @if (!showRawAttributes()) {
+          <div class="feature-info__table-scroll">
+            <table class="feature-info__table">
+              <tbody>
+                @for (row of selectedFeatureAttributes; track row.key) {
+                  <tr>
+                    <th>{{ row.key }}</th>
+                    <td>{{ row.value }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else {
+          <pre class="feature-info__raw">{{ rawJson() }}</pre>
+        }
+
+        <button
+          pButton
+          type="button"
+          [label]="showRawAttributes() ? 'Readable view' : 'Raw attributes'"
+          [icon]="showRawAttributes() ? 'pi pi-table' : 'pi pi-code'"
+          class="p-button-text p-button-sm feature-info__raw-toggle"
+          (click)="toggleRaw()"
+        ></button>
+      </div>
+    }
+  }
+</div>

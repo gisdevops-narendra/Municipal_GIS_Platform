@@ -1,0 +1,59 @@
+<header class="site-header">
+  <div class="site-header__bar">
+    <a routerLink="/" class="site-header__brand">
+      <span class="site-header__mark" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M11 1L20.5 6.5V15.5L11 21L1.5 15.5V6.5L11 1Z" stroke="currentColor" stroke-width="1.4" />
+          <path d="M11 1V21" stroke="currentColor" stroke-width="1" stroke-dasharray="1.6 2.2" />
+          <path d="M1.5 6.5L20.5 15.5" stroke="currentColor" stroke-width="1" stroke-dasharray="1.6 2.2" />
+        </svg>
+      </span>
+      <span class="site-header__wordmark">
+        <span class="site-header__title">Municipal GIS Platform</span>
+        <span class="site-header__subtitle">Urban Local Body Edition</span>
+      </span>
+    </a>
+
+    @if (showActions) {
+      <div class="site-header__account">
+        @if (isAuthenticated()) {
+          <div class="user-chip" title="Signed in via Keycloak">
+            <span class="user-chip__avatar" aria-hidden="true">{{ initials() }}</span>
+            <span class="user-chip__meta">
+              <span class="user-chip__name">{{ displayName() }}</span>
+              @if (roleLabel() || secondaryLine()) {
+                <span class="user-chip__sub">{{ roleLabel() || secondaryLine() }}</span>
+              }
+            </span>
+          </div>
+          <button
+            pButton
+            type="button"
+            class="p-button-outlined p-button-sm site-header__logout"
+            icon="pi pi-sign-out"
+            label="Logout"
+            aria-label="Logout"
+            (click)="logout()"
+          ></button>
+        } @else {
+          <a routerLink="/login" pButton class="p-button-text p-button-sm" label="Login"></a>
+          <a routerLink="/register" pButton class="p-button-sm site-header__register site-header__register--full" label="Register Municipality"></a>
+          <a routerLink="/register" pButton class="p-button-sm site-header__register site-header__register--compact" label="Register"></a>
+        }
+      </div>
+    }
+  </div>
+
+  @if (showActions && isAuthenticated()) {
+    <nav class="site-header__nav" aria-label="Primary">
+      <div class="site-header__nav-inner">
+        <a routerLink="/dashboard" routerLinkActive="is-active">Dashboard</a>
+        <a routerLink="/departments" routerLinkActive="is-active">Departments</a>
+        <a routerLink="/users" routerLinkActive="is-active">Users</a>
+        <a routerLink="/gis" routerLinkActive="is-active" [routerLinkActiveOptions]="{ exact: true }">Municipal GIS</a>
+        <a routerLink="/gis/uploads" routerLinkActive="is-active">GIS Data</a>
+        <a routerLink="/gis/layers" routerLinkActive="is-active">GIS Layers</a>
+      </div>
+    </nav>
+  }
+</header>

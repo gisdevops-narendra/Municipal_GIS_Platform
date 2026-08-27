@@ -1,0 +1,122 @@
+<app-site-header />
+
+<main class="perms-shell contour-field">
+  <div class="page-container perms-shell__inner">
+    <div class="perms-card survey-panel">
+      <div class="perms-card__header">
+        <div>
+          <span class="eyebrow">GIS</span>
+          <h1 class="perms-card__heading">
+            Layer Permissions
+            @if (matrix(); as m) {
+              <span class="perms-card__layer-name">— {{ m.layer.name }}</span>
+            }
+          </h1>
+        </div>
+        <button pButton type="button" label="Back to Layers" class="p-button-text" (click)="back()"></button>
+      </div>
+
+      @if (loading()) {
+        <p class="perms-card__lede">Loading permissions…</p>
+      } @else if (forbidden()) {
+        <p-message
+          severity="warn"
+          text="You do not have permission to manage this layer. Only users with MANAGE may view or change its permissions."
+          styleClass="w-full"
+        />
+      } @else {
+        @if (pageError(); as message) {
+          <p-message severity="error" [text]="message" styleClass="w-full perms-card__message" />
+        }
+
+        <table class="perms-table perms-table--owner">
+          <thead>
+            <tr>
+              <th></th>
+              @for (permission of permissions; track permission) {
+                <th>{{ permission }}</th>
+              }
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Municipality Owner</td>
+              @for (permission of permissions; track permission) {
+                <td class="perms-table__owner-cell">✓</td>
+              }
+            </tr>
+          </tbody>
+        </table>
+        <p class="perms-card__hint">
+          The Owner always has every permission on every layer — not stored as grants, and not editable here.
+        </p>
+
+        @for (section of sections(); track section.departmentId) {
+          <div class="perms-department">
+            <h2 class="perms-department__title">{{ section.departmentName }}</h2>
+            <table class="perms-table">
+              <thead>
+                <tr>
+                  <th></th>
+                  @for (permission of permissions; track permission) {
+                    <th>{{ permission }}</th>
+                  }
+                </tr>
+              </thead>
+              <tbody>
+                @for (role of roles; track role) {
+                  <tr>
+                    <td>{{ roleLabels[role] }}</td>
+                    @for (permission of permissions; track permission) {
+                      <td>
+                        <p-checkbox
+                          [binary]="true"
+                          [ngModel]="isChecked(section, role, permission)"
+                          [disabled]="isSelfCell(section, role) || isSaving(section, role, permission)"
+                          [pTooltip]="isSelfCell(section, role) ? 'You cannot change permissions for your own role.' : ''"
+                          (onChange)="toggle(section, role, permission, $event)"
+                        ></p-checkbox>
+                      </td>
+                    }
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+
+        @if (grantableDepartments.length > 0) {
+          <div class="perms-add">
+            <label class="field-label" for="perms-add-department">Grant another department access</label>
+            <div class="perms-add__row">
+              <p-select
+                inputId="perms-add-department"
+                [options]="grantableDepartments"
+                optionLabel="label"
+                optionValue="value"
+                placeholder="Select a department"
+                [ngModel]="addDepartmentId()"
+                (ngModelChange)="addDepartmentId.set($event)"
+                styleClass="perms-add__select"
+              ></p-select>
+              <button
+                pButton
+                type="button"
+                label="Add"
+                class="p-button-outlined p-button-sm"
+                [disabled]="!addDepartmentId()"
+                (click)="addDepartmentSection()"
+              ></button>
+            </div>
+            <p class="field-hint">
+              Adds a section below with everything unchecked — tick a box to grant it (e.g. VIEW-only cross-department
+              access, Task 8 §5).
+            </p>
+          </div>
+        }
+      }
+    </div>
+  </div>
+</main>
+
+<app-site-footer />

@@ -1,0 +1,156 @@
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.7
+    container_name: municipal-gis-keycloak
+    # Development-only command: `start-dev` uses Keycloak's embedded H2
+    # database and disables HTTPS enforcement so it can run locally without
+    # extra infrastructure. Never use start-dev in production.
+    command: start-dev --import-realm
+    environment:
+      # Dev-only bootstrap admin credentials for the Keycloak Admin Console
+      # (http://localhost:8080). Not used by the Angular app and not a
+      # production secret — change/remove before any real deployment.
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      # Host port 8080 is commonly taken by other local services; Keycloak
+      # itself still listens on 8080 inside the container.
+      - "8180:8080"
+    volumes:
+      - ./keycloak/import:/opt/keycloak/data/import
+    restart: unless-stopped
+
+  postgres:
+    # Official PostGIS-enabled PostgreSQL image (postgis/postgis wraps the
+    # same postgres:16 base and adds the PostGIS extension binaries). On a
+    # brand-new volume its init scripts automatically run
+    # `CREATE EXTENSION postgis` against POSTGRES_DB. Task 5's Prisma
+    # migration also runs `CREATE EXTENSION IF NOT EXISTS postgis`
+    # explicitly, so upgrading an EXISTING Task 3/4 database (whose volume
+    # already has data, so these init scripts do NOT re-run) still enables
+    # PostGIS correctly.
+    image: postgis/postgis:16-3.4-alpine
+    container_name: municipal-gis-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-municipal_gis}
+      POSTGRES_USER: ${POSTGRES_USER:-municipal_gis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-municipal_gis_dev_password}
+    ports:
+      # Host port 5432 is often already taken by a local Postgres install;
+      # override POSTGRES_PORT in .env if so (container always listens on
+      # 5432 internally).
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-municipal_gis} -d ${POSTGRES_DB:-municipal_gis}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  geoserver:
+    # kartoza/geoserver is the standard, actively maintained open-source
+    # Docker image for GeoServer local development — official GeoServer
+    # ships no first-party image. Data dir is persisted in a named volume
+    # so workspaces/datastores survive container restarts.
+    image: kartoza/geoserver:2.25.2
+    container_name: municipal-gis-geoserver
+    environment:
+      GEOSERVER_ADMIN_USER: ${GEOSERVER_ADMIN_USER:-admin}
+      # Dev-only default password — change before any real deployment, and
+      # never commit a real one. See docs/backend.md "GeoServer".
+      GEOSERVER_ADMIN_PASSWORD: ${GEOSERVER_ADMIN_PASSWORD:-geoserver_dev_admin}
+      INITIAL_MEMORY: 512M
+      MAXIMUM_MEMORY: 1G
+    ports:
+      # Host port 8080 is commonly taken; GeoServer listens on 8080
+      # internally, serving under the /geoserver context path.
+      - "${GEOSERVER_PORT:-8600}:8080"
+    volumes:
+      - geoserver-data:/opt/geoserver/data_dir
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/geoserver/web/ > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+    container_name: municipal-gis-backend
+    environment:
+      # Reaches Postgres via the compose network, not localhost.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-municipal_gis}:${POSTGRES_PASSWORD:-municipal_gis_dev_password}@postgres:5432/${POSTGRES_DB:-municipal_gis}?schema=public
+      BACKEND_PORT: 3000
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:4200}
+      # KEYCLOAK_URL must be the SAME origin the browser/Angular uses (it is
+      # baked into every token's `iss` claim, which the backend validates
+      # against). KEYCLOAK_INTERNAL_URL is where this container actually
+      # reaches Keycloak over the compose network — see
+      # backend/src/auth/strategies/keycloak-jwt.strategy.ts for why these
+      # two must be allowed to differ.
+      KEYCLOAK_URL: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8180}
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-municipal-gis}
+      KEYCLOAK_FRONTEND_CLIENT_ID: ${KEYCLOAK_FRONTEND_CLIENT_ID:-municipal-gis-frontend}
+      KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-municipal-gis-backend}
+      KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-dev-backend-client-secret-change-me}
+      # GeoServer REST API — server-side only, never exposed to Angular.
+      # Internal compose network address; not the browser-facing one (there
+      # is no browser-facing GeoServer URL in this task — Angular only ever
+      # talks to NestJS, see docs/backend.md "GeoServer").
+      GEOSERVER_URL: http://geoserver:8080/geoserver
+      GEOSERVER_ADMIN_USER: ${GEOSERVER_ADMIN_USER:-admin}
+      GEOSERVER_ADMIN_PASSWORD: ${GEOSERVER_ADMIN_PASSWORD:-geoserver_dev_admin}
+      # Connection parameters GeoServer's PostGIS datastores are configured
+      # with. Same physical database as DATABASE_URL above (see
+      # docs/backend.md §19 — one shared PostGIS instance for now), passed
+      # discretely rather than parsed out of DATABASE_URL for clarity.
+      POSTGIS_HOST: postgres
+      POSTGIS_PORT: "5432"
+      POSTGIS_DATABASE: ${POSTGRES_DB:-municipal_gis}
+      POSTGIS_USER: ${POSTGRES_USER:-municipal_gis}
+      POSTGIS_PASSWORD: ${POSTGRES_PASSWORD:-municipal_gis_dev_password}
+      # Task 7 GIS uploads — see docs/backend.md "GIS Uploads" / "File
+      # storage". Configurable, never hard-coded in application code.
+      GIS_UPLOAD_STORAGE_DIR: /app/storage/uploads
+      GIS_UPLOAD_MAX_FILE_SIZE_MB: ${GIS_UPLOAD_MAX_FILE_SIZE_MB:-500}
+      GIS_UPLOAD_MAX_EXTRACTED_ZIP_SIZE_MB: ${GIS_UPLOAD_MAX_EXTRACTED_ZIP_SIZE_MB:-2000}
+      GIS_UPLOAD_MAX_ZIP_FILE_COUNT: ${GIS_UPLOAD_MAX_ZIP_FILE_COUNT:-100}
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+    volumes:
+      - ./backend:/app
+      - backend-node-modules:/app/node_modules
+      # Keeps build output inside the container (not bind-mounted to the
+      # host): the container runs as root, and `nest start --watch` writes
+      # to dist/ on every reload — without this, those files would end up
+      # root-owned on the host and block later host-side `npm run build`.
+      - backend-dist:/app/dist
+      # Same reasoning as backend-dist: uploaded/extracted GIS files are
+      # written by the (root) container process — a named volume keeps
+      # them out of the host-owned bind mount above, rather than leaving
+      # root-owned files under ./backend/storage.
+      - backend-storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+      geoserver:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  backend-node-modules:
+  backend-dist:
+  backend-storage:
+  geoserver-data:

@@ -1,0 +1,69 @@
+.dept-shell {
+  padding: 48px 0 80px;
+  min-height: calc(100vh - 72px - 90px);
+}
+
+.dept-card {
+  padding: 32px 36px 36px;
+}
+
+.dept-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.dept-card__heading {
+  font-size: 22px;
+  margin: 6px 0 0;
+}
+
+.dept-card__lede {
+  font-size: 13.5px;
+  color: var(--color-ink-500);
+}
+
+.dept-card__message {
+  margin-bottom: 16px;
+  display: block;
+}
+
+.dept-table {
+  font-size: 13.5px;
+}
+
+.dept-table__mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.dept-table__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.dept-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.dept-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+@media (max-width: 720px) {
+  .dept-card {
+    padding: 24px 18px 28px;
+  }
+
+  .dept-card__header {
+    flex-direction: column;
+  }
+}

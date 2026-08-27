@@ -1,0 +1,44 @@
+<div class="map-controls">
+  <div class="map-controls__group">
+    <button
+      pButton
+      type="button"
+      icon="pi pi-plus"
+      class="p-button-text map-controls__btn"
+      aria-label="Zoom in"
+      pTooltip="Zoom in"
+      tooltipPosition="left"
+      (click)="zoomIn()"
+    ></button>
+    <button
+      pButton
+      type="button"
+      icon="pi pi-minus"
+      class="p-button-text map-controls__btn"
+      aria-label="Zoom out"
+      pTooltip="Zoom out"
+      tooltipPosition="left"
+      (click)="zoomOut()"
+    ></button>
+    <button
+      pButton
+      type="button"
+      icon="pi pi-refresh"
+      class="p-button-text map-controls__btn"
+      aria-label="Reset view"
+      pTooltip="Reset to initial view"
+      tooltipPosition="left"
+      (click)="resetView()"
+    ></button>
+    <button
+      pButton
+      type="button"
+      icon="pi pi-window-maximize"
+      class="p-button-text map-controls__btn"
+      aria-label="Toggle fullscreen"
+      pTooltip="Fullscreen"
+      tooltipPosition="left"
+      (click)="toggleFullscreen()"
+    ></button>
+  </div>
+</div>

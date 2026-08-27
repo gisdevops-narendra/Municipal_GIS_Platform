@@ -1,0 +1,417 @@
+// Prisma schema for the Municipal GIS Platform backend (Tasks 3-6).
+//
+// Task 3: Municipality + User, single system role (MUNICIPALITY_OWNER).
+// Task 4: Department + Municipality -> Department -> User hierarchy, and a
+// second system role (MUNICIPALITY_USER).
+// Task 5: GISWorkspace — one permanent GIS workspace per municipality,
+// mirrored (not stored) in GeoServer as a workspace + PostGIS datastore.
+// Task 6: GISLayer — layer metadata published from GeoServer, backing the
+// 2D map viewer. The actual geometry lives in plain PostGIS tables
+// (gis_demo_*, raw SQL in the Task 6 migration) that Prisma does not model
+// — GeoServer publishes them directly; Postgres/Prisma only tracks layer
+// metadata. Granular roles/permissions and file ingestion remain out of
+// scope.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MunicipalityStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum DepartmentStatus {
+  ACTIVE
+  INACTIVE
+}
+
+/// PROVISIONING: DB row created, GeoServer workspace/datastore not yet
+/// confirmed. ACTIVE: GeoServer workspace + PostGIS datastore confirmed
+/// present. PROVISIONING_FAILED: GeoServer was unreachable or rejected the
+/// request — retryable, see GisWorkspaceService.provision.
+enum GisWorkspaceStatus {
+  PROVISIONING
+  ACTIVE
+  PROVISIONING_FAILED
+}
+
+/// Only VECTOR is populated in Task 6; RASTER is modeled now so a future
+/// GeoTIFF/imagery task doesn't need a migration to add it.
+enum GisLayerType {
+  VECTOR
+  RASTER
+}
+
+enum GisGeometryType {
+  POINT
+  LINE
+  POLYGON
+}
+
+enum GisLayerStatus {
+  ACTIVE
+  INACTIVE
+}
+
+/// Task 7: who "owns" a layer conceptually — CANONICAL (municipality-wide
+/// reference data: boundary, wards, road centerline, parcels — only
+/// MUNICIPALITY_OWNER may create these) vs DEPARTMENT (operational data
+/// belonging to one department — streetlights, water pipeline, etc.).
+/// The Task 6 demo layers are CANONICAL.
+enum GisLayerOwnershipType {
+  CANONICAL
+  DEPARTMENT
+}
+
+/// Task 7 upload file formats. Raster (GeoTIFF/COG) is explicitly out of
+/// scope — see docs/backend.md "GIS Uploads".
+enum GisUploadFileFormat {
+  SHAPEFILE_ZIP
+  GEOJSON
+  CSV
+}
+
+/// The upload/draft/review/publish lifecycle (Task 7 §14). A row only ever
+/// moves forward, except IN_REVIEW -> REJECTED and (FAILED|PUBLISH_FAILED)
+/// -> retry back into VALIDATING/APPROVED. Never skips DRAFT — an upload
+/// is never live on the map until it passes through every gate.
+enum GisUploadStatus {
+  UPLOAD_PENDING
+  VALIDATING
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  PUBLISHED
+  REJECTED
+  FAILED
+  PUBLISH_FAILED
+}
+
+/// Task 8: exactly three roles. MUNICIPALITY_USER (Task 4) was replaced by
+/// DEPARTMENT_HEAD/DEPARTMENT_USER — see migration
+/// 20260827100100_migrate_municipality_user_to_department_user, which
+/// converts every existing MUNICIPALITY_USER row to DEPARTMENT_USER. The
+/// old enum value intentionally remains in the underlying Postgres type
+/// (Postgres has no cheap "drop enum value"; recreating the type is more
+/// risk than a permanently-unused value is worth) but is never written or
+/// read by application code again — see docs/backend.md "GIS Layer
+/// Permissions" (Task 8).
+enum SystemRole {
+  MUNICIPALITY_OWNER
+  DEPARTMENT_HEAD
+  DEPARTMENT_USER
+}
+
+/// Task 8 layer-level permissions. Deliberately does NOT include a
+/// FEATURE_EDIT-style permission — there is no feature editing anywhere
+/// in this platform yet.
+enum GisPermission {
+  VIEW
+  UPLOAD
+  APPROVE
+  PUBLISH
+  EXPORT
+  MANAGE
+}
+
+model Municipality {
+  id            String             @id @default(uuid())
+  name          String
+  type          String
+  state         String
+  district      String
+  city          String
+  officialEmail String             @unique @map("official_email")
+  contactNumber String             @map("contact_number")
+  status        MunicipalityStatus @default(ACTIVE)
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+
+  users        User[]
+  departments  Department[]
+  gisWorkspace GISWorkspace?
+  uploads      GISLayerUpload[]
+
+  @@map("municipalities")
+}
+
+model GISWorkspace {
+  id                 String             @id @default(uuid())
+  /// One GIS workspace per municipality — @unique makes this a true 1:1,
+  /// not just a 1:many. Every municipality gets exactly one, created
+  /// automatically at registration (see docs/backend.md "GIS Workspace").
+  municipalityId     String             @unique @map("municipality_id")
+  name               String
+  code               String
+  description        String?
+  status             GisWorkspaceStatus @default(PROVISIONING)
+  /// Storage/projected CRS used for spatial data in this workspace, e.g.
+  /// "EPSG:32643" (UTM 43N — suitable default for Gujarat). Configurable
+  /// per municipality; NOT auto-detected in this task.
+  defaultCrs         String             @default("EPSG:32643") @map("default_crs")
+  /// Geographic CRS used for display, e.g. "EPSG:4326" (WGS84).
+  displayCrs         String             @default("EPSG:4326") @map("display_crs")
+  /// Deterministic, URL/XML-safe GeoServer workspace name derived from the
+  /// municipality name (see gis/workspace-naming.util.ts) — globally
+  /// unique across the whole GeoServer instance, not just per-municipality.
+  /// System-controlled: never accepted from the client, never editable via
+  /// the API once provisioned.
+  geoserverWorkspace String             @unique @map("geoserver_workspace")
+  createdById        String?            @map("created_by")
+  updatedById        String?            @map("updated_by")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+
+  municipality Municipality     @relation(fields: [municipalityId], references: [id])
+  layers       GISLayer[]
+  uploads      GISLayerUpload[]
+
+  @@map("gis_workspaces")
+}
+
+model GISLayer {
+  id                 String           @id @default(uuid())
+  gisWorkspaceId     String           @map("gis_workspace_id")
+  name               String
+  code               String
+  description        String?
+  layerType          GisLayerType     @default(VECTOR) @map("layer_type")
+  /// Denormalized copy of the parent workspace's geoserverWorkspace at
+  /// publish time — lets a layer response be self-contained (frontend can
+  /// build the WMS/WFS request without a second lookup) and stays valid
+  /// since geoserverWorkspace is itself immutable once provisioned.
+  geoserverWorkspace String           @map("geoserver_workspace")
+  /// Published GeoServer layer name within that workspace, e.g. "roads"
+  /// (qualified name for OGC requests is "{geoserverWorkspace}:{geoserverLayer}").
+  geoserverLayer     String           @map("geoserver_layer")
+  /// Null for RASTER layers (not used in Task 6).
+  geometryType       GisGeometryType? @map("geometry_type")
+  visibleByDefault   Boolean          @default(true) @map("visible_by_default")
+  status             GisLayerStatus   @default(ACTIVE)
+  displayOrder       Int              @default(0) @map("display_order")
+  /// Layer's own extent in EPSG:4326 (lon/lat), captured from GeoServer at
+  /// publish time — lets the frontend derive an initial map view per
+  /// municipality without hardcoding any coordinates. Null until GeoServer
+  /// successfully reports a bounding box.
+  bboxMinX           Float?           @map("bbox_min_x")
+  bboxMinY           Float?           @map("bbox_min_y")
+  bboxMaxX           Float?           @map("bbox_max_x")
+  bboxMaxY           Float?           @map("bbox_max_y")
+  createdById        String?          @map("created_by")
+  updatedById        String?          @map("updated_by")
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+
+  /// Task 7. Null + ownershipType=CANONICAL for the Task 6 demo layers and
+  /// any municipality-wide layer. Required when ownershipType=DEPARTMENT.
+  departmentId   String?               @map("department_id")
+  ownershipType  GisLayerOwnershipType @default(CANONICAL) @map("ownership_type")
+  /// Task 7. Physical PostGIS table backing an uploaded layer, e.g.
+  /// "layer_a1b2c3d4e5f6..." — application-generated, never derived from
+  /// user input (see GdalService.tableNameFor). Null for the Task 6 demo
+  /// layers, which share the gis_demo_* tables instead.
+  postgisTable   String?               @map("postgis_table")
+  /// Task 7. The GISLayerUpload that most recently (re)published this
+  /// layer — plain audit field like createdById, not a formal relation, so
+  /// a purged upload row never blocks deleting/replacing the layer it
+  /// produced. Null for the Task 6 demo layers (no upload produced them).
+  sourceUploadId String?               @map("source_upload_id")
+  /// Task 7. Bumped on every successful re-publish that replaces this
+  /// layer's data (see docs/backend.md "Layer versioning") — never
+  /// decremented, never reset.
+  version        Int                   @default(1)
+
+  gisWorkspace GISWorkspace         @relation(fields: [gisWorkspaceId], references: [id])
+  department   Department?          @relation(fields: [departmentId], references: [id])
+  uploads      GISLayerUpload[]
+  permissions  GISLayerPermission[]
+
+  // Layer code is unique within its workspace (mirrors Department's
+  // per-municipality uniqueness pattern) — not globally, since every
+  // municipality independently gets its own MUNICIPAL_BOUNDARY/WARDS/ROADS.
+  @@unique([gisWorkspaceId, code])
+  @@index([departmentId])
+  @@map("gis_layers")
+}
+
+/// Task 8. Grants one (role, department) pair a permission on one layer.
+/// This is deliberately how BOTH "default access" and "cross-department
+/// access" (Task 8 §4/§5) are represented — there is no separate concept
+/// of a default: a DEPARTMENT layer's owning department's Head/User
+/// permissions are seeded here as ordinary rows the moment the layer is
+/// first published (see GisAuthorizationService.ensureDefaultPermissions),
+/// which is exactly what makes them editable/revocable by the Owner
+/// (§4: "these are defaults only... Owner must be able to configure
+/// permissions"). A cross-department grant (§5, e.g. "Roads User may VIEW
+/// Water Pipeline") is just another row with `departmentId` set to the
+/// *grantee* department, which may differ from the layer's own owning
+/// department.
+///
+/// `role` intentionally reuses SystemRole rather than introducing a
+/// separate Role entity — this platform has no Role table, only the
+/// SystemRole enum on User, and Task 8 explicitly says to reuse what
+/// exists rather than build new RBAC infrastructure. MUNICIPALITY_OWNER
+/// is never actually stored here: the Owner's access is unconditional and
+/// enforced in code (GisAuthorizationService), never via a row — see
+/// docs/backend.md "GIS Layer Permissions".
+model GISLayerPermission {
+  id           String        @id @default(uuid())
+  gisLayerId   String        @map("gis_layer_id")
+  departmentId String        @map("department_id")
+  role         SystemRole
+  permission   GisPermission
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  gisLayer   GISLayer   @relation(fields: [gisLayerId], references: [id], onDelete: Cascade)
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+
+  // Prevents duplicate layer + role(+department) + permission combinations
+  // — Task 8 §3.
+  @@unique([gisLayerId, departmentId, role, permission])
+  @@index([departmentId])
+  @@map("gis_layer_permissions")
+}
+
+/// Task 7. One row per uploaded file, tracking it through
+/// UPLOAD_PENDING -> VALIDATING -> DRAFT -> IN_REVIEW -> APPROVED ->
+/// PUBLISHED (or -> REJECTED / FAILED / PUBLISH_FAILED). Never itself "is"
+/// a live layer — publishing creates or updates a separate GISLayer row
+/// (see `layerId`), and the live Municipal GIS map only ever reads
+/// GISLayer, never GISLayerUpload. See docs/backend.md "GIS Uploads" for
+/// the full lifecycle and why PostGIS import happens once, at validate
+/// time, rather than being re-run at publish time.
+model GISLayerUpload {
+  id             String @id @default(uuid())
+  municipalityId String @map("municipality_id")
+  gisWorkspaceId String @map("gis_workspace_id")
+  /// Plain audit field (User.id), not a relation — mirrors
+  /// Department.createdById; a deleted user must never block reading an
+  /// upload they created.
+  uploadedById   String @map("uploaded_by")
+
+  originalFilename String              @map("original_filename")
+  /// Application-generated, filesystem-safe name actually used under
+  /// storage/uploads/<municipalityId>/... — never the user's original
+  /// filename (see StorageService).
+  storedFilename   String              @map("stored_filename")
+  fileSize         Int                 @map("file_size")
+  fileFormat       GisUploadFileFormat @map("file_format")
+  status           GisUploadStatus     @default(UPLOAD_PENDING)
+
+  layerName     String                @map("layer_name")
+  /// Deterministic, generated from layerName (see LayerNamingService) —
+  /// never accepted as raw user input. If this matches an existing
+  /// GISLayer.code in the same workspace, a successful publish replaces
+  /// that layer's data (a new version) rather than creating a duplicate.
+  layerCode     String                @map("layer_code")
+  description   String?
+  departmentId  String?               @map("department_id")
+  ownershipType GisLayerOwnershipType @default(DEPARTMENT) @map("ownership_type")
+
+  /// CRS detected from the source file (or the user-supplied override for
+  /// CSV X/Y, or user-confirmed when GDAL could not determine one) — see
+  /// docs/backend.md "CRS handling". Null until validation runs.
+  sourceCrs    String?          @map("source_crs")
+  /// Always the GIS workspace's own defaultCrs at the time of import —
+  /// denormalized here for an easy audit trail per upload.
+  targetCrs    String?          @map("target_crs")
+  geometryType GisGeometryType? @map("geometry_type")
+  featureCount Int?             @map("feature_count")
+  /// Physical PostGIS table this upload imported into — set once
+  /// VALIDATING succeeds, reused unchanged through preview and publish
+  /// (see docs/backend.md — import is not re-run at publish time).
+  postgisTable String?          @map("postgis_table")
+
+  /// Structured validation result (file/CRS/geometry/features/fields/
+  /// warnings/errors) — see UploadValidationSummary in gdal.service.ts.
+  validationSummary Json?   @map("validation_summary")
+  errorMessage      String? @map("error_message")
+
+  reviewedById    String?   @map("reviewed_by")
+  reviewedAt      DateTime? @map("reviewed_at")
+  rejectionReason String?   @map("rejection_reason")
+
+  publishedById String?   @map("published_by")
+  publishedAt   DateTime? @map("published_at")
+  /// Set once PUBLISHED — the GISLayer this upload created or replaced.
+  /// Plain audit field, not a formal relation (see GISLayer.sourceUploadId
+  /// for why), but does reference GISLayer.id for the `layer` include below.
+  layerId       String?   @map("layer_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  municipality Municipality @relation(fields: [municipalityId], references: [id])
+  gisWorkspace GISWorkspace @relation(fields: [gisWorkspaceId], references: [id])
+  department   Department?  @relation(fields: [departmentId], references: [id])
+  layer        GISLayer?    @relation(fields: [layerId], references: [id])
+
+  @@index([municipalityId, status])
+  @@index([departmentId])
+  @@map("gis_layer_uploads")
+}
+
+model Department {
+  id             String           @id @default(uuid())
+  municipalityId String           @map("municipality_id")
+  name           String
+  code           String
+  description    String?
+  status         DepartmentStatus @default(ACTIVE)
+  /// User.id of the MUNICIPALITY_OWNER who created this department. Plain
+  /// audit field, not a Prisma relation — see docs/backend.md "Audit" for
+  /// why a full audit log is deferred.
+  createdById    String?          @map("created_by")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  municipality Municipality         @relation(fields: [municipalityId], references: [id])
+  users        User[]
+  layers       GISLayer[]
+  uploads      GISLayerUpload[]
+  permissions  GISLayerPermission[]
+
+  // Enforced at the database level, not just in application code: a
+  // department name/code must be unique within its municipality, but the
+  // same name/code may be reused across different municipalities.
+  @@unique([municipalityId, name])
+  @@unique([municipalityId, code])
+  @@map("departments")
+}
+
+model User {
+  id             String     @id @default(uuid())
+  keycloakUserId String     @unique @map("keycloak_user_id")
+  fullName       String     @map("full_name")
+  email          String     @unique
+  mobileNumber   String     @map("mobile_number")
+  municipalityId String     @map("municipality_id")
+  /// Nullable: the MUNICIPALITY_OWNER created during registration belongs
+  /// to no department. MUNICIPALITY_USER accounts are normally assigned
+  /// one at creation time.
+  departmentId   String?    @map("department_id")
+  systemRole     SystemRole @default(MUNICIPALITY_OWNER) @map("system_role")
+  status         UserStatus @default(ACTIVE)
+  /// User.id of the MUNICIPALITY_OWNER who created this user (self-registered
+  /// owners have no creator). Plain audit field, not a Prisma relation.
+  createdById    String?    @map("created_by")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+
+  municipality Municipality @relation(fields: [municipalityId], references: [id])
+  department   Department?  @relation(fields: [departmentId], references: [id])
+
+  @@map("users")
+}

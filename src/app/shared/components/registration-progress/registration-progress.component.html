@@ -1,0 +1,18 @@
+<div class="reg-progress">
+  <span class="reg-progress__index">
+    STEP {{ current.toString().padStart(2, '0') }} / {{ total.toString().padStart(2, '0') }}
+  </span>
+
+  <ol class="reg-progress__list">
+    @for (step of steps; track step.label; let i = $index) {
+      <li
+        class="reg-progress__item"
+        [class.reg-progress__item--done]="i + 1 < current"
+        [class.reg-progress__item--active]="i + 1 === current"
+      >
+        <span class="reg-progress__dot">{{ (i + 1).toString().padStart(2, '0') }}</span>
+        <span class="reg-progress__label">{{ step.label }}</span>
+      </li>
+    }
+  </ol>
+</div>

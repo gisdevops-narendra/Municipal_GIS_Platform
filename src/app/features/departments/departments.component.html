@@ -1,0 +1,114 @@
+<app-site-header />
+
+<main class="dept-shell contour-field">
+  <div class="page-container dept-shell__inner">
+    <div class="dept-card survey-panel">
+      <div class="dept-card__header">
+        <div>
+          <span class="eyebrow">Administration</span>
+          <h1 class="dept-card__heading">Departments</h1>
+        </div>
+        @if (isOwner()) {
+          <button pButton type="button" label="Add Department" (click)="openCreateDialog()"></button>
+        }
+      </div>
+
+      @if (pageError(); as message) {
+        <p-message severity="error" [text]="message" styleClass="w-full dept-card__message" />
+      }
+
+      @if (loading()) {
+        <p class="dept-card__lede">Loading departments…</p>
+      } @else if (departments().length === 0) {
+        <p class="dept-card__lede">No departments yet. {{ isOwner() ? 'Create the first one to get started.' : '' }}</p>
+      } @else {
+        <p-table [value]="departments()" styleClass="dept-table" [rowHover]="true">
+          <ng-template pTemplate="header">
+            <tr>
+              <th>Department Name</th>
+              <th>Code</th>
+              <th>Description</th>
+              <th>Status</th>
+              <th>Users</th>
+              <th>Actions</th>
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="body" let-department>
+            <tr>
+              <td>{{ department.name }}</td>
+              <td class="dept-table__mono">{{ department.code }}</td>
+              <td>{{ department.description || '—' }}</td>
+              <td>
+                <p-tag [severity]="department.status === 'ACTIVE' ? 'success' : 'secondary'" [value]="department.status"></p-tag>
+              </td>
+              <td>{{ department.userCount }}</td>
+              <td class="dept-table__actions">
+                <button pButton type="button" label="View Users" class="p-button-text p-button-sm" (click)="viewUsers(department)"></button>
+                @if (isOwner()) {
+                  <button pButton type="button" label="Edit" class="p-button-text p-button-sm" (click)="openEditDialog(department)"></button>
+                  <button
+                    pButton
+                    type="button"
+                    [label]="department.status === 'ACTIVE' ? 'Deactivate' : 'Activate'"
+                    class="p-button-text p-button-sm"
+                    (click)="toggleStatus(department)"
+                  ></button>
+                  <button
+                    pButton
+                    type="button"
+                    label="Delete"
+                    class="p-button-text p-button-sm p-button-danger"
+                    (click)="deleteDepartment(department)"
+                  ></button>
+                }
+              </td>
+            </tr>
+          </ng-template>
+        </p-table>
+      }
+    </div>
+  </div>
+</main>
+
+<p-dialog
+  [visible]="dialogVisible()"
+  (visibleChange)="dialogVisible.set($event)"
+  [modal]="true"
+  [header]="editingDepartment() ? 'Edit Department' : 'Add Department'"
+  [style]="{ width: '480px' }"
+>
+  <form [formGroup]="form" (ngSubmit)="submit()" class="dept-form">
+    <div class="dept-form__field">
+      <label class="field-label" for="dept-name">Department Name</label>
+      <input pInputText id="dept-name" formControlName="name" class="w-full" />
+      @if (f.name.invalid && f.name.touched) {
+        <div class="field-error">Department name is required (2-150 characters).</div>
+      }
+    </div>
+
+    <div class="dept-form__field">
+      <label class="field-label" for="dept-code">Code</label>
+      <input pInputText id="dept-code" formControlName="code" class="w-full" placeholder="e.g. ROADS" />
+      <div class="field-hint">Letters, numbers, hyphen or underscore. Normalized to uppercase automatically.</div>
+      @if (f.code.invalid && f.code.touched) {
+        <div class="field-error">Code is required (2-30 characters).</div>
+      }
+    </div>
+
+    <div class="dept-form__field">
+      <label class="field-label" for="dept-description">Description</label>
+      <textarea pTextarea id="dept-description" formControlName="description" class="w-full" rows="3"></textarea>
+    </div>
+
+    @if (formError(); as message) {
+      <p-message severity="error" [text]="message" styleClass="w-full" />
+    }
+
+    <div class="dept-form__actions">
+      <button pButton type="button" label="Cancel" class="p-button-text" (click)="closeDialog()"></button>
+      <button pButton type="submit" [label]="editingDepartment() ? 'Save Changes' : 'Create Department'" [loading]="formSubmitting()"></button>
+    </div>
+  </form>
+</p-dialog>
+
+<app-site-footer />

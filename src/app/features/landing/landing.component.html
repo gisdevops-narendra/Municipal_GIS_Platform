@@ -1,0 +1,53 @@
+<app-site-header />
+
+<main>
+  <section class="hero contour-field">
+    <div class="page-container hero__inner">
+      <div class="hero__content">
+        <span class="eyebrow">Municipal GIS Platform</span>
+        <h1 class="hero__heading">Manage your municipality through GIS</h1>
+        <p class="hero__lede">
+          One secure platform to manage municipal GIS data, assets, properties, projects and
+          operations — built for Indian Urban Local Bodies, from Nagar Panchayats to Municipal
+          Corporations.
+        </p>
+        <div class="hero__actions">
+          <a routerLink="/register" pButton label="Register Municipality" class="p-button-lg"></a>
+          <a routerLink="/login" pButton label="Login" class="p-button-lg p-button-outlined"></a>
+        </div>
+      </div>
+
+      <div class="hero__panel survey-panel" aria-hidden="true">
+        <div class="hero__panel-header">
+          <span class="hero__panel-label">SHEET REF.</span>
+          <span class="hero__panel-value">MGP&nbsp;/&nbsp;ULB&nbsp;/&nbsp;01</span>
+        </div>
+        <ul class="hero__panel-list">
+          <li><span>Municipality</span><span>Isolated workspace</span></li>
+          <li><span>Ward Boundaries</span><span>Canonical layer</span></li>
+          <li><span>Property Parcels</span><span>Linked to tax &amp; utilities</span></li>
+          <li><span>Asset Layers</span><span>Roads · Water · Lighting</span></li>
+        </ul>
+        <div class="hero__panel-footer">CRS: EPSG:4326 (WGS 84) · Configurable per municipality</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="capabilities">
+    <div class="page-container">
+      <span class="eyebrow">What the platform covers</span>
+      <h2 class="capabilities__heading">A single operating layer for municipal work</h2>
+
+      <div class="capabilities__grid">
+        @for (item of capabilities; track item.label) {
+          <div class="capability-card survey-panel">
+            <h3 class="capability-card__title">{{ item.label }}</h3>
+            <p class="capability-card__desc">{{ item.description }}</p>
+          </div>
+        }
+      </div>
+    </div>
+  </section>
+</main>
+
+<app-site-footer />
