@@ -10,6 +10,7 @@ import XYZ from 'ol/source/XYZ';
 import ImageWMS from 'ol/source/ImageWMS';
 import VectorSource from 'ol/source/Vector';
 import GeoJSON from 'ol/format/GeoJSON';
+import Draw, { createBox } from 'ol/interaction/Draw';
 import { Fill, Stroke, Style, Circle as CircleStyle } from 'ol/style';
 import { defaults as defaultControls } from 'ol/control';
 import ScaleLine from 'ol/control/ScaleLine';
@@ -111,7 +112,16 @@ export class MapService {
   /** Overlay that draws the attribute table's currently-selected features
    *  on top of everything else. Created lazily on first selection. */
   private selectionLayer: VectorLayer<VectorSource> | null = null;
+  /** Overlay for Query Builder results (distinct colour from selection). */
+  private queryLayer: VectorLayer<VectorSource> | null = null;
+  /** Sketch layer + active interaction for "draw geometry for spatial query". */
+  private drawLayer: VectorLayer<VectorSource> | null = null;
+  private drawInteraction: Draw | null = null;
   private readonly geoJson = new GeoJSON();
+
+  /** Geometries (EPSG:4326) of the currently highlighted/selected features —
+   *  read by the Query Builder for "use current selection as spatial input". */
+  readonly selectionGeometries = signal<Record<string, unknown>[]>([]);
 
   /** Current visibility per GisLayer.id, seeded from visibleByDefault —
    *  the single source of truth the layer panel binds its checkboxes to. */
@@ -175,10 +185,14 @@ export class MapService {
   }
 
   destroy(): void {
+    this.cancelDraw();
     this.map?.setTarget(undefined);
     this.map = null;
     this.managedLayers.clear();
     this.selectionLayer = null;
+    this.queryLayer = null;
+    this.drawLayer = null;
+    this.selectionGeometries.set([]);
   }
 
   /** Re-measures the map container — call after a dock panel opens, closes,
@@ -194,16 +208,102 @@ export class MapService {
   setSelectionHighlight(geometries: (Record<string, unknown> | null | undefined)[]): void {
     const source = this.ensureSelectionSource();
     source.clear();
+    const kept: Record<string, unknown>[] = [];
     for (const geometry of geometries) {
       const feature = this.toMapFeature(geometry);
-      if (feature) {
+      if (feature && geometry) {
         source.addFeature(feature);
+        kept.push(geometry);
       }
     }
+    this.selectionGeometries.set(kept);
   }
 
   clearSelectionHighlight(): void {
     this.selectionLayer?.getSource()?.clear();
+    this.selectionGeometries.set([]);
+  }
+
+  // ----- query builder: WMS filter, result highlight, draw -----
+
+  /** Applies (or clears with `null`) an ECQL filter on a layer's WMS render
+   *  — GeoServer only paints matching features. */
+  setLayerCqlFilter(layerId: string, cql: string | null): void {
+    const entry = this.managedLayers.get(layerId);
+    const source = entry?.olLayer.getSource();
+    if (!source) return;
+    const params = { ...source.getParams() };
+    if (cql && cql.trim().length > 0) {
+      params['CQL_FILTER'] = cql;
+    } else {
+      delete params['CQL_FILTER'];
+    }
+    source.updateParams(params);
+  }
+
+  clearAllLayerCqlFilters(): void {
+    for (const [id] of this.managedLayers) {
+      this.setLayerCqlFilter(id, null);
+    }
+  }
+
+  setQueryHighlight(geometries: (Record<string, unknown> | null | undefined)[]): void {
+    const source = this.ensureQuerySource();
+    source.clear();
+    for (const geometry of geometries) {
+      const feature = this.toMapFeature(geometry);
+      if (feature) source.addFeature(feature);
+    }
+  }
+
+  clearQueryHighlight(): void {
+    this.queryLayer?.getSource()?.clear();
+  }
+
+  /** Lets the user draw one geometry for a spatial query. Emits the drawn
+   *  shape as GeoJSON (EPSG:4326) and keeps it on screen; complete /
+   *  `cancelDraw` / `clearDraw` remove it. */
+  beginDraw(kind: 'Point' | 'Line' | 'Rectangle' | 'Polygon'): Observable<Record<string, unknown>> {
+    this.cancelDraw();
+    const source = this.ensureDrawSource();
+    source.clear();
+
+    const type = kind === 'Point' ? 'Point' : kind === 'Line' ? 'LineString' : kind === 'Rectangle' ? 'Circle' : 'Polygon';
+
+    return new Observable<Record<string, unknown>>((subscriber) => {
+      this.drawInteraction = new Draw({
+        source,
+        type,
+        geometryFunction: kind === 'Rectangle' ? createBox() : undefined
+      });
+      this.drawInteraction.on('drawstart', () => source.clear());
+      this.drawInteraction.on('drawend', (event) => {
+        const geom = (event as unknown as { feature: Feature }).feature.getGeometry();
+        if (geom) {
+          const geojson = this.geoJson.writeGeometryObject(geom, {
+            dataProjection: LAYER_PROJECTION,
+            featureProjection: MAP_PROJECTION
+          });
+          subscriber.next(geojson as Record<string, unknown>);
+        }
+        this.cancelDraw();
+        subscriber.complete();
+      });
+      this.map?.addInteraction(this.drawInteraction);
+      return () => this.cancelDraw();
+    });
+  }
+
+  cancelDraw(): void {
+    if (this.drawInteraction && this.map) {
+      this.map.removeInteraction(this.drawInteraction);
+    }
+    this.drawInteraction = null;
+  }
+
+  clearDraw(): void {
+    this.cancelDraw();
+    this.drawLayer?.getSource()?.clear();
   }
 
   /** Zooms/pans the map to frame the given GeoJSON (EPSG:4326) geometries. */
@@ -221,6 +321,46 @@ export class MapService {
     if (!isEmptyExtent(extent)) {
       view.fit(extent, { size: this.map?.getSize(), padding: [60, 60, 60, 60], maxZoom: 18, duration: 250 });
     }
+  }
+
+  private ensureQuerySource(): VectorSource {
+    if (!this.queryLayer) {
+      const primary = '#128077';
+      this.queryLayer = new VectorLayer({
+        source: new VectorSource(),
+        style: new Style({
+          stroke: new Stroke({ color: primary, width: 2.5 }),
+          fill: new Fill({ color: 'rgba(18, 128, 119, 0.14)' }),
+          image: new CircleStyle({
+            radius: 6,
+            stroke: new Stroke({ color: primary, width: 2.5 }),
+            fill: new Fill({ color: 'rgba(18, 128, 119, 0.3)' })
+          })
+        }),
+        zIndex: 9998,
+        properties: { queryOverlay: true }
+      });
+      this.map?.addLayer(this.queryLayer);
+    }
+    return this.queryLayer.getSource() as VectorSource;
+  }
+
+  private ensureDrawSource(): VectorSource {
+    if (!this.drawLayer) {
+      const accent = '#b5722a';
+      this.drawLayer = new VectorLayer({
+        source: new VectorSource(),
+        style: new Style({
+          stroke: new Stroke({ color: accent, width: 2, lineDash: [6, 4] }),
+          fill: new Fill({ color: 'rgba(181, 114, 42, 0.1)' }),
+          image: new CircleStyle({ radius: 6, stroke: new Stroke({ color: accent, width: 2 }), fill: new Fill({ color: 'rgba(181, 114, 42, 0.25)' }) })
+        }),
+        zIndex: 10000,
+        properties: { drawOverlay: true }
+      });
+      this.map?.addLayer(this.drawLayer);
+    }
+    return this.drawLayer.getSource() as VectorSource;
   }
 
   private ensureSelectionSource(): VectorSource {

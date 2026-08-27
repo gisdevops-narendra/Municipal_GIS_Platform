@@ -28,6 +28,16 @@
         />
       </span>
 
+      @if (baseFilter(); as filter) {
+        <span class="attr-table__filter-chip" [pTooltip]="filter.cql" tooltipPosition="top">
+          <i class="pi pi-filter" aria-hidden="true"></i>
+          <span class="attr-table__filter-label">{{ filter.label }}</span>
+          <button type="button" aria-label="Clear query filter" (click)="clearExternalFilter()">
+            <i class="pi pi-times" aria-hidden="true"></i>
+          </button>
+        </span>
+      }
+
       <span class="attr-table__report">{{ pageReport() }}</span>
 
       <span class="attr-table__spacer"></span>

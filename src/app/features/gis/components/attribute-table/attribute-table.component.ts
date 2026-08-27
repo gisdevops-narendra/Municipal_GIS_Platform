@@ -1,9 +1,11 @@
 import {
   Component,
+  EventEmitter,
   HostListener,
   Input,
   OnChanges,
   OnDestroy,
+  Output,
   SimpleChanges,
   computed,
   inject,
@@ -38,6 +40,13 @@ import {
 export interface MapClickFeatureRef {
   layerId: string;
   featureId: string;
+}
+
+/** A Query Builder result applied to the table as a locked filter. */
+export interface AttributeExternalFilter {
+  layerId: string;
+  cql: string;
+  label: string;
 }
 
 /**
@@ -80,6 +89,12 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
   @Input() initialLayerId: string | null = null;
   /** Features just clicked on the map — toggles them in the selection. */
   @Input() mapClickFeatures: MapClickFeatureRef[] = [];
+  /** A locked base CQL filter driven by the Query Builder — ANDed with the
+   *  in-table search; shown as a removable chip. */
+  @Input() externalFilter: AttributeExternalFilter | null = null;
+  @Output() externalFilterCleared = new EventEmitter<void>();
+
+  readonly baseFilter = signal<AttributeExternalFilter | null>(null);
 
   readonly pageSizes = ATTRIBUTE_PAGE_SIZES;
 
@@ -141,12 +156,46 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
   }
 
   ngOnChanges(changes: SimpleChanges): void {
+    if (changes['externalFilter']) {
+      this.applyExternalFilter();
+      return;
+    }
     if (changes['layers'] || changes['initialLayerId']) {
       this.pickDefaultLayer();
     }
     if (changes['mapClickFeatures'] && this.mapClickFeatures?.length) {
       this.syncFromMapClick();
     }
+  }
+
+  private applyExternalFilter(): void {
+    const filter = this.externalFilter;
+    this.baseFilter.set(filter);
+    if (!filter) {
+      this.first.set(0);
+      this.load();
+      return;
+    }
+    // switch to the queried layer, then load with the base filter applied
+    if (filter.layerId !== this.activeLayerId()) {
+      this.activeLayerId.set(filter.layerId);
+      this.sortField.set(null);
+      this.searchInput.set('');
+      this.search.set('');
+      this.hiddenFields.set(new Set());
+      this.fields.set(this.service.getFields(filter.layerId) || []);
+      this.selectedIds.set(new Set());
+      this.geomCache.clear();
+    }
+    this.first.set(0);
+    this.load();
+  }
+
+  clearExternalFilter(): void {
+    this.baseFilter.set(null);
+    this.externalFilterCleared.emit();
+    this.first.set(0);
+    this.load();
   }
 
   ngOnDestroy(): void {
@@ -185,6 +234,11 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
     this.geomCache.clear();
     this.lastClickedIndex = -1;
     this.mapService.clearSelectionHighlight();
+    if (this.baseFilter()) {
+      // the query filter belonged to the previous layer
+      this.baseFilter.set(null);
+      this.externalFilterCleared.emit();
+    }
     this.load();
   }
 
@@ -214,7 +268,8 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
       search: this.search()
     };
 
-    this.service.fetchPage(layer, query).subscribe({
+    const base = this.baseFilter();
+    this.service.fetchPage(layer, query, { baseFilter: base?.layerId === layer.id ? base.cql : null }).subscribe({
       next: (page) => {
         if (token !== this.loadToken) return;
         this.rows.set(page.rows);

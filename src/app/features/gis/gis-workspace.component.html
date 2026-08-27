@@ -49,6 +49,19 @@
           @case ('legend') {
             <app-legend [layers]="layers()" [inline]="true" />
           }
+          @case ('query') {
+            @if (layersReady()) {
+              <app-query-builder
+                [layers]="layers()"
+                [initialLayerId]="highlightLayerId()"
+                [workspaceKey]="workspace()?.code ?? ''"
+                (queryRun)="onQueryRun($event)"
+                (queryCleared)="onQueryCleared()"
+              />
+            } @else {
+              <p class="gis-ws__hint">{{ layersError() ?? 'Loading layers…' }}</p>
+            }
+          }
           @case ('workspace') {
             @if (workspace(); as ws) {
               @if (ws.status === 'PROVISIONING_FAILED') {
@@ -157,6 +170,8 @@
                 [layers]="layers()"
                 [initialLayerId]="highlightLayerId()"
                 [mapClickFeatures]="mapClickFeatures()"
+                [externalFilter]="activeQueryFilter()"
+                (externalFilterCleared)="onQueryCleared()"
               />
             }
             @default {

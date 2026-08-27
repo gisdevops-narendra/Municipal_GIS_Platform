@@ -1,0 +1,439 @@
+:host {
+  display: block;
+}
+
+.qb {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  font-size: 12.5px;
+}
+
+.qb__notice {
+  font-size: 13px;
+  color: var(--color-ink-500);
+  margin: 0;
+}
+
+.qb__hint {
+  font-size: 11.5px;
+  color: var(--color-ink-500);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.qb__muted {
+  color: var(--color-ink-300);
+}
+
+.qb__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.qb__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-500);
+}
+
+.qb__select ::ng-deep .p-select,
+.qb__select.p-select {
+  width: 100%;
+  height: 30px;
+}
+
+.qb__select ::ng-deep .p-select-label {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.qb__select--sm.p-select,
+.qb__select--sm ::ng-deep .p-select {
+  height: 28px;
+}
+
+/* ---------- section ---------- */
+.qb__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-line);
+}
+
+.qb__section-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-700);
+}
+
+.qb__section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+/* ---------- condition group ---------- */
+.qb__group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.qb__group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.qb__group-first {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-ink-500);
+}
+
+.qb__connector.p-select,
+.qb__connector ::ng-deep .p-select {
+  width: 78px;
+  height: 26px;
+  flex: 0 0 78px;
+}
+
+.qb__connector ::ng-deep .p-select-label {
+  padding: 0 4px 0 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+.qb__connector ::ng-deep .p-select-dropdown {
+  width: 20px;
+}
+
+.qb__connector--inner.p-select,
+.qb__connector--inner ::ng-deep .p-select {
+  width: 70px;
+  height: 24px;
+  flex: 0 0 70px;
+}
+
+.qb__not {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--color-ink-500);
+  cursor: pointer;
+}
+
+.qb__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-ink-400, var(--color-ink-500));
+  cursor: pointer;
+
+  i {
+    font-size: 11px;
+  }
+
+  &:hover {
+    background: var(--color-surface);
+    color: var(--color-error-600);
+  }
+}
+
+/* ---------- condition ---------- */
+.qb__cond {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.qb__cond-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.qb__cond-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.qb__select--op.p-select,
+.qb__select--op ::ng-deep .p-select {
+  flex: 0 0 118px;
+  height: 28px;
+}
+
+.qb__select--op ::ng-deep .p-select-label {
+  font-size: 11px;
+  padding: 0 6px;
+}
+
+.qb__select--units.p-select,
+.qb__select--units ::ng-deep .p-select {
+  flex: 1;
+  height: 28px;
+}
+
+.qb__input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.qb__input--half {
+  flex: 1 1 0;
+}
+
+.qb__between {
+  font-size: 11px;
+  color: var(--color-ink-500);
+}
+
+.qb__cond .qb__icon {
+  margin-left: 0;
+  margin-top: 1px;
+}
+
+/* ---------- add buttons ---------- */
+.qb__add {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px dashed var(--color-line-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: 11.5px;
+  color: var(--color-primary-700);
+  cursor: pointer;
+
+  i {
+    font-size: 10px;
+  }
+
+  &:hover {
+    background: var(--color-primary-100);
+  }
+}
+
+.qb__add--group {
+  border-style: solid;
+}
+
+/* ---------- spatial draw ---------- */
+.qb__draw-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.qb__draw-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: 11.5px;
+  color: var(--color-ink-700);
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--color-primary-500);
+  }
+
+  &.is-active {
+    background: var(--color-primary-600);
+    border-color: var(--color-primary-600);
+    color: #fff;
+  }
+}
+
+.qb__geom-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  color: var(--color-ink-700);
+
+  .pi-check {
+    color: var(--color-success-600);
+    font-size: 10px;
+  }
+}
+
+.qb__drawing {
+  color: var(--color-accent-600);
+}
+
+.qb__link {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 11.5px;
+  color: var(--color-primary-600);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* ---------- validation / preview ---------- */
+.qb__issues {
+  list-style: none;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--color-error-600);
+  border-radius: var(--radius-md);
+  background: var(--color-error-100);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+
+  li {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    font-size: 11.5px;
+    color: var(--color-error-600);
+    line-height: 1.4;
+  }
+
+  i {
+    font-size: 10px;
+    margin-top: 2px;
+  }
+}
+
+.qb__preview {
+  font-size: 11px;
+
+  summary {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-ink-500);
+    cursor: pointer;
+  }
+
+  code {
+    display: block;
+    margin-top: 6px;
+    padding: 8px;
+    background: var(--color-surface-alt);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--color-ink-700);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+}
+
+/* ---------- result ---------- */
+.qb__result {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  font-size: 12px;
+  color: var(--color-ink-900);
+
+  strong {
+    font-family: var(--font-display);
+    font-size: 15px;
+  }
+}
+
+.qb__result--empty {
+  color: var(--color-ink-500);
+}
+
+/* ---------- controls ---------- */
+.qb__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-line);
+}
+
+.qb__run {
+  flex: 1 1 100%;
+}
+
+.qb__save {
+  display: flex;
+  gap: 6px;
+}
+
+/* ---------- saved queries ---------- */
+.qb__saved-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.qb__saved {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+}
+
+.qb__saved-load {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-size: 12px;
+  color: var(--color-ink-900);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &:hover {
+    background: var(--color-surface-alt);
+  }
+}
+
+.qb__saved .qb__icon {
+  margin-left: 0;
+}

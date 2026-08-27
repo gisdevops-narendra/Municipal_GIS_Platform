@@ -16,6 +16,7 @@ import {
 interface WfsFeature {
   id?: string;
   geometry?: GeoJsonGeometry | null;
+  geometry_name?: string;
   properties?: Record<string, unknown> | null;
 }
 
@@ -46,16 +47,52 @@ export class AttributeTableService {
 
   /** field metadata per layer id, so re-paging / sorting doesn't re-infer */
   private readonly fieldCache = new Map<string, AttributeField[]>();
+  private readonly geometryFieldCache = new Map<string, string>();
 
   getFields(layerId: string): AttributeField[] | undefined {
     return this.fieldCache.get(layerId);
   }
 
-  clearCache(layerId: string): void {
-    this.fieldCache.delete(layerId);
+  getGeometryField(layerId: string): string {
+    return this.geometryFieldCache.get(layerId) ?? 'geom';
   }
 
-  fetchPage(layer: GisLayer, query: AttributeQuery): Observable<AttributePage> {
+  clearCache(layerId: string): void {
+    this.fieldCache.delete(layerId);
+    this.geometryFieldCache.delete(layerId);
+  }
+
+  /** Field + geometry metadata for a layer, inferred from a sample of real
+   *  rows (GeoServer's cached schema is not reliable here). Cached, so the
+   *  Query Builder and Attribute Table share one describe call per layer. */
+  loadMetadata(layer: GisLayer): Observable<{ fields: AttributeField[]; geometryField: string }> {
+    const cachedFields = this.fieldCache.get(layer.id);
+    if (cachedFields && cachedFields.length > 0) {
+      return of({ fields: cachedFields, geometryField: this.getGeometryField(layer.id) });
+    }
+    const url = `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wfs`;
+    const params = new HttpParams()
+      .set('service', 'WFS')
+      .set('version', '2.0.0')
+      .set('request', 'GetFeature')
+      .set('typeNames', `${layer.geoserverWorkspace}:${layer.geoserverLayer}`)
+      .set('outputFormat', 'application/json')
+      .set('srsName', 'EPSG:4326')
+      .set('count', '100');
+
+    return this.http.get<WfsFeatureCollection>(url, { params }).pipe(
+      map((collection) => {
+        const fields = this.resolveFields(layer.id, collection.features ?? []);
+        return { fields, geometryField: this.getGeometryField(layer.id) };
+      })
+    );
+  }
+
+  fetchPage(
+    layer: GisLayer,
+    query: AttributeQuery,
+    options: { baseFilter?: string | null } = {}
+  ): Observable<AttributePage> {
     const url = `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wfs`;
     const typeName = `${layer.geoserverWorkspace}:${layer.geoserverLayer}`;
 
@@ -75,7 +112,8 @@ export class AttributeTableService {
       params = params.set('sortBy', `${query.sortField} ${query.sortDir === 'desc' ? 'DESC' : 'ASC'}`);
     }
 
-    const cql = this.buildSearchFilter(layer.id, query.search);
+    const searchCql = this.buildSearchFilter(layer.id, query.search);
+    const cql = combineCql(options.baseFilter, searchCql);
     if (cql) {
       params = params.set('cql_filter', cql);
     }
@@ -138,6 +176,10 @@ export class AttributeTableService {
    *  A page with rows always yields the full property set (GeoServer emits
    *  every column, nulls included), so the first non-empty page is enough. */
   private resolveFields(layerId: string, features: WfsFeature[]): AttributeField[] {
+    const geometryName = features.find((f) => f.geometry_name)?.geometry_name;
+    if (geometryName) {
+      this.geometryFieldCache.set(layerId, geometryName);
+    }
     const cached = this.fieldCache.get(layerId);
     if (cached && cached.length > 0) {
       return cached;
@@ -245,4 +287,12 @@ export class AttributeTableService {
       .replace(/\b\w/g, (letter) => letter.toUpperCase())
       .trim();
   }
+}
+
+/** AND-combines two optional CQL fragments. */
+export function combineCql(a?: string | null, b?: string | null): string | null {
+  const parts = [a, b].filter((p): p is string => !!p && p.trim().length > 0);
+  if (parts.length === 0) return null;
+  if (parts.length === 1) return parts[0];
+  return parts.map((p) => `(${p})`).join(' AND ');
 }

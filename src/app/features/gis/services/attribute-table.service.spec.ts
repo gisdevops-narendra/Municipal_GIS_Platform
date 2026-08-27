@@ -121,7 +121,7 @@ describe('AttributeTableService', () => {
     httpMock.expectOne((r) => r.url.endsWith('/wfs')).flush(WFS_PAGE);
 
     service.fetchPage(LAYER, { ...DEFAULT_ATTRIBUTE_QUERY, search: '2' }).subscribe();
-    const req = httpMock.expectOne((r) => r.request.params.has('cql_filter'));
+    const req = httpMock.expectOne((r) => r.params.has('cql_filter'));
     const cql = req.request.params.get('cql_filter') ?? '';
     expect(cql).toContain(`"name" ILIKE '%2%'`);
     expect(cql).toContain(`"id" = 2`);
@@ -134,7 +134,7 @@ describe('AttributeTableService', () => {
       expect(rows.map((r) => r.featureId)).toEqual(['wards.5', 'wards.6']);
       done();
     });
-    const req = httpMock.expectOne((r) => r.request.params.get('featureID') === 'wards.5,wards.6');
+    const req = httpMock.expectOne((r) => r.params.get('featureID') === 'wards.5,wards.6');
     expect(req.request.params.get('srsName')).toBe('EPSG:4326');
     req.flush(WFS_PAGE);
   });

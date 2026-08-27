@@ -1,0 +1,252 @@
+@if (!hasLayers()) {
+  <p class="qb__notice">No vector layers are available to query.</p>
+} @else {
+  <div class="qb">
+    <!-- layer -->
+    <label class="qb__field">
+      <span class="qb__label">Layer</span>
+      <p-select
+        class="qb__select"
+        [options]="layerOptions()"
+        optionLabel="label"
+        optionValue="value"
+        [ngModel]="def.layerId"
+        (onChange)="onLayerChange($event.value)"
+        appendTo="body"
+      />
+    </label>
+
+    @if (fieldsLoading()) {
+      <p class="qb__hint">Reading fields…</p>
+    } @else if (fieldsError()) {
+      <p-message severity="error" [text]="fieldsError()!" styleClass="w-full" />
+    } @else {
+      <!-- ============ attribute conditions ============ -->
+      <div class="qb__section">
+        <span class="qb__section-title">Attribute conditions</span>
+
+        @for (group of def.groups; track group.uid; let gi = $index) {
+          <div class="qb__group">
+            <div class="qb__group-head">
+              @if (gi > 0) {
+                <p-select
+                  class="qb__connector"
+                  [options]="[{ label: 'AND', value: 'AND' }, { label: 'OR', value: 'OR' }]"
+                  optionLabel="label"
+                  optionValue="value"
+                  [(ngModel)]="group.connector"
+                  (onChange)="revalidate()"
+                  appendTo="body"
+                />
+              } @else {
+                <span class="qb__group-first">Where</span>
+              }
+              <label class="qb__not">
+                <p-checkbox [binary]="true" [(ngModel)]="group.not" (onChange)="revalidate()" />
+                <span>NOT</span>
+              </label>
+              @if (def.groups.length > 1) {
+                <button type="button" class="qb__icon" aria-label="Remove group" (click)="removeGroup(group)">
+                  <i class="pi pi-trash" aria-hidden="true"></i>
+                </button>
+              }
+            </div>
+
+            @for (condition of group.conditions; track condition.uid; let ci = $index) {
+              <div class="qb__cond">
+                @if (ci > 0) {
+                  <p-select
+                    class="qb__connector qb__connector--inner"
+                    [options]="[{ label: 'AND', value: 'AND' }, { label: 'OR', value: 'OR' }]"
+                    optionLabel="label"
+                    optionValue="value"
+                    [(ngModel)]="group.innerConnector"
+                    (onChange)="revalidate()"
+                    appendTo="body"
+                  />
+                }
+                <div class="qb__cond-body">
+                  <p-select
+                    class="qb__select qb__select--sm"
+                    [options]="fieldOptions()"
+                    optionLabel="label"
+                    optionValue="value"
+                    placeholder="Field"
+                    [filter]="fieldOptions().length > 8"
+                    [ngModel]="condition.field"
+                    (onChange)="onFieldChange(condition, $event.value)"
+                    appendTo="body"
+                  />
+                  <div class="qb__cond-row">
+                    <p-select
+                      class="qb__select qb__select--op"
+                      [options]="operatorsFor(condition.field)"
+                      optionLabel="label"
+                      optionValue="op"
+                      [ngModel]="condition.operator"
+                      (onChange)="onOperatorChange(condition, $event.value)"
+                      appendTo="body"
+                    />
+                    @if (operatorArity(condition.operator) === 1) {
+                      <input
+                        pInputText
+                        class="qb__input"
+                        [type]="condition.operator === 'IN' ? 'text' : inputTypeFor(condition.field)"
+                        [placeholder]="condition.operator === 'IN' ? 'a, b, c' : 'value'"
+                        [(ngModel)]="condition.value"
+                        (ngModelChange)="revalidate()"
+                      />
+                    } @else if (operatorArity(condition.operator) === 2) {
+                      <input pInputText class="qb__input qb__input--half" [type]="inputTypeFor(condition.field)" placeholder="min" [(ngModel)]="condition.value" (ngModelChange)="revalidate()" />
+                      <span class="qb__between">and</span>
+                      <input pInputText class="qb__input qb__input--half" [type]="inputTypeFor(condition.field)" placeholder="max" [(ngModel)]="condition.value2" (ngModelChange)="revalidate()" />
+                    }
+                  </div>
+                </div>
+                <button type="button" class="qb__icon" aria-label="Remove condition" (click)="removeCondition(group, condition)">
+                  <i class="pi pi-times" aria-hidden="true"></i>
+                </button>
+              </div>
+            }
+
+            <button type="button" class="qb__add" (click)="addCondition(group)">
+              <i class="pi pi-plus" aria-hidden="true"></i> Condition
+            </button>
+          </div>
+        }
+
+        <button type="button" class="qb__add qb__add--group" (click)="addGroup()">
+          <i class="pi pi-plus" aria-hidden="true"></i> Group
+        </button>
+      </div>
+
+      <!-- ============ spatial filter ============ -->
+      <div class="qb__section">
+        <label class="qb__section-toggle">
+          <p-checkbox [binary]="true" [ngModel]="def.spatial.enabled" (onChange)="toggleSpatial($event.checked)" />
+          <span class="qb__section-title">Spatial filter</span>
+        </label>
+
+        @if (def.spatial.enabled) {
+          <label class="qb__field">
+            <span class="qb__label">Relationship</span>
+            <p-select
+              class="qb__select"
+              [options]="relations"
+              optionLabel="label"
+              optionValue="relation"
+              [(ngModel)]="def.spatial.relation"
+              (onChange)="onRelationChange()"
+              appendTo="body"
+            />
+          </label>
+          <p class="qb__hint">{{ spatialRelationHint }}</p>
+
+          @if (def.spatial.relation === 'DWITHIN') {
+            <div class="qb__cond-row">
+              <input pInputText class="qb__input qb__input--half" type="number" min="1" [(ngModel)]="def.spatial.distance" (ngModelChange)="revalidate()" />
+              <p-select
+                class="qb__select qb__select--units"
+                [options]="distanceUnits"
+                optionLabel="label"
+                optionValue="value"
+                [(ngModel)]="def.spatial.distanceUnits"
+                (onChange)="revalidate()"
+                appendTo="body"
+              />
+            </div>
+          }
+
+          <span class="qb__label">Geometry</span>
+          <div class="qb__draw-row">
+            @for (kind of allowedGeometryKinds(); track kind) {
+              <button
+                type="button"
+                class="qb__draw-btn"
+                [class.is-active]="drawing() === kind"
+                (click)="startDraw(kind)"
+              >{{ kind }}</button>
+            }
+          </div>
+          <div class="qb__geom-status">
+            @if (drawing()) {
+              <span class="qb__drawing">Click the map to draw the {{ drawing() }}…</span>
+              <button type="button" class="qb__link" (click)="cancelDraw()">Cancel</button>
+            } @else if (def.spatial.geometry) {
+              <span><i class="pi pi-check" aria-hidden="true"></i> {{ def.spatial.geometryKind }} set ({{ def.spatial.source }})</span>
+              <button type="button" class="qb__link" (click)="clearGeometry()">Clear</button>
+            } @else {
+              <span class="qb__muted">No geometry yet</span>
+              @if (selectionCount().length === 1) {
+                <button type="button" class="qb__link" (click)="useSelection()">Use selected feature</button>
+              }
+            }
+          </div>
+        }
+      </div>
+    }
+
+    <!-- ============ validation + preview ============ -->
+    @if (issues().length > 0) {
+      <ul class="qb__issues">
+        @for (issue of issues(); track issue) {
+          <li><i class="pi pi-exclamation-triangle" aria-hidden="true"></i> {{ issue }}</li>
+        }
+      </ul>
+    } @else if (previewCql()) {
+      <details class="qb__preview">
+        <summary>ECQL preview</summary>
+        <code>{{ previewCql() }}</code>
+      </details>
+    }
+
+    <!-- ============ result ============ -->
+    @if (running()) {
+      <p class="qb__hint">Running query…</p>
+    } @else if (runError()) {
+      <p-message severity="error" [text]="runError()!" styleClass="w-full" />
+    } @else if (result()) {
+      @if (result()!.total === 0) {
+        <p class="qb__result qb__result--empty">No features match this query.</p>
+      } @else {
+        <p class="qb__result">
+          <strong>{{ result()!.total.toLocaleString() }}</strong> matching feature{{ result()!.total === 1 ? '' : 's' }}
+          @if (result()!.truncated) {
+            <span class="qb__muted"> · map shows first {{ previewLimit.toLocaleString() }}</span>
+          }
+        </p>
+      }
+    }
+
+    <!-- ============ controls ============ -->
+    <div class="qb__controls">
+      <button pButton type="button" label="Run Query" icon="pi pi-play" class="p-button-sm qb__run" [disabled]="!canRun()" [loading]="running()" (click)="runQuery()"></button>
+      <button pButton type="button" label="Clear" icon="pi pi-eraser" class="p-button-sm p-button-text" (click)="clearResults()"></button>
+      <button pButton type="button" label="Reset" icon="pi pi-refresh" class="p-button-sm p-button-text" (click)="resetBuilder()"></button>
+      <button pButton type="button" label="Save" icon="pi pi-bookmark" class="p-button-sm p-button-text" (click)="toggleSave()"></button>
+    </div>
+
+    @if (showSave()) {
+      <div class="qb__save">
+        <input pInputText class="qb__input" placeholder="Query name" [(ngModel)]="saveName" />
+        <button pButton type="button" label="Save" class="p-button-sm" [disabled]="!saveName.trim()" (click)="confirmSave()"></button>
+      </div>
+    }
+
+    @if (savedQueries().length > 0) {
+      <div class="qb__section">
+        <span class="qb__section-title">Saved queries</span>
+        <ul class="qb__saved-list">
+          @for (saved of savedQueries(); track saved.id) {
+            <li class="qb__saved">
+              <button type="button" class="qb__saved-load" (click)="loadSaved(saved.id)">{{ saved.name }}</button>
+              <button type="button" class="qb__icon" aria-label="Delete saved query" (click)="deleteSaved(saved.id, $event)">
+                <i class="pi pi-trash" aria-hidden="true"></i>
+              </button>
+            </li>
+          }
+        </ul>
+      </div>
+    }
+  </div>
+}
