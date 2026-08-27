@@ -55,6 +55,11 @@ export function convertLength(metres: number, unit: LengthUnit): number {
   return metres / METRES_PER[unit];
 }
 
+/** Inverse of `convertLength` — a value in `unit` expressed in metres. */
+export function toMetres(value: number, unit: LengthUnit): number {
+  return value * METRES_PER[unit];
+}
+
 export function convertArea(squareMetres: number, unit: AreaUnit): number {
   return squareMetres / SQ_METRES_PER[unit];
 }

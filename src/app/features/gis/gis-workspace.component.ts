@@ -28,6 +28,7 @@ import { AttributeExternalFilter, AttributeTableComponent, MapClickFeatureRef } 
 import { QueryBuilderComponent } from './components/query-builder/query-builder.component';
 import { MeasureComponent } from './components/measure/measure.component';
 import { BookmarksComponent } from './components/bookmarks/bookmarks.component';
+import { BufferOverlayComponent } from './components/buffer-overlay/buffer-overlay.component';
 
 const CRS_PATTERN = /^EPSG:\d{4,6}$/;
 
@@ -62,7 +63,7 @@ const TOOLS: WsTool[] = [
   { id: 'bookmarks', label: 'Bookmarks', icon: 'pi pi-bookmark', group: 'explore', dock: 'left', available: true },
   { id: 'query', label: 'Query Builder', icon: 'pi pi-filter', group: 'analysis', dock: 'left', available: true },
   { id: 'measure', label: 'Measure', icon: 'pi pi-arrows-h', group: 'analysis', dock: 'left', available: true },
-  { id: 'buffer', label: 'Buffer & Overlay', icon: 'pi pi-circle', group: 'analysis', dock: 'left', available: false },
+  { id: 'buffer', label: 'Buffer & Overlay', icon: 'pi pi-circle', group: 'analysis', dock: 'left', available: true },
   { id: 'statistics', label: 'Statistics', icon: 'pi pi-chart-bar', group: 'analysis', dock: 'bottom', available: false },
   { id: 'print', label: 'Print Layout', icon: 'pi pi-print', group: 'output', dock: 'left', available: false },
   { id: 'reports', label: 'Reports', icon: 'pi pi-file', group: 'output', dock: 'bottom', available: false },
@@ -94,7 +95,8 @@ const TOOLS: WsTool[] = [
     AttributeTableComponent,
     QueryBuilderComponent,
     MeasureComponent,
-    BookmarksComponent
+    BookmarksComponent,
+    BufferOverlayComponent
   ],
   // One OpenLayers Map per visit, shared by the map surface and every dock
   // panel — see MapService's own doc comment for why this is a

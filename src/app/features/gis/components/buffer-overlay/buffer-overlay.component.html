@@ -1,0 +1,249 @@
+<div class="bo">
+  <!-- mode -->
+  <div class="bo__modes" role="tablist">
+    <button
+      type="button"
+      class="bo__mode"
+      [class.bo__mode--active]="mode() === 'buffer'"
+      (click)="setMode('buffer')"
+    >
+      Buffer
+    </button>
+    <button
+      type="button"
+      class="bo__mode"
+      [class.bo__mode--active]="mode() === 'overlay'"
+      (click)="setMode('overlay')"
+    >
+      Overlay
+    </button>
+  </div>
+
+  <!-- ============ BUFFER ============ -->
+  @if (mode() === 'buffer') {
+    <div class="bo__section">
+      <span class="bo__section-title">Input geometry</span>
+      <div class="bo__operand">
+        <span class="bo__operand-state">{{ operandLabel(bufferGeom()) }}</span>
+        <div class="bo__operand-actions">
+          @for (kind of geomKinds; track kind) {
+            <button
+              type="button"
+              class="bo__chip"
+              [class.bo__chip--busy]="drawing() === 'buffer'"
+              (click)="draw(kind, 'buffer')"
+            >
+              <i class="pi pi-pencil" aria-hidden="true"></i>{{ kind }}
+            </button>
+          }
+          <button type="button" class="bo__chip" (click)="useSelection('buffer')">
+            <i class="pi pi-check-square" aria-hidden="true"></i>Selection ({{ selection().length }})
+          </button>
+          @if (bufferGeom()) {
+            <button type="button" class="bo__chip bo__chip--ghost" (click)="clearOperand('buffer')">
+              <i class="pi pi-times" aria-hidden="true"></i>
+            </button>
+          }
+        </div>
+        @if (drawing() === 'buffer') {
+          <button type="button" class="bo__cancel" (click)="cancelDraw()">Cancel drawing</button>
+        }
+      </div>
+    </div>
+
+    <div class="bo__row">
+      <label class="bo__field bo__field--grow">
+        <span class="bo__label">Distance</span>
+        <input
+          type="number"
+          class="bo__input"
+          min="0"
+          step="any"
+          [(ngModel)]="bufferDistance"
+        />
+      </label>
+      <label class="bo__field">
+        <span class="bo__label">Unit</span>
+        <p-select
+          class="bo__select"
+          [options]="lengthUnits"
+          optionLabel="label"
+          optionValue="value"
+          [ngModel]="bufferUnit()"
+          (ngModelChange)="bufferUnit.set($event)"
+          appendTo="body"
+        />
+      </label>
+    </div>
+
+    <label class="bo__field">
+      <span class="bo__label">End cap</span>
+      <p-select
+        class="bo__select"
+        [options]="[
+          { label: 'Round', value: 'round' },
+          { label: 'Flat', value: 'flat' },
+          { label: 'Square', value: 'square' }
+        ]"
+        optionLabel="label"
+        optionValue="value"
+        [ngModel]="bufferCap()"
+        (ngModelChange)="bufferCap.set($event)"
+        appendTo="body"
+      />
+    </label>
+  }
+
+  <!-- ============ OVERLAY ============ -->
+  @if (mode() === 'overlay') {
+    <label class="bo__field">
+      <span class="bo__label">Operation</span>
+      <p-select
+        class="bo__select"
+        [options]="operations"
+        optionLabel="label"
+        optionValue="value"
+        [ngModel]="overlayOp()"
+        (ngModelChange)="overlayOp.set($event)"
+        appendTo="body"
+      />
+    </label>
+    <p class="bo__hint">{{ opHint() }}</p>
+
+    <div class="bo__section">
+      <span class="bo__section-title">Operand A</span>
+      <div class="bo__operand">
+        <span class="bo__operand-state">{{ operandLabel(operandA()) }}</span>
+        <div class="bo__operand-actions">
+          @for (kind of geomKinds; track kind) {
+            <button type="button" class="bo__chip" (click)="draw(kind, 'a')">
+              <i class="pi pi-pencil" aria-hidden="true"></i>{{ kind }}
+            </button>
+          }
+          <button type="button" class="bo__chip" (click)="useSelection('a')">
+            <i class="pi pi-check-square" aria-hidden="true"></i>Selection ({{ selection().length }})
+          </button>
+          @if (operandA()) {
+            <button type="button" class="bo__chip bo__chip--ghost" (click)="clearOperand('a')">
+              <i class="pi pi-times" aria-hidden="true"></i>
+            </button>
+          }
+        </div>
+        @if (drawing() === 'a') {
+          <button type="button" class="bo__cancel" (click)="cancelDraw()">Cancel drawing</button>
+        }
+      </div>
+    </div>
+
+    <div class="bo__section">
+      <span class="bo__section-title">Operand B</span>
+      <label class="bo__field">
+        <span class="bo__label">Layer</span>
+        <p-select
+          class="bo__select"
+          [options]="layerOptions()"
+          optionLabel="label"
+          optionValue="value"
+          [ngModel]="operandBLayer()"
+          (ngModelChange)="operandBLayer.set($event)"
+          [showClear]="true"
+          placeholder="— pick a whole layer —"
+          appendTo="body"
+        />
+      </label>
+      @if (!operandBLayer()) {
+        <div class="bo__operand">
+          <span class="bo__operand-state">{{ operandLabel(operandB()) }}</span>
+          <div class="bo__operand-actions">
+            @for (kind of geomKinds; track kind) {
+              <button type="button" class="bo__chip" (click)="draw(kind, 'b')">
+                <i class="pi pi-pencil" aria-hidden="true"></i>{{ kind }}
+              </button>
+            }
+            <button type="button" class="bo__chip" (click)="useSelection('b')">
+              <i class="pi pi-check-square" aria-hidden="true"></i>Selection ({{ selection().length }})
+            </button>
+            @if (operandB()) {
+              <button type="button" class="bo__chip bo__chip--ghost" (click)="clearOperand('b')">
+                <i class="pi pi-times" aria-hidden="true"></i>
+              </button>
+            }
+          </div>
+          @if (drawing() === 'b') {
+            <button type="button" class="bo__cancel" (click)="cancelDraw()">Cancel drawing</button>
+          }
+        </div>
+      }
+    </div>
+  }
+
+  <!-- ============ shared: affected features ============ -->
+  <label class="bo__field">
+    <span class="bo__label">Show affected features from</span>
+    <p-select
+      class="bo__select"
+      [options]="layerOptions()"
+      optionLabel="label"
+      optionValue="value"
+      [ngModel]="targetLayerId()"
+      (ngModelChange)="targetLayerId.set($event)"
+      [showClear]="true"
+      placeholder="— none —"
+      appendTo="body"
+    />
+  </label>
+
+  <!-- ============ state ============ -->
+  @if (error()) {
+    <p-message severity="error" [text]="error()!" styleClass="w-full" />
+  }
+  @if (running()) {
+    <p class="bo__hint"><i class="pi pi-spin pi-spinner" aria-hidden="true"></i> Processing on the GIS server…</p>
+  }
+  @if (result(); as r) {
+    @if (r.empty) {
+      <p class="bo__result bo__result--empty">The operation produced no geometry.</p>
+    } @else {
+      <p class="bo__result">
+        Result added to the map.
+        @if (r.affected !== null) {
+          <br />{{ r.affected }} affected feature{{ r.affected === 1 ? '' : 's' }} in the attribute table.
+        }
+      </p>
+    }
+  }
+
+  <!-- ============ controls ============ -->
+  <div class="bo__controls">
+    @if (mode() === 'buffer') {
+      <button
+        pButton
+        type="button"
+        label="Run buffer"
+        icon="pi pi-circle"
+        class="p-button-sm bo__run"
+        [disabled]="running()"
+        (click)="runBuffer()"
+      ></button>
+    } @else {
+      <button
+        pButton
+        type="button"
+        label="Run overlay"
+        icon="pi pi-clone"
+        class="p-button-sm bo__run"
+        [disabled]="running()"
+        (click)="runOverlay()"
+      ></button>
+    }
+    <button
+      pButton
+      type="button"
+      label="Clear"
+      icon="pi pi-eraser"
+      class="p-button-sm p-button-text"
+      [disabled]="running()"
+      (click)="clear()"
+    ></button>
+  </div>
+</div>

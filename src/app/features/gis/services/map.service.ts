@@ -10,6 +10,7 @@ import XYZ from 'ol/source/XYZ';
 import ImageWMS from 'ol/source/ImageWMS';
 import VectorSource from 'ol/source/Vector';
 import GeoJSON from 'ol/format/GeoJSON';
+import WKT from 'ol/format/WKT';
 import Draw, { createBox } from 'ol/interaction/Draw';
 import Overlay from 'ol/Overlay';
 import LineString from 'ol/geom/LineString';
@@ -136,6 +137,9 @@ export class MapService {
   private selectionLayer: VectorLayer<VectorSource> | null = null;
   /** Overlay for Query Builder results (distinct colour from selection). */
   private queryLayer: VectorLayer<VectorSource> | null = null;
+  /** Overlay for Buffer / Overlay analysis output. */
+  private analysisLayer: VectorLayer<VectorSource> | null = null;
+  private readonly wkt = new WKT();
   /** Sketch layer + active interaction for "draw geometry for spatial query". */
   private drawLayer: VectorLayer<VectorSource> | null = null;
   private drawInteraction: Draw | null = null;
@@ -224,6 +228,7 @@ export class MapService {
     this.managedLayers.clear();
     this.selectionLayer = null;
     this.queryLayer = null;
+    this.analysisLayer = null;
     this.drawLayer = null;
     this.measureLayer = null;
     this.selectionGeometries.set([]);
@@ -279,6 +284,82 @@ export class MapService {
     for (const [id] of this.managedLayers) {
       this.setLayerCqlFilter(id, null);
     }
+  }
+
+  // ----- buffer / overlay analysis -----
+
+  /** WKT for a GeoJSON geometry, reprojected `sourceProj` → `targetProj`. */
+  wktFromGeoJson(
+    geojson: Record<string, unknown>,
+    sourceProj = LAYER_PROJECTION,
+    targetProj = MAP_PROJECTION
+  ): string {
+    const geometry = this.geoJson.readGeometry(geojson, {
+      dataProjection: sourceProj,
+      featureProjection: targetProj
+    });
+    return this.wkt.writeGeometry(geometry);
+  }
+
+  /** Reprojects a GeoJSON geometry `sourceProj` → `targetProj`. */
+  reprojectGeoJson(
+    geojson: Record<string, unknown>,
+    sourceProj: string,
+    targetProj: string
+  ): Record<string, unknown> {
+    const geometry = this.geoJson.readGeometry(geojson, {
+      dataProjection: sourceProj,
+      featureProjection: targetProj
+    });
+    return this.geoJson.writeGeometryObject(geometry) as Record<string, unknown>;
+  }
+
+  /** Approx. latitude (degrees) of a GeoJSON geometry's centre — for the
+   *  Web-Mercator distance correction used when buffering. */
+  centreLatitude(geojson: Record<string, unknown>, sourceProj = LAYER_PROJECTION): number {
+    const geometry = this.geoJson.readGeometry(geojson, {
+      dataProjection: sourceProj,
+      featureProjection: LAYER_PROJECTION
+    });
+    const extent = geometry.getExtent();
+    return (extent[1] + extent[3]) / 2;
+  }
+
+  /** Draws (or clears with `null`) the analysis result geometry — a
+   *  distinct violet overlay above everything else. `geojson` is EPSG:4326. */
+  setAnalysisGeometry(geojson: Record<string, unknown> | null): void {
+    const source = this.ensureAnalysisSource();
+    source.clear();
+    const feature = this.toMapFeature(geojson);
+    if (feature) {
+      source.addFeature(feature);
+    }
+  }
+
+  clearAnalysisGeometry(): void {
+    this.analysisLayer?.getSource()?.clear();
+  }
+
+  private ensureAnalysisSource(): VectorSource {
+    if (!this.analysisLayer) {
+      const violet = '#6b4fa8';
+      this.analysisLayer = new VectorLayer({
+        source: new VectorSource(),
+        style: new Style({
+          stroke: new Stroke({ color: violet, width: 2.5 }),
+          fill: new Fill({ color: 'rgba(107, 79, 168, 0.15)' }),
+          image: new CircleStyle({
+            radius: 6,
+            stroke: new Stroke({ color: violet, width: 2.5 }),
+            fill: new Fill({ color: 'rgba(107, 79, 168, 0.3)' })
+          })
+        }),
+        zIndex: 9997,
+        properties: { analysisOverlay: true }
+      });
+      this.map?.addLayer(this.analysisLayer);
+    }
+    return this.analysisLayer.getSource() as VectorSource;
   }
 
   setQueryHighlight(geometries: (Record<string, unknown> | null | undefined)[]): void {

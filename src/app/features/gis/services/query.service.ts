@@ -35,15 +35,17 @@ export class QueryService {
 
   execute(layer: GisLayer, cql: string): Observable<QueryExecution> {
     const url = `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wfs`;
-    const params = new HttpParams()
+    let params = new HttpParams()
       .set('service', 'WFS')
       .set('version', '2.0.0')
       .set('request', 'GetFeature')
       .set('typeNames', `${layer.geoserverWorkspace}:${layer.geoserverLayer}`)
       .set('outputFormat', 'application/json')
       .set('srsName', 'EPSG:4326')
-      .set('count', String(this.previewLimit))
-      .set('cql_filter', cql);
+      .set('count', String(this.previewLimit));
+    if (cql && cql.trim().length > 0) {
+      params = params.set('cql_filter', cql);
+    }
 
     return this.http.get<WfsCollection>(url, { params }).pipe(
       map((collection) => {
@@ -55,5 +57,11 @@ export class QueryService {
         return { total, geometries, truncated: total > geometries.length };
       })
     );
+  }
+
+  /** All (up to `previewLimit`) geometries of a layer, EPSG:4326 — used as
+   *  an operand for the Overlay tool ("this whole layer"). */
+  layerGeometries(layer: GisLayer): Observable<GeoJsonGeometry[]> {
+    return this.execute(layer, '').pipe(map((execution) => execution.geometries));
   }
 }
