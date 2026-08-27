@@ -216,7 +216,9 @@ export class GisWorkspaceComponent {
     event.preventDefault();
     const startY = event.clientY;
     const startH = this.bottomHeight();
-    const move = (e: PointerEvent) => this.bottomHeight.set(Math.min(620, Math.max(160, startH - (e.clientY - startY))));
+    const max = Math.max(220, Math.round((window.innerHeight - 112) * 0.72));
+    const move = (e: PointerEvent) =>
+      this.bottomHeight.set(Math.min(max, Math.max(140, startH - (e.clientY - startY))));
     this.dragUntilRelease(move);
   }
 
