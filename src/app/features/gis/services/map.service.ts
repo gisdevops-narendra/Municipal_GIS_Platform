@@ -272,12 +272,19 @@ export class MapService {
     const source = entry?.olLayer.getSource();
     if (!source) return;
     const params = { ...source.getParams() };
-    if (cql && cql.trim().length > 0) {
-      params['CQL_FILTER'] = cql;
+    const wanted = cql && cql.trim().length > 0 ? cql : null;
+    if ((params['CQL_FILTER'] ?? null) === wanted) return;
+    if (wanted) {
+      params['CQL_FILTER'] = wanted;
     } else {
       delete params['CQL_FILTER'];
     }
-    source.updateParams(params);
+    // `updateParams` only *merges* — Object.assign(this.params_, params) — so a
+    // key that was dropped from the copy above is never actually removed from
+    // the source, leaving the layer stuck on its last filter. `setParams`
+    // replaces the param object wholesale (and resets the loader), so clearing
+    // a filter really does bring the full layer back.
+    source.setParams(params);
   }
 
   clearAllLayerCqlFilters(): void {

@@ -394,10 +394,11 @@ export class GisWorkspaceComponent {
   }
 
   onQueryCleared(): void {
-    const filter = this.activeQueryFilter();
-    if (filter) {
-      this.mapService.setLayerCqlFilter(filter.layerId, null);
-    }
+    // Clear every layer's CQL filter, not just the one currently tracked:
+    // `activeQueryFilter` is a single slot, so a buffer on layer A followed by
+    // a query on layer B leaves A's WMS render filtered with nothing to undo
+    // it. A blanket reset keeps "Clear" honest.
+    this.mapService.clearAllLayerCqlFilters();
     this.mapService.clearQueryHighlight();
     this.activeQueryFilter.set(null);
   }
