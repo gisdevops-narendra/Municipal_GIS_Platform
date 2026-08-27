@@ -1,0 +1,295 @@
+:host {
+  display: block;
+  height: 100%;
+}
+
+.attr-table {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.attr-table__notice {
+  padding: 16px;
+  font-size: 13px;
+  color: var(--color-ink-500);
+  margin: 0;
+}
+
+/* ---------- toolbar ---------- */
+.attr-table__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-surface);
+}
+
+.attr-table__layer.p-select {
+  height: 30px;
+  min-width: 150px;
+  max-width: 220px;
+}
+
+.attr-table__layer.p-select ::ng-deep .p-select-label {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 12.5px;
+}
+
+.attr-table__search {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.attr-table__search .pi-search {
+  position: absolute;
+  left: 9px;
+  font-size: 12px;
+  color: var(--color-ink-500);
+  pointer-events: none;
+}
+
+.attr-table__search-input {
+  height: 30px;
+  width: 170px;
+  padding: 0 10px 0 26px !important;
+  font-size: 12.5px;
+}
+
+.attr-table__report {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-ink-500);
+  white-space: nowrap;
+}
+
+.attr-table__spacer {
+  flex: 1;
+}
+
+.attr-table__tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.attr-table__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-ink-500);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+
+  i {
+    font-size: 14px;
+  }
+
+  &:hover:not(:disabled) {
+    background: var(--color-surface-alt);
+    color: var(--color-ink-900);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  &.is-active {
+    background: var(--color-primary-100);
+    color: var(--color-primary-700);
+  }
+}
+
+/* ---------- field visibility menu ---------- */
+.attr-table__fields {
+  position: relative;
+}
+
+.attr-table__fields-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 30;
+  width: 224px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+}
+
+.attr-table__fields-title {
+  display: block;
+  padding: 4px 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-500);
+}
+
+.attr-table__fields-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  font-size: 12.5px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--color-surface-alt);
+  }
+}
+
+.attr-table__fields-name {
+  flex: 1;
+}
+
+.attr-table__fields-type {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-ink-300);
+}
+
+/* ---------- error ---------- */
+.attr-table__error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  flex-shrink: 0;
+}
+
+/* ---------- grid ---------- */
+.attr-table__grid {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.attr-table__grid ::ng-deep .attr-table__p {
+  height: 100%;
+  font-size: 12px;
+}
+
+.attr-table__grid ::ng-deep .p-datatable-table-container {
+  height: 100%;
+}
+
+.attr-table__grid ::ng-deep .p-datatable-thead > tr > th {
+  padding: 5px 10px;
+  background: var(--color-surface-alt);
+  border-color: var(--color-line);
+  color: var(--color-ink-700);
+  font-weight: 600;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.attr-table__grid ::ng-deep .p-datatable-tbody > tr > td {
+  padding: 4px 10px;
+  border-color: var(--color-line);
+  white-space: nowrap;
+  line-height: 1.5;
+}
+
+.attr-table__grid ::ng-deep .p-datatable-tbody > tr {
+  cursor: pointer;
+}
+
+.attr-table__grid ::ng-deep .p-datatable-tbody > tr:hover > td {
+  background: var(--color-surface-alt);
+}
+
+.attr-table__grid ::ng-deep .attr-table__row--selected > td,
+.attr-table__grid ::ng-deep .attr-table__row--selected:hover > td {
+  background: var(--color-primary-100);
+  color: var(--color-primary-700);
+}
+
+.attr-table__grid ::ng-deep th.attr-table__gutter,
+.attr-table__grid ::ng-deep td.attr-table__gutter {
+  width: 46px;
+  min-width: 46px;
+  max-width: 46px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--color-ink-300);
+  background: var(--color-surface-alt);
+}
+
+.attr-table__grid ::ng-deep th.attr-table__th--num,
+.attr-table__grid ::ng-deep td.attr-table__td--num {
+  text-align: right;
+  font-family: var(--font-mono);
+}
+
+.attr-table__grid ::ng-deep td.attr-table__td--null {
+  color: var(--color-ink-300);
+  font-style: italic;
+}
+
+.attr-table__grid ::ng-deep .attr-table__th.is-sorted {
+  color: var(--color-primary-700);
+}
+
+.attr-table__grid ::ng-deep .attr-table__sort {
+  font-size: 10px;
+  margin-left: 6px;
+  color: var(--color-ink-300);
+  vertical-align: middle;
+}
+
+.attr-table__grid ::ng-deep .attr-table__th.is-sorted .attr-table__sort {
+  color: var(--color-primary-600);
+}
+
+.attr-table__grid ::ng-deep .attr-table__empty {
+  text-align: center;
+  padding: 24px !important;
+  color: var(--color-ink-500);
+  font-style: italic;
+}
+
+/* ---------- pagination ---------- */
+.attr-table__foot {
+  flex-shrink: 0;
+  border-top: 1px solid var(--color-line);
+  background: var(--color-surface);
+}
+
+.attr-table__foot ::ng-deep .p-paginator {
+  padding: 2px 6px;
+  border: none;
+  background: transparent;
+  justify-content: flex-end;
+  min-height: 32px;
+}
+
+.attr-table__foot ::ng-deep .p-paginator .p-paginator-first,
+.attr-table__foot ::ng-deep .p-paginator .p-paginator-prev,
+.attr-table__foot ::ng-deep .p-paginator .p-paginator-next,
+.attr-table__foot ::ng-deep .p-paginator .p-paginator-last,
+.attr-table__foot ::ng-deep .p-paginator .p-paginator-page {
+  min-width: 26px;
+  height: 26px;
+}

@@ -1,0 +1,192 @@
+@if (!hasLayers()) {
+  <p class="attr-table__notice">No vector layers are available to inspect.</p>
+} @else {
+  <div class="attr-table">
+    <!-- toolbar -->
+    <div class="attr-table__bar">
+      <p-select
+        class="attr-table__layer"
+        [options]="layerOptions()"
+        optionLabel="label"
+        optionValue="value"
+        [ngModel]="activeLayerId()"
+        (onChange)="selectLayer($event.value)"
+        appendTo="body"
+        [ariaLabel]="'Layer'"
+      />
+
+      <span class="attr-table__search">
+        <i class="pi pi-search" aria-hidden="true"></i>
+        <input
+          pInputText
+          type="search"
+          class="attr-table__search-input"
+          placeholder="Search records"
+          [ngModel]="searchInput()"
+          (ngModelChange)="onSearch($event)"
+          aria-label="Search records"
+        />
+      </span>
+
+      <span class="attr-table__report">{{ pageReport() }}</span>
+
+      <span class="attr-table__spacer"></span>
+
+      <div class="attr-table__tools">
+        <button
+          type="button"
+          class="attr-table__btn"
+          [disabled]="selectedIds().size === 0"
+          pTooltip="Zoom to selected" tooltipPosition="top"
+          (click)="zoomToSelected()"
+        ><i class="pi pi-search-plus" aria-hidden="true"></i></button>
+
+        <button
+          type="button"
+          class="attr-table__btn"
+          pTooltip="Select all on this page" tooltipPosition="top"
+          (click)="selectAllOnPage()"
+        ><i class="pi pi-check-square" aria-hidden="true"></i></button>
+
+        <button
+          type="button"
+          class="attr-table__btn"
+          [disabled]="selectedIds().size === 0"
+          pTooltip="Clear selection" tooltipPosition="top"
+          (click)="clearSelection()"
+        ><i class="pi pi-times-circle" aria-hidden="true"></i></button>
+
+        <button
+          type="button"
+          class="attr-table__btn"
+          pTooltip="Refresh" tooltipPosition="top"
+          (click)="refresh()"
+        ><i class="pi pi-refresh" aria-hidden="true"></i></button>
+
+        <span class="attr-table__fields">
+          <button
+            type="button"
+            class="attr-table__btn"
+            [class.is-active]="fieldsMenuOpen()"
+            pTooltip="Show / hide fields" tooltipPosition="top"
+            (click)="toggleFieldsMenu()"
+          ><i class="pi pi-sliders-h" aria-hidden="true"></i></button>
+
+          @if (fieldsMenuOpen()) {
+            <div class="attr-table__fields-menu">
+              <span class="attr-table__fields-title">Fields</span>
+              @for (field of fields(); track field.name) {
+                <label class="attr-table__fields-row">
+                  <p-checkbox
+                    [binary]="true"
+                    [ngModel]="isFieldVisible(field.name)"
+                    (onChange)="toggleField(field.name, $event.checked)"
+                  />
+                  <span class="attr-table__fields-name">{{ field.label }}</span>
+                  <span class="attr-table__fields-type">{{ field.type }}</span>
+                </label>
+              }
+            </div>
+          }
+        </span>
+      </div>
+    </div>
+
+    <!-- error -->
+    @if (error(); as message) {
+      <div class="attr-table__error">
+        <p-message severity="error" [text]="message" styleClass="w-full" />
+        <button pButton type="button" label="Retry" icon="pi pi-refresh" class="p-button-sm p-button-outlined" (click)="refresh()"></button>
+      </div>
+    }
+
+    <!-- grid -->
+    <div class="attr-table__grid">
+      <p-table
+        [value]="rows()"
+        [scrollable]="true"
+        scrollHeight="flex"
+        [resizableColumns]="true"
+        columnResizeMode="expand"
+        [reorderableColumns]="true"
+        [loading]="loading()"
+        dataKey="featureId"
+        styleClass="attr-table__p p-datatable-sm p-datatable-gridlines"
+      >
+        <ng-template pTemplate="header">
+          <tr>
+            <th class="attr-table__gutter">#</th>
+            @for (field of visibleFields(); track field.name) {
+              <th
+                pResizableColumn
+                pReorderableColumn
+                class="attr-table__th"
+                [class.attr-table__th--num]="isNumeric(field)"
+                [class.is-sorted]="sortField() === field.name"
+                [pTooltip]="field.label + '  ·  ' + field.type"
+                tooltipPosition="top"
+                (click)="onSort(field.name)"
+              >
+                <span class="attr-table__th-label">{{ field.label }}</span>
+                <i
+                  class="pi attr-table__sort"
+                  [ngClass]="
+                    sortField() === field.name
+                      ? sortDir() === 'asc'
+                        ? 'pi-sort-amount-up-alt'
+                        : 'pi-sort-amount-down'
+                      : 'pi-sort-alt'
+                  "
+                ></i>
+              </th>
+            }
+          </tr>
+        </ng-template>
+
+        <ng-template pTemplate="body" let-row let-rowIndex="rowIndex">
+          <tr
+            class="attr-table__row"
+            [class.attr-table__row--selected]="isSelected(row)"
+            (click)="onRowClick(row, $event)"
+          >
+            <td class="attr-table__gutter">{{ first() + rowIndex + 1 }}</td>
+            @for (field of visibleFields(); track field.name) {
+              <td
+                [class.attr-table__td--num]="isNumeric(field)"
+                [class.attr-table__td--null]="isNull(row.values[field.name])"
+              >
+                {{ formatValue(field, row.values[field.name]) }}
+              </td>
+            }
+          </tr>
+        </ng-template>
+
+        <ng-template pTemplate="emptymessage">
+          <tr>
+            <td [attr.colspan]="visibleFields().length + 1" class="attr-table__empty">
+              @if (loading()) {
+                Loading features…
+              } @else if (search()) {
+                No records match &ldquo;{{ searchInput() }}&rdquo;.
+              } @else {
+                This layer has no features.
+              }
+            </td>
+          </tr>
+        </ng-template>
+      </p-table>
+    </div>
+
+    <!-- pagination -->
+    <div class="attr-table__foot">
+      <p-paginator
+        [rows]="pageSize()"
+        [totalRecords]="total()"
+        [first]="first()"
+        [rowsPerPageOptions]="pageSizes"
+        (onPageChange)="onPage($event)"
+        styleClass="attr-table__paginator"
+      />
+    </div>
+  </div>
+}

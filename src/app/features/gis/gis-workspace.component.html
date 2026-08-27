@@ -152,6 +152,13 @@
                 [results]="featureInfoResults()"
               />
             }
+            @case ('attributes') {
+              <app-attribute-table
+                [layers]="layers()"
+                [initialLayerId]="highlightLayerId()"
+                [mapClickFeatures]="mapClickFeatures()"
+              />
+            }
             @default {
               <div class="gis-ws__soon">
                 <i class="pi pi-clock" aria-hidden="true"></i>

@@ -1,16 +1,22 @@
 import { Injectable, signal } from '@angular/core';
 import OlMap from 'ol/Map';
 import View from 'ol/View';
+import Feature from 'ol/Feature';
 import TileLayer from 'ol/layer/Tile';
 import ImageLayer from 'ol/layer/Image';
+import VectorLayer from 'ol/layer/Vector';
 import OSM from 'ol/source/OSM';
 import XYZ from 'ol/source/XYZ';
 import ImageWMS from 'ol/source/ImageWMS';
+import VectorSource from 'ol/source/Vector';
+import GeoJSON from 'ol/format/GeoJSON';
+import { Fill, Stroke, Style, Circle as CircleStyle } from 'ol/style';
 import { defaults as defaultControls } from 'ol/control';
 import ScaleLine from 'ol/control/ScaleLine';
 import MousePosition from 'ol/control/MousePosition';
 import { createStringXY } from 'ol/coordinate';
 import { fromLonLat, transformExtent } from 'ol/proj';
+import { createEmpty, extend as extendExtent, isEmpty as isEmptyExtent } from 'ol/extent';
 import { forkJoin, map as rxMap, Observable, of } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import { GisLayer } from '../../../core/models/gis-layer.model';
@@ -27,6 +33,10 @@ const FALLBACK_ZOOM = 4;
 
 export interface FeatureInfoFeature {
   attributes: Record<string, unknown>;
+  /** stable WFS/WMS feature id (e.g. "wards.5"), when GeoServer supplies one */
+  id?: string;
+  /** GeoJSON geometry as returned by GetFeatureInfo (map projection) */
+  geometry?: Record<string, unknown> | null;
 }
 
 export interface FeatureInfoResult {
@@ -98,6 +108,11 @@ export class MapService {
   private readonly managedLayers = new Map<string, ManagedLayer>();
   private initialExtent3857: number[] | null = null;
 
+  /** Overlay that draws the attribute table's currently-selected features
+   *  on top of everything else. Created lazily on first selection. */
+  private selectionLayer: VectorLayer<VectorSource> | null = null;
+  private readonly geoJson = new GeoJSON();
+
   /** Current visibility per GisLayer.id, seeded from visibleByDefault —
    *  the single source of truth the layer panel binds its checkboxes to. */
   readonly layerVisibility = signal<Record<string, boolean>>({});
@@ -163,12 +178,85 @@ export class MapService {
     this.map?.setTarget(undefined);
     this.map = null;
     this.managedLayers.clear();
+    this.selectionLayer = null;
   }
 
   /** Re-measures the map container — call after a dock panel opens, closes,
    *  or is resized so OpenLayers repaints at the new size. */
   updateSize(): void {
     this.map?.updateSize();
+  }
+
+  // ----- attribute-table selection sync -----
+
+  /** Replaces the highlighted-feature overlay with `geometries` (GeoJSON,
+   *  EPSG:4326). Empty array clears it. */
+  setSelectionHighlight(geometries: (Record<string, unknown> | null | undefined)[]): void {
+    const source = this.ensureSelectionSource();
+    source.clear();
+    for (const geometry of geometries) {
+      const feature = this.toMapFeature(geometry);
+      if (feature) {
+        source.addFeature(feature);
+      }
+    }
+  }
+
+  clearSelectionHighlight(): void {
+    this.selectionLayer?.getSource()?.clear();
+  }
+
+  /** Zooms/pans the map to frame the given GeoJSON (EPSG:4326) geometries. */
+  zoomToGeometries(geometries: (Record<string, unknown> | null | undefined)[]): void {
+    const view = this.map?.getView();
+    if (!view) return;
+    const extent = createEmpty();
+    for (const geometry of geometries) {
+      const feature = this.toMapFeature(geometry);
+      const geom = feature?.getGeometry();
+      if (geom) {
+        extendExtent(extent, geom.getExtent());
+      }
+    }
+    if (!isEmptyExtent(extent)) {
+      view.fit(extent, { size: this.map?.getSize(), padding: [60, 60, 60, 60], maxZoom: 18, duration: 250 });
+    }
+  }
+
+  private ensureSelectionSource(): VectorSource {
+    if (!this.selectionLayer) {
+      const accent = '#b5722a';
+      const stroke = new Stroke({ color: accent, width: 3 });
+      this.selectionLayer = new VectorLayer({
+        source: new VectorSource(),
+        style: new Style({
+          stroke,
+          fill: new Fill({ color: 'rgba(181, 114, 42, 0.16)' }),
+          image: new CircleStyle({
+            radius: 7,
+            stroke: new Stroke({ color: accent, width: 3 }),
+            fill: new Fill({ color: 'rgba(181, 114, 42, 0.35)' })
+          })
+        }),
+        zIndex: 9999,
+        properties: { selectionOverlay: true }
+      });
+      this.map?.addLayer(this.selectionLayer);
+    }
+    return this.selectionLayer.getSource() as VectorSource;
+  }
+
+  private toMapFeature(geometry: Record<string, unknown> | null | undefined): Feature | null {
+    if (!geometry) return null;
+    try {
+      const geom = this.geoJson.readGeometry(geometry, {
+        dataProjection: LAYER_PROJECTION,
+        featureProjection: MAP_PROJECTION
+      });
+      return new Feature({ geometry: geom });
+    } catch {
+      return null;
+    }
   }
 
   /** Toggles the map container in/out of the browser's native Fullscreen
@@ -323,11 +411,19 @@ export class MapService {
     return new Observable<FeatureInfoResult | null>((subscriber) => {
       fetch(url)
         .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`))))
-        .then((body: { features?: { properties: Record<string, unknown> }[] }) => {
-          const features = (body.features ?? []).map((feature) => ({ attributes: feature.properties }));
-          subscriber.next({ layer: entry.layer, features });
-          subscriber.complete();
-        })
+        .then(
+          (body: {
+            features?: { id?: string; properties: Record<string, unknown>; geometry?: Record<string, unknown> | null }[];
+          }) => {
+            const features = (body.features ?? []).map((feature) => ({
+              attributes: feature.properties,
+              id: feature.id,
+              geometry: feature.geometry ?? null
+            }));
+            subscriber.next({ layer: entry.layer, features });
+            subscriber.complete();
+          }
+        )
         .catch(() => {
           // A single layer's GetFeatureInfo failing (GeoServer error,
           // network issue) must not break the rest of the click — see

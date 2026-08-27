@@ -150,8 +150,9 @@
   padding: 14px;
 }
 
-/* the layer panel manages its own padding + internal scroll */
-.gis-ws__left:has(app-layer-panel) .gis-ws__panel-body {
+/* the layer panel + attribute table manage their own padding + scroll */
+.gis-ws__left:has(app-layer-panel) .gis-ws__panel-body,
+.gis-ws__bottom:has(app-attribute-table) .gis-ws__panel-body {
   padding: 0;
   overflow: hidden;
 }

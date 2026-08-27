@@ -24,6 +24,7 @@ import { MapControlsComponent } from './components/map-controls/map-controls.com
 import { LegendComponent } from './components/legend/legend.component';
 import { FeatureInfoComponent } from './components/feature-info/feature-info.component';
 import { GisSearchComponent } from './components/gis-search/gis-search.component';
+import { AttributeTableComponent, MapClickFeatureRef } from './components/attribute-table/attribute-table.component';
 
 const CRS_PATTERN = /^EPSG:\d{4,6}$/;
 
@@ -54,7 +55,7 @@ const TOOLS: WsTool[] = [
   { id: 'layers', label: 'Layers', icon: 'pi pi-clone', group: 'data', dock: 'left', available: true },
   { id: 'legend', label: 'Legend', icon: 'pi pi-palette', group: 'data', dock: 'left', available: true },
   { id: 'identify', label: 'Identify', icon: 'pi pi-info-circle', group: 'explore', dock: 'bottom', available: true },
-  { id: 'attributes', label: 'Attribute Table', icon: 'pi pi-table', group: 'explore', dock: 'bottom', available: false },
+  { id: 'attributes', label: 'Attribute Table', icon: 'pi pi-table', group: 'explore', dock: 'bottom', available: true },
   { id: 'bookmarks', label: 'Bookmarks', icon: 'pi pi-bookmark', group: 'explore', dock: 'left', available: false },
   { id: 'query', label: 'Query Builder', icon: 'pi pi-filter', group: 'analysis', dock: 'bottom', available: false },
   { id: 'measure', label: 'Measure', icon: 'pi pi-arrows-h', group: 'analysis', dock: 'left', available: false },
@@ -86,7 +87,8 @@ const TOOLS: WsTool[] = [
     MapControlsComponent,
     LegendComponent,
     FeatureInfoComponent,
-    GisSearchComponent
+    GisSearchComponent,
+    AttributeTableComponent
   ],
   // One OpenLayers Map per visit, shared by the map surface and every dock
   // panel — see MapService's own doc comment for why this is a
@@ -136,6 +138,17 @@ export class GisWorkspaceComponent {
   readonly featureInfoLoading = signal(false);
   readonly featureInfoError = signal<string | null>(null);
   readonly featureInfoResults = signal<FeatureInfoResult[]>([]);
+
+  /** Flattened map-click hits (layer + stable feature id) for the attribute
+   *  table to mirror as a selection. */
+  readonly mapClickFeatures = computed<MapClickFeatureRef[]>(() =>
+    this.featureInfoResults()
+      .flatMap((result) =>
+        result.features
+          .filter((feature) => typeof feature.id === 'string')
+          .map((feature) => ({ layerId: result.layer.id, featureId: feature.id as string }))
+      )
+  );
 
   readonly highlightLayerId = signal<string | null>(null);
   private mapIsReady = false;
@@ -331,24 +344,31 @@ export class GisWorkspaceComponent {
 
   onFeatureInfoResults(results: FeatureInfoResult[]): void {
     this.featureInfoResults.set(results);
-    this.bottomTool.set('identify');
-    this.refreshMapSize();
+    this.openIdentifyDock();
   }
 
   onFeatureInfoLoading(isLoading: boolean): void {
     this.featureInfoLoading.set(isLoading);
     if (isLoading) {
-      this.bottomTool.set('identify');
-      this.refreshMapSize();
+      this.openIdentifyDock();
     }
   }
 
   onFeatureInfoError(message: string | null): void {
     this.featureInfoError.set(message);
     if (message) {
-      this.bottomTool.set('identify');
-      this.refreshMapSize();
+      this.openIdentifyDock();
     }
+  }
+
+  /** A map click routes to the Identify dock — unless the Attribute Table
+   *  is already open, in which case the click just updates its selection
+   *  (via the `mapClickFeatures` input) and the table stays put. */
+  private openIdentifyDock(): void {
+    if (this.bottomTool() !== 'attributes') {
+      this.bottomTool.set('identify');
+    }
+    this.refreshMapSize();
   }
 
   // ----- configure workspace -----
