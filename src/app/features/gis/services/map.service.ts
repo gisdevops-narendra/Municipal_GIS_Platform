@@ -21,7 +21,7 @@ import { defaults as defaultControls } from 'ol/control';
 import ScaleLine from 'ol/control/ScaleLine';
 import MousePosition from 'ol/control/MousePosition';
 import { createStringXY } from 'ol/coordinate';
-import { fromLonLat, transformExtent } from 'ol/proj';
+import { fromLonLat, transform, transformExtent } from 'ol/proj';
 import { createEmpty, extend as extendExtent, isEmpty as isEmptyExtent } from 'ol/extent';
 import type Geometry from 'ol/geom/Geometry';
 import { forkJoin, map as rxMap, Observable, of } from 'rxjs';
@@ -765,6 +765,32 @@ export class MapService {
       view.setCenter(fromLonLat(FALLBACK_CENTER_4326));
       view.setZoom(FALLBACK_ZOOM);
     }
+  }
+
+  // ----- spatial bookmarks -----
+
+  /** Current view centre / zoom / projection — for saving a bookmark. */
+  getViewState(): { center: [number, number]; zoom: number; projection: string } | null {
+    const view = this.map?.getView();
+    const center = view?.getCenter();
+    const zoom = view?.getZoom();
+    if (!view || !center || zoom === undefined) {
+      return null;
+    }
+    return { center: [center[0], center[1]], zoom, projection: view.getProjection().getCode() };
+  }
+
+  /** Animates the view to a saved bookmark, reprojecting the centre if the
+   *  bookmark was stored under a different projection. */
+  applyViewState(state: { center: [number, number]; zoom: number; projection: string }): void {
+    const view = this.map?.getView();
+    if (!view) return;
+    const target = view.getProjection().getCode();
+    const center =
+      state.projection === target
+        ? state.center
+        : (transform(state.center, state.projection, target) as [number, number]);
+    view.animate({ center, zoom: state.zoom, duration: 400 });
   }
 
   /** Task 9 §7: swaps the single base tile layer's source — every other

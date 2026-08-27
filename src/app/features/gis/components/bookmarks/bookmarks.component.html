@@ -1,0 +1,71 @@
+<div class="bm">
+  <div class="bm__add">
+    <input
+      pInputText
+      class="bm__input"
+      placeholder="Bookmark name"
+      [(ngModel)]="newName"
+      (ngModelChange)="clearAddError()"
+      (keydown.enter)="add()"
+      aria-label="Bookmark name"
+    />
+    <button pButton type="button" label="Save view" icon="pi pi-bookmark" class="p-button-sm bm__save" (click)="add()"></button>
+  </div>
+  @if (addError()) {
+    <p class="bm__error"><i class="pi pi-exclamation-triangle" aria-hidden="true"></i> {{ addError() }}</p>
+  }
+
+  <div class="bm__list-wrap">
+    <span class="bm__label">Bookmarks</span>
+
+    @if (bookmarks().length === 0) {
+      <p class="bm__empty">No bookmarks yet — pan/zoom the map and save the view.</p>
+    } @else {
+      <ul class="bm__list">
+        @for (bookmark of bookmarks(); track bookmark.id) {
+          <li class="bm__item">
+            @if (renamingId() === bookmark.id) {
+              <div class="bm__rename">
+                <input
+                  pInputText
+                  class="bm__input"
+                  [(ngModel)]="renameName"
+                  (keydown.enter)="confirmRename()"
+                  (keydown.escape)="cancelRename()"
+                  aria-label="New bookmark name"
+                />
+                <button pButton type="button" icon="pi pi-check" class="p-button-sm" aria-label="Save name" (click)="confirmRename()"></button>
+                <button pButton type="button" icon="pi pi-times" class="p-button-sm p-button-text" aria-label="Cancel rename" (click)="cancelRename()"></button>
+              </div>
+              @if (renameError()) {
+                <p class="bm__error">{{ renameError() }}</p>
+              }
+            } @else {
+              <button
+                type="button"
+                class="bm__name"
+                [pTooltip]="'Zoom ' + bookmark.view.zoom.toFixed(1)"
+                tooltipPosition="top"
+                (click)="zoomTo(bookmark)"
+              >
+                <i class="pi pi-map-marker" aria-hidden="true"></i>
+                <span>{{ bookmark.name }}</span>
+              </button>
+              <div class="bm__actions">
+                <button type="button" class="bm__icon" pTooltip="Zoom to" tooltipPosition="top" (click)="zoomTo(bookmark)">
+                  <i class="pi pi-search-plus" aria-hidden="true"></i>
+                </button>
+                <button type="button" class="bm__icon" pTooltip="Rename" tooltipPosition="top" (click)="startRename(bookmark)">
+                  <i class="pi pi-pencil" aria-hidden="true"></i>
+                </button>
+                <button type="button" class="bm__icon bm__icon--danger" pTooltip="Delete" tooltipPosition="top" (click)="remove(bookmark)">
+                  <i class="pi pi-trash" aria-hidden="true"></i>
+                </button>
+              </div>
+            }
+          </li>
+        }
+      </ul>
+    }
+  </div>
+</div>

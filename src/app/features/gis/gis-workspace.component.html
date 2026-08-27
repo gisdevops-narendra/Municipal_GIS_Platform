@@ -56,6 +56,9 @@
               <p class="gis-ws__hint">{{ layersError() ?? 'Loading map…' }}</p>
             }
           }
+          @case ('bookmarks') {
+            <app-bookmarks [workspaceKey]="workspace()?.code ?? ''" />
+          }
           @case ('query') {
             @if (layersReady()) {
               <app-query-builder
