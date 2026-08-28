@@ -316,6 +316,16 @@ export class MapService {
     }
   }
 
+  // ----- layer styling -----
+
+  /** Forces a WMS layer to re-fetch from GeoServer — call after its style
+   *  changes server-side so the styled render replaces the cached tiles.
+   *  Works for a managed GIS layer id or the wizard's `preview` layer. */
+  refreshLayerStyle(layerId: string): void {
+    const source = this.managedLayers.get(layerId)?.olLayer.getSource();
+    source?.updateParams({ _style: Date.now() });
+  }
+
   // ----- buffer / overlay analysis -----
 
   /** WKT for a GeoJSON geometry, reprojected `sourceProj` → `targetProj`. */
@@ -1007,7 +1017,7 @@ export class MapService {
 
   /** GeoServer WMS GetLegendGraphic — a public, anonymous GeoServer image
    *  endpoint, so this is just a URL, no HTTP call needed here. */
-  legendGraphicUrl(layer: GisLayer): string {
+  legendGraphicUrl(layer: GisLayer, cacheBust?: number): string {
     const qualifiedLayer = `${layer.geoserverWorkspace}:${layer.geoserverLayer}`;
     const params = new URLSearchParams({
       service: 'WMS',
@@ -1017,6 +1027,7 @@ export class MapService {
       layer: qualifiedLayer,
       legend_options: 'fontAntiAliasing:true;fontSize:11'
     });
+    if (cacheBust) params.set('_ts', String(cacheBust));
     return `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wms?${params.toString()}`;
   }
 

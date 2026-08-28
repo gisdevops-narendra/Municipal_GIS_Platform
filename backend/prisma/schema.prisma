@@ -232,6 +232,15 @@ model GISLayer {
   /// decremented, never reset.
   version        Int                   @default(1)
 
+  /// GIS Layer Styling. The workspace-scoped GeoServer style name that
+  /// holds this layer's YSLD (`<geoserverLayer>_style`), set as the
+  /// layer's default style, or null for GeoServer's built-in default.
+  styleName      String?               @map("style_name")
+  /// The structured LayerStyleSpec the YSLD was generated from — so the
+  /// editor can reopen the exact settings. See
+  /// backend/src/gis/dto/layer-style.dto.ts and docs/backend.md.
+  styleSpec      Json?                 @map("style_spec")
+
   gisWorkspace GISWorkspace         @relation(fields: [gisWorkspaceId], references: [id])
   department   Department?          @relation(fields: [departmentId], references: [id])
   uploads      GISLayerUpload[]
@@ -349,6 +358,10 @@ model GISLayerUpload {
   /// Plain audit field, not a formal relation (see GISLayer.sourceUploadId
   /// for why), but does reference GISLayer.id for the `layer` include below.
   layerId       String?   @map("layer_id")
+
+  /// GIS Layer Styling. A LayerStyleSpec the user configured in the upload
+  /// wizard's Preview step — applied to the real GISLayer at publish time.
+  styleSpec Json? @map("style_spec")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

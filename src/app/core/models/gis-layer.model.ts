@@ -35,6 +35,10 @@ export interface GisLayer {
   /** Bumped every time an uploaded layer is replaced by a newer version
    *  (Task 7) — 1 for every Task 6 demo layer. */
   version: number;
+  /** GIS Layer Styling: the GeoServer style name holding this layer's
+   *  YSLD, or null when it uses GeoServer's built-in default. */
+  styleName?: string | null;
+  hasCustomStyle?: boolean;
   /** EPSG:4326 (lon/lat) extent captured from GeoServer at publish time, or
    *  null if unavailable (e.g. a layer with zero features yet). */
   bbox: GisLayerBoundingBox | null;

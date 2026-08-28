@@ -23,7 +23,13 @@ import {
 } from './storage.service';
 import { GeoServerService, PostgisConnectionParams } from './geoserver.service';
 import { GisAuthorizationService } from './gis-authorization.service';
+import { StyleService, type UploadedIcon } from './style.service';
+import { FieldStatsService } from './field-stats.service';
 import { CreateUploadDto } from './dto/create-upload.dto';
+import type {
+  ClassificationMethod,
+  LayerStyleSpecDto,
+} from './dto/layer-style.dto';
 import {
   deriveLayerCode,
   generateLayerTableName,
@@ -85,6 +91,8 @@ export class GisUploadsService {
     private readonly geoServer: GeoServerService,
     private readonly config: ConfigService,
     private readonly gisAuth: GisAuthorizationService,
+    private readonly styleService: StyleService,
+    private readonly fieldStats: FieldStatsService,
   ) {}
 
   async create(
@@ -244,6 +252,114 @@ export class GisUploadsService {
       geoserverLayer: previewName,
       bbox,
     };
+  }
+
+  // ---- Styling in the upload wizard (GIS Layer Styling). The spec is
+  //      applied to the preview featuretype for the wizard map, saved on
+  //      the upload, and re-applied to the real layer at publish time. ----
+
+  private uploadGeometryKey(
+    upload: GISLayerUpload,
+  ): 'point' | 'line' | 'polygon' | null {
+    if (upload.geometryType === 'POINT') return 'point';
+    if (upload.geometryType === 'LINE') return 'line';
+    if (upload.geometryType === 'POLYGON') return 'polygon';
+    return null;
+  }
+
+  private assertStyleable(
+    upload: GISLayerUpload,
+  ): asserts upload is GISLayerUpload & {
+    postgisTable: string;
+  } {
+    if (
+      !upload.postgisTable ||
+      !isSafeGeneratedTableName(upload.postgisTable)
+    ) {
+      throw new BadRequestException(
+        'This upload has not been validated successfully yet.',
+      );
+    }
+  }
+
+  async uploadStyleAttributes(uploadId: string, appUser: AppUser) {
+    const upload = await this.findScoped(uploadId, appUser);
+    this.assertCanManage(appUser, upload);
+    this.assertStyleable(upload);
+    return {
+      geometry: this.uploadGeometryKey(upload),
+      attributes: await this.fieldStats.attributes(upload.postgisTable, null),
+    };
+  }
+
+  async uploadFieldStats(
+    uploadId: string,
+    appUser: AppUser,
+    field: string,
+    options: { method?: ClassificationMethod; classes?: number },
+  ) {
+    const upload = await this.findScoped(uploadId, appUser);
+    this.assertCanManage(appUser, upload);
+    this.assertStyleable(upload);
+    return this.fieldStats.fieldStats(
+      upload.postgisTable,
+      field,
+      options,
+      null,
+    );
+  }
+
+  async applyUploadStyle(
+    uploadId: string,
+    appUser: AppUser,
+    spec: LayerStyleSpecDto,
+  ) {
+    // preview() (re)publishes the `preview_<id>` featuretype and re-checks
+    // access — the wizard styles that layer live on its own map.
+    const { geoserverWorkspace, geoserverLayer } = await this.preview(
+      uploadId,
+      appUser,
+    );
+    await this.styleService.applyStyle(
+      {
+        workspace: geoserverWorkspace,
+        geoserverLayer,
+        styleName: `${geoserverLayer}_style`,
+      },
+      spec,
+    );
+    await this.prisma.gISLayerUpload.update({
+      where: { id: uploadId },
+      data: { styleSpec: spec as unknown as Prisma.InputJsonValue },
+    });
+    return { geoserverWorkspace, geoserverLayer };
+  }
+
+  /** Stores a user-supplied point icon in the upload's workspace. */
+  async uploadStyleIcon(
+    uploadId: string,
+    appUser: AppUser,
+    file: UploadedIcon,
+  ) {
+    const upload = await this.findScoped(uploadId, appUser);
+    this.assertCanManage(appUser, upload);
+    const workspace = await this.prisma.gISWorkspace.findUniqueOrThrow({
+      where: { id: upload.gisWorkspaceId },
+    });
+    return this.styleService.uploadIcon(workspace.geoserverWorkspace, file);
+  }
+
+  /** Proxies a stored custom icon's bytes back for reload preview. */
+  async uploadCustomIcon(uploadId: string, appUser: AppUser, name: string) {
+    const upload = await this.findScoped(uploadId, appUser);
+    this.assertCanManage(appUser, upload);
+    const workspace = await this.prisma.gISWorkspace.findUniqueOrThrow({
+      where: { id: upload.gisWorkspaceId },
+    });
+    return this.styleService.customIconBytes(
+      workspace.geoserverWorkspace,
+      name,
+    );
   }
 
   async submitForReview(uploadId: string, appUser: AppUser) {
@@ -454,6 +570,33 @@ export class GisUploadsService {
         );
       }
 
+      // GIS Layer Styling: carry the style the user configured in the
+      // wizard's Preview step onto the real layer. Best-effort — a style
+      // failure must never leave the layer unpublished (it is already live
+      // above); it just falls back to the default style.
+      if (upload.styleSpec) {
+        try {
+          const { styleName } = await this.styleService.applyStyle(
+            {
+              workspace: workspace.geoserverWorkspace,
+              geoserverLayer: savedLayer.geoserverLayer,
+            },
+            upload.styleSpec as unknown as LayerStyleSpecDto,
+          );
+          await this.prisma.gISLayer.update({
+            where: { id: savedLayer.id },
+            data: {
+              styleName,
+              styleSpec: upload.styleSpec,
+            },
+          });
+        } catch (error) {
+          this.logger.warn(
+            `Published layer ${savedLayer.id} but could not apply its saved style: ${(error as Error).message}`,
+          );
+        }
+      }
+
       // Best-effort cleanup, never allowed to fail the publish itself
       // (the layer is already live at this point).
       await this.geoServer
@@ -461,6 +604,12 @@ export class GisUploadsService {
           workspace.geoserverWorkspace,
           datastore,
           this.previewLayerName(upload.id),
+        )
+        .catch(() => undefined);
+      await this.geoServer
+        .deleteStyle(
+          workspace.geoserverWorkspace,
+          `${this.previewLayerName(upload.id)}_style`,
         )
         .catch(() => undefined);
       // existingLayer.postgisTable is null for a Task 6 demo/canonical

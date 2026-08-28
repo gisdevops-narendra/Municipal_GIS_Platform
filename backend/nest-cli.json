@@ -3,6 +3,12 @@
   "collection": "@nestjs/schematics",
   "sourceRoot": "src",
   "compilerOptions": {
-    "deleteOutDir": false
+    "deleteOutDir": false,
+    "assets": [
+      { "include": "gis/marker-icons/*.svg", "outDir": "dist/src" },
+      { "include": "gis/marker-icons/*.json", "outDir": "dist/src" },
+      { "include": "gis/marker-icons/LICENSE.txt", "outDir": "dist/src" }
+    ],
+    "watchAssets": true
   }
 }

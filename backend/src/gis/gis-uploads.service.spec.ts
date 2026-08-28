@@ -65,7 +65,10 @@ function buildService() {
   const geoServer = {
     ensureFeatureType: jest.fn(),
     deleteFeatureType: jest.fn(),
+    deleteStyle: jest.fn().mockResolvedValue(undefined),
   };
+  const styleService = { applyStyle: jest.fn(), removeStyle: jest.fn() };
+  const fieldStats = { attributes: jest.fn(), fieldStats: jest.fn() };
   const config = { getOrThrow: jest.fn((k: string) => `cfg-${k}`) };
   // Defaults to "fully allowed" so every pre-existing (pre-Task-8) test
   // keeps exercising the behavior it was written for, not permission
@@ -85,9 +88,11 @@ function buildService() {
     geoServer as unknown as GeoServerService,
     config as unknown as ConfigService,
     gisAuth as unknown as GisAuthorizationService,
+    styleService as never,
+    fieldStats as never,
   );
 
-  return { service, prisma, storage, gdal, geoServer, gisAuth };
+  return { service, prisma, storage, gdal, geoServer, gisAuth, styleService };
 }
 
 describe('GisUploadsService — authorization', () => {

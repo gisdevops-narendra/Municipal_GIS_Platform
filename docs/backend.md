@@ -627,6 +627,102 @@ the stack. Basemap tiles need outbound internet from the print container;
 is a `service_started` (not `_healthy`) dependency of `backend` so a slow
 print engine never blocks boot — print calls just 503 until it is up.
 
+## 27. GIS Layer Styling (GeoServer + YSLD)
+
+Every published layer can be styled — single symbol, categorized (unique
+values), graduated (classified ranges), labels, scale-dependent
+visibility. The style is authored as a structured **`LayerStyleSpec`**
+(JSON, `backend/src/gis/dto/layer-style.dto.ts`), the backend turns it
+into **YSLD**, GeoServer stores it as a workspace style, and the existing
+`ImageWMS` layer re-renders.
+
+**Infra.** GeoServer needs the YSLD extension — `docker-compose.yml` sets
+`STABLE_EXTENSIONS: ysld-plugin` + `FORCE_DOWNLOAD_STABLE_EXTENSIONS`, so
+kartoza downloads `geoserver-2.25.2-ysld-plugin.zip` on start (needs
+internet, one-time). Offline fallback: drop the jar into `WEB-INF/lib`.
+
+**Pieces** (`backend/src/gis/`):
+- `YsldGenerator` — pure `spec → YSLD`, unit-tested; GeoServer's 400 on a
+  bad PUT is the last line of defence. Handles point/line/polygon +
+  raster symbolizers, categorized (`filter: ${field = 'v'}`, ECQL literal
+  escaped) with an `else` rule, graduated (range filters from breaks,
+  ramp colour per class), text symbolizers, `scale:` ranges.
+- `FieldStatsService` — geometry + attributes from
+  `information_schema.columns`; classification stats **straight from
+  PostGIS** (`MIN`/`MAX`/`COUNT`, `percentile_cont` for quantile breaks,
+  `DISTINCT … LIMIT 51` for categories). The field name is **whitelisted
+  against the attribute list** before any query; the table name is
+  `isSafeGeneratedTableName`-guarded (uploaded layers) or a fixed
+  `gis_demo_*` name (canonical layers, with a `gis_workspace_id` filter).
+- `StyleService` — style primitives (no tenant logic): `applyStyle` (PUT
+  YSLD under `<layer>_style`, set it as the layer default),
+  `removeStyle` (revert to the built-in `point`/`line`/`polygon` style,
+  delete the custom one).
+- `GeoServerService` — `putYsldStyle` / `getStyleBody` / `deleteStyle` /
+  `setLayerDefaultStyle` (all workspace-scoped; invalid YSLD → 400 →
+  `BadRequestException` with the parser message).
+
+**Where the tenant/permission check lives.** `GisLayersService` (layer
+target) and `GisUploadsService` (upload target) resolve + authorise the
+layer (`findLayerInMunicipality` + `gisAuth.canManage` — owner in
+practice, same as permission editing) then call the primitives.
+`GISLayer` gains `styleName` + `styleSpec`; `GISLayerUpload` gains
+`styleSpec`.
+
+**Two entry points.**
+1. Upload wizard Preview step → `PUT /api/gis/uploads/:id/style` restyles
+   the `preview_<id>` featuretype on the wizard map and saves the spec on
+   the upload. `publish()` re-applies that spec to the real `GISLayer`
+   (best-effort — a style failure never blocks the publish).
+2. Map layer panel / `/gis/layers` → `PUT /api/gis/layers/:id/style`
+   generates YSLD, saves it, sets it as the layer default, persists the
+   spec. The frontend then bumps a cache-bust param on the WMS source
+   (`MapService.refreshLayerStyle`) so the styled render replaces the
+   cached tiles — no second map instance. `DELETE …/style` reverts.
+
+`deleteLayer` also deletes the layer's GeoServer style.
+
+**Point icons (ExternalGraphic).** A point symbol may carry an
+`icon: { source: 'builtin' | 'custom', name, mime }` instead of a vector
+`mark`; `iconOpacity` and `iconAnchorX/Y` also apply. GeoServer renders an
+ExternalGraphic as-is (it does **not** recolour it from YSLD), so the
+editor hides the fill/outline pickers when an icon is chosen.
+- **Built-in set** — 24 original CC0 marker icons in
+  `backend/src/gis/marker-icons/` (`manifest.json` + one `.svg` each +
+  `LICENSE.txt`; copied next to the compiled code via `nest-cli.json`
+  assets — `outDir: dist/src` because this project emits to `dist/src/…`;
+  `marker-icons/index.ts` also probes a few fallback dirs and never throws
+  on a missing file). Public domain — no attribution required.
+  `GET /api/gis/style/icons` lists them (auth);
+  `GET /api/gis/style/icons/:id` serves the SVG — **unauthenticated on
+  purpose**: the editor loads it as a plain `<img src>` (no JWT), and the
+  files are static public art with no tenant data.
+- **Custom upload** — `POST /api/gis/{layers|uploads}/:id/style/icon`
+  (multipart `file`, ≤512 KB, SVG or PNG). `StyleService.uploadIcon`
+  validates (PNG magic bytes; SVG is **rejected**, not repaired, if it
+  contains a script / event handler / external `href` / entity), then
+  stores it in the workspace's GeoServer style-resource dir under a
+  content-hashed name `mgp_icon_<sha>.<ext>`. The proxy-back route
+  `GET …/style/icon/:name` **is** tenant-scoped, so the editor fetches it
+  via `HttpClient` as a blob and shows it through an object URL.
+- **Resolution.** On `applyStyle`, `StyleService.resolveSpecIcons` deep-
+  copies the spec and rewrites every `symbol.icon` to a resource filename
+  GeoServer resolves against `workspaces/<ws>/styles/`: a built-in icon is
+  pushed to the workspace on first use (`mgp_icon_builtin_<id>.svg`,
+  idempotent) and its manifest anchor is applied when the user hasn't
+  overridden it; a custom icon is already there. The **persisted**
+  `styleSpec` keeps the logical ref (`source: 'builtin', name: 'pin'`), so
+  it re-resolves cleanly on every re-apply. `GeoServerService` gains
+  `putStyleResource` / `styleResourceExists` (HEAD) / `getStyleResource` /
+  `deleteStyleResource`.
+
+Endpoints (all `@RequireMunicipalityMember()`, service does `canManage`):
+`GET|PUT|DELETE /api/gis/layers/:id/style`,
+`GET /api/gis/layers/:id/style/{attributes,field-stats}`,
+`POST /api/gis/layers/:id/style/icon`, `GET …/style/icon/:name`,
+`GET /api/gis/style/icons[/:id]`, and the `uploads` equivalents (no
+layer-style DELETE).
+
 ## 28. GIS Uploads (Task 7) — overview
 
 Turns the Municipal GIS from a read-only viewer into a system where
@@ -793,14 +889,26 @@ publish time.
 — matching `DELETE /api/departments/:id`; it is *not* delegated through
 the MANAGE permission the way permission editing is, because it discards
 every version's data and all cross-department grants). Order:
-`deleteFeatureType` (recurse) → delete the `GISLayer` row (its
-`GISLayerPermission` grants cascade; PUBLISHED upload rows keep their
-history, the FK clears their `layerId`) → best-effort
-`DROP TABLE IF EXISTS` the `layer_<uuid>` table. GeoServer is called
-first and its failure aborts before any DB write, so the delete stays
-retryable. The shared `gis_demo_*` tables behind a CANONICAL/demo layer
-are never dropped (`postgisTable` is null for those, and
-`isSafeGeneratedTableName` is still checked defensively).
+
+1. read the upload history (`gISLayerUpload.findMany({ where: { layerId } })`)
+   **before** any delete — the `GISLayer` delete nulls
+   `gis_layer_uploads.layer_id` via the FK;
+2. `deleteFeatureType` (recurse) — GeoServer first, so its failure aborts
+   before any DB write and the delete stays retryable;
+3. one transaction: `gISLayerUpload.deleteMany({ where: { layerId } })` +
+   `gISLayer.delete` (its `GISLayerPermission` grants cascade). **Every
+   upload that produced this layer — all versions — is removed**, so the
+   GIS Data list never keeps showing an upload whose layer is gone.
+   DRAFT / FAILED uploads that never produced this layer (`layerId` null)
+   are left alone;
+4. best-effort: `DROP TABLE IF EXISTS` every `layer_<uuid>` table (the
+   layer's plus each deleted upload's own), then
+   `StorageService.deleteUploadFiles` for each upload (raw + temporary
+   dirs). Failures here only orphan a table/file, never break the list.
+
+The shared `gis_demo_*` tables behind a CANONICAL/demo layer are never
+dropped (`postgisTable` is null for those, and `isSafeGeneratedTableName`
+is still checked defensively).
 
 **Failure handling** (§38): every GeoServer call in `publish()` happens
 BEFORE the Prisma transaction that writes `GISLayer`/marks the upload

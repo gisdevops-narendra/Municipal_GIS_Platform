@@ -190,6 +190,22 @@
         <div class="upload-wizard__preview-map">
           <app-municipal-map [layers]="previewLayers()" />
         </div>
+
+        <details class="upload-wizard__style" [open]="styleOpen()">
+          <summary (click)="toggleStyle($event)">
+            <i class="pi pi-palette" aria-hidden="true"></i> Style layer
+            <span class="upload-wizard__style-hint">optional — applied on the preview and kept when published</span>
+          </summary>
+          @if (styleOpen() && upload(); as up) {
+            <app-style-editor
+              [target]="{ kind: 'upload', id: up.id }"
+              [geometry]="previewGeometry()"
+              [layerName]="up.layer.name"
+              [live]="true"
+              (applied)="onStyleApplied()"
+            />
+          }
+        </details>
       } @else {
         <p-message severity="warn" text="Preview could not be loaded." styleClass="w-full" />
       }

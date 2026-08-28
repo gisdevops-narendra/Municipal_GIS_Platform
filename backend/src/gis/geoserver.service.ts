@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   Logger,
   ServiceUnavailableException,
@@ -322,6 +323,219 @@ export class GeoServerService {
     if (!response.ok && response.status !== 404) {
       throw await this.toError('deleting feature type', response);
     }
+  }
+
+  // ---------------------------------------------------------------------
+  // Styling (GIS Layer Styling — YSLD). All styles are workspace-scoped so
+  // they never collide across municipalities. One style per layer, named
+  // `<geoserverLayer>_style`, set as the layer's default style.
+  // ---------------------------------------------------------------------
+
+  private readonly YSLD_CONTENT_TYPE = 'application/vnd.geoserver.ysld+yaml';
+
+  async styleExists(workspace: string, name: string): Promise<boolean> {
+    const response = await this.request(
+      `/rest/workspaces/${encodeURIComponent(workspace)}/styles/${encodeURIComponent(name)}.json`,
+      { method: 'GET' },
+    );
+    if (response.status === 404) return false;
+    if (!response.ok) {
+      throw await this.toError('checking style existence', response);
+    }
+    return true;
+  }
+
+  /**
+   * Creates or replaces a workspace style holding `ysld`. A syntactically
+   * invalid YSLD comes back from GeoServer as HTTP 400 — surfaced as a
+   * `BadRequestException` with the parser message so the editor can show
+   * it, rather than a generic 503.
+   */
+  async putYsldStyle(
+    workspace: string,
+    name: string,
+    ysld: string,
+  ): Promise<void> {
+    if (!(await this.styleExists(workspace, name))) {
+      const created = await this.request(
+        `/rest/workspaces/${encodeURIComponent(workspace)}/styles`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            style: { name, format: 'ysld', filename: `${name}.ysld` },
+          }),
+        },
+      );
+      if (!created.ok && created.status !== 409) {
+        throw await this.toError('creating style', created);
+      }
+    }
+
+    const response = await this.request(
+      `/rest/workspaces/${encodeURIComponent(workspace)}/styles/${encodeURIComponent(name)}?raw=true`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': this.YSLD_CONTENT_TYPE },
+        body: ysld,
+      },
+      30000,
+    );
+    if (response.status === 400) {
+      const detail = await response.text().catch(() => '');
+      throw new BadRequestException(
+        `The style is not valid: ${this.firstLine(detail) || 'GeoServer rejected the YSLD.'}`,
+      );
+    }
+    if (!response.ok) {
+      throw await this.toError('saving style', response);
+    }
+  }
+
+  async getStyleBody(workspace: string, name: string): Promise<string | null> {
+    const response = await this.request(
+      `/rest/workspaces/${encodeURIComponent(workspace)}/styles/${encodeURIComponent(name)}.ysld`,
+      { method: 'GET', headers: { Accept: this.YSLD_CONTENT_TYPE } },
+    );
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw await this.toError('reading style', response);
+    }
+    return response.text();
+  }
+
+  /** Idempotent — an already-absent style is success. */
+  async deleteStyle(workspace: string, name: string): Promise<void> {
+    const response = await this.request(
+      `/rest/workspaces/${encodeURIComponent(workspace)}/styles/${encodeURIComponent(name)}?recurse=true&purge=true`,
+      { method: 'DELETE' },
+    );
+    if (!response.ok && response.status !== 404) {
+      throw await this.toError('deleting style', response);
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Style resources (ExternalGraphic icon files). GeoServer resolves a
+  // relative `external:` url in a workspace YSLD against that workspace's
+  // style resource directory: `workspaces/<ws>/styles/<file>`. We push
+  // icon bytes there with the Resource REST API so the same style keeps
+  // rendering after a save/reload with no external hosting.
+  // ---------------------------------------------------------------------
+
+  private styleResourcePath(workspace: string, filename: string): string {
+    return `/rest/resource/workspaces/${encodeURIComponent(workspace)}/styles/${encodeURIComponent(filename)}`;
+  }
+
+  async styleResourceExists(
+    workspace: string,
+    filename: string,
+  ): Promise<boolean> {
+    const response = await this.request(
+      this.styleResourcePath(workspace, filename),
+      { method: 'HEAD' },
+    );
+    if (response.status === 404) return false;
+    if (!response.ok) {
+      throw await this.toError('checking style resource', response);
+    }
+    return true;
+  }
+
+  /** Creates or replaces an icon file in the workspace's style dir. */
+  async putStyleResource(
+    workspace: string,
+    filename: string,
+    body: Buffer,
+    contentType: string,
+  ): Promise<void> {
+    const response = await this.request(
+      this.styleResourcePath(workspace, filename),
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': contentType },
+        body: new Uint8Array(body),
+      },
+      30000,
+    );
+    if (!response.ok) {
+      throw await this.toError('uploading style resource', response);
+    }
+  }
+
+  /** Raw bytes of an icon file, or null if absent. */
+  async getStyleResource(
+    workspace: string,
+    filename: string,
+  ): Promise<{ body: Buffer; contentType: string } | null> {
+    const response = await this.request(
+      this.styleResourcePath(workspace, filename),
+      { method: 'GET' },
+    );
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw await this.toError('reading style resource', response);
+    }
+    const buffer = Buffer.from(await response.arrayBuffer());
+    return {
+      body: buffer,
+      contentType:
+        response.headers.get('content-type') || 'application/octet-stream',
+    };
+  }
+
+  /** Idempotent — an already-absent resource is success. */
+  async deleteStyleResource(
+    workspace: string,
+    filename: string,
+  ): Promise<void> {
+    const response = await this.request(
+      this.styleResourcePath(workspace, filename),
+      { method: 'DELETE' },
+    );
+    if (!response.ok && response.status !== 404) {
+      throw await this.toError('deleting style resource', response);
+    }
+  }
+
+  /**
+   * Points a published layer at its default style. `styleWorkspace`
+   * omitted → a GeoServer built-in style (`point` / `line` / `polygon`),
+   * used to revert a layer to the unstyled default.
+   */
+  async setLayerDefaultStyle(
+    workspace: string,
+    layer: string,
+    styleName: string,
+    styleWorkspace?: string,
+  ): Promise<void> {
+    const response = await this.request(
+      `/rest/layers/${encodeURIComponent(`${workspace}:${layer}`)}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          layer: {
+            defaultStyle: styleWorkspace
+              ? { name: styleName, workspace: styleWorkspace }
+              : { name: styleName },
+          },
+        }),
+      },
+    );
+    if (!response.ok) {
+      throw await this.toError('setting layer default style', response);
+    }
+  }
+
+  private firstLine(text: string): string {
+    return (
+      text
+        .split('\n')
+        .map((line) => line.trim())
+        .find((line) => line.length > 0)
+        ?.slice(0, 300) ?? ''
+    );
   }
 
   private async getFeatureTypeBoundingBox(

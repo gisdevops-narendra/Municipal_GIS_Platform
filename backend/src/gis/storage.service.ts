@@ -223,6 +223,26 @@ export class StorageService {
     return fs.existsSync(absolutePath);
   }
 
+  /** Permanently removes every file kept for one upload — the original
+   *  file under raw/ and any extracted contents under temporary/. Used
+   *  when the layer an upload produced is deleted (Task 8): nothing
+   *  references those files any more. Best-effort per directory. */
+  async deleteUploadFiles(
+    municipalityId: string,
+    uploadId: string,
+  ): Promise<void> {
+    await Promise.all([
+      fsp.rm(this.rawDir(municipalityId, uploadId), {
+        recursive: true,
+        force: true,
+      }),
+      fsp.rm(this.temporaryDir(municipalityId, uploadId), {
+        recursive: true,
+        force: true,
+      }),
+    ]);
+  }
+
   private tenantPath(municipalityId: string, ...segments: string[]): string {
     // municipalityId is always a server-derived UUID (AppUser.municipalityId
     // from the JWT-resolved user) — never client input — but validated

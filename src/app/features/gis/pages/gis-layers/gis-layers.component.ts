@@ -14,6 +14,8 @@ import { CurrentUserService } from '../../../../core/services/current-user.servi
 import { NotificationService } from '../../../../core/services/notification.service';
 import { CurrentUser } from '../../../../core/models/current-user.model';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
+import { StyleGeometry } from '../../../../core/models/layer-style.model';
+import { StyleEditorComponent } from '../../components/style-editor/style-editor.component';
 
 /**
  * GIS Layer Management screen (Task 8 §6) — extends the GIS area
@@ -42,7 +44,8 @@ import { GisLayer } from '../../../../core/models/gis-layer.model';
     MessageModule,
     PrimeTemplate,
     SiteHeaderComponent,
-    SiteFooterComponent
+    SiteFooterComponent,
+    StyleEditorComponent
   ],
   templateUrl: './gis-layers.component.html',
   styleUrl: './gis-layers.component.scss'
@@ -61,6 +64,7 @@ export class GisLayersComponent {
   readonly detailLayer = signal<GisLayer | null>(null);
   readonly exporting = signal<string | null>(null);
   readonly deleting = signal<string | null>(null);
+  readonly styleLayer = signal<GisLayer | null>(null);
 
   constructor() {
     this.currentUserService.getMe().subscribe({ next: (user) => this.currentUser.set(user) });
@@ -98,13 +102,29 @@ export class GisLayersComponent {
     this.router.navigate(['/gis/layers', layer.id, 'permissions']);
   }
 
+  openStyle(layer: GisLayer): void {
+    this.styleLayer.set(layer);
+  }
+
+  styleGeometryOf(layer: GisLayer): StyleGeometry {
+    if (layer.layerType === 'RASTER') return 'raster';
+    if (layer.geometryType === 'POINT') return 'point';
+    if (layer.geometryType === 'LINE') return 'line';
+    return 'polygon';
+  }
+
+  onStyleSaved(): void {
+    this.styleLayer.set(null);
+    this.loadLayers();
+  }
+
   /** Hard delete — unpublishes the layer from GeoServer and permanently
    *  drops its data. Owner-only; the real gate is the backend. The list
    *  is a permission-filtered snapshot, so on success we just drop the
    *  row locally rather than refetching. */
   deleteLayer(layer: GisLayer): void {
     this.notify.confirmDelete({
-      message: `Delete "${layer.name}"? This unpublishes the layer and permanently removes its data. This cannot be undone.`,
+      message: `Delete "${layer.name}"? This unpublishes the layer and permanently removes its data and upload history. This cannot be undone.`,
       accept: () => {
         this.deleting.set(layer.id);
         this.gisLayersService.delete(layer.id).subscribe({

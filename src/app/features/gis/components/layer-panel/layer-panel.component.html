@@ -15,6 +15,16 @@
                 (onChange)="onToggle(layer.id, $event)"
               ></p-checkbox>
               <label [for]="'layer-' + layer.id" class="layer-panel__label">{{ layer.name }}</label>
+              <button
+                type="button"
+                class="layer-panel__style"
+                pTooltip="Style layer"
+                tooltipPosition="left"
+                aria-label="Style layer"
+                (click)="onStyle(layer, $event)"
+              >
+                <i class="pi pi-palette" aria-hidden="true"></i>
+              </button>
               @if (isVisible(layer.id)) {
                 <img
                   class="layer-panel__swatch"
@@ -46,6 +56,16 @@
                     (onChange)="onToggle(layer.id, $event)"
                   ></p-checkbox>
                   <label [for]="'layer-' + layer.id" class="layer-panel__label">{{ layer.name }}</label>
+                  <button
+                    type="button"
+                    class="layer-panel__style"
+                    pTooltip="Style layer"
+                    tooltipPosition="left"
+                    aria-label="Style layer"
+                    (click)="onStyle(layer, $event)"
+                  >
+                    <i class="pi pi-palette" aria-hidden="true"></i>
+                  </button>
                   @if (isVisible(layer.id)) {
                     <img
                       class="layer-panel__swatch"

@@ -14,6 +14,9 @@ import { GisDashboardController } from './gis-dashboard.controller';
 import { GisDashboardService } from './gis-dashboard.service';
 import { PrintController } from './print.controller';
 import { PrintService } from './print.service';
+import { StyleService } from './style.service';
+import { FieldStatsService } from './field-stats.service';
+import { YsldGenerator } from './ysld-generator';
 
 @Module({
   imports: [AuthModule],
@@ -34,6 +37,9 @@ import { PrintService } from './print.service';
     GisAuthorizationService,
     GisDashboardService,
     PrintService,
+    StyleService,
+    FieldStatsService,
+    YsldGenerator,
   ],
   exports: [GisWorkspaceService, GisLayersService, GisAuthorizationService],
 })

@@ -1,0 +1,218 @@
+[
+  {
+    "id": "pin",
+    "label": "Pin",
+    "category": "Markers",
+    "anchor": [
+      0.5,
+      1
+    ]
+  },
+  {
+    "id": "pin-dot",
+    "label": "Pin (dot)",
+    "category": "Markers",
+    "anchor": [
+      0.5,
+      1
+    ]
+  },
+  {
+    "id": "pin-slate",
+    "label": "Pin (neutral)",
+    "category": "Markers",
+    "anchor": [
+      0.5,
+      1
+    ]
+  },
+  {
+    "id": "circle",
+    "label": "Circle",
+    "category": "Markers",
+    "anchor": [
+      0.5,
+      0.5
+    ]
+  },
+  {
+    "id": "square",
+    "label": "Square",
+    "category": "Markers",
+    "anchor": [
+      0.5,
+      0.5
+    ]
+  },
+  {
+    "id": "triangle",
+    "label": "Triangle",
+    "category": "Markers",
+    "anchor": [
+      0.5,
+      0.5
+    ]
+  },
+  {
+    "id": "diamond",
+    "label": "Diamond",
+    "category": "Markers",
+    "anchor": [
+      0.5,
+      0.5
+    ]
+  },
+  {
+    "id": "star",
+    "label": "Star",
+    "category": "Markers",
+    "anchor": [
+      0.5,
+      0.5
+    ]
+  },
+  {
+    "id": "cross",
+    "label": "Cross",
+    "category": "Markers",
+    "anchor": [
+      0.5,
+      0.5
+    ]
+  },
+  {
+    "id": "hospital",
+    "label": "Hospital",
+    "category": "Amenities",
+    "anchor": [
+      0.5,
+      0.5
+    ]
+  },
+  {
+    "id": "clinic",
+    "label": "Clinic / Health",
+    "category": "Amenities",
+    "anchor": [
+      0.5,
+      0.5
+    ]
+  },
+  {
+    "id": "school",
+    "label": "School",
+    "category": "Amenities",
+    "anchor": [
+      0.5,
+      0.5
+    ]
+  },
+  {
+    "id": "library",
+    "label": "Library",
+    "category": "Amenities",
+    "anchor": [
+      0.5,
+      0.5
+    ]
+  },
+  {
+    "id": "park",
+    "label": "Park / Tree",
+    "category": "Amenities",
+    "anchor": [
+      0.5,
+      0.5
+    ]
+  },
+  {
+    "id": "water",
+    "label": "Water",
+    "category": "Utilities",
+    "anchor": [
+      0.5,
+      0.5
+    ]
+  },
+  {
+    "id": "fire",
+    "label": "Fire station",
+    "category": "Amenities",
+    "anchor": [
+      0.5,
+      0.5
+    ]
+  },
+  {
+    "id": "police",
+    "label": "Police",
+    "category": "Amenities",
+    "anchor": [
+      0.5,
+      0.5
+    ]
+  },
+  {
+    "id": "government",
+    "label": "Government",
+    "category": "Amenities",
+    "anchor": [
+      0.5,
+      0.5
+    ]
+  },
+  {
+    "id": "power",
+    "label": "Power",
+    "category": "Utilities",
+    "anchor": [
+      0.5,
+      0.5
+    ]
+  },
+  {
+    "id": "waste",
+    "label": "Waste",
+    "category": "Utilities",
+    "anchor": [
+      0.5,
+      0.5
+    ]
+  },
+  {
+    "id": "parking",
+    "label": "Parking",
+    "category": "Transport",
+    "anchor": [
+      0.5,
+      0.5
+    ]
+  },
+  {
+    "id": "bus",
+    "label": "Bus stop",
+    "category": "Transport",
+    "anchor": [
+      0.5,
+      0.5
+    ]
+  },
+  {
+    "id": "warning",
+    "label": "Warning",
+    "category": "Markers",
+    "anchor": [
+      0.5,
+      0.5
+    ]
+  },
+  {
+    "id": "info",
+    "label": "Info",
+    "category": "Markers",
+    "anchor": [
+      0.5,
+      0.5
+    ]
+  }
+]

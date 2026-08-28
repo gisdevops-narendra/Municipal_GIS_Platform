@@ -28,7 +28,29 @@
   </nav>
 
   <!-- ============ left dock ============ -->
-  @if (activeLeftTool(); as tool) {
+  @if (styleTargetLayer(); as styleLayer) {
+    <aside class="gis-ws__left" [style.width.px]="leftWidth()">
+      <header class="gis-ws__panel-head">
+        <span class="gis-ws__panel-title">Style · {{ styleLayer.name }}</span>
+        <button type="button" class="gis-ws__icon-btn" aria-label="Close panel" (click)="closeStyleEditor()">
+          <i class="pi pi-times" aria-hidden="true"></i>
+        </button>
+      </header>
+      <div class="gis-ws__panel-body">
+        <app-style-editor
+          [target]="{ kind: 'layer', id: styleLayer.id }"
+          [geometry]="styleGeometryOf(styleLayer)"
+          [layerName]="styleLayer.name"
+          [live]="true"
+          (applied)="onStyleApplied(styleLayer)"
+          (removed)="onStyleRemoved(styleLayer)"
+          (closed)="closeStyleEditor()"
+        />
+      </div>
+      <div class="gis-ws__resize gis-ws__resize--x" (pointerdown)="startLeftResize($event)" title="Drag to resize"></div>
+    </aside>
+  }
+  @if (!styleTargetLayer() && activeLeftTool(); as tool) {
     <aside class="gis-ws__left" [style.width.px]="leftWidth()">
       <header class="gis-ws__panel-head">
         <span class="gis-ws__panel-title">{{ tool.label }}</span>
@@ -41,7 +63,7 @@
         @switch (tool.id) {
           @case ('layers') {
             @if (layersReady()) {
-              <app-layer-panel [layers]="layers()" [highlightLayerId]="highlightLayerId()" />
+              <app-layer-panel [layers]="layers()" [highlightLayerId]="highlightLayerId()" (styleLayer)="openStyleEditor($event)" />
             } @else {
               <p class="gis-ws__hint">{{ layersError() ?? 'Loading layers…' }}</p>
             }

@@ -6,17 +6,22 @@ import {
   Param,
   ParseIntPipe,
   Post,
+  Put,
   Query,
+  Res,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { RequireMunicipalityMember } from '../auth/decorators/authorization.decorators';
 import { CurrentAppUser } from '../auth/decorators/current-app-user.decorator';
 import type { AppUser } from '../auth/types/app-user.type';
 import { GisUploadsService } from './gis-uploads.service';
 import { CreateUploadDto } from './dto/create-upload.dto';
 import { RejectUploadDto } from './dto/reject-upload.dto';
+import { LayerStyleSpecDto } from './dto/layer-style.dto';
+import type { ClassificationMethod } from './dto/layer-style.dto';
 
 // Multer decorators are evaluated once, at class-load time, before Nest's
 // DI is available — so the size limit is read directly from process.env
@@ -82,6 +87,72 @@ export class GisUploadsController {
   @Get('uploads/:id/preview')
   preview(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
     return this.uploadsService.preview(id, appUser);
+  }
+
+  // ---- Styling in the wizard's Preview step (GIS Layer Styling). ----
+
+  @RequireMunicipalityMember()
+  @Get('uploads/:id/style/attributes')
+  styleAttributes(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
+    return this.uploadsService.uploadStyleAttributes(id, appUser);
+  }
+
+  @RequireMunicipalityMember()
+  @Get('uploads/:id/style/field-stats')
+  fieldStats(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @Query('field') field: string,
+    @Query('method') method?: ClassificationMethod,
+    @Query('classes', new ParseIntPipe({ optional: true })) classes?: number,
+  ) {
+    return this.uploadsService.uploadFieldStats(id, appUser, field, {
+      method,
+      classes,
+    });
+  }
+
+  @RequireMunicipalityMember()
+  @Put('uploads/:id/style')
+  applyStyle(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @Body() spec: LayerStyleSpecDto,
+  ) {
+    return this.uploadsService.applyUploadStyle(id, appUser, spec);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('uploads/:id/style/icon')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 512 * 1024 } }),
+  )
+  async uploadStyleIcon(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('An icon file is required.');
+    }
+    return this.uploadsService.uploadStyleIcon(id, appUser, file);
+  }
+
+  @RequireMunicipalityMember()
+  @Get('uploads/:id/style/icon/:name')
+  async customStyleIcon(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @Param('name') name: string,
+    @Res() res: Response,
+  ) {
+    const icon = await this.uploadsService.uploadCustomIcon(id, appUser, name);
+    if (!icon) {
+      throw new BadRequestException('Icon not found.');
+    }
+    res.setHeader('Content-Type', icon.contentType);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(icon.body);
   }
 
   @RequireMunicipalityMember()

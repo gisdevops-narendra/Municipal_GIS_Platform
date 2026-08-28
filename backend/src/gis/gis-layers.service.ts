@@ -1,16 +1,24 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { GISLayer, GISWorkspace, GisPermission } from '@prisma/client';
+import { GISLayer, GISWorkspace, GisPermission, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { GeoServerService } from './geoserver.service';
 import { GisAuthorizationService } from './gis-authorization.service';
+import { StorageService } from './storage.service';
+import { StyleService, type UploadedIcon } from './style.service';
+import { FieldStatsService } from './field-stats.service';
 import { isSafeGeneratedTableName } from './layer-naming.util';
 import type { AppUser } from '../auth/types/app-user.type';
+import type {
+  ClassificationMethod,
+  LayerStyleSpecDto,
+} from './dto/layer-style.dto';
 
 type LayerWithDepartment = GISLayer & {
   department?: { id: string; name: string } | null;
@@ -77,6 +85,9 @@ export class GisLayersService {
     private readonly geoServer: GeoServerService,
     private readonly gisAuth: GisAuthorizationService,
     private readonly config: ConfigService,
+    private readonly storage: StorageService,
+    private readonly styleService: StyleService,
+    private readonly fieldStats: FieldStatsService,
   ) {}
 
   /**
@@ -333,17 +344,21 @@ export class GisLayersService {
   }
 
   /**
-   * Hard-deletes a layer: unpublishes its GeoServer feature type, removes
-   * the GISLayer row (its GISLayerPermission grants cascade), and drops
-   * the dedicated `layer_<uuid>` PostGIS table an upload created for it.
+   * Hard-deletes a layer and everything that only exists because of it:
+   *   - the GeoServer feature type (unpublished);
+   *   - the `GISLayer` row (its `GISLayerPermission` grants cascade);
+   *   - **every `GISLayerUpload` that produced this layer** (all versions)
+   *     — so the "GIS Data" list no longer shows an upload whose layer is
+   *     gone — plus each of those uploads' stored files;
+   *   - the dedicated `layer_<uuid>` PostGIS table(s).
    *
    * Owner-only. Deleting a layer throws away every version's data and all
    * cross-department grants, so — unlike permission editing — it is never
    * delegated through the MANAGE permission. The shared `gis_demo_*`
    * tables behind a CANONICAL/demo layer are never dropped (`postgisTable`
-   * is null for those). PUBLISHED upload rows that produced this layer
-   * keep their history; the DB clears their `layerId` (FK ON DELETE SET
-   * NULL).
+   * is null for those, and only `layer_<uuid>` names pass the safety
+   * check). DRAFT / FAILED uploads that never produced this layer
+   * (`layerId` null) are left alone — they are pending work, not history.
    */
   async deleteLayer(appUser: AppUser, layerId: string): Promise<void> {
     if (appUser.systemRole !== 'MUNICIPALITY_OWNER') {
@@ -356,6 +371,13 @@ export class GisLayersService {
       layerId,
     );
 
+    // Read the upload history now: deleting the GISLayer row nulls
+    // gis_layer_uploads.layer_id via the FK, so this must happen first.
+    const uploads = await this.prisma.gISLayerUpload.findMany({
+      where: { layerId: layer.id },
+      select: { id: true, municipalityId: true, postgisTable: true },
+    });
+
     // GeoServer first: if it fails (for anything other than an
     // already-absent feature type, which deleteFeatureType treats as
     // success), abort before touching the database so the delete stays
@@ -366,14 +388,42 @@ export class GisLayersService {
       layer.geoserverLayer,
     );
 
-    await this.prisma.gISLayer.delete({ where: { id: layer.id } });
+    await this.prisma.$transaction([
+      this.prisma.gISLayerUpload.deleteMany({ where: { layerId: layer.id } }),
+      this.prisma.gISLayer.delete({ where: { id: layer.id } }),
+    ]);
 
-    if (layer.postgisTable && isSafeGeneratedTableName(layer.postgisTable)) {
+    // Best-effort cleanup — the rows are already gone, so a failure here
+    // only leaves an orphaned table/file, never a broken list.
+    const tables = new Set(
+      [layer.postgisTable, ...uploads.map((u) => u.postgisTable)].filter(
+        (name): name is string => !!name && isSafeGeneratedTableName(name),
+      ),
+    );
+    for (const table of tables) {
       await this.prisma
-        .$executeRawUnsafe(`DROP TABLE IF EXISTS "${layer.postgisTable}"`)
+        .$executeRawUnsafe(`DROP TABLE IF EXISTS "${table}"`)
         .catch((error: Error) =>
           this.logger.warn(
-            `Deleted layer ${layer.id} but failed to drop its table "${layer.postgisTable}": ${error.message}`,
+            `Deleted layer ${layer.id} but failed to drop table "${table}": ${error.message}`,
+          ),
+        );
+    }
+    for (const upload of uploads) {
+      await this.storage
+        .deleteUploadFiles(upload.municipalityId, upload.id)
+        .catch((error: Error) =>
+          this.logger.warn(
+            `Deleted layer ${layer.id} but failed to remove files for upload ${upload.id}: ${error.message}`,
+          ),
+        );
+    }
+    if (layer.styleName) {
+      await this.geoServer
+        .deleteStyle(layer.geoserverWorkspace, layer.styleName)
+        .catch((error: Error) =>
+          this.logger.warn(
+            `Deleted layer ${layer.id} but failed to delete style "${layer.styleName}": ${error.message}`,
           ),
         );
     }
@@ -416,6 +466,8 @@ export class GisLayersService {
       departmentId: layer.departmentId,
       departmentName: layer.department?.name ?? null,
       version: layer.version,
+      styleName: layer.styleName,
+      hasCustomStyle: !!layer.styleName,
       bbox:
         layer.bboxMinX !== null &&
         layer.bboxMinY !== null &&
@@ -429,5 +481,173 @@ export class GisLayersService {
             }
           : null,
     };
+  }
+
+  // ---------------------------------------------------------------------
+  // Styling (GIS Layer Styling — YSLD). All gated by MANAGE (owner in
+  // practice), same as permission editing. See docs/backend.md.
+  // ---------------------------------------------------------------------
+
+  /** The PostGIS table the style editor reads attributes / class breaks
+   *  from: an uploaded layer's own `layer_<uuid>` table, or the shared
+   *  `gis_demo_*` table for a canonical demo layer (with a workspace
+   *  filter). */
+  private styleSource(layer: GISLayer): {
+    table: string | null;
+    workspaceId: string | null;
+  } {
+    if (layer.postgisTable) {
+      return { table: layer.postgisTable, workspaceId: null };
+    }
+    const demo: Record<string, string> = {
+      MUNICIPAL_BOUNDARY: 'gis_demo_municipal_boundary',
+      WARDS: 'gis_demo_wards',
+      ROADS: 'gis_demo_roads',
+    };
+    return {
+      table: demo[layer.code] ?? null,
+      workspaceId: layer.gisWorkspaceId,
+    };
+  }
+
+  private geometryKey(
+    layer: GISLayer,
+  ): 'point' | 'line' | 'polygon' | 'raster' | null {
+    if (layer.layerType === 'RASTER') return 'raster';
+    if (layer.geometryType === 'POINT') return 'point';
+    if (layer.geometryType === 'LINE') return 'line';
+    if (layer.geometryType === 'POLYGON') return 'polygon';
+    return null;
+  }
+
+  private async findManageableLayer(appUser: AppUser, layerId: string) {
+    const layer = await this.findLayerInMunicipality(
+      appUser.municipalityId,
+      layerId,
+    );
+    if (!(await this.gisAuth.canManage(appUser, layer))) {
+      throw new ForbiddenException(
+        'You do not have permission to style this layer.',
+      );
+    }
+    return layer;
+  }
+
+  async getLayerStyle(appUser: AppUser, layerId: string) {
+    const layer = await this.findManageableLayer(appUser, layerId);
+    return {
+      styleName: layer.styleName,
+      spec: (layer.styleSpec as unknown as LayerStyleSpecDto | null) ?? null,
+      geometry: this.geometryKey(layer),
+    };
+  }
+
+  async layerStyleAttributes(appUser: AppUser, layerId: string) {
+    const layer = await this.findManageableLayer(appUser, layerId);
+    const { table, workspaceId } = this.styleSource(layer);
+    if (!table) {
+      throw new BadRequestException(
+        'This layer has no attribute table to style by.',
+      );
+    }
+    return {
+      geometry: this.geometryKey(layer),
+      attributes: await this.fieldStats.attributes(table, workspaceId),
+    };
+  }
+
+  async layerFieldStats(
+    appUser: AppUser,
+    layerId: string,
+    field: string,
+    options: { method?: ClassificationMethod; classes?: number },
+  ) {
+    const layer = await this.findManageableLayer(appUser, layerId);
+    const { table, workspaceId } = this.styleSource(layer);
+    if (!table) {
+      throw new BadRequestException(
+        'This layer has no attribute table to style by.',
+      );
+    }
+    return this.fieldStats.fieldStats(table, field, options, workspaceId);
+  }
+
+  async applyLayerStyle(
+    appUser: AppUser,
+    layerId: string,
+    spec: LayerStyleSpecDto,
+  ) {
+    const layer = await this.findManageableLayer(appUser, layerId);
+    const { styleName } = await this.styleService.applyStyle(
+      {
+        workspace: layer.geoserverWorkspace,
+        geoserverLayer: layer.geoserverLayer,
+      },
+      spec,
+    );
+    await this.prisma.gISLayer.update({
+      where: { id: layer.id },
+      data: {
+        styleName,
+        styleSpec: spec as unknown as Prisma.InputJsonValue,
+        updatedById: appUser.id,
+      },
+    });
+    return { styleName, spec };
+  }
+
+  async removeLayerStyle(appUser: AppUser, layerId: string) {
+    const layer = await this.findManageableLayer(appUser, layerId);
+    if (layer.styleName) {
+      await this.styleService.removeStyle(
+        {
+          workspace: layer.geoserverWorkspace,
+          geoserverLayer: layer.geoserverLayer,
+          styleName: layer.styleName,
+        },
+        this.geometryKey(layer),
+      );
+    }
+    await this.prisma.gISLayer.update({
+      where: { id: layer.id },
+      data: {
+        styleName: null,
+        styleSpec: Prisma.DbNull,
+        updatedById: appUser.id,
+      },
+    });
+  }
+
+  /** Stores a user-supplied point icon in the layer's workspace and
+   *  returns the `IconRef` to save in the style spec. */
+  async uploadLayerIcon(appUser: AppUser, layerId: string, file: UploadedIcon) {
+    const layer = await this.findManageableLayer(appUser, layerId);
+    return this.styleService.uploadIcon(layer.geoserverWorkspace, file);
+  }
+
+  /** Proxies a stored custom icon's bytes back for reload preview. */
+  async layerCustomIcon(appUser: AppUser, layerId: string, name: string) {
+    const layer = await this.findManageableLayer(appUser, layerId);
+    return this.styleService.customIconBytes(layer.geoserverWorkspace, name);
+  }
+
+  /** Used by GisUploadsService.publish() — apply a spec carried on the
+   *  upload to the freshly created/updated layer row. Best-effort at the
+   *  call site. */
+  async applyStyleToLayerRow(
+    layer: Pick<GISLayer, 'id' | 'geoserverWorkspace' | 'geoserverLayer'>,
+    spec: LayerStyleSpecDto,
+  ): Promise<void> {
+    const { styleName } = await this.styleService.applyStyle(
+      {
+        workspace: layer.geoserverWorkspace,
+        geoserverLayer: layer.geoserverLayer,
+      },
+      spec,
+    );
+    await this.prisma.gISLayer.update({
+      where: { id: layer.id },
+      data: { styleName, styleSpec: spec as unknown as Prisma.InputJsonValue },
+    });
   }
 }

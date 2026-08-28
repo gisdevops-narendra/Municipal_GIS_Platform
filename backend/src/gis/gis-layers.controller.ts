@@ -1,4 +1,19 @@
-import { Body, Controller, Delete, Get, Param, Put, Res } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseIntPipe,
+  Post,
+  Put,
+  Query,
+  Res,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import {
   RequireMunicipalityMember,
@@ -7,11 +22,45 @@ import {
 import { CurrentAppUser } from '../auth/decorators/current-app-user.decorator';
 import type { AppUser } from '../auth/types/app-user.type';
 import { GisLayersService } from './gis-layers.service';
+import { StyleService } from './style.service';
 import { SetLayerPermissionDto } from './dto/set-layer-permission.dto';
+import { LayerStyleSpecDto } from './dto/layer-style.dto';
+import type { ClassificationMethod } from './dto/layer-style.dto';
+
+/** Uploaded marker icons are inlined per feature at render time — keep
+ *  them small (matches StyleService.MAX_ICON_BYTES). */
+const MAX_ICON_BYTES = 512 * 1024;
 
 @Controller('gis')
 export class GisLayersController {
-  constructor(private readonly gisLayersService: GisLayersService) {}
+  constructor(
+    private readonly gisLayersService: GisLayersService,
+    private readonly styleService: StyleService,
+  ) {}
+
+  // ---- Marker-icon gallery (GIS Layer Styling — ExternalGraphic). The
+  //      bundled set is workspace-agnostic and CC0 (see
+  //      backend/src/gis/marker-icons/LICENSE.txt). ----
+
+  @RequireMunicipalityMember()
+  @Get('style/icons')
+  listBuiltinIcons() {
+    return { icons: this.styleService.builtinIcons() };
+  }
+
+  /** Public on purpose — these are static CC0 marker graphics with no
+   *  tenant data, and they are loaded as plain `<img src>` in the style
+   *  editor (which can't attach the JWT the way HttpClient does). */
+  @Get('style/icons/:iconId')
+  builtinIcon(@Param('iconId') iconId: string, @Res() res: Response) {
+    const bytes = this.styleService.builtinIconBytes(iconId);
+    if (!bytes) {
+      throw new BadRequestException('Unknown icon.');
+    }
+    res.setHeader('Content-Type', 'image/svg+xml');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(bytes);
+  }
 
   /**
    * Any authenticated member of the municipality may call this — as of
@@ -73,6 +122,88 @@ export class GisLayersController {
     @Param('id') id: string,
   ): Promise<{ success: true }> {
     await this.gisLayersService.deleteLayer(appUser, id);
+    return { success: true };
+  }
+
+  // ---- Styling (GIS Layer Styling — YSLD). Gated by MANAGE in the service. ----
+
+  @RequireMunicipalityMember()
+  @Get('layers/:id/style')
+  getStyle(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
+    return this.gisLayersService.getLayerStyle(appUser, id);
+  }
+
+  @RequireMunicipalityMember()
+  @Get('layers/:id/style/attributes')
+  styleAttributes(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
+    return this.gisLayersService.layerStyleAttributes(appUser, id);
+  }
+
+  @RequireMunicipalityMember()
+  @Get('layers/:id/style/field-stats')
+  fieldStats(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @Query('field') field: string,
+    @Query('method') method?: ClassificationMethod,
+    @Query('classes', new ParseIntPipe({ optional: true })) classes?: number,
+  ) {
+    return this.gisLayersService.layerFieldStats(appUser, id, field, {
+      method,
+      classes,
+    });
+  }
+
+  @RequireMunicipalityMember()
+  @Put('layers/:id/style')
+  applyStyle(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @Body() spec: LayerStyleSpecDto,
+  ) {
+    return this.gisLayersService.applyLayerStyle(appUser, id, spec);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('layers/:id/style/icon')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: MAX_ICON_BYTES } }),
+  )
+  async uploadIcon(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('An icon file is required.');
+    }
+    return this.gisLayersService.uploadLayerIcon(appUser, id, file);
+  }
+
+  @RequireMunicipalityMember()
+  @Get('layers/:id/style/icon/:name')
+  async customIcon(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @Param('name') name: string,
+    @Res() res: Response,
+  ) {
+    const icon = await this.gisLayersService.layerCustomIcon(appUser, id, name);
+    if (!icon) {
+      throw new BadRequestException('Icon not found.');
+    }
+    res.setHeader('Content-Type', icon.contentType);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(icon.body);
+  }
+
+  @RequireMunicipalityMember()
+  @Delete('layers/:id/style')
+  async removeStyle(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+  ): Promise<{ success: true }> {
+    await this.gisLayersService.removeLayerStyle(appUser, id);
     return { success: true };
   }
 

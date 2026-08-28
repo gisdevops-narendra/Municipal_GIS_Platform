@@ -50,6 +50,13 @@
                   <button
                     pButton
                     type="button"
+                    label="Style"
+                    class="p-button-text p-button-sm"
+                    (click)="openStyle(layer)"
+                  ></button>
+                  <button
+                    pButton
+                    type="button"
                     label="Permissions"
                     class="p-button-text p-button-sm"
                     (click)="openPermissions(layer)"
@@ -122,6 +129,25 @@
         </div>
       }
     </dl>
+  }
+</p-dialog>
+
+<p-dialog
+  [visible]="!!styleLayer()"
+  (visibleChange)="!$event ? styleLayer.set(null) : null"
+  [modal]="true"
+  [header]="'Style · ' + (styleLayer()?.name ?? '')"
+  [style]="{ width: '460px' }"
+  [breakpoints]="{ '560px': '95vw' }"
+>
+  @if (styleLayer(); as layer) {
+    <app-style-editor
+      [target]="{ kind: 'layer', id: layer.id }"
+      [geometry]="styleGeometryOf(layer)"
+      [layerName]="layer.name"
+      (applied)="onStyleSaved()"
+      (removed)="onStyleSaved()"
+    />
   }
 </p-dialog>
 

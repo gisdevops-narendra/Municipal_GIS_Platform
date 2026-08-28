@@ -1,7 +1,9 @@
-import { Component, Input, inject } from '@angular/core';
+import { Component, EventEmitter, Input, Output, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { ButtonModule } from 'primeng/button';
 import { CheckboxModule, CheckboxChangeEvent } from 'primeng/checkbox';
 import { SelectModule } from 'primeng/select';
+import { TooltipModule } from 'primeng/tooltip';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { MapService } from '../../services/map.service';
 
@@ -30,7 +32,7 @@ export interface LayerPanelDepartmentGroup {
 @Component({
   selector: 'app-layer-panel',
   standalone: true,
-  imports: [FormsModule, CheckboxModule, SelectModule],
+  imports: [FormsModule, ButtonModule, CheckboxModule, SelectModule, TooltipModule],
   templateUrl: './layer-panel.component.html',
   styleUrl: './layer-panel.component.scss'
 })
@@ -41,6 +43,8 @@ export class LayerPanelComponent {
   /** Task 9 §4: a layer arriving here via a dashboard deep link gets a
    *  brief visual highlight so the user can see what the click landed on. */
   @Input() highlightLayerId: string | null = null;
+  /** Opens the reusable style editor for this layer (GIS Layer Styling). */
+  @Output() styleLayer = new EventEmitter<GisLayer>();
 
   readonly visibility = this.mapService.layerVisibility;
 
@@ -83,5 +87,10 @@ export class LayerPanelComponent {
 
   legendUrl(layer: GisLayer): string {
     return this.mapService.legendGraphicUrl(layer);
+  }
+
+  onStyle(layer: GisLayer, event: Event): void {
+    event.stopPropagation();
+    this.styleLayer.emit(layer);
   }
 }

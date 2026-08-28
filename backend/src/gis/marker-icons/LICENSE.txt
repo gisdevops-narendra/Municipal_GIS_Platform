@@ -1,0 +1,5 @@
+The marker icons in this directory are original artwork created for the
+Municipal GIS Platform and are released into the public domain under
+CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/).
+No attribution is required. They are intentionally simple, in the
+spirit of open map-icon sets such as Maki (also CC0).

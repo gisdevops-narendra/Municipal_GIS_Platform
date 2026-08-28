@@ -4,6 +4,7 @@ import { GisLayersService } from './gis-layers.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { GeoServerService } from './geoserver.service';
 import { GisAuthorizationService } from './gis-authorization.service';
+import { StorageService } from './storage.service';
 import type { AppUser } from '../auth/types/app-user.type';
 
 const OWNER: AppUser = {
@@ -30,14 +31,23 @@ describe('GisLayersService', () => {
       count: jest.Mock;
       delete: jest.Mock;
     };
+    gISLayerUpload: { findMany: jest.Mock; deleteMany: jest.Mock };
     department: { findMany: jest.Mock };
     $executeRawUnsafe: jest.Mock;
+    $transaction: jest.Mock;
   };
   let geoServer: {
     ensureFeatureType: jest.Mock;
     getFeaturesAsGeoJson: jest.Mock;
     deleteFeatureType: jest.Mock;
   };
+  let storage: { deleteUploadFiles: jest.Mock };
+  let styleService: {
+    applyStyle: jest.Mock;
+    removeStyle: jest.Mock;
+    styleNameFor: (l: string) => string;
+  };
+  let fieldStats: { attributes: jest.Mock; fieldStats: jest.Mock };
   let gisAuth: {
     filterViewable: jest.Mock;
     canView: jest.Mock;
@@ -66,8 +76,13 @@ describe('GisLayersService', () => {
         count: jest.fn().mockResolvedValue(1),
         delete: jest.fn().mockResolvedValue({}),
       },
+      gISLayerUpload: {
+        findMany: jest.fn().mockResolvedValue([]),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
       department: { findMany: jest.fn().mockResolvedValue([]) },
       $executeRawUnsafe: jest.fn().mockResolvedValue(0),
+      $transaction: jest.fn((ops: unknown[]) => Promise.all(ops)),
     };
     geoServer = {
       ensureFeatureType: jest
@@ -76,6 +91,7 @@ describe('GisLayersService', () => {
       getFeaturesAsGeoJson: jest.fn(),
       deleteFeatureType: jest.fn().mockResolvedValue(undefined),
     };
+    storage = { deleteUploadFiles: jest.fn().mockResolvedValue(undefined) };
     // Owner-bypass by default: filterViewable/canView etc. are only
     // exercised directly in "permission filtering" below — every other
     // describe block here is about workspace-level tenant isolation, not
@@ -95,12 +111,24 @@ describe('GisLayersService', () => {
     // Demo-layer seeding is opt-in via GIS_SEED_DEMO_LAYERS; default the
     // mock to "true" so the seeding tests below exercise the real path.
     config = { get: jest.fn().mockReturnValue('true') };
+    styleService = {
+      applyStyle: jest.fn().mockResolvedValue({ styleName: 's', ysld: '' }),
+      removeStyle: jest.fn().mockResolvedValue(undefined),
+      styleNameFor: (l: string) => `${l}_style`,
+    };
+    fieldStats = {
+      attributes: jest.fn().mockResolvedValue([]),
+      fieldStats: jest.fn().mockResolvedValue({ field: 'x', kind: 'number' }),
+    };
 
     service = new GisLayersService(
       prisma as unknown as PrismaService,
       geoServer as unknown as GeoServerService,
       gisAuth as unknown as GisAuthorizationService,
       config as unknown as ConfigService,
+      storage as unknown as StorageService,
+      styleService as never,
+      fieldStats as never,
     );
   });
 
@@ -374,12 +402,54 @@ describe('GisLayersService', () => {
     });
 
     it('aborts before the DB delete when GeoServer fails — stays retryable', async () => {
-      geoServer.deleteFeatureType.mockRejectedValue(new Error('GeoServer down'));
+      geoServer.deleteFeatureType.mockRejectedValue(
+        new Error('GeoServer down'),
+      );
 
       await expect(
         service.deleteLayer(appUser('muni-a'), 'layer-1'),
       ).rejects.toThrow('GeoServer down');
       expect(prisma.gISLayer.delete).not.toHaveBeenCalled();
+      expect(prisma.gISLayerUpload.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('deletes the upload history that produced the layer, plus its files and tables', async () => {
+      const uploadTable = `layer_${'b'.repeat(32)}`;
+      prisma.gISLayerUpload.findMany.mockResolvedValue([
+        { id: 'up-1', municipalityId: 'muni-a', postgisTable: uploadTable },
+        { id: 'up-2', municipalityId: 'muni-a', postgisTable: null },
+      ]);
+
+      await service.deleteLayer(appUser('muni-a'), 'layer-1');
+
+      // scoped strictly to uploads that produced THIS layer
+      expect(prisma.gISLayerUpload.deleteMany).toHaveBeenCalledWith({
+        where: { layerId: 'layer-1' },
+      });
+      // ...inside the same transaction as the GISLayer delete
+      expect(prisma.$transaction).toHaveBeenCalled();
+      // stored files removed for every such upload
+      expect(storage.deleteUploadFiles).toHaveBeenCalledWith('muni-a', 'up-1');
+      expect(storage.deleteUploadFiles).toHaveBeenCalledWith('muni-a', 'up-2');
+      // the layer's table and each upload's own table are dropped
+      expect(prisma.$executeRawUnsafe).toHaveBeenCalledWith(
+        `DROP TABLE IF EXISTS "layer_${'a'.repeat(32)}"`,
+      );
+      expect(prisma.$executeRawUnsafe).toHaveBeenCalledWith(
+        `DROP TABLE IF EXISTS "${uploadTable}"`,
+      );
+    });
+
+    it("still resolves when removing an upload's files fails (best-effort)", async () => {
+      prisma.gISLayerUpload.findMany.mockResolvedValue([
+        { id: 'up-1', municipalityId: 'muni-a', postgisTable: null },
+      ]);
+      storage.deleteUploadFiles.mockRejectedValue(new Error('EACCES'));
+
+      await expect(
+        service.deleteLayer(appUser('muni-a'), 'layer-1'),
+      ).resolves.toBeUndefined();
+      expect(prisma.gISLayerUpload.deleteMany).toHaveBeenCalled();
     });
 
     it('never drops a table for a canonical/demo layer (no dedicated postgisTable)', async () => {

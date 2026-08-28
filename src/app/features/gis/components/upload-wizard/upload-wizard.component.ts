@@ -16,7 +16,9 @@ import { CurrentUser } from '../../../../core/models/current-user.model';
 import { GisUpload, GisUploadPreview } from '../../../../core/models/gis-upload.model';
 import { MapService } from '../../services/map.service';
 import { MunicipalMapComponent } from '../municipal-map/municipal-map.component';
+import { StyleEditorComponent } from '../style-editor/style-editor.component';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
+import { StyleGeometry } from '../../../../core/models/layer-style.model';
 
 type WizardStep = 'FILE_INFO' | 'VALIDATION' | 'PREVIEW';
 
@@ -50,7 +52,8 @@ const CRS_PATTERN = /^EPSG:\d{4,6}$/;
     TagModule,
     ProgressBarModule,
     FileUploadModule,
-    MunicipalMapComponent
+    MunicipalMapComponent,
+    StyleEditorComponent
   ],
   providers: [MapService],
   templateUrl: './upload-wizard.component.html',
@@ -64,6 +67,7 @@ export class UploadWizardComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly uploadsService = inject(GisUploadsService);
   private readonly departmentService = inject(DepartmentService);
+  private readonly mapService = inject(MapService);
 
   readonly step = signal<WizardStep>('FILE_INFO');
   readonly departments = signal<Department[]>([]);
@@ -75,6 +79,7 @@ export class UploadWizardComponent implements OnInit {
   readonly preview = signal<GisUploadPreview | null>(null);
   readonly previewLoading = signal(false);
   readonly submitting = signal(false);
+  readonly styleOpen = signal(false);
 
   readonly form = this.fb.nonNullable.group({
     layerName: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(150)]],
@@ -243,6 +248,22 @@ export class UploadWizardComponent implements OnInit {
     const layer = this.previewLayer();
     return layer ? [layer] : [];
   });
+
+  previewGeometry(): StyleGeometry {
+    const g = this.upload()?.validation.geometryType;
+    if (g === 'POINT') return 'point';
+    if (g === 'LINE') return 'line';
+    return 'polygon';
+  }
+
+  toggleStyle(event: Event): void {
+    event.preventDefault();
+    this.styleOpen.update((open) => !open);
+  }
+
+  onStyleApplied(): void {
+    this.mapService.refreshLayerStyle('preview');
+  }
 
   submitForReview(): void {
     const current = this.upload();

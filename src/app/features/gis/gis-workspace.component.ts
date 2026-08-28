@@ -30,6 +30,8 @@ import { MeasureComponent } from './components/measure/measure.component';
 import { BookmarksComponent } from './components/bookmarks/bookmarks.component';
 import { BufferOverlayComponent } from './components/buffer-overlay/buffer-overlay.component';
 import { PrintLayoutComponent } from './components/print-layout/print-layout.component';
+import { StyleEditorComponent } from './components/style-editor/style-editor.component';
+import { StyleGeometry } from '../../core/models/layer-style.model';
 
 const CRS_PATTERN = /^EPSG:\d{4,6}$/;
 
@@ -98,7 +100,8 @@ const TOOLS: WsTool[] = [
     MeasureComponent,
     BookmarksComponent,
     BufferOverlayComponent,
-    PrintLayoutComponent
+    PrintLayoutComponent,
+    StyleEditorComponent
   ],
   // One OpenLayers Map per visit, shared by the map surface and every dock
   // panel — see MapService's own doc comment for why this is a
@@ -143,6 +146,10 @@ export class GisWorkspaceComponent {
 
   readonly activeLeftTool = computed(() => TOOLS.find((tool) => tool.id === this.leftTool()) ?? null);
   readonly activeBottomTool = computed(() => TOOLS.find((tool) => tool.id === this.bottomTool()) ?? null);
+
+  /** GIS Layer Styling: when set, the left dock shows the style editor for
+   *  this layer instead of the tool panel (no rail/layout change). */
+  readonly styleTargetLayer = signal<GisLayer | null>(null);
 
   // ----- identify / feature info -----
   readonly featureInfoLoading = signal(false);
@@ -224,6 +231,34 @@ export class GisWorkspaceComponent {
   closeLeft(): void {
     this.leftTool.set(null);
     this.refreshMapSize();
+  }
+
+  // ----- layer styling -----
+
+  openStyleEditor(layer: GisLayer): void {
+    this.styleTargetLayer.set(layer);
+    this.refreshMapSize();
+  }
+
+  closeStyleEditor(): void {
+    this.styleTargetLayer.set(null);
+    this.refreshMapSize();
+  }
+
+  styleGeometryOf(layer: GisLayer): StyleGeometry {
+    if (layer.layerType === 'RASTER') return 'raster';
+    if (layer.geometryType === 'POINT') return 'point';
+    if (layer.geometryType === 'LINE') return 'line';
+    return 'polygon';
+  }
+
+  onStyleApplied(layer: GisLayer): void {
+    this.mapService.setLayerVisibility(layer.id, true);
+    this.mapService.refreshLayerStyle(layer.id);
+  }
+
+  onStyleRemoved(layer: GisLayer): void {
+    this.mapService.refreshLayerStyle(layer.id);
   }
 
   closeBottom(): void {
