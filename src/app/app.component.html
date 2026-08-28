@@ -5,6 +5,26 @@
      that can raise a notification is itself lazy-loaded and larger, so the
      host is always ready by the time one fires. -->
 @defer (on immediate) {
-  <p-toast position="bottom-right" [breakpoints]="{ '640px': { width: '100%', right: '0', left: '0' } }" />
+  <p-toast [position]="toastPosition()" [life]="toastLife()" [breakpoints]="{ '640px': { width: '100%', right: '0', left: '0' } }" />
   <p-confirmdialog [style]="{ width: '30rem' }" [breakpoints]="{ '480px': '92vw' }" />
+
+  <!-- Global keyboard-shortcuts help (opened with "?") -->
+  <p-dialog
+    header="Keyboard shortcuts"
+    [visible]="shortcuts.helpOpen()"
+    (visibleChange)="shortcuts.helpOpen.set($event)"
+    [modal]="true"
+    [dismissableMask]="true"
+    [style]="{ width: '28rem' }"
+    [breakpoints]="{ '480px': '92vw' }"
+  >
+    <ul class="app-shortcuts">
+      @for (s of shortcuts.shortcuts(); track s.id) {
+        <li class="app-shortcuts__row">
+          <kbd class="app-shortcuts__keys">{{ s.keys }}</kbd>
+          <span class="app-shortcuts__label">{{ s.label }}</span>
+        </li>
+      }
+    </ul>
+  </p-dialog>
 }

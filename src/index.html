@@ -12,6 +12,28 @@
     href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
     rel="stylesheet"
   >
+  <!-- Anti-flash: apply the stored appearance settings before first paint,
+       so a dark/compact user never sees a frame of the light default.
+       ThemeService re-applies (and stays authoritative) once Angular boots. -->
+  <script>
+    (function () {
+      try {
+        var s = JSON.parse(localStorage.getItem('mgp.settings') || '{}');
+        var a = s.appearance || {};
+        var root = document.documentElement;
+        var theme = a.theme || 'system';
+        var dark =
+          theme === 'dark' ||
+          (theme === 'system' &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches);
+        root.setAttribute('data-theme', dark ? 'dark' : 'light');
+        if (a.colorTheme) root.setAttribute('data-color-theme', a.colorTheme);
+        root.setAttribute('data-density', a.density || 'comfortable');
+        if ((s.accessibility || {}).highContrast) root.setAttribute('data-contrast', 'high');
+        if (a.fontScale) root.style.setProperty('--font-scale', String(a.fontScale));
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
   <app-root></app-root>

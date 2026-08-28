@@ -1,0 +1,73 @@
+<app-site-header />
+
+<main class="settings contour-field">
+  <div class="page-container settings__inner">
+    <header class="settings__intro">
+      <span class="eyebrow">Preferences</span>
+      <h1 class="settings__title">Settings</h1>
+      <p class="settings__lede">
+        Your personal preferences for this platform. Changes are saved to your account
+        automatically and apply everywhere you sign in.
+      </p>
+    </header>
+
+    <div class="settings__layout">
+      <nav class="settings__nav" aria-label="Settings sections">
+        @for (group of nav; track group.id) {
+          @if (group.sections.length) {
+            <p class="settings__nav-group">{{ group.label }}</p>
+            <ul class="settings__nav-list">
+              @for (section of group.sections; track section.id) {
+                <li>
+                  <button
+                    type="button"
+                    class="settings__nav-item"
+                    [class.is-active]="activeId() === section.id"
+                    (click)="select(section.id)"
+                  >
+                    <i class="settings__nav-icon {{ section.icon }}" aria-hidden="true"></i>
+                    <span>{{ section.label }}</span>
+                  </button>
+                </li>
+              }
+            </ul>
+          }
+        }
+      </nav>
+
+      <section class="settings__panel survey-panel" [attr.aria-label]="activeSection().label">
+        <header class="settings__panel-head">
+          <h2 class="settings__panel-title">{{ activeSection().label }}</h2>
+          <p class="settings__panel-blurb">{{ activeSection().blurb }}</p>
+        </header>
+
+        <div class="settings__panel-body">
+          @switch (activeId()) {
+            @case ('profile') { <app-profile-section /> }
+            @case ('appearance') { <app-appearance-section /> }
+            @case ('accessibility') { <app-accessibility-section /> }
+            @case ('language') { <app-language-section /> }
+            @case ('datetime') { <app-datetime-section /> }
+            @case ('numbers') { <app-numbers-section /> }
+            @case ('map-units') { <app-map-units-section /> }
+            @case ('coordinates') { <app-coordinates-section /> }
+            @case ('basemap') { <app-basemap-section /> }
+            @case ('default-view') { <app-default-view-section /> }
+            @case ('layer-visibility') { <app-layer-visibility-section /> }
+            @case ('map-performance') { <app-map-performance-section /> }
+            @case ('notifications') { <app-notifications-section /> }
+            @case ('session') { <app-session-section /> }
+            @case ('shortcuts') { <app-shortcuts-section /> }
+            @case ('system-status') { <app-system-status-section /> }
+            @case ('about') { <app-about-section /> }
+            @case ('help') { <app-help-section /> }
+            @case ('privacy') { <app-privacy-section /> }
+            @case ('reset') { <app-reset-section /> }
+          }
+        </div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<app-site-footer />

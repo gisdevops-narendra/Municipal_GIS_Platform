@@ -21,6 +21,7 @@ import type { AppUser } from '../auth/types/app-user.type';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto, UpdateUserStatusDto } from './dto/update-user.dto';
+import { UpdateMeDto } from './dto/update-me.dto';
 import { QueryUsersDto } from './dto/query-users.dto';
 
 @Controller()
@@ -34,6 +35,16 @@ export class UsersController {
   @Get('me')
   getMe(@CurrentKeycloakUser() user: KeycloakJwtPayload) {
     return this.usersService.getAuthenticatedUser(user.sub);
+  }
+
+  /** PATCH /api/me — self-service profile edit (own name / mobile only). */
+  @UseGuards(KeycloakJwtGuard, AppUserGuard)
+  @Patch('me')
+  updateMe(
+    @CurrentKeycloakUser() user: KeycloakJwtPayload,
+    @Body() dto: UpdateMeDto,
+  ) {
+    return this.usersService.updateOwnProfile(user.sub, dto);
   }
 
   /** Any authenticated member of the municipality may view the user list —

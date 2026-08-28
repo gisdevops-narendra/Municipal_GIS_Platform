@@ -41,6 +41,11 @@ import { YsldGenerator } from './ysld-generator';
     FieldStatsService,
     YsldGenerator,
   ],
-  exports: [GisWorkspaceService, GisLayersService, GisAuthorizationService],
+  exports: [
+    GisWorkspaceService,
+    GisLayersService,
+    GisAuthorizationService,
+    GeoServerService,
+  ],
 })
 export class GisModule {}

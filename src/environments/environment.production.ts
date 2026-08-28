@@ -10,6 +10,8 @@
  */
 export const environment = {
   production: true,
+  /** Shown in Settings → About. Bump alongside a release. */
+  version: '1.0.0',
   appUrl: 'http://localhost:4200',
   keycloak: {
     url: 'http://localhost:8180',

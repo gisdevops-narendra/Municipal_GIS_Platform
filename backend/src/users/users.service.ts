@@ -11,6 +11,7 @@ import { KeycloakAdminService } from '../keycloak/keycloak-admin.service';
 import type { AppUser } from '../auth/types/app-user.type';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto, UpdateUserStatusDto } from './dto/update-user.dto';
+import { UpdateMeDto } from './dto/update-me.dto';
 import { QueryUsersDto } from './dto/query-users.dto';
 
 const USER_LIST_INCLUDE = {
@@ -170,6 +171,29 @@ export class UsersService {
       this.logger.error('User creation transaction failed', error as Error);
       throw error;
     }
+  }
+
+  /** `PATCH /api/me` — a user editing their own profile. Only `fullName` /
+   *  `mobileNumber`; returns the same shape as `GET /api/me`. */
+  async updateOwnProfile(keycloakUserId: string, dto: UpdateMeDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { keycloakUserId },
+    });
+    if (!user) {
+      throw new NotFoundException(
+        'No application user is linked to this identity.',
+      );
+    }
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        ...(dto.fullName !== undefined && { fullName: dto.fullName.trim() }),
+        ...(dto.mobileNumber !== undefined && {
+          mobileNumber: dto.mobileNumber,
+        }),
+      },
+    });
+    return this.getAuthenticatedUser(keycloakUserId);
   }
 
   async updateUser(municipalityId: string, id: string, dto: UpdateUserDto) {

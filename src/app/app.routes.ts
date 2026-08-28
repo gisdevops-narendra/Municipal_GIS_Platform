@@ -78,6 +78,13 @@ export const routes: Routes = [
     title: 'Municipal GIS — Municipal GIS Platform'
   },
   {
+    path: 'settings',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./features/settings/settings.component').then((m) => m.SettingsComponent),
+    title: 'Settings — Municipal GIS Platform'
+  },
+  {
     path: 'gis/uploads',
     canActivate: [authGuard],
     loadComponent: () =>

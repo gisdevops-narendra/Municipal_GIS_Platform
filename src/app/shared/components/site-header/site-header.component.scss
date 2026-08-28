@@ -170,6 +170,16 @@
   border-bottom-color: var(--color-primary-600);
 }
 
+/* Settings sits at the far right of the nav row, icon-led */
+.site-header__nav-settings {
+  margin-left: auto;
+  gap: 6px;
+}
+
+.site-header__nav-settings .pi {
+  font-size: 13px;
+}
+
 /* ---------- responsive ---------- */
 @media (max-width: 640px) {
   .site-header__bar {

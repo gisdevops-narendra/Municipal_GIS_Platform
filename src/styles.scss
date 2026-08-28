@@ -72,7 +72,8 @@ body {
   font-family: var(--font-body);
   color: var(--color-ink-900);
   background: var(--color-bg);
-  font-size: 15px;
+  /* Settings → Appearance → Text size sets --font-scale (0.85–1.3). */
+  font-size: calc(15px * var(--font-scale, 1));
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
@@ -325,4 +326,130 @@ a {
   font-size: 10px;
   white-space: nowrap;
   pointer-events: none;
+}
+
+/* ====================================================================== */
+/* Settings → Appearance & Accessibility                                   */
+/*                                                                        */
+/* ThemeService (and the anti-flash snippet in index.html) stamp these    */
+/* attributes / classes on <html>; the values live here. Colour themes    */
+/* additionally retune the --color-primary-* tokens at runtime — no CSS   */
+/* needed here for those.                                                 */
+/* ====================================================================== */
+
+/* ---- Dark theme ------------------------------------------------------- */
+:root[data-theme='dark'] {
+  --color-bg: #0f1614;
+  --color-surface: #161f1c;
+  --color-surface-alt: #1f2a26;
+  --color-ink-900: #eef2f0;
+  --color-ink-700: #c2ccc7;
+  --color-ink-500: #92a09a;
+  --color-ink-300: #6b7772;
+
+  --color-line: #2b3733;
+  --color-line-strong: #3c4a45;
+
+  /* Light "wash" tokens — ThemeService drops its runtime overrides for
+     these in dark mode so these win (see theme.service.ts). */
+  --color-primary-100: #12332e;
+  --color-accent-100: #33261a;
+
+  --color-error-600: #e2766a;
+  --color-error-100: #35211e;
+  --color-success-600: #6cc38b;
+  --color-success-100: #172a20;
+
+  --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+  color-scheme: dark;
+}
+
+/* Slightly lift surfaces that sit directly on the page background so the
+   survey-panel edges stay legible in the dark. */
+:root[data-theme='dark'] .survey-panel {
+  background: var(--color-surface);
+}
+
+/* ---- Density -------------------------------------------------------- */
+:root[data-density='compact'] {
+  --radius-sm: 3px;
+  --radius-md: 4px;
+}
+
+:root[data-density='compact'] body {
+  font-size: calc(14px * var(--font-scale, 1));
+  line-height: 1.45;
+}
+
+:root[data-density='compact'] .p-button {
+  padding-top: 0.35rem !important;
+  padding-bottom: 0.35rem !important;
+}
+
+:root[data-density='compact'] .p-datatable-tbody > tr > td,
+:root[data-density='compact'] .p-datatable-thead > tr > th {
+  padding-top: 0.4rem !important;
+  padding-bottom: 0.4rem !important;
+}
+
+/* ---- Higher contrast ---------------------------------------------------- */
+:root[data-contrast='high'] {
+  --color-ink-900: #000000;
+  --color-ink-700: #1c2622;
+  --color-ink-500: #354039;
+  --color-ink-300: #5a655e;
+  --color-line: #7c8a83;
+  --color-line-strong: #4b5751;
+}
+
+:root[data-contrast='high'][data-theme='dark'] {
+  --color-ink-900: #ffffff;
+  --color-ink-700: #e4ebe8;
+  --color-ink-500: #c2ccc7;
+  --color-ink-300: #9aa6a1;
+  --color-line: #6c7a74;
+  --color-line-strong: #8b9992;
+}
+
+:root[data-contrast='high'] :focus-visible {
+  outline-width: 3px;
+}
+
+/* ---- Reduce motion (explicit toggle, independent of the OS media query) */
+.mgp-reduce-motion *,
+.mgp-reduce-motion *::before,
+.mgp-reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* ---- Always underline links ---------------------------------------- */
+.mgp-underline-links a:not(.p-button):not(.p-menuitem-link) {
+  text-decoration: underline;
+}
+
+/* ---- Larger click targets ----------------------------------------- */
+.mgp-large-targets .p-button {
+  min-height: 2.75rem;
+}
+
+.mgp-large-targets .p-checkbox,
+.mgp-large-targets .p-checkbox .p-checkbox-box,
+.mgp-large-targets .p-radiobutton,
+.mgp-large-targets .p-radiobutton .p-radiobutton-box {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.mgp-large-targets .p-inputtext,
+.mgp-large-targets .p-select,
+.mgp-large-targets .p-inputnumber-input {
+  min-height: 2.75rem;
+}
+
+.mgp-large-targets .settings__nav-item {
+  padding-top: 10px;
+  padding-bottom: 10px;
 }

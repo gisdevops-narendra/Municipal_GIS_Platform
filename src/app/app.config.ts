@@ -27,7 +27,9 @@ export const appConfig: ApplicationConfig = {
       theme: {
         preset: MgpPreset,
         options: {
-          darkModeSelector: false
+          // Settings → Appearance stamps `data-theme="dark"` on <html>;
+          // this makes PrimeNG's own components follow it.
+          darkModeSelector: '[data-theme="dark"]'
         }
       }
     }),

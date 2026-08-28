@@ -425,6 +425,22 @@ model User {
 
   municipality Municipality @relation(fields: [municipalityId], references: [id])
   department   Department?  @relation(fields: [departmentId], references: [id])
+  setting      UserSetting?
 
   @@map("users")
+}
+
+/// Per-user application settings (Settings module). One row per user, a
+/// single JSON blob so new preferences never need a schema change — the
+/// shape is validated by AppSettingsDto on write. Cleared entirely by
+/// "Reset Application Settings".
+model UserSetting {
+  id        String   @id @default(uuid())
+  userId    String   @unique @map("user_id")
+  data      Json     @default("{}")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
 }

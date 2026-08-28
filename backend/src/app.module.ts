@@ -9,6 +9,8 @@ import { MunicipalitiesModule } from './municipalities/municipalities.module';
 import { UsersModule } from './users/users.module';
 import { DepartmentsModule } from './departments/departments.module';
 import { GisModule } from './gis/gis.module';
+import { SettingsModule } from './settings/settings.module';
+import { SystemModule } from './system/system.module';
 
 @Module({
   imports: [
@@ -20,6 +22,8 @@ import { GisModule } from './gis/gis.module';
     UsersModule,
     DepartmentsModule,
     GisModule,
+    SettingsModule,
+    SystemModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -1,7 +1,18 @@
 import { Injectable, inject } from '@angular/core';
 import { ConfirmationService, MessageService } from 'primeng/api';
+import { SettingsService } from './settings.service';
 
 type ToastSeverity = 'success' | 'info' | 'warn' | 'error';
+
+/** Optional category (see `NOTIFICATION_CATEGORIES`) — a toast whose
+ *  category the user has switched off in Settings is silently dropped.
+ *  Omitting it always shows the toast. */
+export type NotificationCategory =
+  | 'general'
+  | 'uploads'
+  | 'layers'
+  | 'system'
+  | 'session';
 
 export interface ConfirmRequest {
   /** Body text of the dialog. */
@@ -37,23 +48,25 @@ export interface ConfirmRequest {
 export class NotificationService {
   private readonly messages = inject(MessageService);
   private readonly confirmation = inject(ConfirmationService);
+  private readonly settings = inject(SettingsService);
 
   /** A completed action. */
-  success(detail: string, summary = 'Success'): void {
-    this.toast('success', summary, detail);
+  success(detail: string, summary = 'Success', category?: NotificationCategory): void {
+    this.toast('success', summary, detail, undefined, category);
   }
 
   /** Neutral information. */
-  info(detail: string, summary = 'Information'): void {
-    this.toast('info', summary, detail);
+  info(detail: string, summary = 'Information', category?: NotificationCategory): void {
+    this.toast('info', summary, detail, undefined, category);
   }
 
   /** Something the user should be aware of but that isn't a failure. */
-  warn(detail: string, summary = 'Warning'): void {
-    this.toast('warn', summary, detail, 7000);
+  warn(detail: string, summary = 'Warning', category?: NotificationCategory): void {
+    this.toast('warn', summary, detail, 7000, category);
   }
 
-  /** An action that failed. Stays on screen a little longer. */
+  /** An action that failed. Stays on screen a little longer. Errors are
+   *  never suppressed by a category toggle. */
   error(detail: string, summary = 'Something went wrong'): void {
     this.toast('error', summary, detail, 9000);
   }
@@ -104,8 +117,18 @@ export class NotificationService {
     severity: ToastSeverity,
     summary: string,
     detail: string,
-    life = 5000
+    life?: number,
+    category?: NotificationCategory
   ): void {
-    this.messages.add({ severity, summary, detail, life });
+    const prefs = this.settings.notifications();
+    if (category && prefs.categories[category] === false) {
+      return;
+    }
+    this.messages.add({
+      severity,
+      summary,
+      detail,
+      life: life ?? prefs.toastDuration
+    });
   }
 }
