@@ -30,7 +30,13 @@ services:
     # explicitly, so upgrading an EXISTING Task 3/4 database (whose volume
     # already has data, so these init scripts do NOT re-run) still enables
     # PostGIS correctly.
-    image: postgis/postgis:16-3.4-alpine
+    # PostGIS + pgvector (RAG embeddings live in this same database). The
+    # image extends the SAME alpine PostGIS base previously used, so the
+    # existing postgres-data volume keeps working unchanged.
+    build:
+      context: .
+      dockerfile: docker/postgres/Dockerfile
+    image: municipal-gis-postgres:16-3.4-pgvector
     container_name: municipal-gis-postgres
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-municipal_gis}
@@ -122,11 +128,66 @@ services:
       start_period: 40s
     restart: unless-stopped
 
+  ollama:
+    # Self-hosted open-source LLM runtime. No API key, no external AI
+    # service. First start downloads the model (see GIS_AI_LLM_MODEL); it is
+    # cached in the ollama-models volume. CPU by default — to use an NVIDIA
+    # GPU, add a `deploy.resources.reservations.devices` block and a driver
+    # new enough for the image's CUDA.
+    image: ollama/ollama:0.5.13
+    container_name: municipal-gis-ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: "-1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      # One request at a time — this is an internal single-user service, and
+      # NUM_PARALLEL>1 multiplies the KV-cache / compute-buffer memory.
+      OLLAMA_NUM_PARALLEL: "1"
+    volumes:
+      - ollama-models:/root/.ollama
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    healthcheck:
+      test: ["CMD-SHELL", "ollama --version > /dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  gis-ai:
+    # Python AI/RAG backend for the natural-language GIS chatbot.
+    # open-source LLM (Ollama) <- prompt templates <- RAG retrieval <-
+    # pgvector <- local embedding model. Only the NestJS backend calls it;
+    # never the browser.
+    build:
+      context: ./ai
+    container_name: municipal-gis-ai
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-municipal_gis}:${POSTGRES_PASSWORD:-municipal_gis_dev_password}@postgres:5432/${POSTGRES_DB:-municipal_gis}
+      OLLAMA_URL: http://ollama:11434
+      # Open-source instruct model (Apache-2.0). 1.5b runs on ~8 GB RAM /
+      # CPU; set GIS_AI_LLM_MODEL=qwen2.5:3b-instruct on a roomier host.
+      GIS_AI_LLM_MODEL: ${GIS_AI_LLM_MODEL:-qwen2.5:1.5b-instruct}
+      GIS_AI_LLM_NUM_CTX: ${GIS_AI_LLM_NUM_CTX:-6144}
+    ports:
+      - "${GIS_AI_PORT:-8100}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
     container_name: municipal-gis-backend
     environment:
+      # Natural-language GIS assistant — the Python AI service.
+      GIS_AI_URL: http://gis-ai:8000
+      # Dev/QA only: allow POST /api/gis/ai/execute-plan to run a structured
+      # operation with no LLM (still fully validated + compiled). Off unless
+      # explicitly set.
+      GIS_AI_ENABLE_RAW_PLAN: ${GIS_AI_ENABLE_RAW_PLAN:-}
       # Reaches Postgres via the compose network, not localhost.
       DATABASE_URL: postgresql://${POSTGRES_USER:-municipal_gis}:${POSTGRES_PASSWORD:-municipal_gis_dev_password}@postgres:5432/${POSTGRES_DB:-municipal_gis}?schema=public
       BACKEND_PORT: 3000
@@ -203,9 +264,14 @@ services:
       # the backend from booting. Print calls return 503 until it is up.
       mapfish-print:
         condition: service_started
+      # Same reasoning: the AI service warms an embedding model on boot;
+      # the backend must not wait for it. AI calls return 503 until it's up.
+      gis-ai:
+        condition: service_started
     restart: unless-stopped
 
 volumes:
+  ollama-models:
   postgres-data:
   backend-node-modules:
   backend-dist:

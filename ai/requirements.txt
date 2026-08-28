@@ -1,0 +1,13 @@
+# Python AI / RAG backend for the Municipal GIS chatbot.
+# 100% open-source / self-hosted — no proprietary AI SDK, no API key.
+# Pinned for reproducible container builds.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+httpx==0.28.1
+asyncpg==0.30.0
+pgvector==0.3.6
+fastembed==0.5.1
+numpy==1.26.4
+python-dotenv==1.0.1
+tenacity==9.0.0

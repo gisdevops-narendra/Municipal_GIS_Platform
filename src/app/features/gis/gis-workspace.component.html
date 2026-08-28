@@ -102,6 +102,18 @@
               <p class="gis-ws__hint">{{ layersError() ?? 'Loading layers…' }}</p>
             }
           }
+          @case ('assistant') {
+            @if (layersReady()) {
+              <app-ai-chat
+                [layers]="layers()"
+                [activeLayerId]="highlightLayerId()"
+                (queryRun)="onQueryRun($event)"
+                (queryCleared)="onQueryCleared()"
+              />
+            } @else {
+              <p class="gis-ws__hint">{{ layersError() ?? 'Loading layers…' }}</p>
+            }
+          }
           @case ('print') {
             @if (layersReady()) {
               <app-print-layout [layers]="layers()" />

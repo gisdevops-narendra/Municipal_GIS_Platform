@@ -1,0 +1,88 @@
+<div class="aic">
+  <p class="aic__lede">
+    Ask a question about your GIS data in plain language. Results appear on the
+    map and in the Attribute Table, exactly like the Query Builder.
+  </p>
+
+  @if (messages().length === 0) {
+    <div class="aic__examples">
+      <span class="aic__examples-label">Try</span>
+      @for (ex of examples; track ex) {
+        <button type="button" class="aic__chip" (click)="useExample(ex)">{{ ex }}</button>
+      }
+    </div>
+  }
+
+  <div class="aic__thread">
+    @for (msg of messages(); track $index) {
+      <div class="aic__msg" [class.aic__msg--user]="msg.role === 'user'" [class.aic__msg--error]="msg.error">
+        @if (msg.pending) {
+          <span class="aic__typing"><i class="pi pi-spin pi-spinner"></i> Thinking…</span>
+        } @else {
+          <p class="aic__msg-text">{{ msg.content }}</p>
+
+          @if (msg.response?.answerKind === 'clarification' && msg.response?.clarification) {
+            <p-message severity="warn" [text]="msg.response!.clarification!" styleClass="w-full" />
+          }
+
+          @if (msg.response?.result; as result) {
+            <div class="aic__result">
+              <div class="aic__result-head">
+                <span class="aic__count">{{ result.matched }}</span>
+                <span>{{ result.matched === 1 ? 'feature' : 'features' }} in
+                  <strong>{{ result.layerName }}</strong>
+                  @if (result.truncated) { <span class="aic__trunc">(showing first {{ result.geometries.length }})</span> }
+                </span>
+              </div>
+              @if (result.matched > 0) {
+                <div class="aic__result-actions">
+                  <span class="aic__result-hint">Open in the Attribute Table below</span>
+                  <button pButton type="button" class="p-button-text p-button-sm" icon="pi pi-times" label="Clear" (click)="clearResults()"></button>
+                </div>
+              }
+            </div>
+          }
+
+          @if (msg.response?.operation) {
+            <details class="aic__detail">
+              <summary>How this was interpreted</summary>
+              <ul class="aic__op">
+                @for (bit of operationSummary(msg.response!); track bit) {
+                  <li>{{ bit }}</li>
+                }
+              </ul>
+              @if (msg.response?.compiledSql) {
+                <p class="aic__sql-label">Query the platform compiled and ran (read-only):</p>
+                <pre class="aic__sql">{{ msg.response!.compiledSql }}</pre>
+              }
+              @if (msg.response?.usedContext?.length) {
+                <p class="aic__ctx">Grounded in: {{ msg.response!.usedContext.join(' · ') }}</p>
+              }
+            </details>
+          }
+        }
+      </div>
+    }
+  </div>
+
+  @if (serviceError()) {
+    <p-message severity="error" [text]="serviceError()!" styleClass="w-full" />
+  }
+
+  <form class="aic__input" (ngSubmit)="send()">
+    <input
+      pInputText
+      class="w-full"
+      [(ngModel)]="draft"
+      name="draft"
+      autocomplete="off"
+      placeholder="e.g. schools within 1 km of hospitals"
+      [disabled]="sending()"
+    />
+    <button pButton type="submit" icon="pi pi-send" [disabled]="sending() || !draft.trim()" aria-label="Send"></button>
+  </form>
+
+  @if (messages().length > 0) {
+    <button type="button" class="aic__reset" (click)="reset()">Clear conversation</button>
+  }
+</div>

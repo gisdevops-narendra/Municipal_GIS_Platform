@@ -9,6 +9,7 @@ import { MunicipalitiesModule } from './municipalities/municipalities.module';
 import { UsersModule } from './users/users.module';
 import { DepartmentsModule } from './departments/departments.module';
 import { GisModule } from './gis/gis.module';
+import { GisAiModule } from './gis-ai/gis-ai.module';
 import { SettingsModule } from './settings/settings.module';
 import { SystemModule } from './system/system.module';
 
@@ -22,6 +23,7 @@ import { SystemModule } from './system/system.module';
     UsersModule,
     DepartmentsModule,
     GisModule,
+    GisAiModule,
     SettingsModule,
     SystemModule,
   ],

@@ -27,6 +27,7 @@ import { QueryBuilderComponent } from './components/query-builder/query-builder.
 import { MeasureComponent } from './components/measure/measure.component';
 import { BookmarksComponent } from './components/bookmarks/bookmarks.component';
 import { BufferOverlayComponent } from './components/buffer-overlay/buffer-overlay.component';
+import { AiChatComponent } from './components/ai-chat/ai-chat.component';
 import { PrintLayoutComponent } from './components/print-layout/print-layout.component';
 import { StyleEditorComponent } from './components/style-editor/style-editor.component';
 import { StyleGeometry } from '../../core/models/layer-style.model';
@@ -62,6 +63,7 @@ const TOOLS: WsTool[] = [
   // separate tool needed. Identify shows feature info in an on-map popup
   // (see MunicipalMapComponent), so it isn't a dock tool either.
   { id: 'attributes', label: 'Attribute Table', icon: 'pi pi-table', group: 'explore', dock: 'bottom', available: true },
+  { id: 'assistant', label: 'AI Assistant', icon: 'pi pi-comments', group: 'explore', dock: 'left', available: true },
   { id: 'bookmarks', label: 'Bookmarks', icon: 'pi pi-bookmark', group: 'explore', dock: 'left', available: true },
   { id: 'query', label: 'Query Builder', icon: 'pi pi-filter', group: 'analysis', dock: 'left', available: true },
   { id: 'measure', label: 'Measure', icon: 'pi pi-arrows-h', group: 'analysis', dock: 'left', available: true },
@@ -97,6 +99,7 @@ const TOOLS: WsTool[] = [
     MeasureComponent,
     BookmarksComponent,
     BufferOverlayComponent,
+    AiChatComponent,
     PrintLayoutComponent,
     StyleEditorComponent
   ],
