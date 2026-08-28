@@ -16,6 +16,7 @@ import { SiteFooterComponent } from '../../shared/components/site-footer/site-fo
 import { UserManagementService } from '../../core/services/user-management.service';
 import { DepartmentService } from '../../core/services/department.service';
 import { CurrentUserService } from '../../core/services/current-user.service';
+import { NotificationService } from '../../core/services/notification.service';
 import { ManagedRole, MunicipalityUser, MunicipalityUserStatus } from '../../core/models/municipality-user.model';
 import { Department } from '../../core/models/department.model';
 import { CustomValidators } from '../../shared/validators/custom-validators';
@@ -52,6 +53,7 @@ export class UsersComponent {
   private readonly currentUserService = inject(CurrentUserService);
   private readonly route = inject(ActivatedRoute);
   private readonly fb = inject(FormBuilder);
+  private readonly notify = inject(NotificationService);
 
   readonly users = signal<MunicipalityUser[]>([]);
   readonly departments = signal<Department[]>([]);
@@ -245,16 +247,29 @@ export class UsersComponent {
 
   toggleStatus(user: MunicipalityUser): void {
     const nextStatus: MunicipalityUserStatus = user.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
-    const confirmed =
-      nextStatus === 'ACTIVE' ||
-      confirm(`Deactivate ${user.fullName}? They will immediately lose access to the application.`);
-    if (!confirmed) {
+    const apply = () => {
+      this.userService.updateStatus(user.id, nextStatus).subscribe({
+        next: () => {
+          this.notify.success(
+            `${user.fullName} was ${nextStatus === 'ACTIVE' ? 'reactivated' : 'deactivated'}.`
+          );
+          this.loadUsers();
+        },
+        error: (error: HttpErrorResponse) => this.notify.error(this.resolveErrorMessage(error))
+      });
+    };
+
+    if (nextStatus === 'ACTIVE') {
+      apply();
       return;
     }
-    this.pageError.set(null);
-    this.userService.updateStatus(user.id, nextStatus).subscribe({
-      next: () => this.loadUsers(),
-      error: (error: HttpErrorResponse) => this.pageError.set(this.resolveErrorMessage(error))
+
+    this.notify.confirm({
+      header: 'Deactivate user',
+      message: `Deactivate ${user.fullName}? They will immediately lose access to the application.`,
+      confirmLabel: 'Deactivate',
+      destructive: true,
+      accept: apply
     });
   }
 

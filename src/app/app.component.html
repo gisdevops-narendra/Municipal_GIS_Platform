@@ -1,1 +1,10 @@
 <router-outlet />
+
+<!-- Notification host — kept off the initial bundle. `on immediate` loads
+     the PrimeNG toast/dialog chunk right after first render; every screen
+     that can raise a notification is itself lazy-loaded and larger, so the
+     host is always ready by the time one fires. -->
+@defer (on immediate) {
+  <p-toast position="bottom-right" [breakpoints]="{ '640px': { width: '100%', right: '0', left: '0' } }" />
+  <p-confirmdialog [style]="{ width: '30rem' }" [breakpoints]="{ '480px': '92vw' }" />
+}

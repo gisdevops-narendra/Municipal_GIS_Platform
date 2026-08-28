@@ -14,6 +14,7 @@ import { SiteHeaderComponent } from '../../shared/components/site-header/site-he
 import { SiteFooterComponent } from '../../shared/components/site-footer/site-footer.component';
 import { DepartmentService } from '../../core/services/department.service';
 import { CurrentUserService } from '../../core/services/current-user.service';
+import { NotificationService } from '../../core/services/notification.service';
 import { Department } from '../../core/models/department.model';
 
 @Component({
@@ -40,6 +41,7 @@ export class DepartmentsComponent {
   private readonly currentUserService = inject(CurrentUserService);
   private readonly router = inject(Router);
   private readonly fb = inject(FormBuilder);
+  private readonly notify = inject(NotificationService);
 
   readonly departments = signal<Department[]>([]);
   readonly loading = signal(true);
@@ -130,21 +132,29 @@ export class DepartmentsComponent {
 
   toggleStatus(department: Department): void {
     const nextStatus = department.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
-    this.pageError.set(null);
     this.departmentService.update(department.id, { status: nextStatus }).subscribe({
-      next: () => this.loadDepartments(),
-      error: (error: HttpErrorResponse) => this.pageError.set(this.resolveErrorMessage(error))
+      next: () => {
+        this.notify.success(
+          `"${department.name}" ${nextStatus === 'ACTIVE' ? 'activated' : 'deactivated'}.`
+        );
+        this.loadDepartments();
+      },
+      error: (error: HttpErrorResponse) => this.notify.error(this.resolveErrorMessage(error))
     });
   }
 
   deleteDepartment(department: Department): void {
-    if (!confirm(`Delete "${department.name}"? This cannot be undone.`)) {
-      return;
-    }
-    this.pageError.set(null);
-    this.departmentService.remove(department.id).subscribe({
-      next: () => this.loadDepartments(),
-      error: (error: HttpErrorResponse) => this.pageError.set(this.resolveErrorMessage(error))
+    this.notify.confirmDelete({
+      message: `Delete "${department.name}"? This cannot be undone.`,
+      accept: () => {
+        this.departmentService.remove(department.id).subscribe({
+          next: () => {
+            this.notify.success(`"${department.name}" was deleted.`);
+            this.loadDepartments();
+          },
+          error: (error: HttpErrorResponse) => this.notify.error(this.resolveErrorMessage(error))
+        });
+      }
     });
   }
 

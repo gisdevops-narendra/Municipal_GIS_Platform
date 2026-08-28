@@ -13,9 +13,6 @@
       @if (pageError(); as message) {
         <p-message severity="error" [text]="message" styleClass="w-full layers-card__message" />
       }
-      @if (actionError(); as message) {
-        <p-message severity="error" [text]="message" styleClass="w-full layers-card__message" />
-      }
 
       @if (loading()) {
         <p class="layers-card__lede">Loading layers…</p>

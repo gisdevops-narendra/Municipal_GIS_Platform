@@ -11,6 +11,7 @@ import { SiteHeaderComponent } from '../../../../shared/components/site-header/s
 import { SiteFooterComponent } from '../../../../shared/components/site-footer/site-footer.component';
 import { GisLayersService } from '../../../../core/services/gis-layers.service';
 import { CurrentUserService } from '../../../../core/services/current-user.service';
+import { NotificationService } from '../../../../core/services/notification.service';
 import { CurrentUser } from '../../../../core/models/current-user.model';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
 
@@ -50,12 +51,12 @@ export class GisLayersComponent {
   private readonly gisLayersService = inject(GisLayersService);
   private readonly currentUserService = inject(CurrentUserService);
   private readonly router = inject(Router);
+  private readonly notify = inject(NotificationService);
 
   readonly currentUser = signal<CurrentUser | null>(null);
   readonly layers = signal<GisLayer[]>([]);
   readonly loading = signal(true);
   readonly pageError = signal<string | null>(null);
-  readonly actionError = signal<string | null>(null);
 
   readonly detailLayer = signal<GisLayer | null>(null);
   readonly exporting = signal<string | null>(null);
@@ -102,26 +103,24 @@ export class GisLayersComponent {
    *  is a permission-filtered snapshot, so on success we just drop the
    *  row locally rather than refetching. */
   deleteLayer(layer: GisLayer): void {
-    if (
-      !confirm(
-        `Delete "${layer.name}"? This unpublishes the layer and permanently removes its data. This cannot be undone.`
-      )
-    ) {
-      return;
-    }
-    this.actionError.set(null);
-    this.deleting.set(layer.id);
-    this.gisLayersService.delete(layer.id).subscribe({
-      next: () => {
-        this.deleting.set(null);
-        this.layers.update((layers) => layers.filter((l) => l.id !== layer.id));
-        if (this.detailLayer()?.id === layer.id) {
-          this.closeDetail();
-        }
-      },
-      error: (error: HttpErrorResponse) => {
-        this.deleting.set(null);
-        this.actionError.set(error.error?.message ?? 'Delete failed. Please try again.');
+    this.notify.confirmDelete({
+      message: `Delete "${layer.name}"? This unpublishes the layer and permanently removes its data. This cannot be undone.`,
+      accept: () => {
+        this.deleting.set(layer.id);
+        this.gisLayersService.delete(layer.id).subscribe({
+          next: () => {
+            this.deleting.set(null);
+            this.notify.success(`"${layer.name}" was deleted.`);
+            this.layers.update((layers) => layers.filter((l) => l.id !== layer.id));
+            if (this.detailLayer()?.id === layer.id) {
+              this.closeDetail();
+            }
+          },
+          error: (error: HttpErrorResponse) => {
+            this.deleting.set(null);
+            this.notify.error(error.error?.message ?? 'Delete failed. Please try again.');
+          }
+        });
       }
     });
   }
@@ -132,7 +131,6 @@ export class GisLayersComponent {
    *  restriction (this is the deployed application running in the
    *  user's own browser). */
   export(layer: GisLayer): void {
-    this.actionError.set(null);
     this.exporting.set(layer.id);
     this.gisLayersService.export(layer.id).subscribe({
       next: (content) => {
@@ -144,10 +142,11 @@ export class GisLayersComponent {
         anchor.download = `${layer.code.toLowerCase()}.geojson`;
         anchor.click();
         URL.revokeObjectURL(url);
+        this.notify.success(`Exported "${layer.name}" as GeoJSON.`);
       },
       error: (error: HttpErrorResponse) => {
         this.exporting.set(null);
-        this.actionError.set(error.error?.message ?? 'Export failed. Please try again.');
+        this.notify.error(error.error?.message ?? 'Export failed. Please try again.');
       }
     });
   }

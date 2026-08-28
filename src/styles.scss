@@ -271,6 +271,30 @@ a {
 }
 
 /* ---------------------------------------------------------------------- */
+/* App-wide notifications — toast + confirm dialog (NotificationService).  */
+/* Match the tighter, document-like corners the rest of the app uses and   */
+/* keep the confirm dialog's message readable next to its icon.            */
+/* ---------------------------------------------------------------------- */
+.p-toast .p-toast-message {
+  border-radius: var(--radius-sm);
+}
+
+.p-confirmdialog .p-dialog-content {
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.p-confirmdialog .p-confirmdialog-message {
+  margin-left: 0;
+  line-height: 1.5;
+}
+
+.p-confirmdialog .p-confirmdialog-icon {
+  font-size: 1.35rem;
+  color: var(--color-accent-600);
+}
+
+/* ---------------------------------------------------------------------- */
 /* Measurement Tool — map overlays (created by MapService, outside Angular) */
 /* ---------------------------------------------------------------------- */
 .measure-tooltip {

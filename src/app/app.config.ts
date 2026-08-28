@@ -3,6 +3,7 @@ import { provideRouter, withInMemoryScrolling } from '@angular/router';
 import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { providePrimeNG } from 'primeng/config';
+import { ConfirmationService, MessageService } from 'primeng/api';
 import {
   provideKeycloak,
   withAutoRefreshToken,
@@ -32,6 +33,10 @@ export const appConfig: ApplicationConfig = {
     }),
     provideHttpClient(withInterceptors([includeBearerTokenInterceptor])),
     { provide: INCLUDE_BEARER_TOKEN_INTERCEPTOR_CONFIG, useValue: bearerTokenInterceptorConfig },
+    // Back the app-wide toast + confirm-dialog system (NotificationService).
+    // The <p-toast> / <p-confirmdialog> hosts live in AppComponent.
+    MessageService,
+    ConfirmationService,
     // keycloak-angular's withAutoRefreshToken() feature injects these two
     // services internally, but neither is `providedIn: 'root'` and
     // provideKeycloak() never registers them itself — without this, the
