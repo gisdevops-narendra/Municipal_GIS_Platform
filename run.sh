@@ -127,7 +127,13 @@ if [ "${1:-up}" = "--no-serve" ]; then
   exit 0
 fi
 
-# 7. Frontend deps + dev server (foreground — Ctrl+C stops it).
+# 7. Frontend dev server — skip if something is already serving on :4200.
+if curl -sf -o /dev/null http://localhost:4200/ 2>/dev/null; then
+  warn "Something is already serving on http://localhost:4200 — leaving it as is."
+  log  "Everything is up. Frontend: http://localhost:4200"
+  exit 0
+fi
+
 if [ ! -d node_modules ]; then
   log "Installing frontend dependencies (npm install)"
   npm install
