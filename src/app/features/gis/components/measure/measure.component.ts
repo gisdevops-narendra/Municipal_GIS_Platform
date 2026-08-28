@@ -86,10 +86,14 @@ export class MeasureComponent implements OnInit, OnDestroy {
   });
 
   ngOnInit(): void {
+    // Suppress Identify feature-info popups for the whole time this tool is
+    // open — a map click while measuring should only measure.
+    this.mapService.setMeasureMode(true);
     this.start();
   }
 
   ngOnDestroy(): void {
+    this.mapService.setMeasureMode(false);
     this.mapService.clearMeasure();
   }
 

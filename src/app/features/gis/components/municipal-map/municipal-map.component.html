@@ -1,1 +1,18 @@
 <div #mapContainer class="municipal-map" role="application" aria-label="Municipal GIS map"></div>
+
+<!-- Identify popup — an OpenLayers Overlay; OL moves this element into its
+     own overlay container and positions it at the clicked coordinate. -->
+<div #featurePopup class="map-popup" [class.map-popup--hidden]="!popup()">
+  @if (popup(); as state) {
+    <button type="button" class="map-popup__close" aria-label="Close" (click)="closePopup()">
+      <i class="pi pi-times" aria-hidden="true"></i>
+    </button>
+    <div class="map-popup__body">
+      <app-feature-info
+        [loading]="state.loading"
+        [error]="state.error"
+        [results]="state.results"
+      />
+    </div>
+  }
+</div>

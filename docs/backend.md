@@ -554,14 +554,22 @@ that layer" rather than failing the whole click (§29 of the task brief).
 An empty click point simply returns zero features for every visible
 layer — this is a normal, not-an-error outcome.
 
+The result is shown in a **custom on-map popup** (an OpenLayers `Overlay`
+hosting `<app-feature-info>`, anchored at the clicked point), not a dock
+panel — so there is no "Identify" tool in the left rail. An empty click
+just dismisses the popup. While the **Measure** tool is open, map clicks
+only measure: `MapService.setMeasureMode(true)` (set for that tool's whole
+open lifetime) suppresses the Identify click entirely and closes any open
+popup.
+
 ## 25. Frontend map architecture (OpenLayers)
 
 Angular's `MapService` (`src/app/features/gis/services/map.service.ts`,
 component-provided — one instance per `/gis` page visit, not
 `providedIn: 'root'`) is the only place in the frontend that imports from
-`ol`. Every other GIS component (layer panel, map controls, legend,
-feature-info dialog) talks to it through plain methods and an Angular
-signal (`layerVisibility`), never touching OpenLayers types directly.
+`ol`. Every other GIS component (layer panel, map controls, feature-info popup)
+talks to it through plain methods and Angular signals (`layerVisibility`,
+`featureInfoPopup`), never touching OpenLayers types directly.
 
 `environment.geoserverUrl` is the *only* GeoServer-related frontend
 config — the public base URL, analogous to `apiUrl`/`keycloak.url`.

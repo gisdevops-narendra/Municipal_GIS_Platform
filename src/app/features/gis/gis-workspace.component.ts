@@ -21,8 +21,6 @@ import { MapService, FeatureInfoResult } from './services/map.service';
 import { MunicipalMapComponent } from './components/municipal-map/municipal-map.component';
 import { LayerPanelComponent } from './components/layer-panel/layer-panel.component';
 import { MapControlsComponent } from './components/map-controls/map-controls.component';
-import { LegendComponent } from './components/legend/legend.component';
-import { FeatureInfoComponent } from './components/feature-info/feature-info.component';
 import { GisSearchComponent } from './components/gis-search/gis-search.component';
 import { AttributeExternalFilter, AttributeTableComponent, MapClickFeatureRef } from './components/attribute-table/attribute-table.component';
 import { QueryBuilderComponent } from './components/query-builder/query-builder.component';
@@ -60,8 +58,9 @@ const GROUP_ORDER: { id: WsToolGroup; label: string }[] = [
 
 const TOOLS: WsTool[] = [
   { id: 'layers', label: 'Layers', icon: 'pi pi-clone', group: 'data', dock: 'left', available: true },
-  { id: 'legend', label: 'Legend', icon: 'pi pi-palette', group: 'data', dock: 'left', available: true },
-  { id: 'identify', label: 'Identify', icon: 'pi pi-info-circle', group: 'explore', dock: 'bottom', available: true },
+  // Legend lives inside the Layers panel (per-visible-layer swatch) — no
+  // separate tool needed. Identify shows feature info in an on-map popup
+  // (see MunicipalMapComponent), so it isn't a dock tool either.
   { id: 'attributes', label: 'Attribute Table', icon: 'pi pi-table', group: 'explore', dock: 'bottom', available: true },
   { id: 'bookmarks', label: 'Bookmarks', icon: 'pi pi-bookmark', group: 'explore', dock: 'left', available: true },
   { id: 'query', label: 'Query Builder', icon: 'pi pi-filter', group: 'analysis', dock: 'left', available: true },
@@ -92,8 +91,6 @@ const TOOLS: WsTool[] = [
     MunicipalMapComponent,
     LayerPanelComponent,
     MapControlsComponent,
-    LegendComponent,
-    FeatureInfoComponent,
     GisSearchComponent,
     AttributeTableComponent,
     QueryBuilderComponent,
@@ -152,8 +149,9 @@ export class GisWorkspaceComponent {
   readonly styleTargetLayer = signal<GisLayer | null>(null);
 
   // ----- identify / feature info -----
-  readonly featureInfoLoading = signal(false);
-  readonly featureInfoError = signal<string | null>(null);
+  // The feature info itself is shown in an on-map popup (MunicipalMapComponent
+  // + MapService). This signal is kept only so the Attribute Table can mirror
+  // a map click as a selection (`mapClickFeatures`).
   readonly featureInfoResults = signal<FeatureInfoResult[]>([]);
 
   /** Flattened map-click hits (layer + stable feature id) for the attribute
@@ -378,46 +376,30 @@ export class GisWorkspaceComponent {
 
   onSearchFeatureSelected(match: GisSearchFeatureMatch): void {
     const layer = this.layers().find((candidate) => candidate.id === match.layerId);
-    if (layer) {
-      this.mapService.setLayerVisibility(layer.id, true);
-      this.highlightLayerId.set(layer.id);
-      this.featureInfoResults.set([{ layer, features: [{ attributes: match.attributes }] }]);
-      this.featureInfoError.set(null);
-      this.bottomTool.set('identify');
-      this.refreshMapSize();
-    }
     if (match.bbox) {
       this.mapService.zoomToBbox4326(match.bbox);
     }
+    if (layer) {
+      this.mapService.setLayerVisibility(layer.id, true);
+      this.highlightLayerId.set(layer.id);
+      const results: FeatureInfoResult[] = [{ layer, features: [{ attributes: match.attributes }] }];
+      this.featureInfoResults.set(results);
+      // Show the searched feature's attributes in the on-map Identify popup,
+      // anchored at the centre of its bounding box.
+      if (match.bbox) {
+        const centre: [number, number] = [
+          (match.bbox[0] + match.bbox[2]) / 2,
+          (match.bbox[1] + match.bbox[3]) / 2
+        ];
+        this.mapService.openFeatureInfoPopupAt4326(centre, { loading: false, error: null, results });
+      }
+    }
   }
 
+  /** Map click / search hit — kept only so the Attribute Table can mirror
+   *  the selection; the feature info shows in the on-map popup. */
   onFeatureInfoResults(results: FeatureInfoResult[]): void {
     this.featureInfoResults.set(results);
-    this.openIdentifyDock();
-  }
-
-  onFeatureInfoLoading(isLoading: boolean): void {
-    this.featureInfoLoading.set(isLoading);
-    if (isLoading) {
-      this.openIdentifyDock();
-    }
-  }
-
-  onFeatureInfoError(message: string | null): void {
-    this.featureInfoError.set(message);
-    if (message) {
-      this.openIdentifyDock();
-    }
-  }
-
-  /** A map click routes to the Identify dock — unless the Attribute Table
-   *  is already open, in which case the click just updates its selection
-   *  (via the `mapClickFeatures` input) and the table stays put. */
-  private openIdentifyDock(): void {
-    if (this.bottomTool() !== 'attributes') {
-      this.bottomTool.set('identify');
-    }
-    this.refreshMapSize();
   }
 
   // ----- query builder -----

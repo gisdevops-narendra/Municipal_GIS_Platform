@@ -68,6 +68,14 @@ export interface FeatureInfoResult {
   features: FeatureInfoFeature[];
 }
 
+/** Drives the on-map Identify popup (an OpenLayers `Overlay`). `null` = the
+ *  popup is hidden. */
+export interface FeatureInfoPopupState {
+  loading: boolean;
+  error: string | null;
+  results: FeatureInfoResult[];
+}
+
 interface ManagedLayer {
   layer: GisLayer;
   olLayer: ImageLayer<ImageWMS>;
@@ -177,6 +185,15 @@ export class MapService {
   /** epoch ms until which map single-clicks are ignored — covers the
    *  trailing click that ends a draw/measure gesture. */
   private suppressClickUntil = 0;
+  /** True while the Measurement tool panel is open — Identify (map-click
+   *  feature info) is fully disabled for that whole time, not just while a
+   *  measurement is actively being drawn. */
+  private measureModeActive = false;
+
+  /** On-map Identify popup (OpenLayers `Overlay`). The element is owned by
+   *  MunicipalMapComponent; this service positions it and holds its state. */
+  private featurePopupOverlay: Overlay | null = null;
+  readonly featureInfoPopup = signal<FeatureInfoPopupState | null>(null);
 
   /** Geometries (EPSG:4326) of the currently highlighted/selected features —
    *  read by the Query Builder for "use current selection as spatial input". */
@@ -254,6 +271,9 @@ export class MapService {
     this.analysisLayer = null;
     this.drawLayer = null;
     this.measureLayer = null;
+    this.featurePopupOverlay = null;
+    this.featureInfoPopup.set(null);
+    this.measureModeActive = false;
     this.selectionGeometries.set([]);
   }
 
@@ -846,14 +866,64 @@ export class MapService {
 
   /** Registers a handler for single-clicks on the map, receiving the
    *  clicked coordinate in the map's own projection (EPSG:3857) — ready to
-   *  pass straight into getFeatureInfo. Suppressed while a measurement or
-   *  query-draw interaction is active so those clicks don't also trigger
-   *  Identify. */
+   *  pass straight into getFeatureInfo. Suppressed while the Measurement
+   *  tool is open, or a measurement / query-draw interaction is active, so
+   *  those clicks never also trigger Identify. */
   onSingleClick(handler: (coordinate: number[]) => void): void {
     this.map?.on('singleclick', (event) => {
-      if (this.measureDraw || this.drawInteraction || Date.now() < this.suppressClickUntil) return;
+      if (
+        this.measureModeActive ||
+        this.measureDraw ||
+        this.drawInteraction ||
+        Date.now() < this.suppressClickUntil
+      ) {
+        return;
+      }
       handler(event.coordinate);
     });
+  }
+
+  // ----- Identify popup (custom on-map feature-info card) -----
+
+  /** Called once by MunicipalMapComponent with the popup's host element. */
+  registerFeatureInfoPopup(element: HTMLElement): void {
+    if (this.featurePopupOverlay || !this.map) return;
+    this.featurePopupOverlay = new Overlay({
+      element,
+      positioning: 'bottom-center',
+      offset: [0, -14],
+      stopEvent: true,
+      autoPan: { animation: { duration: 200 } }
+    });
+    this.map.addOverlay(this.featurePopupOverlay);
+  }
+
+  /** Opens (or moves) the Identify popup at a map coordinate (EPSG:3857). */
+  openFeatureInfoPopup(coordinate: number[], state: FeatureInfoPopupState): void {
+    this.featurePopupOverlay?.setPosition(coordinate);
+    this.featureInfoPopup.set(state);
+  }
+
+  /** Opens the Identify popup at an EPSG:4326 point (used by map search). */
+  openFeatureInfoPopupAt4326(point: [number, number], state: FeatureInfoPopupState): void {
+    this.openFeatureInfoPopup(fromLonLat(point), state);
+  }
+
+  /** Updates the popup's contents without moving it. */
+  updateFeatureInfoPopup(state: FeatureInfoPopupState): void {
+    if (this.featureInfoPopup()) this.featureInfoPopup.set(state);
+  }
+
+  closeFeatureInfoPopup(): void {
+    this.featurePopupOverlay?.setPosition(undefined);
+    this.featureInfoPopup.set(null);
+  }
+
+  /** Toggled by the Measurement tool for its whole open lifetime. Turning
+   *  it on also dismisses any open Identify popup. */
+  setMeasureMode(active: boolean): void {
+    this.measureModeActive = active;
+    if (active) this.closeFeatureInfoPopup();
   }
 
   setLayerVisibility(layerId: string, visible: boolean): void {

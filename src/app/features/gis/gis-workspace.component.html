@@ -68,9 +68,6 @@
               <p class="gis-ws__hint">{{ layersError() ?? 'Loading layers…' }}</p>
             }
           }
-          @case ('legend') {
-            <app-legend [layers]="layers()" [inline]="true" />
-          }
           @case ('measure') {
             @if (layersReady()) {
               <app-measure />
@@ -173,8 +170,6 @@
         [scaleLineTarget]="scaleSlot"
         [mousePositionTarget]="coordSlot"
         (featureInfoResults)="onFeatureInfoResults($event)"
-        (featureInfoLoading)="onFeatureInfoLoading($event)"
-        (featureInfoError)="onFeatureInfoError($event)"
         (mapReady)="onMapReady()"
       />
       <app-map-controls />
@@ -208,13 +203,6 @@
         </header>
         <div class="gis-ws__panel-body">
           @switch (tool.id) {
-            @case ('identify') {
-              <app-feature-info
-                [loading]="featureInfoLoading()"
-                [error]="featureInfoError()"
-                [results]="featureInfoResults()"
-              />
-            }
             @case ('attributes') {
               <app-attribute-table
                 [layers]="layers()"

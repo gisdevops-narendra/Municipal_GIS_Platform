@@ -1,17 +1,19 @@
 import { AfterViewInit, Component, ElementRef, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChanges, ViewChild, inject } from '@angular/core';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { FeatureInfoResult, MapService } from '../../services/map.service';
+import { FeatureInfoComponent } from '../feature-info/feature-info.component';
 
 /**
- * OpenLayers map surface only — no layer-panel/feature-info UI of its own.
- * Owns map initialization + click -> GetFeatureInfo wiring; everything
- * else (visibility toggles, results display) is driven through the shared
- * MapService by sibling components under the same page.
+ * OpenLayers map surface only — no layer-panel UI of its own. Owns map
+ * initialization, the click -> GetFeatureInfo wiring, and the custom
+ * on-map Identify popup (an OpenLayers `Overlay` hosting `<app-feature-info>`).
+ * Everything else (visibility toggles, attribute-table selection sync) is
+ * driven through the shared MapService by sibling components.
  */
 @Component({
   selector: 'app-municipal-map',
   standalone: true,
-  imports: [],
+  imports: [FeatureInfoComponent],
   templateUrl: './municipal-map.component.html',
   styleUrl: './municipal-map.component.scss'
 })
@@ -23,15 +25,19 @@ export class MunicipalMapComponent implements AfterViewInit, OnChanges, OnDestro
    *  workspace docks these in its status bar instead of on the map. */
   @Input() scaleLineTarget?: HTMLElement;
   @Input() mousePositionTarget?: HTMLElement;
+  /** Flattened map-click hits, so the Attribute Table can mirror the
+   *  selection — the feature info itself now shows in the on-map popup. */
   @Output() featureInfoResults = new EventEmitter<FeatureInfoResult[]>();
-  @Output() featureInfoLoading = new EventEmitter<boolean>();
-  @Output() featureInfoError = new EventEmitter<string | null>();
   /** Task 9 §4: fires once the OpenLayers map instance exists, so a parent
    *  page can safely call MapService methods (e.g. zoomToLayer) for a
    *  dashboard deep link without racing map initialization. */
   @Output() mapReady = new EventEmitter<void>();
 
   @ViewChild('mapContainer', { static: true }) private readonly mapContainer!: ElementRef<HTMLDivElement>;
+  @ViewChild('featurePopup', { static: true }) private readonly featurePopup!: ElementRef<HTMLDivElement>;
+
+  /** Identify popup state (contents + visibility), owned by MapService. */
+  readonly popup = this.mapService.featureInfoPopup;
 
   private initialized = false;
 
@@ -49,6 +55,10 @@ export class MunicipalMapComponent implements AfterViewInit, OnChanges, OnDestro
     this.mapService.destroy();
   }
 
+  closePopup(): void {
+    this.mapService.closeFeatureInfoPopup();
+  }
+
   private tryInit(): void {
     if (this.initialized || !this.mapContainer || this.layers.length === 0) {
       return;
@@ -58,21 +68,29 @@ export class MunicipalMapComponent implements AfterViewInit, OnChanges, OnDestro
       scaleLineTarget: this.scaleLineTarget,
       mousePositionTarget: this.mousePositionTarget
     });
+    this.mapService.registerFeatureInfoPopup(this.featurePopup.nativeElement);
     this.mapService.onSingleClick((coordinate) => this.onMapClick(coordinate));
     this.mapReady.emit();
   }
 
   private onMapClick(coordinate: number[]): void {
-    this.featureInfoLoading.emit(true);
-    this.featureInfoError.emit(null);
+    this.mapService.openFeatureInfoPopup(coordinate, { loading: true, error: null, results: [] });
     this.mapService.getFeatureInfo(coordinate).subscribe({
       next: (results) => {
-        this.featureInfoLoading.emit(false);
+        // Nothing under the click — don't leave an empty card floating.
+        if (results.length === 0) {
+          this.mapService.closeFeatureInfoPopup();
+        } else {
+          this.mapService.updateFeatureInfoPopup({ loading: false, error: null, results });
+        }
         this.featureInfoResults.emit(results);
       },
       error: () => {
-        this.featureInfoLoading.emit(false);
-        this.featureInfoError.emit('Could not retrieve feature information. Please try again.');
+        this.mapService.updateFeatureInfoPopup({
+          loading: false,
+          error: 'Could not retrieve feature information. Please try again.',
+          results: []
+        });
       }
     });
   }

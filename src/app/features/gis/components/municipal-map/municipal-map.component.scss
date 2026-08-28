@@ -71,3 +71,77 @@
     display: none;
   }
 }
+
+/* ---- Identify popup ----
+   OpenLayers relocates this element into its own overlay container inside
+   the map viewport, so it is styled as a standalone card (not scoped under
+   .municipal-map). */
+.map-popup {
+  position: relative;
+  width: 300px;
+  max-width: 78vw;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+
+  // little pointer at the bottom, aimed at the clicked spot
+  &::after,
+  &::before {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    border: solid transparent;
+    pointer-events: none;
+  }
+
+  &::after {
+    margin-left: -7px;
+    border-width: 7px;
+    border-top-color: var(--color-surface);
+  }
+
+  &::before {
+    margin-left: -8px;
+    border-width: 8px;
+    border-top-color: var(--color-line);
+  }
+}
+
+.map-popup--hidden {
+  display: none;
+}
+
+.map-popup__body {
+  padding: 12px 14px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.map-popup__close {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-ink-500);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--color-surface-alt);
+    color: var(--color-ink-900);
+  }
+
+  i {
+    font-size: 12px;
+  }
+}
