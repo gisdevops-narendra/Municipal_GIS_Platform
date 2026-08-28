@@ -200,6 +200,29 @@ describe('GdalService', () => {
       expect(connString).toContain("password='pa\\'ss\\\\word'");
     });
 
+    it('does not force the FID column to `id` (a source `id` attribute must not break the import)', async () => {
+      execFileCustomMock.mockResolvedValueOnce({ stdout: '', stderr: '' });
+
+      await service.importToPostgis({
+        sourcePath: '/tmp/zones.shp',
+        tableName: 'layer_abc123',
+        targetCrs: 'EPSG:32643',
+        connection: {
+          host: 'h',
+          port: '5432',
+          database: 'd',
+          user: 'u',
+          password: 'p',
+        },
+      });
+
+      const [, args] = execFileCustomMock.mock.calls[0] as [string, string[]];
+      expect(args).not.toContain('FID=id');
+      expect(args).toEqual(
+        expect.arrayContaining(['-lco', 'GEOMETRY_NAME=geom']),
+      );
+    });
+
     it('passes -s_srs only when an explicit source CRS override is given', async () => {
       execFileCustomMock.mockResolvedValueOnce({ stdout: '', stderr: '' });
 

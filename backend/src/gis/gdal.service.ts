@@ -148,8 +148,14 @@ export class GdalService {
       params.tableName,
       '-lco',
       'GEOMETRY_NAME=geom',
-      '-lco',
-      'FID=id',
+      // Let GDAL create/manage its own synthetic primary key (the default
+      // `ogc_fid`). We deliberately do NOT force `-lco FID=id`: real-world
+      // municipal shapefiles very often carry their own attribute column
+      // named `id` (of String/Real type), and forcing the target FID column
+      // to `id` makes ogr2ogr try to populate the FID from that column and
+      // abort the whole import with "ERROR 1: Wrong field type for id".
+      // With the default, any source `id` column is imported as an ordinary
+      // attribute (no data lost) and GeoServer still auto-detects the PK.
       // Shapefile DBF numeric fields declare a fixed width/precision (e.g.
       // 24 digits, 15 decimal places) that the PostgreSQL driver otherwise
       // maps straight to NUMERIC(23,15) — whose range tops out around 1e8,

@@ -65,6 +65,14 @@
                     [loading]="exporting() === layer.id"
                     (click)="export(layer)"
                   ></button>
+                  <button
+                    pButton
+                    type="button"
+                    label="Delete"
+                    class="p-button-text p-button-sm p-button-danger"
+                    [loading]="deleting() === layer.id"
+                    (click)="deleteLayer(layer)"
+                  ></button>
                 }
               </td>
             </tr>

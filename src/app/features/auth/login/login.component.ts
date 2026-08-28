@@ -36,6 +36,7 @@ export class LoginComponent implements OnInit {
   private readonly auth = inject(AuthService);
 
   redirecting = false;
+  loginError = false;
 
   readonly form = this.fb.nonNullable.group({
     email: ['', [Validators.email]]
@@ -59,13 +60,23 @@ export class LoginComponent implements OnInit {
       return;
     }
     this.redirecting = true;
-    this.auth
-      .login({
-        redirectUri: window.location.origin + '/dashboard',
-        loginHint: this.email.value || undefined
-      })
-      .catch(() => {
+    this.loginError = false;
+    // Wrap in Promise.resolve() so a *synchronous* throw from the Keycloak
+    // adapter (e.g. not yet initialized, or crypto.subtle unavailable when
+    // the app isn't served from localhost) becomes a rejection we catch here
+    // — rather than escaping (ngSubmit) and letting the <form> do a native
+    // page-reloading submit.
+    Promise.resolve()
+      .then(() =>
+        this.auth.login({
+          redirectUri: window.location.origin + '/dashboard',
+          loginHint: this.email.value || undefined
+        })
+      )
+      .catch((err) => {
+        console.error('Keycloak login failed to start', err);
         this.redirecting = false;
+        this.loginError = true;
       });
   }
 }

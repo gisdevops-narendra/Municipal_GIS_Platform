@@ -29,6 +29,7 @@ import { QueryBuilderComponent } from './components/query-builder/query-builder.
 import { MeasureComponent } from './components/measure/measure.component';
 import { BookmarksComponent } from './components/bookmarks/bookmarks.component';
 import { BufferOverlayComponent } from './components/buffer-overlay/buffer-overlay.component';
+import { PrintLayoutComponent } from './components/print-layout/print-layout.component';
 
 const CRS_PATTERN = /^EPSG:\d{4,6}$/;
 
@@ -65,7 +66,7 @@ const TOOLS: WsTool[] = [
   { id: 'measure', label: 'Measure', icon: 'pi pi-arrows-h', group: 'analysis', dock: 'left', available: true },
   { id: 'buffer', label: 'Buffer & Overlay', icon: 'pi pi-circle', group: 'analysis', dock: 'left', available: true },
   { id: 'statistics', label: 'Statistics', icon: 'pi pi-chart-bar', group: 'analysis', dock: 'bottom', available: false },
-  { id: 'print', label: 'Print Layout', icon: 'pi pi-print', group: 'output', dock: 'left', available: false },
+  { id: 'print', label: 'Print Layout', icon: 'pi pi-print', group: 'output', dock: 'left', available: true },
   { id: 'reports', label: 'Reports', icon: 'pi pi-file', group: 'output', dock: 'bottom', available: false },
   { id: 'export', label: 'Export Data', icon: 'pi pi-download', group: 'output', dock: 'left', available: false },
   { id: 'workspace', label: 'Workspace Details', icon: 'pi pi-server', group: 'admin', dock: 'left', available: true }
@@ -96,7 +97,8 @@ const TOOLS: WsTool[] = [
     QueryBuilderComponent,
     MeasureComponent,
     BookmarksComponent,
-    BufferOverlayComponent
+    BufferOverlayComponent,
+    PrintLayoutComponent
   ],
   // One OpenLayers Map per visit, shared by the map surface and every dock
   // panel — see MapService's own doc comment for why this is a

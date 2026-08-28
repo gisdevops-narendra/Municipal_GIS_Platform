@@ -1,4 +1,5 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { GisLayersService } from './gis-layers.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { GeoServerService } from './geoserver.service';
@@ -27,12 +28,15 @@ describe('GisLayersService', () => {
       findMany: jest.Mock;
       findFirst: jest.Mock;
       count: jest.Mock;
+      delete: jest.Mock;
     };
     department: { findMany: jest.Mock };
+    $executeRawUnsafe: jest.Mock;
   };
   let geoServer: {
     ensureFeatureType: jest.Mock;
     getFeaturesAsGeoJson: jest.Mock;
+    deleteFeatureType: jest.Mock;
   };
   let gisAuth: {
     filterViewable: jest.Mock;
@@ -42,6 +46,7 @@ describe('GisLayersService', () => {
     listGrants: jest.Mock;
     setGrant: jest.Mock;
   };
+  let config: { get: jest.Mock };
 
   const workspace = {
     id: 'ws-somnath',
@@ -59,14 +64,17 @@ describe('GisLayersService', () => {
         findMany: jest.fn(),
         findFirst: jest.fn(),
         count: jest.fn().mockResolvedValue(1),
+        delete: jest.fn().mockResolvedValue({}),
       },
       department: { findMany: jest.fn().mockResolvedValue([]) },
+      $executeRawUnsafe: jest.fn().mockResolvedValue(0),
     };
     geoServer = {
       ensureFeatureType: jest
         .fn()
         .mockResolvedValue({ minX: 75.0, minY: 20.8, maxX: 75.1, maxY: 20.9 }),
       getFeaturesAsGeoJson: jest.fn(),
+      deleteFeatureType: jest.fn().mockResolvedValue(undefined),
     };
     // Owner-bypass by default: filterViewable/canView etc. are only
     // exercised directly in "permission filtering" below — every other
@@ -84,14 +92,28 @@ describe('GisLayersService', () => {
       setGrant: jest.fn().mockResolvedValue(undefined),
     };
 
+    // Demo-layer seeding is opt-in via GIS_SEED_DEMO_LAYERS; default the
+    // mock to "true" so the seeding tests below exercise the real path.
+    config = { get: jest.fn().mockReturnValue('true') };
+
     service = new GisLayersService(
       prisma as unknown as PrismaService,
       geoServer as unknown as GeoServerService,
       gisAuth as unknown as GisAuthorizationService,
+      config as unknown as ConfigService,
     );
   });
 
   describe('ensureDemoLayers', () => {
+    it('does nothing when GIS_SEED_DEMO_LAYERS is not "true"', async () => {
+      config.get.mockReturnValue('false');
+
+      await service.ensureDemoLayers(workspace as never);
+
+      expect(geoServer.ensureFeatureType).not.toHaveBeenCalled();
+      expect(prisma.gISLayer.upsert).not.toHaveBeenCalled();
+    });
+
     it('publishes all three canonical demo layers, each scoped to this workspace via a CQL filter on gis_workspace_id', async () => {
       prisma.gISLayer.upsert.mockResolvedValue({});
 
@@ -209,47 +231,20 @@ describe('GisLayersService', () => {
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
-    it('lazily backfills demo layers for an ACTIVE workspace that has none yet (legacy municipality)', async () => {
+    it('never seeds layers on read — a fresh workspace with no layers returns an empty list', async () => {
       prisma.gISWorkspace.findUnique.mockResolvedValue({
-        id: 'ws-legacy',
-        geoserverWorkspace: 'legacy_municipality',
+        id: 'ws-fresh',
+        geoserverWorkspace: 'fresh_municipality',
         defaultCrs: 'EPSG:32643',
         status: 'ACTIVE',
       });
-      prisma.gISLayer.count.mockResolvedValue(0);
-      prisma.gISLayer.upsert.mockResolvedValue({});
       prisma.gISLayer.findMany.mockResolvedValue([]);
 
-      await service.listForMunicipality(appUser('muni-legacy'));
+      const result = await service.listForMunicipality(appUser('muni-fresh'));
 
-      expect(geoServer.ensureFeatureType).toHaveBeenCalledTimes(3);
-      expect(prisma.gISLayer.findMany).toHaveBeenCalled();
-    });
-
-    it('does not attempt a backfill once layers already exist', async () => {
-      prisma.gISWorkspace.findUnique.mockResolvedValue({
-        id: 'ws-a',
-        status: 'ACTIVE',
-      });
-      prisma.gISLayer.count.mockResolvedValue(3);
-      prisma.gISLayer.findMany.mockResolvedValue([]);
-
-      await service.listForMunicipality(appUser('muni-a'));
-
+      expect(result).toEqual([]);
       expect(geoServer.ensureFeatureType).not.toHaveBeenCalled();
-    });
-
-    it('does not attempt a backfill for a workspace that is not ACTIVE', async () => {
-      prisma.gISWorkspace.findUnique.mockResolvedValue({
-        id: 'ws-provisioning',
-        status: 'PROVISIONING',
-      });
-      prisma.gISLayer.findMany.mockResolvedValue([]);
-
-      await service.listForMunicipality(appUser('muni-provisioning'));
-
-      expect(prisma.gISLayer.count).not.toHaveBeenCalled();
-      expect(geoServer.ensureFeatureType).not.toHaveBeenCalled();
+      expect(prisma.gISLayer.upsert).not.toHaveBeenCalled();
     });
 
     it('delegates permission filtering to GisAuthorizationService.filterViewable (Task 8)', async () => {
@@ -332,6 +327,82 @@ describe('GisLayersService', () => {
         'roads',
       );
       expect(result.filename).toBe('roads.geojson');
+    });
+  });
+
+  describe('deleteLayer', () => {
+    const uploadedLayer = {
+      id: 'layer-1',
+      code: 'DRAINAGE',
+      geoserverWorkspace: 'somnath_municipality',
+      geoserverLayer: 'drainage',
+      ownershipType: 'DEPARTMENT',
+      departmentId: 'dept-water',
+      postgisTable: `layer_${'a'.repeat(32)}`,
+    };
+
+    beforeEach(() => {
+      prisma.gISWorkspace.findUnique.mockResolvedValue({ id: 'ws-a' });
+      prisma.gISLayer.findFirst.mockResolvedValue(uploadedLayer);
+    });
+
+    it('403s for a non-owner and touches nothing', async () => {
+      const deptHead = { ...OWNER, systemRole: 'DEPARTMENT_HEAD' as const };
+
+      await expect(
+        service.deleteLayer(deptHead, 'layer-1'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(geoServer.deleteFeatureType).not.toHaveBeenCalled();
+      expect(prisma.gISLayer.delete).not.toHaveBeenCalled();
+      expect(prisma.$executeRawUnsafe).not.toHaveBeenCalled();
+    });
+
+    it('unpublishes the GeoServer feature type, deletes the row, then drops the layer table', async () => {
+      await service.deleteLayer(appUser('muni-a'), 'layer-1');
+
+      expect(geoServer.deleteFeatureType).toHaveBeenCalledWith(
+        'somnath_municipality',
+        'somnath_municipality_postgis',
+        'drainage',
+      );
+      expect(prisma.gISLayer.delete).toHaveBeenCalledWith({
+        where: { id: 'layer-1' },
+      });
+      expect(prisma.$executeRawUnsafe).toHaveBeenCalledWith(
+        `DROP TABLE IF EXISTS "layer_${'a'.repeat(32)}"`,
+      );
+    });
+
+    it('aborts before the DB delete when GeoServer fails — stays retryable', async () => {
+      geoServer.deleteFeatureType.mockRejectedValue(new Error('GeoServer down'));
+
+      await expect(
+        service.deleteLayer(appUser('muni-a'), 'layer-1'),
+      ).rejects.toThrow('GeoServer down');
+      expect(prisma.gISLayer.delete).not.toHaveBeenCalled();
+    });
+
+    it('never drops a table for a canonical/demo layer (no dedicated postgisTable)', async () => {
+      prisma.gISLayer.findFirst.mockResolvedValue({
+        ...uploadedLayer,
+        ownershipType: 'CANONICAL',
+        departmentId: null,
+        postgisTable: null,
+      });
+
+      await service.deleteLayer(appUser('muni-a'), 'layer-1');
+
+      expect(prisma.gISLayer.delete).toHaveBeenCalled();
+      expect(prisma.$executeRawUnsafe).not.toHaveBeenCalled();
+    });
+
+    it('still resolves when the post-delete table drop fails (best-effort)', async () => {
+      prisma.$executeRawUnsafe.mockRejectedValue(new Error('table locked'));
+
+      await expect(
+        service.deleteLayer(appUser('muni-a'), 'layer-1'),
+      ).resolves.toBeUndefined();
+      expect(prisma.gISLayer.delete).toHaveBeenCalled();
     });
   });
 });

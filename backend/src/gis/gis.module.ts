@@ -12,6 +12,8 @@ import { StorageService } from './storage.service';
 import { GisAuthorizationService } from './gis-authorization.service';
 import { GisDashboardController } from './gis-dashboard.controller';
 import { GisDashboardService } from './gis-dashboard.service';
+import { PrintController } from './print.controller';
+import { PrintService } from './print.service';
 
 @Module({
   imports: [AuthModule],
@@ -20,6 +22,7 @@ import { GisDashboardService } from './gis-dashboard.service';
     GisLayersController,
     GisUploadsController,
     GisDashboardController,
+    PrintController,
   ],
   providers: [
     GisWorkspaceService,
@@ -30,6 +33,7 @@ import { GisDashboardService } from './gis-dashboard.service';
     StorageService,
     GisAuthorizationService,
     GisDashboardService,
+    PrintService,
   ],
   exports: [GisWorkspaceService, GisLayersService, GisAuthorizationService],
 })

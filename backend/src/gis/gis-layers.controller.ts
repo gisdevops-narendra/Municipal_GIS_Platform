@@ -1,6 +1,9 @@
-import { Body, Controller, Get, Param, Put, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Put, Res } from '@nestjs/common';
 import type { Response } from 'express';
-import { RequireMunicipalityMember } from '../auth/decorators/authorization.decorators';
+import {
+  RequireMunicipalityMember,
+  RequireMunicipalityOwner,
+} from '../auth/decorators/authorization.decorators';
 import { CurrentAppUser } from '../auth/decorators/current-app-user.decorator';
 import type { AppUser } from '../auth/types/app-user.type';
 import { GisLayersService } from './gis-layers.service';
@@ -58,6 +61,19 @@ export class GisLayersController {
   @Get('layers/:id/permissions')
   getPermissions(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
     return this.gisLayersService.getPermissionMatrix(appUser, id);
+  }
+
+  /** Hard-deletes a layer — unpublishes it from GeoServer and drops its
+   *  data. Owner-only (also re-checked in the service); the guard here is
+   *  defense-in-depth, matching DELETE /api/departments/:id. */
+  @RequireMunicipalityOwner()
+  @Delete('layers/:id')
+  async deleteLayer(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+  ): Promise<{ success: true }> {
+    await this.gisLayersService.deleteLayer(appUser, id);
+    return { success: true };
   }
 
   /** Task 8 §7. One checkbox toggle per call. Gated by MANAGE and the

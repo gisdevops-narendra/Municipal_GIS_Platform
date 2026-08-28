@@ -1,0 +1,27 @@
+# Keep line endings consistent across Windows and Linux checkouts.
+# Text files are normalized to LF in the repo and on checkout.
+* text=auto eol=lf
+
+# Windows-only scripts must stay CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary assets — never normalize or diff as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.shp binary
+*.dbf binary
+*.shx binary
+*.gpkg binary

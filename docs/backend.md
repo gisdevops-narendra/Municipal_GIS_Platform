@@ -458,9 +458,9 @@ and a `bboxMinX/Y`/`bboxMaxX/Y` (EPSG:4326) captured from GeoServer at
 publish time — this is what lets the frontend compute an initial map
 view without any hardcoded coordinates (see §25).
 
-Three demonstration layers ship with every municipality — **hand-authored
-sample geometry, not real municipal GIS data**, clearly labelled as such
-in their `description`:
+Three demonstration layers can be seeded into every municipality —
+**hand-authored sample geometry, not real municipal GIS data**, clearly
+labelled as such in their `description`:
 
 | code | name | geometry | native table |
 |---|---|---|---|
@@ -468,34 +468,28 @@ in their `description`:
 | `WARDS` | Wards | Polygon | `gis_demo_wards` |
 | `ROADS` | Roads | Line | `gis_demo_roads` |
 
-`GisLayersService.ensureDemoLayers(workspace)` idempotently creates the
-`GISLayer` rows and publishes the matching GeoServer feature types. It
-never throws — a single layer's publish failing (logged) does not affect
-the others or the workspace's own status. It runs automatically in two
-places:
+**This is off by default.** A freshly registered municipality starts with
+an empty layer list — nothing is created until its owner uploads real
+data. Set `GIS_SEED_DEMO_LAYERS=true` to opt in (local demos, screenshots).
 
-1. Inside `GisWorkspaceService.provisionWorkspace()`, right after a
-   workspace is marked `ACTIVE` — so newly registered municipalities get a
-   working map with zero manual steps, same philosophy as workspace
-   provisioning itself.
-2. Lazily, inside `GisLayersService.listForMunicipality()` — if an
-   `ACTIVE` workspace has zero `GISLayer` rows (e.g. it was provisioned
-   before this feature existed), the first `GET /api/gis/layers` call for
-   that municipality backfills them before returning. This is a single
-   cheap `count()` query in the common case (layers already exist), so it
-   does not defeat the "fetch layer metadata once" performance goal. This
-   was found and fixed live during Task 6 verification: two municipalities
-   registered during Task 5 testing (before this feature existed) had an
-   `ACTIVE` workspace but no layers, and had no path to ever get them
-   without this backfill.
+`GisLayersService.ensureDemoLayers(workspace)` idempotently creates the
+`GISLayer` rows and publishes the matching GeoServer feature types. When
+`GIS_SEED_DEMO_LAYERS` is not `"true"` it is a no-op. It never throws — a
+single layer's publish failing (logged) does not affect the others or the
+workspace's own status. It runs from
+`GisWorkspaceService.provisionWorkspace()`, right after a workspace is
+marked `ACTIVE`. There is **no** lazy backfill on read:
+`GisLayersService.listForMunicipality()` returns exactly the `GISLayer`
+rows that exist, and never creates any.
 
 Actual demo *geometry* is separate from the metadata above — it is seeded
 into the shared demo tables (Somnath, by default) via
 `backend/prisma/seed-demo-gis-data.ts` (`npm run seed:gis-demo`),
-idempotent and safe to re-run. Freshly registered municipalities get
-working layer metadata and published (empty) featuretypes automatically,
-but no demo geometry until/unless they're seeded too — the map still
-loads correctly, it just has nothing to draw yet.
+idempotent and safe to re-run. With `GIS_SEED_DEMO_LAYERS=true`, freshly
+registered municipalities get working layer metadata and published
+(empty) featuretypes automatically, but no demo geometry until/unless
+they're seeded too — the map still loads correctly, it just has nothing
+to draw yet.
 
 ## 23. WMS / WFS & CQL-based tenant isolation for shared demo data
 
@@ -585,6 +579,54 @@ India-wide view only if no layer has usable data yet) — never a hardcoded
 coordinate, so a newly registered municipality anywhere in India gets a
 sensible initial view with zero frontend code changes.
 
+## 26. Print Layout (MapFish Print)
+
+The GIS workspace's **Print Layout** tool (left dock) turns the live
+OpenLayers map into a professional A4/A3, portrait/landscape, PDF or PNG
+document — title, legend, scale bar, north arrow, date, metadata,
+attribution.
+
+**Pipeline.** `mapfish-print` (a compose service,
+`camptocamp/mapfish_print:3.30`, backend-only — never exposed to the
+browser) does the map compositing. Print templates live in
+`mapfish-print/print-apps/municipal-gis/` (`config.yaml` + one
+JasperReports 6.20 `.jrxml` per layout + `legend.jrxml` + `north-arrow.svg`)
+and are mounted read-only into the container.
+
+**The backend builds the spec, not the frontend** (`PrintService` /
+`PrintController`, `backend/src/gis/print.*`). The Angular panel sends only
+the live view (`center` + true `scale` + `rotation`, via
+`MapService.getPrintContext()` — `center`+`scale`, never a bbox, so the
+printed resolution matches the screen) and a list of **GISLayer ids**.
+`PrintService.buildReport`:
+
+1. `GisLayersService.listForMunicipality(appUser)` → the caller's
+   tenant-scoped, permission-filtered layers. A requested `layerId` not in
+   that list → `403` (**this is the print authorization boundary** — you
+   can only print a layer you can already VIEW). Any member may print.
+2. builds the MapFish v3 spec: each WMS layer's `baseURL` is
+   `MAPFISH_GEOSERVER_URL` (`http://geoserver:8080/geoserver` — the
+   compose-internal address, so the *print container* fetches the imagery,
+   not the browser); the live `CQL_FILTER` is passed straight through;
+   legend entries are GetLegendGraphic URLs on the same internal GeoServer.
+3. the basemap is resolved from `basemapId` against a fixed server-side
+   allowlist (`osm` / `carto-light` / `topo` / `none`) — the client never
+   sends a URL, so MapFish can never be pointed at an arbitrary host.
+4. POSTs to MapFish's synchronous `buildreport.<pdf|png>` (120 s timeout)
+   and streams the binary back with a `Content-Disposition` filename
+   (`main.ts` adds `Content-Disposition` to CORS `exposedHeaders` so the
+   panel can read it). A MapFish error or unreachable engine → `503`.
+
+`buildSpec` is a pure function (DTO + resolved layers → spec object), unit
+tested in `print.service.spec.ts` without a running MapFish.
+
+**Config.** `MAPFISH_PRINT_URL`, `MAPFISH_GEOSERVER_URL`,
+`MAPFISH_PRINT_APP` (see `backend/.env.example`). MapFish adds ~1 GB RAM to
+the stack. Basemap tiles need outbound internet from the print container;
+`basemapId: 'none'` is the always-available offline path. `mapfish-print`
+is a `service_started` (not `_healthy`) dependency of `backend` so a slow
+print engine never blocks boot — print calls just 503 until it is up.
+
 ## 28. GIS Uploads (Task 7) — overview
 
 Turns the Municipal GIS from a read-only viewer into a system where
@@ -634,12 +676,19 @@ X_POSSIBLE_NAMES=...`/`-oo Y_POSSIBLE_NAMES=...`/`-oo
 KEEP_GEOM_COLUMNS=NO`.
 
 `GdalService.importToPostgis()` runs `ogr2ogr -f PostgreSQL "PG:..."
-<source> -nln <table> -lco GEOMETRY_NAME=geom -lco FID=id -nlt
+<source> -nln <table> -lco GEOMETRY_NAME=geom -lco PRECISION=NO -nlt
 PROMOTE_TO_MULTI -t_srs <targetCrs> [-s_srs <override>] -overwrite`.
 Table/column identifier quoting is handled internally by GDAL's
 PostgreSQL driver — this, not any hand-written SQL, is what satisfies
 Task 7 §10 ("do not directly use uploaded field names to construct SQL
 without sanitization").
+
+The FID column is left to GDAL's default (`ogc_fid`) — **not** forced to
+`id`. Municipal shapefiles frequently carry their own `id` attribute
+column (String/Real); `-lco FID=id` then makes ogr2ogr try to source the
+FID from it and aborts the import with `ERROR 1: Wrong field type for
+id`. With the default, that column imports as an ordinary attribute and
+GeoServer still auto-detects the primary key.
 
 ## 30. CRS handling (Task 7)
 
@@ -737,6 +786,21 @@ reusing Task 6's `ImageWMS`/`MunicipalMapComponent` rendering exactly —
 no separate preview infrastructure, no raw geometry ever sent to the
 browser. Deleted (best-effort) once the real feature type takes over at
 publish time.
+
+**Deleting a layer**: `DELETE /api/gis/layers/:id`
+(`GisLayersService.deleteLayer`) is a **hard delete**, **owner-only**
+(re-checked in the service, and guarded by `@RequireMunicipalityOwner()`
+— matching `DELETE /api/departments/:id`; it is *not* delegated through
+the MANAGE permission the way permission editing is, because it discards
+every version's data and all cross-department grants). Order:
+`deleteFeatureType` (recurse) → delete the `GISLayer` row (its
+`GISLayerPermission` grants cascade; PUBLISHED upload rows keep their
+history, the FK clears their `layerId`) → best-effort
+`DROP TABLE IF EXISTS` the `layer_<uuid>` table. GeoServer is called
+first and its failure aborts before any DB write, so the delete stays
+retryable. The shared `gis_demo_*` tables behind a CANONICAL/demo layer
+are never dropped (`postgisTable` is null for those, and
+`isSafeGeneratedTableName` is still checked defensively).
 
 **Failure handling** (§38): every GeoServer call in `publish()` happens
 BEFORE the Prisma transaction that writes `GISLayer`/marks the upload

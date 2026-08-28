@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jasperReport xmlns="http://jasperreports.sourceforge.net/jasperreports"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://jasperreports.sourceforge.net/jasperreports http://jasperreports.sourceforge.net/xsd/jasperreport.xsd"
+    name="A4-portrait" pageWidth="595" pageHeight="842" columnWidth="555" columnCount="1"
+    leftMargin="20" rightMargin="20" topMargin="20" bottomMargin="20"
+    isTitleNewPage="false" isSummaryNewPage="false" whenNoDataType="AllSectionsNoDetail">
+  <parameter name="mapSubReport" class="java.lang.String"/>
+  <parameter name="scalebarSubReport" class="java.lang.String"/>
+  <parameter name="northArrowSubReport" class="java.lang.String"/>
+  <parameter name="legendSubReport" class="java.lang.String"/>
+  <parameter name="legendDataSource" class="net.sf.jasperreports.engine.data.JRTableModelDataSource"/>
+  <parameter name="title" class="java.lang.String"/>
+  <parameter name="metadata" class="java.lang.String"/>
+  <parameter name="printDate" class="java.lang.String"/>
+  <parameter name="attribution" class="java.lang.String"/>
+  <parameter name="showLegend" class="java.lang.Boolean"/>
+  <parameter name="showScalebar" class="java.lang.Boolean"/>
+  <parameter name="showNorthArrow" class="java.lang.Boolean"/>
+  <title>
+    <band height="785" splitType="Prevent">
+      <textField isBlankWhenNull="true">
+        <reportElement x="0" y="0" width="555" height="28" forecolor="#1C2430"/>
+        <textElement><font size="19" isBold="true"/></textElement>
+        <textFieldExpression><![CDATA[$P{title}]]></textFieldExpression>
+      </textField>
+      <textField isBlankWhenNull="true">
+        <reportElement x="0" y="30" width="555" height="13" forecolor="#5B6572">
+          <printWhenExpression><![CDATA[$P{metadata} != null && $P{metadata}.trim().length() > 0]]></printWhenExpression>
+        </reportElement>
+        <textElement><font size="8"/></textElement>
+        <textFieldExpression><![CDATA[$P{metadata}]]></textFieldExpression>
+      </textField>
+      <line>
+        <reportElement x="0" y="46" width="555" height="1"/>
+        <graphicElement><pen lineWidth="0.5" lineColor="#C7CDD4"/></graphicElement>
+      </line>
+      <subreport>
+        <reportElement x="0" y="52" width="555" height="600"/>
+        <subreportExpression><![CDATA[$P{mapSubReport}]]></subreportExpression>
+      </subreport>
+      <subreport>
+        <reportElement x="8" y="610" width="200" height="40">
+          <printWhenExpression><![CDATA[$P{showScalebar}]]></printWhenExpression>
+        </reportElement>
+        <subreportExpression><![CDATA[$P{scalebarSubReport}]]></subreportExpression>
+      </subreport>
+      <subreport>
+        <reportElement x="503" y="600" width="44" height="52">
+          <printWhenExpression><![CDATA[$P{showNorthArrow}]]></printWhenExpression>
+        </reportElement>
+        <subreportExpression><![CDATA[$P{northArrowSubReport}]]></subreportExpression>
+      </subreport>
+      <staticText>
+        <reportElement x="0" y="658" width="555" height="13" forecolor="#1C2430">
+          <printWhenExpression><![CDATA[$P{showLegend}]]></printWhenExpression>
+        </reportElement>
+        <textElement><font size="10" isBold="true"/></textElement>
+        <text><![CDATA[Legend]]></text>
+      </staticText>
+      <subreport>
+        <reportElement x="0" y="672" width="555" height="80">
+          <printWhenExpression><![CDATA[Boolean.TRUE.equals($P{showLegend}) && $P{legendDataSource} != null]]></printWhenExpression>
+        </reportElement>
+        <dataSourceExpression><![CDATA[$P{legendDataSource}]]></dataSourceExpression>
+        <subreportExpression><![CDATA[$P{legendSubReport}]]></subreportExpression>
+      </subreport>
+      <line>
+        <reportElement x="0" y="760" width="555" height="1"/>
+        <graphicElement><pen lineWidth="0.5" lineColor="#C7CDD4"/></graphicElement>
+      </line>
+      <textField isBlankWhenNull="true">
+        <reportElement x="0" y="763" width="300" height="12" forecolor="#5B6572"/>
+        <textElement><font size="7"/></textElement>
+        <textFieldExpression><![CDATA[$P{printDate}]]></textFieldExpression>
+      </textField>
+      <textField isBlankWhenNull="true">
+        <reportElement x="255" y="763" width="300" height="12" forecolor="#5B6572"/>
+        <textElement textAlignment="Right"><font size="7"/></textElement>
+        <textFieldExpression><![CDATA[$P{attribution}]]></textFieldExpression>
+      </textField>
+    </band>
+  </title>
+</jasperReport>

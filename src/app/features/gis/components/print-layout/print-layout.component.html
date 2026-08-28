@@ -1,0 +1,150 @@
+<div class="pl">
+  <!-- ============ page setup ============ -->
+  <section class="pl__card">
+    <h3 class="pl__card-title">Page setup</h3>
+
+    <div class="pl__seg" role="radiogroup" aria-label="Orientation">
+      @for (option of orientationOptions; track option.value) {
+        <button
+          type="button"
+          class="pl__seg-btn"
+          role="radio"
+          [class.is-active]="orientation() === option.value"
+          [attr.aria-checked]="orientation() === option.value"
+          (click)="setOrientation(option.value)"
+        >
+          <span class="pl__ori" [class.pl__ori--portrait]="option.value === 'portrait'"></span>
+          {{ option.label }}
+        </button>
+      }
+    </div>
+
+    <div class="pl__grid2">
+      <label class="pl__field">
+        <span class="pl__label">Paper size</span>
+        <p-select
+          class="pl__select"
+          [options]="pageSizes"
+          optionLabel="label"
+          optionValue="value"
+          [ngModel]="pageSize()"
+          (ngModelChange)="pageSize.set($event); optionChanged()"
+          appendTo="body"
+        />
+      </label>
+      <label class="pl__field">
+        <span class="pl__label">Resolution</span>
+        <p-select
+          class="pl__select"
+          [options]="dpiOptions()"
+          optionLabel="label"
+          optionValue="value"
+          [ngModel]="dpi()"
+          (ngModelChange)="dpi.set($event); optionChanged()"
+          appendTo="body"
+        />
+      </label>
+    </div>
+
+    <div class="pl__seg" role="radiogroup" aria-label="Output format">
+      @for (option of formatOptions; track option.value) {
+        <button
+          type="button"
+          class="pl__seg-btn"
+          role="radio"
+          [class.is-active]="format() === option.value"
+          [attr.aria-checked]="format() === option.value"
+          (click)="setFormat(option.value)"
+        >
+          <i [class]="option.icon" aria-hidden="true"></i>
+          {{ option.label }}
+        </button>
+      }
+    </div>
+  </section>
+
+  <!-- ============ labels ============ -->
+  <section class="pl__card">
+    <h3 class="pl__card-title">Labels</h3>
+    <label class="pl__field">
+      <span class="pl__label">Map title</span>
+      <input
+        pInputText
+        class="pl__input"
+        [(ngModel)]="title"
+        (ngModelChange)="optionChanged()"
+        maxlength="120"
+        placeholder="e.g. Ward Boundaries — 2026"
+      />
+    </label>
+    <label class="pl__field">
+      <span class="pl__label">Subtitle / notes</span>
+      <input
+        pInputText
+        class="pl__input"
+        [(ngModel)]="metadata"
+        (ngModelChange)="optionChanged()"
+        maxlength="500"
+        placeholder="Optional second line"
+      />
+    </label>
+  </section>
+
+  <!-- ============ map elements ============ -->
+  <section class="pl__card">
+    <h3 class="pl__card-title">Show on map</h3>
+    <div class="pl__checks">
+      <label class="pl__check">
+        <p-checkbox [binary]="true" [(ngModel)]="includeLegend" (ngModelChange)="optionChanged()" inputId="pl-legend" />
+        <span>Legend</span>
+      </label>
+      <label class="pl__check">
+        <p-checkbox [binary]="true" [(ngModel)]="includeScalebar" (ngModelChange)="optionChanged()" inputId="pl-scale" />
+        <span>Scale bar</span>
+      </label>
+      <label class="pl__check">
+        <p-checkbox [binary]="true" [(ngModel)]="includeNorthArrow" (ngModelChange)="optionChanged()" inputId="pl-north" />
+        <span>North arrow</span>
+      </label>
+      <label class="pl__check">
+        <p-checkbox [binary]="true" [(ngModel)]="includeDate" (ngModelChange)="optionChanged()" inputId="pl-date" />
+        <span>Date</span>
+      </label>
+    </div>
+  </section>
+
+  <!-- ============ context ============ -->
+  <p class="pl__context">
+    <i class="pi pi-map" aria-hidden="true"></i>
+    <span>
+      Prints the current map view · scale <strong>{{ scaleLabel() }}</strong>
+      · {{ layers.length }} layer{{ layers.length === 1 ? '' : 's' }} available
+    </span>
+  </p>
+
+  <!-- ============ action ============ -->
+  <button
+    pButton
+    type="button"
+    label="Generate &amp; download"
+    icon="pi pi-download"
+    class="pl__generate"
+    [loading]="state() === 'generating'"
+    [disabled]="state() === 'generating'"
+    (click)="generate()"
+  ></button>
+
+  <!-- ============ state ============ -->
+  @if (state() === 'error' && errorMsg()) {
+    <p-message severity="error" [text]="errorMsg()!" styleClass="w-full" />
+  }
+  @if (state() === 'done' && lastFilename(); as name) {
+    <p class="pl__result">
+      <i class="pi pi-check-circle" aria-hidden="true"></i>
+      <span>
+        Saved <strong>{{ name }}</strong>.
+        <button type="button" class="pl__link" (click)="downloadAgain()">Download again</button>
+      </span>
+    </p>
+  }
+</div>

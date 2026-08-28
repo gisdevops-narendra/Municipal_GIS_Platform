@@ -29,6 +29,10 @@
           }
         </div>
 
+        @if (loginError) {
+          <p-message severity="error" text="Could not reach the identity provider. Check that Keycloak is running, then try again." styleClass="w-full" />
+        }
+
         <button pButton type="submit" label="Login" class="w-full" [loading]="redirecting"></button>
       </form>
 

@@ -22,7 +22,7 @@ import { defaults as defaultControls } from 'ol/control';
 import ScaleLine from 'ol/control/ScaleLine';
 import MousePosition from 'ol/control/MousePosition';
 import { createStringXY } from 'ol/coordinate';
-import { fromLonLat, transform, transformExtent } from 'ol/proj';
+import { fromLonLat, getPointResolution, transform, transformExtent } from 'ol/proj';
 import { createEmpty, extend as extendExtent, isEmpty as isEmptyExtent } from 'ol/extent';
 import type Geometry from 'ol/geom/Geometry';
 import { forkJoin, map as rxMap, Observable, of } from 'rxjs';
@@ -77,6 +77,29 @@ export interface BasemapOption {
   id: string;
   label: string;
   attribution: string;
+}
+
+/** One visible WMS layer as the Print Layout panel needs to describe it to
+ *  the backend — id only (the backend resolves the GeoServer name), plus
+ *  the live opacity and any CQL filter currently applied. */
+export interface PrintLayerContext {
+  layerId: string;
+  opacity: number;
+  cqlFilter: string | null;
+}
+
+/** Everything the Print Layout panel needs to reproduce the live view on
+ *  paper: the current extent expressed as centre + true map scale (so the
+ *  printed resolution matches the screen), the rotation, the visible
+ *  layers top-first, and which basemap is active. */
+export interface PrintMapContext {
+  projection: 'EPSG:3857';
+  center: [number, number];
+  /** Real-world scale denominator (1 : N) at the view centre. */
+  scale: number;
+  rotation: number;
+  layers: PrintLayerContext[];
+  basemapId: string;
 }
 
 /** Task 9 §7/§16: open-source/public tile sources only — no commercial
@@ -879,6 +902,60 @@ export class MapService {
         ? state.center
         : (transform(state.center, state.projection, target) as [number, number]);
     view.animate({ center, zoom: state.zoom, duration: 400 });
+  }
+
+  // ----- print layout -----
+
+  /** The live map scale denominator (1 : N) at the view centre, using the
+   *  OGC standard 0.28 mm/pixel — the same convention MapFish Print uses,
+   *  so a round-trip preserves the on-screen resolution. `null` before the
+   *  map is ready. */
+  currentScaleDenominator(): number | null {
+    const view = this.map?.getView();
+    const resolution = view?.getResolution();
+    const center = view?.getCenter();
+    if (!view || resolution === undefined || !center) {
+      return null;
+    }
+    const pointResolution = getPointResolution(MAP_PROJECTION, resolution, center);
+    return pointResolution / 0.00028;
+  }
+
+  /** Snapshot of the current view + visible WMS layers for the Print
+   *  Layout panel. Overlays (measurement, query highlight, analysis,
+   *  selection) and the basemap are excluded here — the backend adds the
+   *  basemap from `basemapId`, and the transient overlays are not part of
+   *  a printed map. `null` before the map is ready. */
+  getPrintContext(): PrintMapContext | null {
+    const view = this.map?.getView();
+    const center = view?.getCenter();
+    const scale = this.currentScaleDenominator();
+    if (!view || !center || scale === null) {
+      return null;
+    }
+    // managedLayers is insertion-ordered bottom→top (displayOrder at init);
+    // MapFish wants the topmost layer first.
+    const layers: PrintLayerContext[] = [...this.managedLayers.values()]
+      .filter((entry) => entry.olLayer.getVisible())
+      .reverse()
+      .map((entry) => {
+        const params = entry.olLayer.getSource()?.getParams() ?? {};
+        const cql = params['CQL_FILTER'];
+        return {
+          layerId: entry.layer.id,
+          opacity: entry.olLayer.getOpacity(),
+          cqlFilter: typeof cql === 'string' && cql.trim().length > 0 ? cql : null
+        };
+      });
+
+    return {
+      projection: MAP_PROJECTION,
+      center: [center[0], center[1]],
+      scale,
+      rotation: view.getRotation(),
+      layers,
+      basemapId: this.activeBasemap()
+    };
   }
 
   /** Task 9 §7: swaps the single base tile layer's source — every other

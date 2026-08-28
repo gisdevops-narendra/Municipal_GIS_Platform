@@ -32,6 +32,12 @@ export class GisLayersService {
     return this.http.get(`${this.baseUrl}/${id}/export`, { responseType: 'text' });
   }
 
+  /** Hard-deletes a layer — unpublishes it from GeoServer and drops its
+   *  data. Owner-only, enforced server-side. */
+  delete(id: string): Observable<{ success: true }> {
+    return this.http.delete<{ success: true }>(`${this.baseUrl}/${id}`);
+  }
+
   /** Gated by MANAGE permission server-side. */
   getPermissions(id: string): Observable<GisLayerPermissionMatrix> {
     return this.http.get<GisLayerPermissionMatrix>(`${this.baseUrl}/${id}/permissions`);

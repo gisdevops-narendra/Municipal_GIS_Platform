@@ -20,6 +20,9 @@ async function bootstrap() {
   app.enableCors({
     origin: config.get<string>('CORS_ORIGIN', 'http://localhost:4200'),
     credentials: true,
+    // Content-Disposition: so the Print Layout panel can read the
+    // suggested download filename off the streamed PDF/PNG response.
+    exposedHeaders: ['Content-Disposition'],
   });
 
   const port = config.get<string>('BACKEND_PORT', '3000');

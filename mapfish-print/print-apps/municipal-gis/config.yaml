@@ -1,0 +1,156 @@
+# MapFish Print v3 configuration — Municipal GIS Platform.
+#
+# One print app ("municipal-gis") with four page layouts (A4/A3 ×
+# portrait/landscape). The Angular frontend never builds this spec: the
+# NestJS backend (backend/src/gis/print.service.ts) assembles the request
+# from the live OpenLayers map state, resolves every layer against the
+# caller's tenant-scoped workspace, and rewrites GeoServer URLs to the
+# compose-internal address (http://geoserver:8080/geoserver) before
+# POSTing here. URL safety is therefore enforced by the spec builder, not
+# by !restrictUris. See docs/backend.md "Print Layout (MapFish Print)".
+
+throwErrorOnExtraParameters: true
+
+pdfConfig: !pdfConfig
+  compressed: true
+  author: 'Municipal GIS Platform'
+  creator: 'Municipal GIS Platform — MapFish Print'
+
+templates:
+  A4 portrait: !template
+    reportTemplate: A4-portrait.jrxml
+    attributes:
+      title: !string { default: '' }
+      metadata: !string { default: '' }
+      printDate: !string { default: '' }
+      attribution: !string { default: '' }
+      showLegend: !boolean { default: true }
+      showScalebar: !boolean { default: true }
+      showNorthArrow: !boolean { default: true }
+      map: !map
+        maxDpi: 300
+        dpiSuggestions: [96, 150, 300]
+        width: 555
+        height: 600
+      legend: !legend
+        default: { name: '' }
+      scalebar: !scalebar
+        width: 190
+        height: 40
+        default:
+          type: bar
+          unit: m
+          geodetic: true
+          renderAsSvg: true
+          backgroundColor: 'rgba(255, 255, 255, 0.75)'
+      northArrow: !northArrow
+        size: 44
+        default:
+          graphic: 'file://north-arrow.svg'
+          backgroundColor: 'rgba(255, 255, 255, 0)'
+    processors: &processors
+      - !reportBuilder { directory: '.' }
+      - !createMap {}
+      - !createScalebar {}
+      - !createNorthArrow {}
+      - !prepareLegend
+        template: legend.jrxml
+
+  A4 landscape: !template
+    reportTemplate: A4-landscape.jrxml
+    attributes:
+      title: !string { default: '' }
+      metadata: !string { default: '' }
+      printDate: !string { default: '' }
+      attribution: !string { default: '' }
+      showLegend: !boolean { default: true }
+      showScalebar: !boolean { default: true }
+      showNorthArrow: !boolean { default: true }
+      map: !map
+        maxDpi: 300
+        dpiSuggestions: [96, 150, 300]
+        width: 802
+        height: 400
+      legend: !legend
+        default: { name: '' }
+      scalebar: !scalebar
+        width: 190
+        height: 40
+        default:
+          type: bar
+          unit: m
+          geodetic: true
+          renderAsSvg: true
+          backgroundColor: 'rgba(255, 255, 255, 0.75)'
+      northArrow: !northArrow
+        size: 44
+        default:
+          graphic: 'file://north-arrow.svg'
+          backgroundColor: 'rgba(255, 255, 255, 0)'
+    processors: *processors
+
+  A3 portrait: !template
+    reportTemplate: A3-portrait.jrxml
+    attributes:
+      title: !string { default: '' }
+      metadata: !string { default: '' }
+      printDate: !string { default: '' }
+      attribution: !string { default: '' }
+      showLegend: !boolean { default: true }
+      showScalebar: !boolean { default: true }
+      showNorthArrow: !boolean { default: true }
+      map: !map
+        maxDpi: 300
+        dpiSuggestions: [96, 150, 300]
+        width: 802
+        height: 940
+      legend: !legend
+        default: { name: '' }
+      scalebar: !scalebar
+        width: 220
+        height: 40
+        default:
+          type: bar
+          unit: m
+          geodetic: true
+          renderAsSvg: true
+          backgroundColor: 'rgba(255, 255, 255, 0.75)'
+      northArrow: !northArrow
+        size: 52
+        default:
+          graphic: 'file://north-arrow.svg'
+          backgroundColor: 'rgba(255, 255, 255, 0)'
+    processors: *processors
+
+  A3 landscape: !template
+    reportTemplate: A3-landscape.jrxml
+    attributes:
+      title: !string { default: '' }
+      metadata: !string { default: '' }
+      printDate: !string { default: '' }
+      attribution: !string { default: '' }
+      showLegend: !boolean { default: true }
+      showScalebar: !boolean { default: true }
+      showNorthArrow: !boolean { default: true }
+      map: !map
+        maxDpi: 300
+        dpiSuggestions: [96, 150, 300]
+        width: 1151
+        height: 660
+      legend: !legend
+        default: { name: '' }
+      scalebar: !scalebar
+        width: 220
+        height: 40
+        default:
+          type: bar
+          unit: m
+          geodetic: true
+          renderAsSvg: true
+          backgroundColor: 'rgba(255, 255, 255, 0.75)'
+      northArrow: !northArrow
+        size: 52
+        default:
+          graphic: 'file://north-arrow.svg'
+          backgroundColor: 'rgba(255, 255, 255, 0)'
+    processors: *processors

@@ -59,6 +59,7 @@ export class GisLayersComponent {
 
   readonly detailLayer = signal<GisLayer | null>(null);
   readonly exporting = signal<string | null>(null);
+  readonly deleting = signal<string | null>(null);
 
   constructor() {
     this.currentUserService.getMe().subscribe({ next: (user) => this.currentUser.set(user) });
@@ -94,6 +95,35 @@ export class GisLayersComponent {
 
   openPermissions(layer: GisLayer): void {
     this.router.navigate(['/gis/layers', layer.id, 'permissions']);
+  }
+
+  /** Hard delete — unpublishes the layer from GeoServer and permanently
+   *  drops its data. Owner-only; the real gate is the backend. The list
+   *  is a permission-filtered snapshot, so on success we just drop the
+   *  row locally rather than refetching. */
+  deleteLayer(layer: GisLayer): void {
+    if (
+      !confirm(
+        `Delete "${layer.name}"? This unpublishes the layer and permanently removes its data. This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    this.actionError.set(null);
+    this.deleting.set(layer.id);
+    this.gisLayersService.delete(layer.id).subscribe({
+      next: () => {
+        this.deleting.set(null);
+        this.layers.update((layers) => layers.filter((l) => l.id !== layer.id));
+        if (this.detailLayer()?.id === layer.id) {
+          this.closeDetail();
+        }
+      },
+      error: (error: HttpErrorResponse) => {
+        this.deleting.set(null);
+        this.actionError.set(error.error?.message ?? 'Delete failed. Please try again.');
+      }
+    });
   }
 
   /** Triggers a real browser download of the GeoJSON returned by the

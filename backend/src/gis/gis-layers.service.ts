@@ -4,10 +4,12 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { GISLayer, GISWorkspace, GisPermission } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { GeoServerService } from './geoserver.service';
 import { GisAuthorizationService } from './gis-authorization.service';
+import { isSafeGeneratedTableName } from './layer-naming.util';
 import type { AppUser } from '../auth/types/app-user.type';
 
 type LayerWithDepartment = GISLayer & {
@@ -74,7 +76,19 @@ export class GisLayersService {
     private readonly prisma: PrismaService,
     private readonly geoServer: GeoServerService,
     private readonly gisAuth: GisAuthorizationService,
+    private readonly config: ConfigService,
   ) {}
+
+  /**
+   * Whether newly provisioned municipalities get the three sample demo
+   * layers (Municipality Boundary / Wards / Roads). Off by default: a fresh
+   * registration should start with an empty layer list until the owner
+   * uploads real data. Set `GIS_SEED_DEMO_LAYERS=true` to opt in (e.g. for
+   * local demos / screenshots).
+   */
+  private demoLayersEnabled(): boolean {
+    return this.config.get<string>('GIS_SEED_DEMO_LAYERS', 'false') === 'true';
+  }
 
   /**
    * Idempotently creates the GISLayer metadata rows + publishes the
@@ -92,6 +106,13 @@ export class GisLayersService {
    * working even if one layer publish had a hiccup).
    */
   async ensureDemoLayers(workspace: GISWorkspace): Promise<void> {
+    if (!this.demoLayersEnabled()) {
+      this.logger.debug(
+        `Skipping demo-layer seeding for workspace "${workspace.geoserverWorkspace}" (GIS_SEED_DEMO_LAYERS is not "true")`,
+      );
+      return;
+    }
+
     const datastore = `${workspace.geoserverWorkspace}_postgis`;
     const cqlFilter = `gis_workspace_id = '${workspace.id}'`;
 
@@ -163,21 +184,6 @@ export class GisLayersService {
     });
     if (!workspace) {
       throw new NotFoundException('GIS workspace not found.');
-    }
-
-    // Lazy backfill: a workspace that was provisioned before this feature
-    // existed (or whose earlier ensureDemoLayers call fully failed) has an
-    // ACTIVE workspace but zero GISLayer rows. Self-heal it here — cheap in
-    // the common case (a single count query that short-circuits once
-    // layers exist) and avoids requiring every pre-existing municipality's
-    // owner to manually hit "Retry Provisioning".
-    if (workspace.status === 'ACTIVE') {
-      const existingCount = await this.prisma.gISLayer.count({
-        where: { gisWorkspaceId: workspace.id },
-      });
-      if (existingCount === 0) {
-        await this.ensureDemoLayers(workspace);
-      }
     }
 
     const layers = await this.prisma.gISLayer.findMany({
@@ -324,6 +330,53 @@ export class GisLayersService {
       granted,
     );
     return this.getPermissionMatrix(appUser, layerId);
+  }
+
+  /**
+   * Hard-deletes a layer: unpublishes its GeoServer feature type, removes
+   * the GISLayer row (its GISLayerPermission grants cascade), and drops
+   * the dedicated `layer_<uuid>` PostGIS table an upload created for it.
+   *
+   * Owner-only. Deleting a layer throws away every version's data and all
+   * cross-department grants, so — unlike permission editing — it is never
+   * delegated through the MANAGE permission. The shared `gis_demo_*`
+   * tables behind a CANONICAL/demo layer are never dropped (`postgisTable`
+   * is null for those). PUBLISHED upload rows that produced this layer
+   * keep their history; the DB clears their `layerId` (FK ON DELETE SET
+   * NULL).
+   */
+  async deleteLayer(appUser: AppUser, layerId: string): Promise<void> {
+    if (appUser.systemRole !== 'MUNICIPALITY_OWNER') {
+      throw new ForbiddenException(
+        'Only the municipality owner may delete a layer.',
+      );
+    }
+    const layer = await this.findLayerInMunicipality(
+      appUser.municipalityId,
+      layerId,
+    );
+
+    // GeoServer first: if it fails (for anything other than an
+    // already-absent feature type, which deleteFeatureType treats as
+    // success), abort before touching the database so the delete stays
+    // retryable rather than leaving an orphaned published layer.
+    await this.geoServer.deleteFeatureType(
+      layer.geoserverWorkspace,
+      `${layer.geoserverWorkspace}_postgis`,
+      layer.geoserverLayer,
+    );
+
+    await this.prisma.gISLayer.delete({ where: { id: layer.id } });
+
+    if (layer.postgisTable && isSafeGeneratedTableName(layer.postgisTable)) {
+      await this.prisma
+        .$executeRawUnsafe(`DROP TABLE IF EXISTS "${layer.postgisTable}"`)
+        .catch((error: Error) =>
+          this.logger.warn(
+            `Deleted layer ${layer.id} but failed to drop its table "${layer.postgisTable}": ${error.message}`,
+          ),
+        );
+    }
   }
 
   private async findLayerInMunicipality(

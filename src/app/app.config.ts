@@ -48,7 +48,13 @@ export const appConfig: ApplicationConfig = {
       initOptions: {
         onLoad: 'check-sso',
         silentCheckSsoRedirectUri: `${window.location.origin}/silent-check-sso.html`,
-        pkceMethod: 'S256'
+        pkceMethod: 'S256',
+        // Modern browsers block the third-party cookies the session-status
+        // iframe needs (Keycloak is a different origin than this SPA), so the
+        // iframe check misfires as "logged out" and drives a redirect loop
+        // between /dashboard and Keycloak. Token freshness is handled by
+        // withAutoRefreshToken() below instead.
+        checkLoginIframe: false
       },
       features: [withAutoRefreshToken({ onInactivityTimeout: 'none' })]
     })

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80">
+  <g fill="none" stroke="#1c2430" stroke-width="2">
+    <circle cx="40" cy="42" r="30"/>
+  </g>
+  <polygon points="40,8 50,46 40,38 30,46" fill="#1c2430"/>
+  <polygon points="40,8 40,38 30,46" fill="#5b6572"/>
+  <text x="40" y="78" text-anchor="middle" font-family="Arial, Helvetica, sans-serif"
+        font-size="16" font-weight="bold" fill="#1c2430">N</text>
+</svg>

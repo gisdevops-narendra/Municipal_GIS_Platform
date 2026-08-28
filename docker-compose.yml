@@ -64,6 +64,15 @@ services:
       GEOSERVER_ADMIN_PASSWORD: ${GEOSERVER_ADMIN_PASSWORD:-geoserver_dev_admin}
       INITIAL_MEMORY: 512M
       MAXIMUM_MEMORY: 1G
+      # Angular (http://localhost:4200) calls GeoServer's anonymous OGC
+      # endpoints directly from the browser. The WPS Execute POST sends
+      # Content-Type: application/xml, which makes the browser fire a
+      # CORS preflight — GeoServer must answer it. No credentials are
+      # ever sent, so a wildcard origin is safe here (dev only).
+      CORS_ENABLED: "true"
+      CORS_ALLOWED_ORIGINS: "*"
+      CORS_ALLOWED_METHODS: "GET,POST,PUT,DELETE,HEAD,OPTIONS"
+      CORS_ALLOWED_HEADERS: "*"
     ports:
       # Host port 8080 is commonly taken; GeoServer listens on 8080
       # internally, serving under the /geoserver context path.
@@ -79,6 +88,32 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    restart: unless-stopped
+
+  mapfish-print:
+    # MapFish Print v3 — the map compositing / PDF+PNG engine behind the
+    # GIS workspace's Print Layout tool. Only the backend talks to it (see
+    # backend/src/gis/print.service.ts); it is never exposed to the browser.
+    # It fetches WMS from GeoServer and basemap tiles over the compose
+    # network + the public internet. Print templates live in
+    # ./mapfish-print/print-apps/municipal-gis (config.yaml + *.jrxml).
+    image: camptocamp/mapfish_print:3.30
+    container_name: municipal-gis-mapfish-print
+    environment:
+      # ~1 GB of extra RAM for the print JVM. Lower Xmx if the stack is
+      # tight, but large A3/300-dpi renders may then fail.
+      CATALINA_OPTS: "-Xms256m -Xmx1g"
+    # No published port (backend-only). To hit capabilities.json /
+    # buildreport directly while debugging templates, add:
+    #   ports: ["8680:8080"]
+    volumes:
+      - ./mapfish-print/print-apps:/usr/local/tomcat/webapps/ROOT/print-apps:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/print/municipal-gis/capabilities.json > /dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 40s
     restart: unless-stopped
 
   backend:
@@ -124,6 +159,18 @@ services:
       GIS_UPLOAD_MAX_FILE_SIZE_MB: ${GIS_UPLOAD_MAX_FILE_SIZE_MB:-500}
       GIS_UPLOAD_MAX_EXTRACTED_ZIP_SIZE_MB: ${GIS_UPLOAD_MAX_EXTRACTED_ZIP_SIZE_MB:-2000}
       GIS_UPLOAD_MAX_ZIP_FILE_COUNT: ${GIS_UPLOAD_MAX_ZIP_FILE_COUNT:-100}
+      # When "true", newly registered municipalities are seeded with the
+      # three sample demo layers. Off by default — a fresh registration
+      # starts with an empty layer list. See backend/.env.example.
+      GIS_SEED_DEMO_LAYERS: ${GIS_SEED_DEMO_LAYERS:-false}
+      # MapFish Print — Print Layout tool (docs/backend.md "Print Layout").
+      # MAPFISH_PRINT_URL: this backend → the print engine.
+      # MAPFISH_GEOSERVER_URL: the URL baked INTO the print spec, i.e. how
+      # the mapfish-print container reaches GeoServer (compose-internal,
+      # never the browser-facing localhost:8600).
+      MAPFISH_PRINT_URL: ${MAPFISH_PRINT_URL:-http://mapfish-print:8080/print}
+      MAPFISH_PRINT_APP: ${MAPFISH_PRINT_APP:-municipal-gis}
+      MAPFISH_GEOSERVER_URL: ${MAPFISH_GEOSERVER_URL:-http://geoserver:8080/geoserver}
     ports:
       - "${BACKEND_PORT:-3000}:3000"
     volumes:
@@ -145,6 +192,10 @@ services:
       keycloak:
         condition: service_started
       geoserver:
+        condition: service_started
+      # service_started, not healthy: a slow print engine must not block
+      # the backend from booting. Print calls return 503 until it is up.
+      mapfish-print:
         condition: service_started
     restart: unless-stopped
 

@@ -83,6 +83,13 @@
               <p class="gis-ws__hint">{{ layersError() ?? 'Loading layers…' }}</p>
             }
           }
+          @case ('print') {
+            @if (layersReady()) {
+              <app-print-layout [layers]="layers()" />
+            } @else {
+              <p class="gis-ws__hint">{{ layersError() ?? 'Loading map…' }}</p>
+            }
+          }
           @case ('workspace') {
             @if (workspace(); as ws) {
               @if (ws.status === 'PROVISIONING_FAILED') {
