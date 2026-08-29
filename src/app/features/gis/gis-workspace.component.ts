@@ -1,4 +1,5 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, WritableSignal, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
 import { ActivatedRoute } from '@angular/router';
@@ -144,6 +145,13 @@ export class GisWorkspaceComponent {
   readonly leftWidth = signal(300);
   readonly bottomHeight = signal(240);
 
+  /** Every tool panel that has been opened at least once. Panels are kept
+   *  mounted (just hidden) after their first open so switching tools — or
+   *  leaving and returning to the workspace — never loses their in-progress
+   *  form / filter / result state. */
+  readonly openedLeftTools = signal<ReadonlySet<string>>(new Set(['layers']));
+  readonly openedBottomTools = signal<ReadonlySet<string>>(new Set());
+
   readonly activeLeftTool = computed(() => TOOLS.find((tool) => tool.id === this.leftTool()) ?? null);
   readonly activeBottomTool = computed(() => TOOLS.find((tool) => tool.id === this.bottomTool()) ?? null);
 
@@ -170,7 +178,9 @@ export class GisWorkspaceComponent {
 
   readonly highlightLayerId = signal<string | null>(null);
   private mapIsReady = false;
-  private deepLinkApplied = false;
+  /** Signature of the query params the deep-link was last applied for — so a
+   *  kept-alive workspace re-applies only when the params actually change. */
+  private lastDeepLinkKey: string | null = null;
 
   /** Active Query Builder result — drives the WMS filter, the map highlight,
    *  and the Attribute Table's locked filter. */
@@ -209,6 +219,11 @@ export class GisWorkspaceComponent {
       next: () => this.geoserverReachable.set(true),
       error: () => this.geoserverReachable.set(false)
     });
+
+    // The workspace is kept alive across navigation, so `?layer=` / `?department=`
+    // deep links (from the dashboard) arrive on re-navigation, not just at
+    // construction — react to every change, not a one-shot snapshot read.
+    this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe(() => this.tryApplyDeepLink());
   }
 
   get f() {
@@ -219,10 +234,24 @@ export class GisWorkspaceComponent {
   activateTool(tool: WsTool): void {
     if (tool.dock === 'left') {
       this.leftTool.update((current) => (current === tool.id ? null : tool.id));
+      if (this.leftTool() === tool.id) {
+        this.rememberOpened(this.openedLeftTools, tool.id);
+      }
     } else {
       this.bottomTool.update((current) => (current === tool.id ? null : tool.id));
+      if (this.bottomTool() === tool.id) {
+        this.rememberOpened(this.openedBottomTools, tool.id);
+      }
     }
     this.refreshMapSize();
+  }
+
+  private rememberOpened(
+    store: WritableSignal<ReadonlySet<string>>,
+    id: string,
+  ): void {
+    if (store().has(id)) return;
+    store.set(new Set([...store(), id]));
   }
 
   isToolActive(tool: WsTool): boolean {
@@ -340,14 +369,19 @@ export class GisWorkspaceComponent {
   }
 
   private tryApplyDeepLink(): void {
-    if (this.deepLinkApplied || !this.mapIsReady || this.layers().length === 0) {
+    if (!this.mapIsReady || this.layers().length === 0) {
       return;
     }
-    this.deepLinkApplied = true;
 
     const params = this.route.snapshot.queryParamMap;
     const layerId = params.get('layer');
     const departmentId = params.get('department');
+
+    const key = `${layerId ?? ''}|${departmentId ?? ''}`;
+    if (key === this.lastDeepLinkKey) {
+      return;
+    }
+    this.lastDeepLinkKey = key;
 
     if (layerId) {
       const layer = this.layers().find((candidate) => candidate.id === layerId);

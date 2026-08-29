@@ -1,4 +1,4 @@
-import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, Input, OnDestroy, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { SelectModule } from 'primeng/select';
@@ -34,8 +34,28 @@ interface ResultRow {
   templateUrl: './measure.component.html',
   styleUrl: './measure.component.scss'
 })
-export class MeasureComponent implements OnInit, OnDestroy {
+export class MeasureComponent implements OnDestroy {
   private readonly mapService = inject(MapService);
+
+  /** The panel is kept mounted after its first open (workspace keeps every
+   *  opened tool alive) — this tracks whether it is the *visible* tool, so
+   *  the map draw interaction is paused while hidden but a completed
+   *  measurement stays on the map. */
+  private isActive = false;
+  @Input() set active(value: boolean) {
+    if (value === this.isActive) return;
+    this.isActive = value;
+    if (value) {
+      this.mapService.setMeasureMode(true);
+      // Returning to a finished (or in-progress) measurement must not wipe it.
+      if (!this.result() && !this.drawing()) {
+        this.start();
+      }
+    } else {
+      this.mapService.setMeasureMode(false);
+      this.mapService.stopMeasure();
+    }
+  }
 
   readonly kinds: { value: MeasureKind; label: string }[] = [
     { value: 'distance', label: 'Distance' },
@@ -85,16 +105,13 @@ export class MeasureComponent implements OnInit, OnDestroy {
     }));
   });
 
-  ngOnInit(): void {
-    // Suppress Identify feature-info popups for the whole time this tool is
-    // open — a map click while measuring should only measure.
-    this.mapService.setMeasureMode(true);
-    this.start();
-  }
-
   ngOnDestroy(): void {
+    // Only fires on a real teardown (workspace closed / logout), never on a
+    // tool switch. Full map cleanup is MapService.destroy()'s job; here we
+    // just release the interaction. The explicit "Clear" button still wipes
+    // the graphics via clearMeasure().
     this.mapService.setMeasureMode(false);
-    this.mapService.clearMeasure();
+    this.mapService.stopMeasure();
   }
 
   onKindChange(kind: MeasureKind): void {

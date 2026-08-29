@@ -98,6 +98,21 @@
   border-right: 1px solid var(--color-line);
 }
 
+/* Dock closed, or the style editor has taken over — the panel host stays in
+   the DOM (its tool panels are kept alive) but collapses its grid track,
+   exactly as the old `@if` did. */
+.gis-ws__left.is-collapsed,
+.gis-ws__bottom.is-collapsed {
+  display: none;
+}
+
+/* A tool panel that has been opened but isn't the one currently shown:
+   kept mounted so its state survives, just not visible. `!important` beats
+   any `:host { display: … }` a panel component sets. */
+.gis-ws__panel--hidden {
+  display: none !important;
+}
+
 /* ---------- shared panel chrome ---------- */
 .gis-ws__panel-head {
   display: flex;
@@ -150,9 +165,11 @@
   padding: 14px;
 }
 
-/* the layer panel + attribute table manage their own padding + scroll */
-.gis-ws__left:has(app-layer-panel) .gis-ws__panel-body,
-.gis-ws__bottom:has(app-attribute-table) .gis-ws__panel-body {
+/* the layer panel + attribute table manage their own padding + scroll —
+   only while they are the *visible* panel (others are kept mounted but
+   carry .gis-ws__panel--hidden). */
+.gis-ws__left:has(app-layer-panel:not(.gis-ws__panel--hidden)) .gis-ws__panel-body,
+.gis-ws__bottom:has(app-attribute-table:not(.gis-ws__panel--hidden)) .gis-ws__panel-body {
   padding: 0;
   overflow: hidden;
 }

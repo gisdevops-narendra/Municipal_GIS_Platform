@@ -51,6 +51,19 @@ export class BufferOverlayComponent implements OnDestroy {
   @Output() queryRun = new EventEmitter<AttributeExternalFilter>();
   @Output() queryCleared = new EventEmitter<void>();
 
+  /** False while the panel is kept mounted but hidden. Operands and results
+   *  persist; only a live draw interaction is cancelled. */
+  private isActive = true;
+  @Input() set active(value: boolean) {
+    if (value === this.isActive) return;
+    this.isActive = value;
+    if (!value && this.drawing()) {
+      this.drawSub?.unsubscribe();
+      this.mapService.cancelDraw();
+      this.drawing.set(null);
+    }
+  }
+
   readonly lengthUnits = LENGTH_UNITS;
   readonly geomKinds: GeomKind[] = ['Polygon', 'Line', 'Point'];
   readonly operations: { value: OverlayOperation; label: string; hint: string }[] = [

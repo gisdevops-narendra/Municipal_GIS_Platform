@@ -1,5 +1,5 @@
 import { ApplicationConfig, provideZoneChangeDetection } from '@angular/core';
-import { provideRouter, withInMemoryScrolling } from '@angular/router';
+import { provideRouter, withInMemoryScrolling, RouteReuseStrategy } from '@angular/router';
 import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { providePrimeNG } from 'primeng/config';
@@ -14,6 +14,7 @@ import {
 } from 'keycloak-angular';
 
 import { routes } from './app.routes';
+import { AppRouteReuseStrategy } from './core/routing/app-route-reuse.strategy';
 import { MgpPreset } from './core/theme/mgp-preset';
 import { environment } from '../environments/environment';
 import { bearerTokenInterceptorConfig } from './core/interceptors/bearer-token.interceptor.config';
@@ -35,6 +36,10 @@ export const appConfig: ApplicationConfig = {
     }),
     provideHttpClient(withInterceptors([includeBearerTokenInterceptor])),
     { provide: INCLUDE_BEARER_TOKEN_INTERCEPTOR_CONFIG, useValue: bearerTokenInterceptorConfig },
+    // Keep-alive navigation: opted-in screens (route `data: { reuse: true }`)
+    // are detached and re-attached whole, so state survives leaving and
+    // coming back. See AppRouteReuseStrategy.
+    { provide: RouteReuseStrategy, useExisting: AppRouteReuseStrategy },
     // Back the app-wide toast + confirm-dialog system (NotificationService).
     // The <p-toast> / <p-confirmdialog> hosts live in AppComponent.
     MessageService,

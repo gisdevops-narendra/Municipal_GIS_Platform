@@ -78,6 +78,19 @@ export class QueryBuilderComponent implements OnChanges, OnDestroy {
   @Input() initialLayerId: string | null = null;
   @Input() workspaceKey = '';
 
+  /** False while the panel is kept mounted but hidden (another tool is
+   *  active). The declarative `def` and results stay put; only a live draw
+   *  interaction is cancelled so it can't keep capturing map clicks. */
+  private isActive = true;
+  @Input() set active(value: boolean) {
+    if (value === this.isActive) return;
+    this.isActive = value;
+    if (!value && this.drawing()) {
+      this.mapService.cancelDraw();
+      this.drawing.set(null);
+    }
+  }
+
   @Output() queryRun = new EventEmitter<AttributeExternalFilter>();
   @Output() queryCleared = new EventEmitter<void>();
 

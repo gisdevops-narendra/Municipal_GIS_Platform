@@ -4,6 +4,7 @@ import { Toast } from 'primeng/toast';
 import { ConfirmDialog } from 'primeng/confirmdialog';
 import { Dialog } from 'primeng/dialog';
 import { AuthService } from './core/services/auth.service';
+import { AppRouteReuseStrategy } from './core/routing/app-route-reuse.strategy';
 import { SettingsService } from './core/services/settings.service';
 import { SessionService } from './core/services/session.service';
 import { ShortcutService } from './core/services/shortcut.service';
@@ -27,6 +28,7 @@ export class AppComponent {
   private readonly auth = inject(AuthService);
   private readonly settings = inject(SettingsService);
   private readonly session = inject(SessionService);
+  private readonly routeReuse = inject(AppRouteReuseStrategy);
   readonly shortcuts = inject(ShortcutService);
   // Injected for its constructor side-effect (starts the appearance effect).
   private readonly theme = inject(ThemeService);
@@ -41,9 +43,16 @@ export class AppComponent {
     this.shortcuts.start();
 
     effect(() => {
-      if (this.auth.isAuthenticated() && !this.settingsLoaded) {
-        this.settingsLoaded = true;
-        this.settings.load();
+      if (this.auth.isAuthenticated()) {
+        if (!this.settingsLoaded) {
+          this.settingsLoaded = true;
+          this.settings.load();
+        }
+      } else if (this.settingsLoaded) {
+        // Session ended — drop every keep-alive'd screen so the next user
+        // on this tab starts clean.
+        this.settingsLoaded = false;
+        this.routeReuse.clear();
       }
     });
     // keep a reference so the linter doesn't flag `theme` as unused

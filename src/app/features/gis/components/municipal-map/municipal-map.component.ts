@@ -40,6 +40,7 @@ export class MunicipalMapComponent implements AfterViewInit, OnChanges, OnDestro
   readonly popup = this.mapService.featureInfoPopup;
 
   private initialized = false;
+  private resizeObserver: ResizeObserver | null = null;
 
   ngAfterViewInit(): void {
     this.tryInit();
@@ -52,6 +53,8 @@ export class MunicipalMapComponent implements AfterViewInit, OnChanges, OnDestro
   }
 
   ngOnDestroy(): void {
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     this.mapService.destroy();
   }
 
@@ -70,6 +73,14 @@ export class MunicipalMapComponent implements AfterViewInit, OnChanges, OnDestro
     });
     this.mapService.registerFeatureInfoPopup(this.featurePopup.nativeElement);
     this.mapService.onSingleClick((coordinate) => this.onMapClick(coordinate));
+
+    // The container is detached from the DOM while another route is showing
+    // (keep-alive navigation) and its size also changes when docks open /
+    // resize — OpenLayers only repaints correctly if told. One observer
+    // covers both cases (and supersedes the workspace's setTimeout hack).
+    this.resizeObserver = new ResizeObserver(() => this.mapService.updateSize());
+    this.resizeObserver.observe(this.mapContainer.nativeElement);
+
     this.mapReady.emit();
   }
 

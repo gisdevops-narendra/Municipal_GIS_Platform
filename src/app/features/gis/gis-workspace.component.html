@@ -50,79 +50,107 @@
       <div class="gis-ws__resize gis-ws__resize--x" (pointerdown)="startLeftResize($event)" title="Drag to resize"></div>
     </aside>
   }
-  @if (!styleTargetLayer() && activeLeftTool(); as tool) {
-    <aside class="gis-ws__left" [style.width.px]="leftWidth()">
-      <header class="gis-ws__panel-head">
-        <span class="gis-ws__panel-title">{{ tool.label }}</span>
-        <button type="button" class="gis-ws__icon-btn" aria-label="Close panel" (click)="closeLeft()">
-          <i class="pi pi-times" aria-hidden="true"></i>
-        </button>
-      </header>
+  <!-- The tool dock stays in the DOM even when closed or hidden behind the
+       style editor, so panels opened inside it are never torn down. -->
+  <aside
+    class="gis-ws__left"
+    [class.is-collapsed]="!activeLeftTool() || !!styleTargetLayer()"
+    [style.width.px]="leftWidth()"
+  >
+    <header class="gis-ws__panel-head">
+      <span class="gis-ws__panel-title">{{ activeLeftTool()?.label }}</span>
+      <button type="button" class="gis-ws__icon-btn" aria-label="Close panel" (click)="closeLeft()">
+        <i class="pi pi-times" aria-hidden="true"></i>
+      </button>
+    </header>
 
+      <!-- Every tool panel opened at least once is kept mounted (hidden via
+           .gis-ws__panel--hidden), never destroyed on tool switch, so its
+           form / filter / result / chat state is exactly as the user left
+           it — here and after navigating away and back (route keep-alive). -->
       <div class="gis-ws__panel-body">
-        @switch (tool.id) {
-          @case ('layers') {
-            @if (layersReady()) {
-              <app-layer-panel [layers]="layers()" [highlightLayerId]="highlightLayerId()" (styleLayer)="openStyleEditor($event)" />
-            } @else {
-              <p class="gis-ws__hint">{{ layersError() ?? 'Loading layers…' }}</p>
-            }
+        @if (openedLeftTools().has('layers')) {
+          @if (layersReady()) {
+            <app-layer-panel
+              [class.gis-ws__panel--hidden]="leftTool() !== 'layers'"
+              [layers]="layers()"
+              [highlightLayerId]="highlightLayerId()"
+              (styleLayer)="openStyleEditor($event)"
+            />
+          } @else if (leftTool() === 'layers') {
+            <p class="gis-ws__hint">{{ layersError() ?? 'Loading layers…' }}</p>
           }
-          @case ('measure') {
-            @if (layersReady()) {
-              <app-measure />
-            } @else {
-              <p class="gis-ws__hint">{{ layersError() ?? 'Loading map…' }}</p>
-            }
+        }
+
+        @if (openedLeftTools().has('measure') && layersReady()) {
+          <app-measure
+            [class.gis-ws__panel--hidden]="leftTool() !== 'measure'"
+            [active]="leftTool() === 'measure'"
+          />
+        }
+
+        @if (openedLeftTools().has('bookmarks')) {
+          <app-bookmarks
+            [class.gis-ws__panel--hidden]="leftTool() !== 'bookmarks'"
+            [workspaceKey]="workspace()?.code ?? ''"
+          />
+        }
+
+        @if (openedLeftTools().has('query') && layersReady()) {
+          <app-query-builder
+            [class.gis-ws__panel--hidden]="leftTool() !== 'query'"
+            [active]="leftTool() === 'query'"
+            [layers]="layers()"
+            [initialLayerId]="highlightLayerId()"
+            [workspaceKey]="workspace()?.code ?? ''"
+            (queryRun)="onQueryRun($event)"
+            (queryCleared)="onQueryCleared()"
+          />
+        }
+
+        @if (openedLeftTools().has('buffer') && layersReady()) {
+          <app-buffer-overlay
+            [class.gis-ws__panel--hidden]="leftTool() !== 'buffer'"
+            [active]="leftTool() === 'buffer'"
+            [layers]="layers()"
+            (queryRun)="onQueryRun($event)"
+            (queryCleared)="onQueryCleared()"
+          />
+        }
+
+        @if (openedLeftTools().has('assistant') && layersReady()) {
+          <app-ai-chat
+            [class.gis-ws__panel--hidden]="leftTool() !== 'assistant'"
+            [layers]="layers()"
+            [activeLayerId]="highlightLayerId()"
+            (queryRun)="onQueryRun($event)"
+            (queryCleared)="onQueryCleared()"
+          />
+        }
+
+        @if (openedLeftTools().has('print') && layersReady()) {
+          <app-print-layout
+            [class.gis-ws__panel--hidden]="leftTool() !== 'print'"
+            [layers]="layers()"
+          />
+        }
+
+        <!-- Layer-gated tools before layers have loaded (layers/bookmarks/
+             workspace show their own state instead) -->
+        @if (activeLeftTool(); as tool) {
+          @if (
+            !layersReady() &&
+            tool.available &&
+            tool.id !== 'layers' &&
+            tool.id !== 'bookmarks' &&
+            tool.id !== 'workspace'
+          ) {
+            <p class="gis-ws__hint">{{ layersError() ?? 'Loading map…' }}</p>
           }
-          @case ('bookmarks') {
-            <app-bookmarks [workspaceKey]="workspace()?.code ?? ''" />
-          }
-          @case ('query') {
-            @if (layersReady()) {
-              <app-query-builder
-                [layers]="layers()"
-                [initialLayerId]="highlightLayerId()"
-                [workspaceKey]="workspace()?.code ?? ''"
-                (queryRun)="onQueryRun($event)"
-                (queryCleared)="onQueryCleared()"
-              />
-            } @else {
-              <p class="gis-ws__hint">{{ layersError() ?? 'Loading layers…' }}</p>
-            }
-          }
-          @case ('buffer') {
-            @if (layersReady()) {
-              <app-buffer-overlay
-                [layers]="layers()"
-                (queryRun)="onQueryRun($event)"
-                (queryCleared)="onQueryCleared()"
-              />
-            } @else {
-              <p class="gis-ws__hint">{{ layersError() ?? 'Loading layers…' }}</p>
-            }
-          }
-          @case ('assistant') {
-            @if (layersReady()) {
-              <app-ai-chat
-                [layers]="layers()"
-                [activeLayerId]="highlightLayerId()"
-                (queryRun)="onQueryRun($event)"
-                (queryCleared)="onQueryCleared()"
-              />
-            } @else {
-              <p class="gis-ws__hint">{{ layersError() ?? 'Loading layers…' }}</p>
-            }
-          }
-          @case ('print') {
-            @if (layersReady()) {
-              <app-print-layout [layers]="layers()" />
-            } @else {
-              <p class="gis-ws__hint">{{ layersError() ?? 'Loading map…' }}</p>
-            }
-          }
-          @case ('workspace') {
-            @if (workspace(); as ws) {
+        }
+
+        @if (leftTool() === 'workspace') {
+          @if (workspace(); as ws) {
               @if (ws.status === 'PROVISIONING_FAILED') {
                 <p-message severity="warn" styleClass="w-full gis-ws__ws-warn">
                   <span>GeoServer provisioning hasn't completed for this workspace yet.</span>
@@ -155,13 +183,15 @@
               @if (isOwner()) {
                 <button pButton type="button" label="Configure workspace" icon="pi pi-cog" class="p-button-outlined p-button-sm gis-ws__ws-config" (click)="openEditDialog()"></button>
               }
-            } @else if (loading()) {
-              <p class="gis-ws__hint">Loading workspace…</p>
-            } @else {
-              <p class="gis-ws__hint">{{ pageError() ?? 'Workspace unavailable.' }}</p>
-            }
+          } @else if (loading()) {
+            <p class="gis-ws__hint">Loading workspace…</p>
+          } @else {
+            <p class="gis-ws__hint">{{ pageError() ?? 'Workspace unavailable.' }}</p>
           }
-          @default {
+        }
+
+        @if (activeLeftTool(); as tool) {
+          @if (!tool.available) {
             <div class="gis-ws__soon">
               <i class="pi pi-clock" aria-hidden="true"></i>
               <p><strong>{{ tool.label }}</strong> is on the roadmap. This panel is reserved for it so the layout won't change when it ships.</p>
@@ -170,9 +200,8 @@
         }
       </div>
 
-      <div class="gis-ws__resize gis-ws__resize--x" (pointerdown)="startLeftResize($event)" title="Drag to resize"></div>
-    </aside>
-  }
+    <div class="gis-ws__resize gis-ws__resize--x" (pointerdown)="startLeftResize($event)" title="Drag to resize"></div>
+  </aside>
 
   <!-- ============ stage: map + bottom dock + status bar ============ -->
   <div class="gis-ws__stage">
@@ -203,37 +232,40 @@
       }
     </div>
 
-    <!-- bottom dock -->
-    @if (activeBottomTool(); as tool) {
-      <section class="gis-ws__bottom" [style.height.px]="bottomHeight()">
-        <div class="gis-ws__resize gis-ws__resize--y" (pointerdown)="startBottomResize($event)" title="Drag to resize"></div>
-        <header class="gis-ws__panel-head">
-          <span class="gis-ws__panel-title">{{ tool.label }}</span>
-          <button type="button" class="gis-ws__icon-btn" aria-label="Close panel" (click)="closeBottom()">
-            <i class="pi pi-times" aria-hidden="true"></i>
-          </button>
-        </header>
-        <div class="gis-ws__panel-body">
-          @switch (tool.id) {
-            @case ('attributes') {
-              <app-attribute-table
-                [layers]="layers()"
-                [initialLayerId]="highlightLayerId()"
-                [mapClickFeatures]="mapClickFeatures()"
-                [externalFilter]="activeQueryFilter()"
-                (externalFilterCleared)="onQueryCleared()"
-              />
-            }
-            @default {
-              <div class="gis-ws__soon">
-                <i class="pi pi-clock" aria-hidden="true"></i>
-                <p><strong>{{ tool.label }}</strong> is on the roadmap. This dock is reserved for it.</p>
-              </div>
-            }
+    <!-- bottom dock — kept in the DOM when closed (its panel stays mounted). -->
+    <section
+      class="gis-ws__bottom"
+      [class.is-collapsed]="!activeBottomTool()"
+      [style.height.px]="bottomHeight()"
+    >
+      <div class="gis-ws__resize gis-ws__resize--y" (pointerdown)="startBottomResize($event)" title="Drag to resize"></div>
+      <header class="gis-ws__panel-head">
+        <span class="gis-ws__panel-title">{{ activeBottomTool()?.label }}</span>
+        <button type="button" class="gis-ws__icon-btn" aria-label="Close panel" (click)="closeBottom()">
+          <i class="pi pi-times" aria-hidden="true"></i>
+        </button>
+      </header>
+      <div class="gis-ws__panel-body">
+        @if (openedBottomTools().has('attributes')) {
+          <app-attribute-table
+            [class.gis-ws__panel--hidden]="bottomTool() !== 'attributes'"
+            [layers]="layers()"
+            [initialLayerId]="highlightLayerId()"
+            [mapClickFeatures]="mapClickFeatures()"
+            [externalFilter]="activeQueryFilter()"
+            (externalFilterCleared)="onQueryCleared()"
+          />
+        }
+        @if (activeBottomTool(); as tool) {
+          @if (!tool.available) {
+            <div class="gis-ws__soon">
+              <i class="pi pi-clock" aria-hidden="true"></i>
+              <p><strong>{{ tool.label }}</strong> is on the roadmap. This dock is reserved for it.</p>
+            </div>
           }
-        </div>
-      </section>
-    }
+        }
+      </div>
+    </section>
 
     <!-- status bar -->
     <footer class="gis-ws__status">
