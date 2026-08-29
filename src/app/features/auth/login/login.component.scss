@@ -52,6 +52,12 @@
   cursor: not-allowed;
 }
 
+.auth-card__forgot {
+  width: 100%;
+  margin-top: 10px;
+  font-size: 12.5px;
+}
+
 .auth-card__divider {
   height: 1px;
   background: var(--color-line);

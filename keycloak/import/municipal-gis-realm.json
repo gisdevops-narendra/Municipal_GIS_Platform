@@ -3,7 +3,17 @@
   "enabled": true,
   "sslRequired": "external",
   "registrationAllowed": false,
+  "resetPasswordAllowed": true,
   "loginWithEmailAllowed": true,
+  "smtpServer": {
+    "host": "mailpit",
+    "port": "1025",
+    "from": "no-reply@municipal-gis.local",
+    "fromDisplayName": "Municipal GIS Platform",
+    "ssl": "false",
+    "starttls": "false",
+    "auth": "false"
+  },
   "accessTokenLifespan": 300,
   "ssoSessionIdleTimeout": 1800,
   "ssoSessionMaxLifespan": 36000,

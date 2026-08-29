@@ -37,6 +37,7 @@ export class LoginComponent implements OnInit {
 
   redirecting = false;
   loginError = false;
+  forgotError = false;
 
   readonly form = this.fb.nonNullable.group({
     email: ['', [Validators.email]]
@@ -77,6 +78,19 @@ export class LoginComponent implements OnInit {
         console.error('Keycloak login failed to start', err);
         this.redirecting = false;
         this.loginError = true;
+      });
+  }
+
+  /** Redirects to Keycloak's hosted "Forgot Your Password?" page. No email
+   *  needs to be entered here — Keycloak collects it and sends the reset
+   *  link. Same defensive Promise.resolve() wrapper as onSubmit(). */
+  onForgotPassword(): void {
+    this.forgotError = false;
+    Promise.resolve()
+      .then(() => this.auth.forgotPassword(window.location.origin + '/login'))
+      .catch((err) => {
+        console.error('Keycloak reset-credentials redirect failed', err);
+        this.forgotError = true;
       });
   }
 }

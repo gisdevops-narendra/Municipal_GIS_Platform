@@ -6,7 +6,9 @@ This project was generated using [Angular CLI](https://github.com/angular/angula
 
 Authentication is handled by Keycloak (OIDC/OAuth2) — see
 [docs/keycloak-auth.md](docs/keycloak-auth.md) for how to start it locally,
-configure the dev realm/client, and how login/logout/route protection work.
+configure the dev realm/client, and how login/logout/route protection and
+the forgot-password flow work. Password-reset emails in local dev are caught
+by Mailpit — read them at http://localhost:8025.
 
 ## Backend (NestJS + PostgreSQL/PostGIS + GeoServer)
 

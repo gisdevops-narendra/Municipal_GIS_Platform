@@ -118,7 +118,47 @@ Keycloak's `end_session_endpoint` (clearing the Keycloak session) and back
 to the app root. The site header's **Logout** button (shown only when
 authenticated) triggers this.
 
-## 8. How route protection works
+## 8. Forgot password / password reset
+
+Keycloak owns this flow end to end — the app never sees a reset token or a
+new password, exactly as with login itself.
+
+**Entry points**
+
+- The `/login` screen has a **Forgot your password?** button
+  (`LoginComponent.onForgotPassword()` → `AuthService.forgotPassword()`). It
+  builds the normal `keycloak-js` login URL (so PKCE/state/nonce are valid)
+  and swaps the path to `login-actions/reset-credentials`, landing the user
+  straight on Keycloak's "Forgot Your Password?" page.
+- Keycloak's own hosted login page also shows a **Forgot password?** link,
+  because the realm has `resetPasswordAllowed: true`.
+
+**The flow**
+
+1. User enters their email on Keycloak's reset page.
+2. Keycloak emails a one-time, signed, time-limited reset link (it always
+   shows the same neutral "check your email" message, so an unknown email
+   cannot be distinguished — no account enumeration).
+3. User clicks the link → Keycloak's set-a-new-password page.
+4. On success Keycloak redirects back to `http://localhost:4200/login`.
+
+**Email transport (local dev)**
+
+The realm's `smtpServer` points at the **mailpit** container
+(`docker-compose.yml`). Mailpit is a fake SMTP server + web inbox — open
+**http://localhost:8025** to read every reset email. No real mail is sent.
+Real deployments replace the `smtpServer` block with real SMTP credentials.
+
+**Realm settings**
+
+`keycloak/import/municipal-gis-realm.json` carries `resetPasswordAllowed`
+and the `smtpServer` block, so a fresh `docker compose down -v && up`
+imports them. That import only runs when the realm does **not** yet exist,
+so for an already-running realm the same settings are pushed in via
+`keycloak/apply-auth-settings.sh` (idempotent; `run.sh` runs it on every
+startup).
+
+## 9. How route protection works
 
 `src/app/core/guards/auth.guard.ts` uses `createAuthGuard` from
 `keycloak-angular` and is attached to `/dashboard` in `app.routes.ts`. If
@@ -127,7 +167,7 @@ originally requested URL as the redirect target, so the user lands back on
 `/dashboard` after logging in. This is authentication only — no
 role/permission checks are applied at this stage.
 
-## 9. HTTP interceptor
+## 10. HTTP interceptor
 
 `core/interceptors/bearer-token.interceptor.config.ts` configures the
 library's `includeBearerTokenInterceptor` (registered in `app.config.ts`)

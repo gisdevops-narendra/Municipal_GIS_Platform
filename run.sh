@@ -88,6 +88,27 @@ for i in $(seq 1 60); do
   sleep 2
 done
 
+# 4b. Wait for Keycloak, then apply the realm auth settings the
+#     forgot-password flow needs (reset-password enabled + SMTP -> mailpit).
+#     Idempotent: safe to run on every startup. Keycloak runs with
+#     KC_HEALTH_ENABLED=true; its management port (9000) is container-only.
+log "Waiting for Keycloak to be ready"
+for i in $(seq 1 60); do
+  if docker exec municipal-gis-keycloak \
+       curl -sf http://localhost:9000/health/ready >/dev/null 2>&1; then
+    echo "   keycloak is ready"
+    break
+  fi
+  if [ "$i" = "60" ]; then
+    echo "ERROR: Keycloak did not become ready in time. Check: ${DC[*]} logs keycloak" >&2
+    exit 1
+  fi
+  sleep 2
+done
+
+log "Applying Keycloak auth settings (reset-password + SMTP)"
+bash keycloak/apply-auth-settings.sh
+
 # 5. Apply Prisma migrations against the containerised backend/DB.
 log "Applying database migrations (prisma migrate deploy)"
 for i in $(seq 1 10); do
@@ -118,6 +139,7 @@ cat <<'EOF'
   Backend API   http://localhost:3000/api
   Keycloak      http://localhost:8180  (admin / admin)
   GeoServer     http://localhost:8600/geoserver  (admin / geoserver_dev_admin)
+  Mailpit       http://localhost:8025  (password-reset emails land here)
   AI service    http://localhost:8100/health
   Frontend      http://localhost:4200  (started below)
 EOF

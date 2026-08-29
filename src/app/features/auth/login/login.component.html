@@ -36,6 +36,22 @@
         <button pButton type="submit" label="Login" class="w-full" [loading]="redirecting"></button>
       </form>
 
+      @if (forgotError) {
+        <p-message
+          severity="error"
+          text="Could not open the password-reset page. Check that Keycloak is running, then try again."
+          styleClass="w-full"
+        />
+      }
+
+      <button
+        pButton
+        type="button"
+        label="Forgot your password?"
+        class="p-button-link auth-card__forgot"
+        (click)="onForgotPassword()"
+      ></button>
+
       <div class="auth-card__divider"></div>
 
       <p class="auth-card__footer-text">

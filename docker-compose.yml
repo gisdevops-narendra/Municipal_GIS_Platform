@@ -21,6 +21,22 @@ services:
       - ./keycloak/import:/opt/keycloak/data/import
     restart: unless-stopped
 
+  mailpit:
+    # Local-dev mail catcher: Keycloak sends password-reset emails to this
+    # container's SMTP port (mailpit:1025, compose network only) and you
+    # read them in the web inbox at http://localhost:8025. Nothing ever
+    # leaves the machine. Dev-only — real deployments point the realm's
+    # smtpServer at a real provider instead (see docs/keycloak-auth.md).
+    image: axllent/mailpit:v1.21
+    container_name: municipal-gis-mailpit
+    environment:
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+    ports:
+      # Web UI only. SMTP (1025) is intentionally not published — only
+      # Keycloak (on the compose network) needs to reach it.
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+    restart: unless-stopped
+
   postgres:
     # Official PostGIS-enabled PostgreSQL image (postgis/postgis wraps the
     # same postgres:16 base and adds the PostGIS extension binaries). On a

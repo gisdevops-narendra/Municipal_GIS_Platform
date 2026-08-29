@@ -83,6 +83,31 @@ export class AuthService {
     return this.keycloak.login({ redirectUri, loginHint: options.loginHint });
   }
 
+  /**
+   * Sends the browser to Keycloak's hosted "Forgot Your Password?" page.
+   * Anonymous — no existing session is required. Keycloak owns the whole
+   * reset flow (one-time signed token emailed to the user, expiry, the
+   * new-password form); after the user sets a new password Keycloak
+   * returns the browser to `redirectUri`.
+   *
+   * Implementation: we take the normal login URL that `keycloak-js` builds
+   * (so PKCE `code_challenge`, `state` and `nonce` are all present and
+   * valid) and swap the endpoint path for `login-actions/reset-credentials`,
+   * which starts a fresh auth session directly on the reset screen. This is
+   * the supported way to deep-link an unauthenticated user to that page.
+   */
+  async forgotPassword(
+    redirectUri: string = window.location.origin + '/login'
+  ): Promise<void> {
+    const loginUrl = await this.keycloak.createLoginUrl({ redirectUri });
+    window.location.assign(
+      loginUrl.replace(
+        '/protocol/openid-connect/auth',
+        '/login-actions/reset-credentials'
+      )
+    );
+  }
+
   /** Redirects through Keycloak's logout endpoint, clearing the Keycloak
    *  session, then returns the browser to the application. */
   logout(redirectUri: string = window.location.origin + '/'): Promise<void> {
