@@ -1,10 +1,116 @@
-.layers-shell {
-  padding: 48px 0 80px;
-  min-height: calc(100vh - 72px - 90px);
+/* Fixed 3-row app shell: header and footer are pinned (never scroll or
+   leave the viewport, matching the /gis workspace shell) — only the
+   table's own rows scroll, never the whole page or the card around it. */
+:host {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
 }
 
+app-site-header {
+  flex-shrink: 0;
+}
+
+app-site-footer {
+  flex-shrink: 0;
+}
+
+::ng-deep app-site-footer .site-footer {
+  margin-top: 0;
+}
+
+.layers-shell {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 48px 0 40px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* A data table benefits from more room than the site's default 1440px
+   reading-width container — widen just this page rather than the global
+   --content-max (which also governs marketing/text pages where a
+   narrower measure is still the right call). */
+.layers-shell__inner {
+  --content-max: 1800px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The card itself never scrolls as a block — header/stats/search/
+   paginator stay put and only the table rows below scroll, via
+   .layers-card__table's [scrollable]+scrollHeight="flex" (same pattern
+   as the GIS Attribute Table panel). */
 .layers-card {
   padding: 32px 36px 36px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.layers-card__table {
+  flex: 1;
+  min-height: 180px;
+  overflow: hidden;
+}
+
+.layers-card__table ::ng-deep .p-datatable-table-container {
+  height: 100%;
+}
+
+/* ---------- summary tiles ---------- */
+.layers-card__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-shrink: 0;
+}
+
+.layers-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 16px 14px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+
+.layers-stat__value {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--color-ink-900);
+  line-height: 1.1;
+}
+
+.layers-stat__label {
+  font-size: 12px;
+  color: var(--color-ink-500);
+}
+
+.layers-card__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+  flex-shrink: 0;
+}
+
+.layers-card__search {
+  flex: 1 1 220px;
+  min-width: 200px;
+}
+
+.layers-card__paginator {
+  flex-shrink: 0;
+  margin-top: 12px;
 }
 
 .layers-card__header {

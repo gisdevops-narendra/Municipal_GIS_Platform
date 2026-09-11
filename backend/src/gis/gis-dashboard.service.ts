@@ -138,16 +138,31 @@ export class GisDashboardService {
     };
   }
 
-  /** Task 9 §2: every active department, with a VIEW-authorized layer
-   *  count each (0 for a department the caller has no visible layers
-   *  in). Department names/ids themselves are already ordinary
-   *  organizational data any municipality member can see via
-   *  GET /api/departments — this just adds the GIS-specific count. */
+  /** Task 9 §2: every active department the caller may see, with a
+   *  VIEW-authorized layer count each (0 for a department the caller has
+   *  no visible layers in). MUNICIPALITY_OWNER sees every department;
+   *  a DEPARTMENT_HEAD/DEPARTMENT_USER only ever sees their own — same
+   *  department-scoped visibility as GET /api/departments, since these
+   *  rows carry other departments' names, which a non-Owner must never
+   *  see (see DepartmentsService.list). */
   async getDepartmentSummary(
     appUser: AppUser,
   ): Promise<DepartmentSummaryEntry[]> {
+    if (
+      appUser.systemRole !== 'MUNICIPALITY_OWNER' &&
+      !appUser.departmentId
+    ) {
+      return [];
+    }
+
     const departments = await this.prisma.department.findMany({
-      where: { municipalityId: appUser.municipalityId, status: 'ACTIVE' },
+      where: {
+        municipalityId: appUser.municipalityId,
+        status: 'ACTIVE',
+        ...(appUser.systemRole !== 'MUNICIPALITY_OWNER' && {
+          id: appUser.departmentId!,
+        }),
+      },
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
     });

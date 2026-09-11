@@ -97,8 +97,8 @@ export class PrintReportDto {
   /** Basemap id, resolved by the backend against a fixed allowlist — never
    *  a URL. `none` prints the WMS layers on a white background. */
   @IsOptional()
-  @IsIn(['osm', 'carto-light', 'topo', 'none'])
-  basemapId?: 'osm' | 'carto-light' | 'topo' | 'none';
+  @IsIn(['osm', 'carto-voyager', 'carto-dark', 'topo', 'none'])
+  basemapId?: 'osm' | 'carto-voyager' | 'carto-dark' | 'topo' | 'none';
 
   @ValidateNested()
   @Type(() => PrintMapDto)

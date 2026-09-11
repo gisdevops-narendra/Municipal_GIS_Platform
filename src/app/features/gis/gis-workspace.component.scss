@@ -23,11 +23,36 @@
   flex-direction: column;
   align-items: center;
   width: 52px;
-  padding: 8px 0;
   background: var(--color-surface-alt);
   border-right: 1px solid var(--color-line);
+  overflow: hidden;
+}
+
+/* The scrollable tool list — everything except the pinned Workspace
+   group below. Only this scrolls; the rail itself never does. */
+.gis-ws__rail-scroll {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0;
   overflow-y: auto;
   scrollbar-width: thin;
+}
+
+/* Always visible at the bottom of the rail, regardless of how tall the
+   scrollable tool list above grows. */
+.gis-ws__rail-pinned {
+  flex-shrink: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+  border-top: 1px solid var(--color-line);
 }
 
 .gis-ws__rail-group {
@@ -70,20 +95,6 @@
     background: var(--color-primary-600);
     border-color: var(--color-primary-600);
     color: #fff;
-  }
-
-  &.is-soon {
-    opacity: 0.4;
-
-    &:hover {
-      opacity: 0.75;
-    }
-
-    &.is-active {
-      opacity: 1;
-      background: var(--color-ink-500);
-      border-color: var(--color-ink-500);
-    }
   }
 }
 

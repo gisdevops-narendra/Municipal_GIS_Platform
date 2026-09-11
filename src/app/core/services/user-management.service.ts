@@ -47,4 +47,12 @@ export class UserManagementService {
   updateStatus(id: string, status: MunicipalityUserStatus): Observable<MunicipalityUser> {
     return this.http.patch<MunicipalityUser>(`${this.baseUrl}/${id}/status`, { status });
   }
+
+  /** Permanent delete — not the same as updateStatus('DISABLED'). Allowed
+   *  for the Owner (anyone but the Owner) and, server-enforced, a
+   *  Department Head deleting a Department User within their own
+   *  department. */
+  remove(id: string): Observable<{ success: true }> {
+    return this.http.delete<{ success: true }>(`${this.baseUrl}/${id}`);
+  }
 }

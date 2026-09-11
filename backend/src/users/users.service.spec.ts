@@ -17,6 +17,7 @@ describe('UsersService', () => {
       findMany: jest.Mock;
       create: jest.Mock;
       update: jest.Mock;
+      delete: jest.Mock;
     };
     department: { findFirst: jest.Mock };
   };
@@ -35,6 +36,15 @@ describe('UsersService', () => {
     status: 'ACTIVE',
   };
 
+  const head: AppUser = {
+    id: 'head-1',
+    keycloakUserId: 'kc-head-1',
+    municipalityId: 'muni-1',
+    departmentId: 'dept-own',
+    systemRole: 'DEPARTMENT_HEAD',
+    status: 'ACTIVE',
+  };
+
   beforeEach(() => {
     prisma = {
       user: {
@@ -43,6 +53,7 @@ describe('UsersService', () => {
         findMany: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
+        delete: jest.fn(),
       },
       department: { findFirst: jest.fn() },
     };
@@ -292,16 +303,118 @@ describe('UsersService', () => {
     });
   });
 
+  describe('deleteUser', () => {
+    it('lets the Owner permanently delete a DEPARTMENT_USER and removes the Keycloak identity', async () => {
+      prisma.user.findFirst.mockResolvedValue({
+        id: 'user-2',
+        keycloakUserId: 'kc-user-2',
+        systemRole: 'DEPARTMENT_USER',
+        departmentId: 'dept-roads',
+      });
+
+      await service.deleteUser(owner, 'user-2');
+
+      expect(prisma.user.delete).toHaveBeenCalledWith({
+        where: { id: 'user-2' },
+      });
+      expect(keycloakAdmin.deleteUser).toHaveBeenCalledWith('kc-user-2');
+    });
+
+    it('lets the Owner delete a DEPARTMENT_HEAD too', async () => {
+      prisma.user.findFirst.mockResolvedValue({
+        id: 'head-2',
+        keycloakUserId: 'kc-head-2',
+        systemRole: 'DEPARTMENT_HEAD',
+        departmentId: 'dept-roads',
+      });
+
+      await service.deleteUser(owner, 'head-2');
+
+      expect(prisma.user.delete).toHaveBeenCalledWith({
+        where: { id: 'head-2' },
+      });
+    });
+
+    it('refuses to delete a user whose systemRole is MUNICIPALITY_OWNER', async () => {
+      prisma.user.findFirst.mockResolvedValue({
+        id: 'owner-1',
+        systemRole: 'MUNICIPALITY_OWNER',
+      });
+
+      await expect(service.deleteUser(owner, 'owner-1')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(prisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('lets a DEPARTMENT_HEAD delete a DEPARTMENT_USER within their own department', async () => {
+      prisma.user.findFirst.mockResolvedValue({
+        id: 'user-2',
+        keycloakUserId: 'kc-user-2',
+        systemRole: 'DEPARTMENT_USER',
+        departmentId: 'dept-own',
+      });
+
+      await service.deleteUser(head, 'user-2');
+
+      expect(prisma.user.delete).toHaveBeenCalledWith({
+        where: { id: 'user-2' },
+      });
+      expect(keycloakAdmin.deleteUser).toHaveBeenCalledWith('kc-user-2');
+    });
+
+    it('refuses a DEPARTMENT_HEAD deleting a user in a different department', async () => {
+      prisma.user.findFirst.mockResolvedValue({
+        id: 'user-3',
+        keycloakUserId: 'kc-user-3',
+        systemRole: 'DEPARTMENT_USER',
+        departmentId: 'dept-other',
+      });
+
+      await expect(service.deleteUser(head, 'user-3')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(prisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('refuses a DEPARTMENT_HEAD deleting a peer DEPARTMENT_HEAD in their own department', async () => {
+      prisma.user.findFirst.mockResolvedValue({
+        id: 'head-2',
+        keycloakUserId: 'kc-head-2',
+        systemRole: 'DEPARTMENT_HEAD',
+        departmentId: 'dept-own',
+      });
+
+      await expect(service.deleteUser(head, 'head-2')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(prisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('does not fail the request when the Keycloak deletion fails (best-effort)', async () => {
+      prisma.user.findFirst.mockResolvedValue({
+        id: 'user-2',
+        keycloakUserId: 'kc-user-2',
+        systemRole: 'DEPARTMENT_USER',
+        departmentId: 'dept-roads',
+      });
+      keycloakAdmin.deleteUser.mockRejectedValue(new Error('kc unreachable'));
+
+      await expect(service.deleteUser(owner, 'user-2')).resolves.toBeUndefined();
+      expect(prisma.user.delete).toHaveBeenCalled();
+    });
+  });
+
   describe('tenant isolation', () => {
     it('getById returns null (404) for a user belonging to a different municipality', async () => {
       prisma.user.findFirst.mockResolvedValue(null);
 
       await expect(
-        service.getById('muni-A', 'user-in-muni-B'),
+        service.getById(owner, 'user-in-muni-B'),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(prisma.user.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'user-in-muni-B', municipalityId: 'muni-A' },
+          where: { id: 'user-in-muni-B', municipalityId: 'muni-1' },
         }),
       );
     });
@@ -309,12 +422,52 @@ describe('UsersService', () => {
     it('list always scopes findMany by the caller municipality, ignoring nothing else supplied', async () => {
       prisma.user.findMany.mockResolvedValue([]);
 
-      await service.list('muni-A', {});
+      await service.list(owner, {});
 
       expect(prisma.user.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- jest.Mock's default typing is `any`
-          where: expect.objectContaining({ municipalityId: 'muni-A' }),
+          where: expect.objectContaining({ municipalityId: 'muni-1' }),
+        }),
+      );
+    });
+  });
+
+  describe('department-scoped access (non-Owner)', () => {
+    it('list forces the caller own department, ignoring a different departmentId in the query', async () => {
+      prisma.user.findMany.mockResolvedValue([]);
+
+      await service.list(head, { departmentId: 'dept-other' });
+
+      expect(prisma.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            municipalityId: 'muni-1',
+            departmentId: 'dept-own',
+          }),
+        }),
+      );
+    });
+
+    it('list returns an empty array without querying when the caller has no department', async () => {
+      await service.list({ ...head, departmentId: null }, {});
+
+      expect(prisma.user.findMany).not.toHaveBeenCalled();
+    });
+
+    it('getById 404s when a DEPARTMENT_HEAD requests a user outside their own department', async () => {
+      prisma.user.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.getById(head, 'user-in-other-dept'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.user.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: 'user-in-other-dept',
+            municipalityId: 'muni-1',
+            departmentId: 'dept-own',
+          },
         }),
       );
     });

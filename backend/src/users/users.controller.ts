@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -47,18 +48,20 @@ export class UsersController {
     return this.usersService.updateOwnProfile(user.sub, dto);
   }
 
-  /** Any authenticated member of the municipality may view the user list —
-   *  only creating/editing/deactivating is Owner-only. */
+  /** Any authenticated member of the municipality may call this — but a
+   *  DEPARTMENT_HEAD/DEPARTMENT_USER only ever gets their own department's
+   *  users back (enforced in UsersService, not here). Only
+   *  creating/editing/deactivating is Owner-only. */
   @RequireMunicipalityMember()
   @Get('users')
   list(@CurrentAppUser() appUser: AppUser, @Query() query: QueryUsersDto) {
-    return this.usersService.list(appUser.municipalityId, query);
+    return this.usersService.list(appUser, query);
   }
 
   @RequireMunicipalityMember()
   @Get('users/:id')
   getOne(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
-    return this.usersService.getById(appUser.municipalityId, id);
+    return this.usersService.getById(appUser, id);
   }
 
   @RequireMunicipalityOwner()
@@ -85,5 +88,19 @@ export class UsersController {
     @Body() dto: UpdateUserStatusDto,
   ) {
     return this.usersService.updateUserStatus(appUser.municipalityId, id, dto);
+  }
+
+  /** Owner may delete anyone (but the Owner); a DEPARTMENT_HEAD may delete
+   *  a DEPARTMENT_USER within their own department — see
+   *  UsersService.deleteUser for the real gate (not Owner-only, unlike the
+   *  other management endpoints above). */
+  @RequireMunicipalityMember()
+  @Delete('users/:id')
+  async remove(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+  ): Promise<{ success: true }> {
+    await this.usersService.deleteUser(appUser, id);
+    return { success: true };
   }
 }

@@ -58,7 +58,10 @@ export const COORDINATE_FORMAT_OPTIONS: Option[] = [
 /** Ids must match `BASEMAPS` in `features/gis/services/map.service.ts`. */
 export const BASEMAP_OPTIONS: Option[] = [
   { label: 'OpenStreetMap', value: 'osm' },
-  { label: 'Light (CARTO)', value: 'carto-light' },
+  { label: 'Satellite (Esri)', value: 'esri-imagery' },
+  { label: 'Streets (Esri)', value: 'esri-streets' },
+  { label: 'Voyager (CARTO)', value: 'carto-voyager' },
+  { label: 'Dark (CARTO)', value: 'carto-dark' },
   { label: 'Topographic (OpenTopoMap)', value: 'topo' },
 ];
 

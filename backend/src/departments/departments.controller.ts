@@ -23,18 +23,20 @@ import {
 export class DepartmentsController {
   constructor(private readonly departmentsService: DepartmentsService) {}
 
-  /** Any authenticated member of the municipality may view departments —
-   *  only creating/editing/deleting is Owner-only (see RequireMunicipalityOwner). */
+  /** Any authenticated member of the municipality may call this — but a
+   *  DEPARTMENT_HEAD/DEPARTMENT_USER only ever gets their own department
+   *  back (enforced in DepartmentsService, not here). Only
+   *  creating/editing/deleting is Owner-only (see RequireMunicipalityOwner). */
   @RequireMunicipalityMember()
   @Get()
   list(@CurrentAppUser() appUser: AppUser) {
-    return this.departmentsService.list(appUser.municipalityId);
+    return this.departmentsService.list(appUser);
   }
 
   @RequireMunicipalityMember()
   @Get(':id')
   getOne(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
-    return this.departmentsService.getById(appUser.municipalityId, id);
+    return this.departmentsService.getById(appUser, id);
   }
 
   @RequireMunicipalityOwner()

@@ -13,6 +13,38 @@
         }
       </div>
 
+      @if (departments().length > 0) {
+        <div class="dept-card__stats">
+          <div class="dept-stat">
+            <span class="dept-stat__value">{{ totalDepartments() }}</span>
+            <span class="dept-stat__label">Total Departments</span>
+          </div>
+          <div class="dept-stat">
+            <span class="dept-stat__value">{{ activeDepartmentCount() }}</span>
+            <span class="dept-stat__label">Active</span>
+          </div>
+          <div class="dept-stat">
+            <span class="dept-stat__value">{{ inactiveDepartmentCount() }}</span>
+            <span class="dept-stat__label">Inactive</span>
+          </div>
+          <div class="dept-stat">
+            <span class="dept-stat__value">{{ totalAssignedUsers() }}</span>
+            <span class="dept-stat__label">Users Assigned</span>
+          </div>
+        </div>
+
+        <div class="dept-card__filters">
+          <input
+            pInputText
+            type="search"
+            placeholder="Search by name or code"
+            class="dept-card__search"
+            [ngModel]="searchTerm()"
+            (ngModelChange)="onSearchChange($event)"
+          />
+        </div>
+      }
+
       @if (pageError(); as message) {
         <p-message severity="error" [text]="message" styleClass="w-full dept-card__message" />
       }
@@ -21,8 +53,17 @@
         <p class="dept-card__lede">Loading departments…</p>
       } @else if (departments().length === 0) {
         <p class="dept-card__lede">No departments yet. {{ isOwner() ? 'Create the first one to get started.' : '' }}</p>
+      } @else if (filteredDepartments().length === 0) {
+        <p class="dept-card__lede">No departments match "{{ searchTerm() }}".</p>
       } @else {
-        <p-table [value]="departments()" styleClass="dept-table" [rowHover]="true">
+        <div class="dept-card__table">
+          <p-table
+            [value]="pagedDepartments()"
+            styleClass="dept-table"
+            [rowHover]="true"
+            [scrollable]="true"
+            scrollHeight="flex"
+          >
           <ng-template pTemplate="header">
             <tr>
               <th>Department Name</th>
@@ -43,21 +84,45 @@
               </td>
               <td>{{ department.userCount }}</td>
               <td class="dept-table__actions">
-                <button pButton type="button" label="View Users" class="p-button-text p-button-sm" (click)="viewUsers(department)"></button>
+                <button
+                  pButton
+                  type="button"
+                  icon="pi pi-users"
+                  class="p-button-text p-button-sm p-button-rounded"
+                  aria-label="View users"
+                  pTooltip="View users"
+                  tooltipPosition="top"
+                  (click)="viewUsers(department)"
+                ></button>
                 @if (isOwner()) {
-                  <button pButton type="button" label="Edit" class="p-button-text p-button-sm" (click)="openEditDialog(department)"></button>
                   <button
                     pButton
                     type="button"
-                    [label]="department.status === 'ACTIVE' ? 'Deactivate' : 'Activate'"
-                    class="p-button-text p-button-sm"
+                    icon="pi pi-pencil"
+                    class="p-button-text p-button-sm p-button-rounded"
+                    aria-label="Edit"
+                    pTooltip="Edit"
+                    tooltipPosition="top"
+                    (click)="openEditDialog(department)"
+                  ></button>
+                  <button
+                    pButton
+                    type="button"
+                    [icon]="department.status === 'ACTIVE' ? 'pi pi-ban' : 'pi pi-check-circle'"
+                    class="p-button-text p-button-sm p-button-rounded"
+                    [attr.aria-label]="department.status === 'ACTIVE' ? 'Deactivate' : 'Activate'"
+                    [pTooltip]="department.status === 'ACTIVE' ? 'Deactivate' : 'Activate'"
+                    tooltipPosition="top"
                     (click)="toggleStatus(department)"
                   ></button>
                   <button
                     pButton
                     type="button"
-                    label="Delete"
-                    class="p-button-text p-button-sm p-button-danger"
+                    icon="pi pi-trash"
+                    class="p-button-text p-button-sm p-button-rounded p-button-danger"
+                    aria-label="Delete"
+                    pTooltip="Delete"
+                    tooltipPosition="top"
                     (click)="deleteDepartment(department)"
                   ></button>
                 }
@@ -65,6 +130,16 @@
             </tr>
           </ng-template>
         </p-table>
+        </div>
+        <p-paginator
+          [rows]="pageSize()"
+          [totalRecords]="filteredDepartments().length"
+          [first]="first()"
+          [rowsPerPageOptions]="pageSizes"
+          [alwaysShow]="false"
+          (onPageChange)="onPageChange($event)"
+          styleClass="dept-card__paginator"
+        />
       }
     </div>
   </div>

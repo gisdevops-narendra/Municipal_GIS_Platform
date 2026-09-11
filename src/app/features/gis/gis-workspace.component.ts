@@ -133,12 +133,28 @@ export class GisWorkspaceComponent {
 
   // ----- dock state -----
   readonly groups = GROUP_ORDER;
+  /** Every tool group except 'admin' — rendered in the rail's scrollable
+   *  area. 'admin' (Workspace Details, and any future workspace-level
+   *  action) is rendered separately, pinned to the bottom of the rail —
+   *  see pinnedToolGroup — so it's always reachable without scrolling
+   *  even as the tool list above it grows toward the 100+ tools this
+   *  rail is designed to scale to. Not-yet-shipped tools (`available:
+   *  false`) are left out of the rail entirely rather than shown
+   *  disabled — flip a tool to `available: true` in TOOLS to have it
+   *  appear. */
   readonly toolsByGroup = computed(() =>
-    GROUP_ORDER.map((group) => ({
-      ...group,
-      tools: TOOLS.filter((tool) => tool.group === group.id)
-    })).filter((group) => group.tools.length > 0)
+    GROUP_ORDER.filter((group) => group.id !== 'admin')
+      .map((group) => ({
+        ...group,
+        tools: TOOLS.filter((tool) => tool.group === group.id && tool.available)
+      }))
+      .filter((group) => group.tools.length > 0)
   );
+
+  readonly pinnedToolGroup = computed(() => {
+    const group = GROUP_ORDER.find((g) => g.id === 'admin')!;
+    return { ...group, tools: TOOLS.filter((tool) => tool.group === 'admin' && tool.available) };
+  });
 
   readonly leftTool = signal<string | null>('layers');
   readonly bottomTool = signal<string | null>(null);

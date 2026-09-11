@@ -81,23 +81,24 @@
           } @else if (departmentSummaries().length === 0) {
             <p class="dashboard-card__note">No departments have been set up yet.</p>
           } @else {
-            <ul class="dashboard-dept-list">
+            <div class="dashboard-dept-grid">
               @for (dept of departmentSummaries(); track dept.departmentId) {
-                <li class="dashboard-dept-list__item">
-                  <a
-                    class="dashboard-dept-list__link"
-                    routerLink="/gis"
-                    [queryParams]="{ department: dept.departmentId }"
-                    [attr.aria-label]="'View ' + dept.departmentName + ' layers on the map'"
-                  >
-                    <span class="dashboard-dept-list__name">{{ dept.departmentName }}</span>
-                    <span class="dashboard-dept-list__count">
-                      {{ dept.layerCount }} {{ dept.layerCount === 1 ? 'layer' : 'layers' }}
-                    </span>
-                  </a>
-                </li>
+                <a
+                  class="dashboard-dept-tile"
+                  routerLink="/gis"
+                  [queryParams]="{ department: dept.departmentId }"
+                  [attr.aria-label]="'View ' + dept.departmentName + ' layers on the map'"
+                  [title]="dept.departmentName"
+                >
+                  <span class="dashboard-dept-tile__name">{{ dept.departmentName }}</span>
+                  <span class="dashboard-dept-tile__count">{{ dept.layerCount }}</span>
+                  <span class="dashboard-dept-tile__unit">{{ dept.layerCount === 1 ? 'layer' : 'layers' }}</span>
+                  <span class="dashboard-dept-tile__track">
+                    <span class="dashboard-dept-tile__fill" [style.width.%]="barWidthPercent(dept.layerCount)"></span>
+                  </span>
+                </a>
               }
-            </ul>
+            </div>
           }
         </section>
       </div>

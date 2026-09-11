@@ -7,24 +7,44 @@
 >
   <!-- ============ tool rail ============ -->
   <nav class="gis-ws__rail" aria-label="GIS tools">
-    @for (group of toolsByGroup(); track group.id) {
-      <div class="gis-ws__rail-group" role="group" [attr.aria-label]="group.label">
-        @for (tool of group.tools; track tool.id) {
-          <button
-            type="button"
-            class="gis-ws__rail-btn"
-            [class.is-active]="isToolActive(tool)"
-            [class.is-soon]="!tool.available"
-            [pTooltip]="tool.available ? tool.label : tool.label + ' · coming soon'"
-            tooltipPosition="right"
-            [attr.aria-pressed]="isToolActive(tool)"
-            (click)="activateTool(tool)"
-          >
-            <i [class]="tool.icon" aria-hidden="true"></i>
-          </button>
-        }
-      </div>
-    }
+    <div class="gis-ws__rail-scroll">
+      @for (group of toolsByGroup(); track group.id) {
+        <div class="gis-ws__rail-group" role="group" [attr.aria-label]="group.label">
+          @for (tool of group.tools; track tool.id) {
+            <button
+              type="button"
+              class="gis-ws__rail-btn"
+              [class.is-active]="isToolActive(tool)"
+              [pTooltip]="tool.label"
+              tooltipPosition="right"
+              [attr.aria-pressed]="isToolActive(tool)"
+              (click)="activateTool(tool)"
+            >
+              <i [class]="tool.icon" aria-hidden="true"></i>
+            </button>
+          }
+        </div>
+      }
+    </div>
+
+    <!-- Always visible, never scrolls away — workspace-level actions
+         (Workspace Details, and any future ones) are pinned to the
+         bottom of the rail regardless of how many tools are above. -->
+    <div class="gis-ws__rail-pinned" role="group" [attr.aria-label]="pinnedToolGroup().label">
+      @for (tool of pinnedToolGroup().tools; track tool.id) {
+        <button
+          type="button"
+          class="gis-ws__rail-btn"
+          [class.is-active]="isToolActive(tool)"
+          [pTooltip]="tool.label"
+          tooltipPosition="right"
+          [attr.aria-pressed]="isToolActive(tool)"
+          (click)="activateTool(tool)"
+        >
+          <i [class]="tool.icon" aria-hidden="true"></i>
+        </button>
+      }
+    </div>
   </nav>
 
   <!-- ============ left dock ============ -->
