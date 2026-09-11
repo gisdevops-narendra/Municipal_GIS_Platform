@@ -1,0 +1,263 @@
+<app-site-header />
+
+<main class="module-access-shell contour-field">
+  <div class="page-container module-access-shell__inner">
+    <div class="module-access-card survey-panel">
+      <div class="module-access-card__header">
+        <div>
+          <span class="eyebrow">Administration</span>
+          <h1 class="module-access-card__heading">Module Access</h1>
+          <p class="module-access-card__lede">
+            @if (isOwner()) {
+              Assign which modules a Department (and its Head) can use, or grant a Department User a subset of
+              what their own department already has.
+            } @else {
+              Grant your Department Users a subset of the modules your department has access to.
+            }
+          </p>
+        </div>
+        @if (isOwner()) {
+          <button
+            pButton
+            type="button"
+            icon="pi pi-plus"
+            label="Add Module"
+            (click)="openAddModuleDialog()"
+          ></button>
+        }
+      </div>
+
+      @if (pageError(); as message) {
+        <p-message severity="error" [text]="message" styleClass="w-full module-access-card__message" />
+      }
+
+      <div class="module-access__body">
+        <aside class="module-access__sidebar">
+          @if (isOwner()) {
+            <div class="module-access__kind-toggle">
+              <button
+                pButton
+                type="button"
+                label="Departments"
+                icon="pi pi-sitemap"
+                [class]="targetKind() === 'department' ? 'p-button-sm' : 'p-button-sm p-button-outlined'"
+                (click)="selectTargetKind('department')"
+              ></button>
+              <button
+                pButton
+                type="button"
+                label="Users"
+                icon="pi pi-user"
+                [class]="targetKind() === 'user' ? 'p-button-sm' : 'p-button-sm p-button-outlined'"
+                (click)="selectTargetKind('user')"
+              ></button>
+            </div>
+          }
+
+          <div class="module-access__target-picker">
+            @if (targetKind() === 'department') {
+              <label class="field-label" for="module-access-target">Department</label>
+              <p-select
+                inputId="module-access-target"
+                [options]="departmentOptions"
+                optionLabel="label"
+                optionValue="value"
+                [filter]="true"
+                filterBy="label"
+                placeholder="Choose a department"
+                [ngModel]="selectedDepartmentId()"
+                (ngModelChange)="selectDepartment($event)"
+                styleClass="module-access__picker w-full"
+              />
+            } @else {
+              <label class="field-label" for="module-access-target">Department User</label>
+              <p-select
+                inputId="module-access-target"
+                [options]="userOptions"
+                optionLabel="label"
+                optionValue="value"
+                [filter]="true"
+                filterBy="label"
+                placeholder="Choose a department user"
+                [ngModel]="selectedUserId()"
+                (ngModelChange)="selectUser($event)"
+                styleClass="module-access__picker w-full"
+              />
+            }
+          </div>
+
+          @if (!forbidden() && ((targetKind() === 'department' && selectedDepartmentId()) || (targetKind() === 'user' && selectedUserId()))) {
+            <div class="module-access__stats">
+              <div class="module-access__stat">
+                <span class="module-access__stat-value">{{ explicitCount() }}</span>
+                <span class="module-access__stat-label">Explicitly granted</span>
+              </div>
+              <div class="module-access__stat">
+                <span class="module-access__stat-value">{{ effectiveCount() }}</span>
+                <span class="module-access__stat-label">Effective (incl. defaults)</span>
+              </div>
+              <div class="module-access__stat">
+                <span class="module-access__stat-value">{{ catalogTotal() }}</span>
+                <span class="module-access__stat-label">Total in catalog</span>
+              </div>
+            </div>
+
+            <ul class="module-access__legend">
+              <li><span class="module-access__swatch module-access__swatch--default"></span> Default — always on</li>
+              <li><span class="module-access__swatch module-access__swatch--auto"></span> Auto — implied by a granted child</li>
+              @if (ceilingIds()) {
+                <li><span class="module-access__swatch module-access__swatch--reach"></span> Out of reach — not in this department</li>
+              }
+            </ul>
+          }
+        </aside>
+
+        <section class="module-access__main">
+          @if (forbidden()) {
+            <p-message
+              severity="warn"
+              text="You do not have permission to manage module access here."
+              styleClass="w-full module-access-card__message"
+            />
+          } @else if (targetKind() === 'department' && !selectedDepartmentId()) {
+            <div class="module-access__empty">
+              <i class="pi pi-sitemap"></i>
+              <p>Choose a department on the left to see and edit its module access.</p>
+            </div>
+          } @else if (targetKind() === 'user' && !selectedUserId()) {
+            <div class="module-access__empty">
+              <i class="pi pi-user"></i>
+              <p>Choose a department user on the left to see and edit their module access.</p>
+            </div>
+          } @else if (catalogLoading() || grantsLoading()) {
+            <p class="module-access-card__hint">Loading…</p>
+          } @else {
+            <div class="module-access__toolbar">
+              <div class="module-access__search">
+                <i class="pi pi-search"></i>
+                <input
+                  pInputText
+                  type="search"
+                  placeholder="Search modules"
+                  class="w-full"
+                  [ngModel]="moduleSearchTerm()"
+                  (ngModelChange)="onModuleSearchChange($event)"
+                />
+              </div>
+            </div>
+
+            @if (filteredRows().length === 0) {
+              <p class="module-access-card__hint">No modules match "{{ moduleSearchTerm() }}".</p>
+            } @else {
+              <div class="module-access__tree">
+                @for (row of filteredRows(); track row.module.id) {
+                  <div
+                    class="module-access__row"
+                    [style.padding-left.px]="row.depth * 20 + 12"
+                    [class.module-access__row--out-of-reach]="row.outOfReach"
+                  >
+                    <p-checkbox
+                      [inputId]="'module-' + row.module.id"
+                      [binary]="true"
+                      [ngModel]="row.explicit || row.implied"
+                      [disabled]="row.implied || row.outOfReach || saving"
+                      (onChange)="toggle(row, $event)"
+                    ></p-checkbox>
+                    <label [for]="'module-' + row.module.id" class="module-access__label">{{ row.module.name }}</label>
+                    @if (row.module.type) {
+                      <span class="module-access__type">{{ row.module.type }}</span>
+                    }
+                    @if (row.module.defaultModule) {
+                      <p-tag severity="info" value="Default" styleClass="module-access__tag"></p-tag>
+                    } @else if (row.implied) {
+                      <p-tag severity="secondary" value="Auto" styleClass="module-access__tag"></p-tag>
+                    } @else if (row.outOfReach) {
+                      <p-tag severity="warn" value="Out of reach" styleClass="module-access__tag"></p-tag>
+                    }
+                  </div>
+                }
+              </div>
+            }
+          }
+        </section>
+      </div>
+    </div>
+  </div>
+</main>
+
+<p-dialog
+  [visible]="addModuleDialogVisible()"
+  (visibleChange)="addModuleDialogVisible.set($event)"
+  [modal]="true"
+  header="Add Module"
+  [style]="{ width: '520px' }"
+>
+  <form [formGroup]="addModuleForm" (ngSubmit)="submitAddModule()" class="module-access-form">
+    <div class="module-access-form__field">
+      <label class="field-label" for="module-name">Module Name</label>
+      <input pInputText id="module-name" formControlName="name" class="w-full" placeholder="e.g. Export to PDF" />
+      @if (amf.name.invalid && amf.name.touched) {
+        <div class="field-error">Module name is required (2-150 characters).</div>
+      }
+    </div>
+
+    <div class="module-access-form__field">
+      <label class="field-label" for="module-parent">Parent Module</label>
+      <p-select
+        inputId="module-parent"
+        [options]="parentModuleOptions()"
+        optionLabel="label"
+        optionValue="value"
+        [filter]="true"
+        filterBy="label"
+        [showClear]="true"
+        placeholder="None — top-level module"
+        formControlName="parentId"
+        styleClass="w-full"
+      />
+      <div class="field-hint">Nesting a module under a parent grants that parent automatically to anyone who has this one.</div>
+    </div>
+
+    <div class="module-access-form__row">
+      <div class="module-access-form__field">
+        <label class="field-label" for="module-type">Type</label>
+        <p-select
+          inputId="module-type"
+          [options]="typeOptions"
+          optionLabel="label"
+          optionValue="value"
+          [showClear]="true"
+          placeholder="None"
+          formControlName="type"
+          styleClass="w-full"
+        />
+      </div>
+
+      <div class="module-access-form__field">
+        <label class="field-label" for="module-priority">Display Priority</label>
+        <p-inputNumber
+          inputId="module-priority"
+          formControlName="displayPriority"
+          [useGrouping]="false"
+          styleClass="w-full"
+        />
+      </div>
+    </div>
+
+    <div class="module-access-form__field module-access-form__field--checkbox">
+      <p-checkbox inputId="module-default" [binary]="true" formControlName="defaultModule"></p-checkbox>
+      <label for="module-default">Always on for everyone (default module)</label>
+    </div>
+
+    @if (addModuleError(); as message) {
+      <p-message severity="error" [text]="message" styleClass="w-full" />
+    }
+
+    <div class="module-access-form__actions">
+      <button pButton type="button" label="Cancel" class="p-button-text" (click)="closeAddModuleDialog()"></button>
+      <button pButton type="submit" label="Create Module" [loading]="addModuleSubmitting()"></button>
+    </div>
+  </form>
+</p-dialog>
+
+<app-site-footer />

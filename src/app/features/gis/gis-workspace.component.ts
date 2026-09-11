@@ -15,6 +15,7 @@ import { SiteHeaderComponent } from '../../shared/components/site-header/site-he
 import { GisWorkspaceService } from '../../core/services/gis-workspace.service';
 import { GisLayersService } from '../../core/services/gis-layers.service';
 import { CurrentUserService } from '../../core/services/current-user.service';
+import { ModuleAccessService } from '../../core/services/module-access.service';
 import { GisWorkspace } from '../../core/models/gis-workspace.model';
 import { GisLayer } from '../../core/models/gis-layer.model';
 import { GisSearchFeatureMatch, GisSearchLayerMatch } from '../../core/models/gis-dashboard.model';
@@ -46,6 +47,11 @@ export interface WsTool {
   group: WsToolGroup;
   dock: 'left' | 'bottom';
   available: boolean;
+  /** Module Access catalog id this tool is gated on — see
+   *  GisWorkspaceComponent's `visibleTools`. Omitted for a tool with no
+   *  catalog equivalent (Workspace Details, AI Assistant): those stay
+   *  ungated rather than being hidden due to a data-modeling gap. */
+  moduleId?: number;
 }
 
 type WsToolGroup = 'data' | 'explore' | 'analysis' | 'output' | 'admin';
@@ -58,19 +64,24 @@ const GROUP_ORDER: { id: WsToolGroup; label: string }[] = [
   { id: 'admin', label: 'Workspace' }
 ];
 
+/** moduleId values are Module Access catalog ids (see
+ *  backend/prisma/seed-modules.ts) — Layer Switcher=1, Query Module=2,
+ *  Print=3, Bookmark=4, Buffer=6 (child of Query Module), Measure=11,
+ *  Attribute Table=15. Tools with no catalog equivalent (AI Assistant,
+ *  Workspace Details) omit moduleId and stay ungated. */
 const TOOLS: WsTool[] = [
-  { id: 'layers', label: 'Layers', icon: 'pi pi-clone', group: 'data', dock: 'left', available: true },
+  { id: 'layers', label: 'Layers', icon: 'pi pi-clone', group: 'data', dock: 'left', available: true, moduleId: 1 },
   // Legend lives inside the Layers panel (per-visible-layer swatch) — no
   // separate tool needed. Identify shows feature info in an on-map popup
   // (see MunicipalMapComponent), so it isn't a dock tool either.
-  { id: 'attributes', label: 'Attribute Table', icon: 'pi pi-table', group: 'explore', dock: 'bottom', available: true },
+  { id: 'attributes', label: 'Attribute Table', icon: 'pi pi-table', group: 'explore', dock: 'bottom', available: true, moduleId: 15 },
   { id: 'assistant', label: 'AI Assistant', icon: 'pi pi-comments', group: 'explore', dock: 'left', available: true },
-  { id: 'bookmarks', label: 'Bookmarks', icon: 'pi pi-bookmark', group: 'explore', dock: 'left', available: true },
-  { id: 'query', label: 'Query Builder', icon: 'pi pi-filter', group: 'analysis', dock: 'left', available: true },
-  { id: 'measure', label: 'Measure', icon: 'pi pi-arrows-h', group: 'analysis', dock: 'left', available: true },
-  { id: 'buffer', label: 'Buffer & Overlay', icon: 'pi pi-circle', group: 'analysis', dock: 'left', available: true },
+  { id: 'bookmarks', label: 'Bookmarks', icon: 'pi pi-bookmark', group: 'explore', dock: 'left', available: true, moduleId: 4 },
+  { id: 'query', label: 'Query Builder', icon: 'pi pi-filter', group: 'analysis', dock: 'left', available: true, moduleId: 2 },
+  { id: 'measure', label: 'Measure', icon: 'pi pi-arrows-h', group: 'analysis', dock: 'left', available: true, moduleId: 11 },
+  { id: 'buffer', label: 'Buffer & Overlay', icon: 'pi pi-circle', group: 'analysis', dock: 'left', available: true, moduleId: 6 },
   { id: 'statistics', label: 'Statistics', icon: 'pi pi-chart-bar', group: 'analysis', dock: 'bottom', available: false },
-  { id: 'print', label: 'Print Layout', icon: 'pi pi-print', group: 'output', dock: 'left', available: true },
+  { id: 'print', label: 'Print Layout', icon: 'pi pi-print', group: 'output', dock: 'left', available: true, moduleId: 3 },
   { id: 'reports', label: 'Reports', icon: 'pi pi-file', group: 'output', dock: 'bottom', available: false },
   { id: 'export', label: 'Export Data', icon: 'pi pi-download', group: 'output', dock: 'left', available: false },
   { id: 'workspace', label: 'Workspace Details', icon: 'pi pi-server', group: 'admin', dock: 'left', available: true }
@@ -115,6 +126,7 @@ export class GisWorkspaceComponent {
   private readonly gisWorkspaceService = inject(GisWorkspaceService);
   private readonly gisLayersService = inject(GisLayersService);
   private readonly currentUserService = inject(CurrentUserService);
+  private readonly moduleAccessService = inject(ModuleAccessService);
   private readonly fb = inject(FormBuilder);
   private readonly route = inject(ActivatedRoute);
   private readonly mapService = inject(MapService);
@@ -131,6 +143,19 @@ export class GisWorkspaceComponent {
   readonly layersError = signal<string | null>(null);
   readonly layersReady = computed(() => !this.layersLoading() && !this.layersError() && this.layers().length > 0);
 
+  /** The caller's own resolved Module Access set (GET /api/module-access/me)
+   *  — hierarchical module assignment (Owner -> Department -> Department
+   *  User). Starts empty (nothing extra shown) until it loads, then
+   *  gates which tools appear via hasModuleAccess — a tool with no
+   *  moduleId (see WsTool) is never gated. Never used to gate anything
+   *  the backend doesn't independently re-check itself (each tool's own
+   *  API calls are authorized server-side regardless of the rail).  */
+  private readonly myModuleIds = signal<Set<number>>(new Set());
+
+  private hasModuleAccess(tool: WsTool): boolean {
+    return tool.moduleId === undefined || this.myModuleIds().has(tool.moduleId);
+  }
+
   // ----- dock state -----
   readonly groups = GROUP_ORDER;
   /** Every tool group except 'admin' — rendered in the rail's scrollable
@@ -141,19 +166,27 @@ export class GisWorkspaceComponent {
    *  rail is designed to scale to. Not-yet-shipped tools (`available:
    *  false`) are left out of the rail entirely rather than shown
    *  disabled — flip a tool to `available: true` in TOOLS to have it
-   *  appear. */
+   *  appear. A tool the caller has no Module Access to is left out the
+   *  same way — see hasModuleAccess. */
   readonly toolsByGroup = computed(() =>
     GROUP_ORDER.filter((group) => group.id !== 'admin')
       .map((group) => ({
         ...group,
-        tools: TOOLS.filter((tool) => tool.group === group.id && tool.available)
+        tools: TOOLS.filter(
+          (tool) => tool.group === group.id && tool.available && this.hasModuleAccess(tool)
+        )
       }))
       .filter((group) => group.tools.length > 0)
   );
 
   readonly pinnedToolGroup = computed(() => {
     const group = GROUP_ORDER.find((g) => g.id === 'admin')!;
-    return { ...group, tools: TOOLS.filter((tool) => tool.group === 'admin' && tool.available) };
+    return {
+      ...group,
+      tools: TOOLS.filter(
+        (tool) => tool.group === 'admin' && tool.available && this.hasModuleAccess(tool)
+      )
+    };
   });
 
   readonly leftTool = signal<string | null>('layers');
@@ -226,6 +259,14 @@ export class GisWorkspaceComponent {
         this.municipalityName.set(user.municipality.name);
         this.isOwner.set(user.systemRole === 'MUNICIPALITY_OWNER');
       }
+    });
+
+    this.moduleAccessService.getMyModuleIds().subscribe({
+      next: ({ moduleIds }) => this.myModuleIds.set(new Set(moduleIds))
+      // No error handler: if this fails, myModuleIds stays empty and every
+      // moduleId-gated tool stays hidden — a safe fail-closed default
+      // rather than fail-open (never show more than the caller actually
+      // has just because the check itself broke).
     });
 
     this.loadWorkspace();
