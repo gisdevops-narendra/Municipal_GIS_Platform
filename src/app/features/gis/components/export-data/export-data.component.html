@@ -1,0 +1,56 @@
+<div class="export">
+  @if (layerOptions().length === 0) {
+    <p class="export__hint">No vector layers to export.</p>
+  } @else {
+    <label class="export__field">
+      <span class="export__label">Layer</span>
+      <p-select
+        class="export__select"
+        [options]="layerOptions()"
+        optionLabel="label"
+        optionValue="value"
+        [ngModel]="selectedLayer()?.id"
+        (ngModelChange)="layerId.set($event); error.set(null)"
+        [filter]="layerOptions().length > 8"
+        appendTo="body"
+      />
+    </label>
+
+    <div class="export__field">
+      <span class="export__label">Format</span>
+      <div class="export__formats" role="radiogroup" aria-label="Export format">
+        @for (option of formatOptions(); track option.value) {
+          <button
+            type="button"
+            role="radio"
+            class="export__format"
+            [class.is-active]="selectedFormat()?.value === option.value"
+            [attr.aria-checked]="selectedFormat()?.value === option.value"
+            (click)="format.set(option.value); error.set(null)"
+          >
+            {{ option.label }}
+          </button>
+        }
+      </div>
+    </div>
+
+    @if (error(); as message) {
+      <p class="export__error" role="alert">{{ message }}</p>
+    }
+
+    <button
+      pButton
+      type="button"
+      class="p-button-sm export__download"
+      icon="pi pi-download"
+      [label]="'Download ' + (selectedFormat()?.label ?? '')"
+      [loading]="busy()"
+      [disabled]="!selectedLayer() || !selectedFormat()"
+      (click)="download()"
+    ></button>
+
+    <p class="export__hint export__hint--muted">
+      Exports every feature in the layer. Shapefiles download as a .zip; KML is always in WGS84 (EPSG:4326).
+    </p>
+  }
+</div>

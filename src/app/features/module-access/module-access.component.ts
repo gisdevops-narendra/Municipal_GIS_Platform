@@ -21,7 +21,8 @@ import { Department } from '../../core/models/department.model';
 import { MunicipalityUser } from '../../core/models/municipality-user.model';
 import { ModuleCatalogEntry, ModuleType, MODULE_TYPES } from '../../core/models/module-access.model';
 
-type TargetKind = 'department' | 'user';
+/** `catalog` is the Owner's view of the module list itself (browse/delete). */
+type TargetKind = 'department' | 'user' | 'catalog';
 
 const TYPE_LABELS: Record<ModuleType, string> = {
   mainleft: 'Main — Left Rail',
@@ -140,6 +141,27 @@ export class ModuleAccessComponent {
   readonly moduleSearchTerm = signal('');
 
   readonly typeOptions = MODULE_TYPES.map((type) => ({ label: TYPE_LABELS[type], value: type }));
+
+  readonly deletingModuleId = signal<number | null>(null);
+
+  /** Sub-module count per module id, for the delete confirmation. */
+  readonly descendantCounts = computed(() => {
+    const childrenOf = new Map<number, number[]>();
+    for (const m of this.catalog()) {
+      if (m.parentId === null) continue;
+      childrenOf.set(m.parentId, [...(childrenOf.get(m.parentId) ?? []), m.id]);
+    }
+    const count = (id: number, seen: Set<number>): number => {
+      let total = 0;
+      for (const child of childrenOf.get(id) ?? []) {
+        if (seen.has(child)) continue;
+        seen.add(child);
+        total += 1 + count(child, seen);
+      }
+      return total;
+    };
+    return new Map(this.catalog().map((m) => [m.id, count(m.id, new Set([m.id]))]));
+  });
 
   readonly addModuleDialogVisible = signal(false);
   readonly addModuleSubmitting = signal(false);
@@ -299,6 +321,43 @@ export class ModuleAccessComponent {
         return { label: `${'—'.repeat(depth)}${depth ? ' ' : ''}${module.name}`, value: module.id };
       })
   );
+
+  /** Owner-only: deletes a module (and its sub-modules) from the global
+   *  catalog after a confirmation that spells out the blast radius. */
+  confirmDeleteModule(module: ModuleCatalogEntry): void {
+    const children = this.descendantCounts().get(module.id) ?? 0;
+    const branch = children ? ` and its ${children} sub-module${children === 1 ? '' : 's'}` : '';
+    this.notify.confirmDelete({
+      header: 'Delete module',
+      message:
+        `Delete "${module.name}"${branch} from the module catalog? This removes it for every municipality ` +
+        'and revokes any department or user access granted to it. This cannot be undone.',
+      accept: () => this.deleteModule(module)
+    });
+  }
+
+  private deleteModule(module: ModuleCatalogEntry): void {
+    this.deletingModuleId.set(module.id);
+    this.moduleAccessService.deleteModule(module.id).subscribe({
+      next: ({ deletedIds }) => {
+        this.deletingModuleId.set(null);
+        const removed = new Set(deletedIds);
+        this.catalog.update((catalog) => catalog.filter((m) => !removed.has(m.id)));
+        this.explicitIds.update((ids) => new Set([...ids].filter((id) => !removed.has(id))));
+        this.notify.success(
+          deletedIds.length > 1
+            ? `"${module.name}" and ${deletedIds.length - 1} sub-module${deletedIds.length === 2 ? '' : 's'} were deleted.`
+            : `"${module.name}" was deleted.`
+        );
+      },
+      error: (err: HttpErrorResponse) => {
+        this.deletingModuleId.set(null);
+        this.notify.error(
+          (err.error as { message?: string } | null)?.message ?? 'Could not delete the module. Please try again.'
+        );
+      }
+    });
+  }
 
   openAddModuleDialog(): void {
     this.addModuleError.set(null);

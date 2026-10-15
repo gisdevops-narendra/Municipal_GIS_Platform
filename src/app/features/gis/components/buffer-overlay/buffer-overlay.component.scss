@@ -201,3 +201,54 @@
 .bo__run {
   flex: 1;
 }
+
+/* ---------- MultiBuffer ---------- */
+.bo__toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--color-ink-700);
+  cursor: pointer;
+
+  input {
+    accent-color: var(--color-primary-600);
+  }
+}
+
+.bo__toggle-hint {
+  color: var(--color-ink-500);
+}
+
+.bo__rings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bo__ring {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.bo__ring-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.bo__ring-label {
+  font-family: var(--font-mono);
+  color: var(--color-ink-700);
+}
+
+.bo__ring-count {
+  margin-left: auto;
+  color: var(--color-ink-900);
+}

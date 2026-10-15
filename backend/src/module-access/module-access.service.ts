@@ -164,6 +164,39 @@ export class ModuleAccessService {
     return result;
   }
 
+  /**
+   * Permanently removes a module from the GLOBAL catalog together with
+   * every descendant (children are linked only by `parentId`, not a
+   * foreign key, so they would otherwise be left orphaned). Department and
+   * user grants of the removed modules go with them (ON DELETE CASCADE).
+   * Returns the removed ids, the target first.
+   */
+  async deleteModule(id: number): Promise<{ deletedIds: number[] }> {
+    const all = await this.prisma.module.findMany({
+      select: { id: true, parentId: true },
+    });
+    if (!all.some((m) => m.id === id)) {
+      throw new NotFoundException(`Module ${id} not found.`);
+    }
+    const childrenOf = new Map<number, number[]>();
+    for (const m of all) {
+      if (m.parentId === null) continue;
+      childrenOf.set(m.parentId, [...(childrenOf.get(m.parentId) ?? []), m.id]);
+    }
+    const deletedIds: number[] = [];
+    const queue = [id];
+    const seen = new Set<number>();
+    while (queue.length) {
+      const next = queue.shift()!;
+      if (seen.has(next)) continue; // defensive: a cyclic parentId chain
+      seen.add(next);
+      deletedIds.push(next);
+      queue.push(...(childrenOf.get(next) ?? []));
+    }
+    await this.prisma.module.deleteMany({ where: { id: { in: deletedIds } } });
+    return { deletedIds };
+  }
+
   async getAllActiveModuleIds(): Promise<Set<number>> {
     const modules = await this.prisma.module.findMany({
       where: { isActive: true },

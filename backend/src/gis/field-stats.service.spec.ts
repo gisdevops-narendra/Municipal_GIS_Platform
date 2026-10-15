@@ -120,4 +120,118 @@ describe('FieldStatsService', () => {
       expect(distinctCall[1]).toBe('ws-9');
     });
   });
+
+  describe('summary (analytics)', () => {
+    /** Typed view of the n-th raw query call: [sql, ...params]. */
+    const call = (n: number) =>
+      queryRaw.mock.calls[n] as [string, ...unknown[]];
+
+    it('returns numeric stats and a 10-bin histogram, clamping the max into the last bin', async () => {
+      columns([{ column_name: 'dia', data_type: 'double precision' }]);
+      queryRaw.mockResolvedValueOnce([
+        {
+          total: 12n,
+          non_null: 10n,
+          min: 0,
+          max: 100,
+          mean: 40,
+          sum: 400,
+          median: 35,
+        },
+      ]);
+      queryRaw.mockResolvedValueOnce([
+        { bin: 1, count: 4n },
+        { bin: 10, count: 6n },
+      ]);
+
+      const result = await service.summary(SAFE_TABLE, 'dia', null);
+
+      expect(result).toMatchObject({ kind: 'number', total: 12, nonNull: 10 });
+      expect(result.numeric?.histogram).toHaveLength(10);
+      expect(result.numeric?.histogram[0]).toEqual({
+        from: 0,
+        to: 10,
+        count: 4,
+      });
+      expect(result.numeric?.histogram[9]).toEqual({
+        from: 90,
+        to: 100,
+        count: 6,
+      });
+      expect(result.numeric?.histogram[5].count).toBe(0);
+      const binSql = call(2)[0];
+      expect(binSql).toContain(
+        'LEAST(width_bucket("dia"::float8, 0, 100, 10), 10)',
+      );
+    });
+
+    it('uses a single bin when every value is equal', async () => {
+      columns([{ column_name: 'dia', data_type: 'integer' }]);
+      queryRaw.mockResolvedValueOnce([
+        {
+          total: 3n,
+          non_null: 3n,
+          min: 5,
+          max: 5,
+          mean: 5,
+          sum: 15,
+          median: 5,
+        },
+      ]);
+      queryRaw.mockResolvedValueOnce([{ bin: 1, count: 3n }]);
+
+      const result = await service.summary(SAFE_TABLE, 'dia', null);
+
+      expect(result.numeric?.histogram).toEqual([{ from: 5, to: 5, count: 3 }]);
+    });
+
+    it('returns top categories and folds the rest into otherCount', async () => {
+      columns([{ column_name: 'status', data_type: 'character varying' }]);
+      queryRaw.mockResolvedValueOnce([
+        { total: 20n, non_null: 18n, distinct_count: 14n },
+      ]);
+      queryRaw.mockResolvedValueOnce([
+        { value: 'Working', count: 10n },
+        { value: 'Leaking', count: 5n },
+      ]);
+
+      const result = await service.summary(SAFE_TABLE, 'status', null);
+
+      expect(result).toMatchObject({
+        kind: 'string',
+        total: 20,
+        nonNull: 18,
+        distinctCount: 14,
+        otherCount: 3,
+        categories: [
+          { value: 'Working', count: 10 },
+          { value: 'Leaking', count: 5 },
+        ],
+      });
+    });
+
+    it('scopes the shared demo tables to the workspace', async () => {
+      columns([{ column_name: 'name', data_type: 'text' }]);
+      queryRaw.mockResolvedValueOnce([
+        { total: 4n, non_null: 4n, distinct_count: 4n },
+      ]);
+      queryRaw.mockResolvedValueOnce([]);
+
+      await service.summary('gis_demo_wards', 'name', 'ws-1');
+
+      expect(call(1)[0]).toContain('WHERE gis_workspace_id = $1');
+      expect(call(1)[1]).toBe('ws-1');
+      expect(call(2)[0]).toContain(
+        'WHERE gis_workspace_id = $1 AND "name" IS NOT NULL',
+      );
+    });
+
+    it('rejects a field that is not an attribute of the layer', async () => {
+      columns([{ column_name: 'name', data_type: 'text' }]);
+
+      await expect(
+        service.summary(SAFE_TABLE, 'name; DROP TABLE x', null),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
 });

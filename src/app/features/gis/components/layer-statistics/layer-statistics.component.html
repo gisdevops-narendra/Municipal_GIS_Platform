@@ -1,0 +1,150 @@
+<div class="stats">
+  <div class="stats__side">
+    <div class="stats__controls">
+      <label class="stats__field">
+        <span class="stats__label">Layer</span>
+        <p-select
+          class="stats__select"
+          [options]="layerOptions()"
+          optionLabel="label"
+          optionValue="value"
+          [ngModel]="layerId()"
+          (ngModelChange)="selectLayer($event)"
+          placeholder="Choose a layer"
+          appendTo="body"
+        />
+      </label>
+      <label class="stats__field">
+        <span class="stats__label">Field</span>
+        <p-select
+          class="stats__select"
+          [options]="fieldOptions()"
+          optionLabel="label"
+          optionValue="value"
+          [ngModel]="field()"
+          (ngModelChange)="selectField($event)"
+          [filter]="fieldOptions().length > 8"
+          placeholder="Choose a field"
+          [disabled]="fieldOptions().length === 0"
+          appendTo="body"
+        />
+      </label>
+    </div>
+
+    @if (error(); as message) {
+      <p class="stats__message stats__message--error" role="alert">{{ message }}</p>
+    } @else if (loading() && !summary()) {
+      <p class="stats__message">Calculating…</p>
+    } @else if (layerOptions().length === 0) {
+      <p class="stats__message">No vector layers to analyse.</p>
+    } @else if (summary() && showStats()) {
+      <dl class="stats__tiles">
+        @for (tile of tiles(); track tile.label) {
+          <div class="stats__tile" [attr.title]="tile.exact ?? null">
+            <dt>{{ tile.label }}</dt>
+            <dd>{{ tile.value }}</dd>
+          </div>
+        }
+      </dl>
+    }
+  </div>
+
+  @if (showChart() && !error()) {
+    @if (summary(); as s) {
+      <div class="stats__chart" #chartArea>
+        <div class="stats__chart-head">
+          <p class="stats__chart-title">
+            {{ isNumeric() ? 'Distribution of ' + s.field : 'Most common values of ' + s.field }}
+          </p>
+          <button
+            type="button"
+            class="stats__toggle"
+            [attr.aria-pressed]="showTable()"
+            (click)="showTable.set(!showTable()); hideTip()"
+          >
+            <i [class]="showTable() ? 'pi pi-chart-bar' : 'pi pi-table'" aria-hidden="true"></i>
+            {{ showTable() ? 'Chart' : 'Table' }}
+          </button>
+        </div>
+
+        @if (s.nonNull === 0) {
+          <p class="stats__message">No feature has a value for this field.</p>
+        } @else if (showTable()) {
+          <div class="stats__scroll">
+            <table class="stats__table">
+              <thead>
+                <tr>
+                  <th scope="col">{{ isNumeric() ? 'Range' : 'Value' }}</th>
+                  <th scope="col" class="num">Features</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (bar of bars(); track bar.key) {
+                  <tr>
+                    <td>{{ bar.label }}</td>
+                    <td class="num">{{ bar.count }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else if (isNumeric()) {
+          <div class="hist">
+            <div class="hist__plot">
+              @for (tick of histogramTicks(); track tick.share) {
+                <div class="hist__grid" [style.bottom.%]="tick.share * 100">
+                  <span class="hist__tick">{{ tick.value }}</span>
+                </div>
+              }
+              <div class="hist__cols">
+                @for (bar of bars(); track bar.key) {
+                  <button
+                    type="button"
+                    class="hist__col"
+                    [attr.aria-label]="bar.count + ' features, ' + bar.label"
+                    (pointerenter)="showTip(bar, $event)"
+                    (pointerleave)="hideTip()"
+                    (focus)="showTip(bar, $event)"
+                    (blur)="hideTip()"
+                  >
+                    <span class="hist__fill" [style.height.%]="bar.share * 100"></span>
+                  </button>
+                }
+              </div>
+            </div>
+            @if (histogramEnds(); as ends) {
+              <div class="hist__axis">
+                <span>{{ ends.from }}</span>
+                <span>{{ ends.to }}</span>
+              </div>
+            }
+          </div>
+        } @else {
+          <ul class="cats stats__scroll">
+            @for (bar of bars(); track bar.key) {
+              <li class="cats__row">
+                <span class="cats__label" [attr.title]="bar.label">{{ bar.label }}</span>
+                <button
+                  type="button"
+                  class="cats__track"
+                  [attr.aria-label]="bar.count + ' features, ' + bar.label"
+                  (pointerenter)="showTip(bar, $event)"
+                  (pointerleave)="hideTip()"
+                  (focus)="showTip(bar, $event)"
+                  (blur)="hideTip()"
+                >
+                  <span class="cats__bar" [class.cats__bar--muted]="bar.muted" [style.width.%]="bar.share * 100"></span>
+                  <span class="cats__value">{{ bar.count }}</span>
+                </button>
+              </li>
+            }
+          </ul>
+        }
+
+        @if (tip(); as t) {
+          <div class="stats__tip" role="status" [style.left.px]="t.x" [style.top.px]="t.y">{{ t.text }}</div>
+        }
+      </div>
+    }
+  }
+</div>

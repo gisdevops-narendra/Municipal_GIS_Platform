@@ -27,6 +27,12 @@ export class ModuleAccessService {
     return this.http.post<ModuleCatalogEntry>(`${this.baseUrl}/catalog`, request);
   }
 
+  /** Owner-only: permanently deletes a module and its sub-modules from the
+   *  global catalog (with their grants). */
+  deleteModule(id: number): Observable<{ deletedIds: number[] }> {
+    return this.http.delete<{ deletedIds: number[] }>(`${this.baseUrl}/catalog/${id}`);
+  }
+
   /** The caller's own resolved module set — what the live /gis workspace
    *  gates its tool rail on. */
   getMyModuleIds(): Observable<{ moduleIds: number[] }> {

@@ -1,4 +1,4 @@
-import { Component, WritableSignal, computed, inject, signal } from '@angular/core';
+import { Component, WritableSignal, computed, effect, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
@@ -31,6 +31,14 @@ import { BookmarksComponent } from './components/bookmarks/bookmarks.component';
 import { BufferOverlayComponent } from './components/buffer-overlay/buffer-overlay.component';
 import { AiChatComponent } from './components/ai-chat/ai-chat.component';
 import { PrintLayoutComponent } from './components/print-layout/print-layout.component';
+import { ExportDataComponent } from './components/export-data/export-data.component';
+import { SketchComponent } from './components/sketch/sketch.component';
+import { LayerStatisticsComponent } from './components/layer-statistics/layer-statistics.component';
+import { LayerReportComponent, TableSelection } from './components/layer-report/layer-report.component';
+import { ANALYTICS_MODULE_ID, DATA_VISUALISATION_MODULE_ID } from '../../core/models/layer-analytics.model';
+import { AI_ASSISTANT_MODULE_ID, LAYER_STYLING_MODULE_ID } from '../../core/models/module-access.model';
+import { SketchService } from './services/sketch.service';
+import { DRAW_MODULE_ID, MARKING_TOOL_MODULE_ID } from './models/sketch.model';
 import { StyleEditorComponent } from './components/style-editor/style-editor.component';
 import { StyleGeometry } from '../../core/models/layer-style.model';
 
@@ -52,6 +60,10 @@ export interface WsTool {
    *  catalog equivalent (Workspace Details, AI Assistant): those stay
    *  ungated rather than being hidden due to a data-modeling gap. */
   moduleId?: number;
+  /** Alternative to `moduleId` for a tool that bundles several catalog
+   *  modules: shown when ANY of them is granted (the tool then gates each
+   *  part itself). */
+  anyModuleIds?: number[];
 }
 
 type WsToolGroup = 'data' | 'explore' | 'analysis' | 'output' | 'admin';
@@ -67,7 +79,8 @@ const GROUP_ORDER: { id: WsToolGroup; label: string }[] = [
 /** moduleId values are Module Access catalog ids (see
  *  backend/prisma/seed-modules.ts) — Layer Switcher=1, Query Module=2,
  *  Print=3, Bookmark=4, Buffer=6 (child of Query Module), Measure=11,
- *  Attribute Table=15. Tools with no catalog equivalent (AI Assistant,
+ *  Attribute Table=15, Export Data=226 (formats gated by its children),
+ *  AI Assistant=900. Tools with no catalog equivalent (AI Assistant,
  *  Workspace Details) omit moduleId and stay ungated. */
 const TOOLS: WsTool[] = [
   { id: 'layers', label: 'Layers', icon: 'pi pi-clone', group: 'data', dock: 'left', available: true, moduleId: 1 },
@@ -75,15 +88,16 @@ const TOOLS: WsTool[] = [
   // separate tool needed. Identify shows feature info in an on-map popup
   // (see MunicipalMapComponent), so it isn't a dock tool either.
   { id: 'attributes', label: 'Attribute Table', icon: 'pi pi-table', group: 'explore', dock: 'bottom', available: true, moduleId: 15 },
-  { id: 'assistant', label: 'AI Assistant', icon: 'pi pi-comments', group: 'explore', dock: 'left', available: true },
+  { id: 'assistant', label: 'AI Assistant', icon: 'pi pi-comments', group: 'explore', dock: 'left', available: true, moduleId: AI_ASSISTANT_MODULE_ID },
   { id: 'bookmarks', label: 'Bookmarks', icon: 'pi pi-bookmark', group: 'explore', dock: 'left', available: true, moduleId: 4 },
   { id: 'query', label: 'Query Builder', icon: 'pi pi-filter', group: 'analysis', dock: 'left', available: true, moduleId: 2 },
   { id: 'measure', label: 'Measure', icon: 'pi pi-arrows-h', group: 'analysis', dock: 'left', available: true, moduleId: 11 },
   { id: 'buffer', label: 'Buffer & Overlay', icon: 'pi pi-circle', group: 'analysis', dock: 'left', available: true, moduleId: 6 },
-  { id: 'statistics', label: 'Statistics', icon: 'pi pi-chart-bar', group: 'analysis', dock: 'bottom', available: false },
+  { id: 'sketch', label: 'Draw & Mark', icon: 'pi pi-pencil', group: 'analysis', dock: 'left', available: true, anyModuleIds: [DRAW_MODULE_ID, MARKING_TOOL_MODULE_ID] },
+  { id: 'statistics', label: 'Statistics', icon: 'pi pi-chart-bar', group: 'analysis', dock: 'bottom', available: true, anyModuleIds: [ANALYTICS_MODULE_ID, DATA_VISUALISATION_MODULE_ID] },
   { id: 'print', label: 'Print Layout', icon: 'pi pi-print', group: 'output', dock: 'left', available: true, moduleId: 3 },
-  { id: 'reports', label: 'Reports', icon: 'pi pi-file', group: 'output', dock: 'bottom', available: false },
-  { id: 'export', label: 'Export Data', icon: 'pi pi-download', group: 'output', dock: 'left', available: false },
+  { id: 'reports', label: 'Reports', icon: 'pi pi-file', group: 'output', dock: 'bottom', available: true, moduleId: 251 },
+  { id: 'export', label: 'Export Data', icon: 'pi pi-download', group: 'output', dock: 'left', available: true, moduleId: 226 },
   { id: 'workspace', label: 'Workspace Details', icon: 'pi pi-server', group: 'admin', dock: 'left', available: true }
 ];
 
@@ -113,6 +127,10 @@ const TOOLS: WsTool[] = [
     BufferOverlayComponent,
     AiChatComponent,
     PrintLayoutComponent,
+    ExportDataComponent,
+    SketchComponent,
+    LayerStatisticsComponent,
+    LayerReportComponent,
     StyleEditorComponent
   ],
   // One OpenLayers Map per visit, shared by the map surface and every dock
@@ -130,6 +148,9 @@ export class GisWorkspaceComponent {
   private readonly fb = inject(FormBuilder);
   private readonly route = inject(ActivatedRoute);
   private readonly mapService = inject(MapService);
+  private readonly sketchService = inject(SketchService);
+  /** Signal twin of `mapIsReady`, so effects can wait for the map. */
+  private readonly mapReady = signal(false);
 
   readonly municipalityName = signal<string | null>(null);
   readonly workspace = signal<GisWorkspace | null>(null);
@@ -150,10 +171,18 @@ export class GisWorkspaceComponent {
    *  moduleId (see WsTool) is never gated. Never used to gate anything
    *  the backend doesn't independently re-check itself (each tool's own
    *  API calls are authorized server-side regardless of the rail).  */
-  private readonly myModuleIds = signal<Set<number>>(new Set());
+  readonly myModuleIds = signal<Set<number>>(new Set());
+
+  /** Layer Styling module — whether the Layers panel offers the style
+   *  editor at all (saving a style is still MANAGE-checked server-side). */
+  readonly canStyleLayers = computed(() => this.myModuleIds().has(LAYER_STYLING_MODULE_ID));
 
   private hasModuleAccess(tool: WsTool): boolean {
-    return tool.moduleId === undefined || this.myModuleIds().has(tool.moduleId);
+    const granted = this.myModuleIds();
+    if (tool.anyModuleIds) {
+      return tool.anyModuleIds.some((id) => granted.has(id));
+    }
+    return tool.moduleId === undefined || granted.has(tool.moduleId);
   }
 
   // ----- dock state -----
@@ -234,6 +263,8 @@ export class GisWorkspaceComponent {
   /** Active Query Builder result — drives the WMS filter, the map highlight,
    *  and the Attribute Table's locked filter. */
   readonly activeQueryFilter = signal<AttributeExternalFilter | null>(null);
+  /** The Attribute Table's current selection — a Report Generation scope. */
+  readonly tableSelection = signal<TableSelection | null>(null);
 
   // ----- configure workspace dialog -----
   readonly dialogVisible = signal(false);
@@ -249,6 +280,14 @@ export class GisWorkspaceComponent {
   });
 
   constructor() {
+    // Saved Draw & Mark sketches belong on the map from the start, not only
+    // once their panel has been opened.
+    effect(() => {
+      const ws = this.workspace();
+      if (this.mapReady() && ws) {
+        this.mapService.setSketches(this.sketchService.list(ws.code));
+      }
+    });
     // On a phone the docks are overlays — start with the map unobstructed.
     if (typeof window !== 'undefined' && window.innerWidth < 900) {
       this.leftTool.set(null);
@@ -422,6 +461,7 @@ export class GisWorkspaceComponent {
 
   onMapReady(): void {
     this.mapIsReady = true;
+    this.mapReady.set(true);
     this.tryApplyDeepLink();
   }
 

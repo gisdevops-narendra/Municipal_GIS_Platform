@@ -39,6 +39,7 @@ describe('GisLayersService', () => {
   let geoServer: {
     ensureFeatureType: jest.Mock;
     getFeaturesAsGeoJson: jest.Mock;
+    getFeaturesInFormat: jest.Mock;
     deleteFeatureType: jest.Mock;
   };
   let storage: { deleteUploadFiles: jest.Mock };
@@ -89,6 +90,7 @@ describe('GisLayersService', () => {
         .fn()
         .mockResolvedValue({ minX: 75.0, minY: 20.8, maxX: 75.1, maxY: 20.9 }),
       getFeaturesAsGeoJson: jest.fn(),
+      getFeaturesInFormat: jest.fn(),
       deleteFeatureType: jest.fn().mockResolvedValue(undefined),
     };
     storage = { deleteUploadFiles: jest.fn().mockResolvedValue(undefined) };
@@ -355,6 +357,81 @@ describe('GisLayersService', () => {
         'roads',
       );
       expect(result.filename).toBe('roads.geojson');
+      expect(result.contentType).toBe('application/geo+json');
+    });
+
+    it('streams a GeoServer-native format (zipped shapefile) when requested', async () => {
+      prisma.gISWorkspace.findUnique.mockResolvedValue({ id: 'ws-a' });
+      prisma.gISLayer.findFirst.mockResolvedValue({
+        id: 'layer-1',
+        code: 'ROADS',
+        geoserverWorkspace: 'somnath_municipality',
+        geoserverLayer: 'roads',
+        ownershipType: 'DEPARTMENT',
+        departmentId: 'dept-roads',
+      });
+      gisAuth.canExport.mockResolvedValue(true);
+      const zip = Buffer.from('PK');
+      geoServer.getFeaturesInFormat.mockResolvedValue({
+        body: zip,
+        contentType: 'application/zip',
+      });
+
+      const result = await service.exportLayer(
+        appUser('muni-a'),
+        'layer-1',
+        'shapefile',
+      );
+
+      expect(geoServer.getFeaturesInFormat).toHaveBeenCalledWith(
+        'somnath_municipality',
+        'roads',
+        'SHAPE-ZIP',
+        { srsName: undefined },
+      );
+      expect(geoServer.getFeaturesAsGeoJson).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        filename: 'roads.zip',
+        body: zip,
+        contentType: 'application/zip',
+      });
+    });
+
+    it('requests KML in EPSG:4326 and still enforces EXPORT first', async () => {
+      prisma.gISWorkspace.findUnique.mockResolvedValue({ id: 'ws-a' });
+      prisma.gISLayer.findFirst.mockResolvedValue({
+        id: 'layer-1',
+        code: 'ROADS',
+        geoserverWorkspace: 'somnath_municipality',
+        geoserverLayer: 'roads',
+        ownershipType: 'DEPARTMENT',
+        departmentId: 'dept-roads',
+      });
+      gisAuth.canExport.mockResolvedValue(false);
+
+      await expect(
+        service.exportLayer(appUser('muni-a'), 'layer-1', 'kml'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(geoServer.getFeaturesInFormat).not.toHaveBeenCalled();
+
+      gisAuth.canExport.mockResolvedValue(true);
+      geoServer.getFeaturesInFormat.mockResolvedValue({
+        body: Buffer.from('<kml/>'),
+        contentType: 'application/vnd.google-earth.kml+xml',
+      });
+      const result = await service.exportLayer(
+        appUser('muni-a'),
+        'layer-1',
+        'kml',
+      );
+
+      expect(geoServer.getFeaturesInFormat).toHaveBeenCalledWith(
+        'somnath_municipality',
+        'roads',
+        'KML',
+        { srsName: 'EPSG:4326' },
+      );
+      expect(result.filename).toBe('roads.kml');
     });
   });
 

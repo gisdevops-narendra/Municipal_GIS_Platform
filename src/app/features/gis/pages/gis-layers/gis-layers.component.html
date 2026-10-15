@@ -93,6 +93,7 @@
                   (click)="viewDetail(layer)"
                 ></button>
                 @if (canManage(layer)) {
+                  @if (canStyle()) {
                   <button
                     pButton
                     type="button"
@@ -103,6 +104,7 @@
                     tooltipPosition="top"
                     (click)="openStyle(layer)"
                   ></button>
+                  }
                   <button
                     pButton
                     type="button"
@@ -122,7 +124,7 @@
                     pTooltip="Export"
                     tooltipPosition="top"
                     [loading]="exporting() === layer.id"
-                    (click)="export(layer)"
+                    (click)="openExportMenu($event, layer)"
                   ></button>
                 }
                 @if (isOwner) {
@@ -220,5 +222,7 @@
     />
   }
 </p-dialog>
+
+<p-menu #exportMenu [model]="exportMenuItems" [popup]="true" appendTo="body" />
 
 <app-site-footer />

@@ -16,6 +16,7 @@ import { PrintController } from './print.controller';
 import { PrintService } from './print.service';
 import { StyleService } from './style.service';
 import { FieldStatsService } from './field-stats.service';
+import { LayerReportService } from './layer-report.service';
 import { YsldGenerator } from './ysld-generator';
 
 @Module({
@@ -39,6 +40,7 @@ import { YsldGenerator } from './ysld-generator';
     PrintService,
     StyleService,
     FieldStatsService,
+    LayerReportService,
     YsldGenerator,
   ],
   exports: [

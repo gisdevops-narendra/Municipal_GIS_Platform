@@ -55,3 +55,8 @@ export interface CreateModuleRequest {
   defaultModule?: boolean;
   displayPriority?: number;
 }
+
+/** Catalog ids of GIS workspace features gated since migration
+ *  20261016090000 (also in prisma/seed-modules.ts). */
+export const AI_ASSISTANT_MODULE_ID = 900;
+export const LAYER_STYLING_MODULE_ID = 901;

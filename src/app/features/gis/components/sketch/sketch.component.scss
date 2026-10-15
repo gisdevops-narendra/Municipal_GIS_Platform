@@ -1,0 +1,215 @@
+:host {
+  display: block;
+}
+
+.sketch {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  font-size: 12.5px;
+}
+
+.sketch__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sketch__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-500);
+}
+
+.sketch__input {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.sketch__colors {
+  display: flex;
+  gap: 8px;
+}
+
+.sketch__color {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--color-surface);
+  box-shadow: 0 0 0 1px var(--color-line);
+  cursor: pointer;
+
+  &.is-active {
+    box-shadow: 0 0 0 2px var(--color-primary-600);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-primary-600);
+    outline-offset: 2px;
+  }
+}
+
+.sketch__kinds {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.sketch__kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  color: var(--color-ink-700);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+
+  .pi {
+    font-size: 11px;
+  }
+
+  &:hover {
+    color: var(--color-ink-900);
+  }
+
+  &.is-active {
+    border-color: var(--color-primary-600);
+    color: var(--color-primary-700);
+    font-weight: 600;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-primary-600);
+    outline-offset: 1px;
+  }
+}
+
+.sketch__drawing {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px dashed var(--color-primary-600);
+  border-radius: var(--radius-md);
+  color: var(--color-ink-700);
+}
+
+.sketch__error {
+  margin: 0;
+  color: var(--color-error-600);
+}
+
+.sketch__list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sketch__list-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.sketch__link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-primary-700);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
+
+  &--danger {
+    color: var(--color-error-600);
+  }
+}
+
+.sketch__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sketch__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 4px;
+  border-radius: var(--radius-sm, 4px);
+
+  &:hover {
+    background: var(--color-surface-alt);
+  }
+}
+
+.sketch__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.sketch__item-icon {
+  font-size: 11px;
+  color: var(--color-ink-500);
+}
+
+.sketch__item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-ink-900);
+}
+
+.sketch__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--radius-sm, 4px);
+  background: none;
+  color: var(--color-ink-500);
+  cursor: pointer;
+
+  &:hover {
+    color: var(--color-ink-900);
+    background: var(--color-surface);
+  }
+
+  &--danger:hover {
+    color: var(--color-error-600);
+  }
+}
+
+.sketch__hint {
+  margin: 0;
+  color: var(--color-ink-700);
+
+  &--muted {
+    font-size: 11.5px;
+    color: var(--color-ink-500);
+  }
+}

@@ -1,0 +1,104 @@
+<div class="report">
+  @if (layerOptions().length === 0) {
+    <p class="report__message">No vector layers to report on.</p>
+  } @else {
+    <div class="report__col">
+      <label class="report__field">
+        <span class="report__label">Layer</span>
+        <p-select
+          class="report__select"
+          [options]="layerOptions()"
+          optionLabel="label"
+          optionValue="value"
+          [ngModel]="layerId()"
+          (ngModelChange)="selectLayer($event)"
+          appendTo="body"
+        />
+      </label>
+
+      <label class="report__field">
+        <span class="report__label">Title</span>
+        <input
+          pInputText
+          class="report__input"
+          maxlength="120"
+          [placeholder]="(layer()?.name ?? 'Layer') + ' report'"
+          [(ngModel)]="title"
+        />
+      </label>
+    </div>
+
+    <fieldset class="report__col report__scope">
+      <legend class="report__label">Features</legend>
+      <label class="report__radio">
+        <input type="radio" name="report-scope" [checked]="effectiveScope() === 'layer'" (change)="scope.set('layer')" />
+        Whole layer
+      </label>
+      <label class="report__radio" [class.is-disabled]="!queryForLayer()">
+        <input
+          type="radio"
+          name="report-scope"
+          [disabled]="!queryForLayer()"
+          [checked]="effectiveScope() === 'query'"
+          (change)="scope.set('query')"
+        />
+        Current query
+        @if (queryForLayer(); as q) {
+          <span class="report__aside" [attr.title]="q.cql">· {{ q.label }}</span>
+        } @else {
+          <span class="report__aside">· none on this layer</span>
+        }
+      </label>
+      <label class="report__radio" [class.is-disabled]="!selectionForLayer()">
+        <input
+          type="radio"
+          name="report-scope"
+          [disabled]="!selectionForLayer()"
+          [checked]="effectiveScope() === 'selection'"
+          (change)="scope.set('selection')"
+        />
+        Selected features
+        <span class="report__aside">· {{ selectionForLayer()?.featureIds?.length ?? 0 }} selected</span>
+      </label>
+    </fieldset>
+
+    <fieldset class="report__fields">
+      <legend class="report__label">Columns ({{ chosen().size }}/{{ maxFields }})</legend>
+      @if (loadingFields()) {
+        <p class="report__message">Loading fields…</p>
+      } @else {
+        <div class="report__field-grid">
+          @for (field of fields(); track field.name) {
+            <label class="report__check" [class.is-disabled]="atLimit() && !chosen().has(field.name)">
+              <input
+                type="checkbox"
+                [checked]="chosen().has(field.name)"
+                [disabled]="atLimit() && !chosen().has(field.name)"
+                (change)="toggleField(field.name, $any($event.target).checked)"
+              />
+              <span class="report__check-name" [attr.title]="field.name">{{ field.name }}</span>
+            </label>
+          }
+        </div>
+      }
+    </fieldset>
+
+    <div class="report__actions">
+      <button
+        pButton
+        type="button"
+        icon="pi pi-file-pdf"
+        label="Generate PDF"
+        class="p-button-sm"
+        [loading]="generating()"
+        [disabled]="!layer() || chosen().size === 0"
+        (click)="generate()"
+      ></button>
+      @if (error(); as message) {
+        <p class="report__message report__message--error" role="alert">{{ message }}</p>
+      } @else {
+        <p class="report__message">Includes summary statistics and up to 5,000 features.</p>
+      }
+    </div>
+  }
+</div>

@@ -2,6 +2,7 @@ import { Injectable, signal } from '@angular/core';
 import OlMap from 'ol/Map';
 import View from 'ol/View';
 import Feature from 'ol/Feature';
+import Point from 'ol/geom/Point';
 import TileLayer from 'ol/layer/Tile';
 import ImageLayer from 'ol/layer/Image';
 import VectorLayer from 'ol/layer/Vector';
@@ -28,6 +29,8 @@ import type Geometry from 'ol/geom/Geometry';
 import { forkJoin, map as rxMap, Observable, of } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import { GisLayer } from '../../../core/models/gis-layer.model';
+import { Sketch } from '../models/sketch.model';
+import './projections';
 
 const MAP_PROJECTION = 'EPSG:3857';
 const LAYER_PROJECTION = 'EPSG:4326';
@@ -54,6 +57,21 @@ export interface MeasureResult {
  *  view must never be a hardcoded Somnath-specific coordinate. */
 const FALLBACK_CENTER_4326: [number, number] = [78.9629, 22.5937];
 const FALLBACK_ZOOM = 4;
+
+/** MultiBuffer ring colours, innermost first (violet, matching the
+ *  analysis overlay). Shared with the Buffer panel's colour key. */
+export const RING_COLORS = ['#4a2f86', '#6b4fa8', '#8a6fc4', '#a991da', '#c6b4ea', '#e0d5f5'];
+
+/** Views remembered by Nav History (back/forward). */
+const NAV_HISTORY_LIMIT = 50;
+/** Zoom Go To X:Y animates to (never zooms *out* past the current zoom). */
+const GOTO_ZOOM = 17;
+
+interface NavHistoryEntry {
+  center: [number, number];
+  zoom: number;
+  rotation: number;
+}
 
 export interface FeatureInfoFeature {
   attributes: Record<string, unknown>;
@@ -245,6 +263,15 @@ export class MapService {
 
   /** Task 9 §7: which open/public basemap is currently active. */
   readonly activeBasemap = signal<string>('osm');
+
+  /** Nav History availability, for the back/forward buttons. */
+  readonly canGoBack = signal(false);
+  readonly canGoForward = signal(false);
+  private navHistory: NavHistoryEntry[] = [];
+  private navIndex = -1;
+
+  private gotoLayer: VectorLayer<VectorSource> | null = null;
+  private sketchLayer: VectorLayer<VectorSource> | null = null;
   readonly basemapOptions: BasemapOption[] = Object.entries(BASEMAPS).map(([id, def]) => ({
     id,
     label: def.label,
@@ -297,6 +324,8 @@ export class MapService {
     this.layerVisibility.set(initialVisibility);
 
     this.initialExtent3857 = this.computeInitialExtent(layers);
+    this.resetNavHistory();
+    this.map.on('moveend', () => this.recordView());
     this.resetView();
   }
 
@@ -311,6 +340,9 @@ export class MapService {
     this.analysisLayer = null;
     this.drawLayer = null;
     this.measureLayer = null;
+    this.gotoLayer = null;
+    this.sketchLayer = null;
+    this.resetNavHistory();
     this.featurePopupOverlay = null;
     this.featureInfoPopup.set(null);
     this.measureModeActive = false;
@@ -401,6 +433,23 @@ export class MapService {
     return this.wkt.writeGeometry(geometry);
   }
 
+  /** Selection Tool: a drawn EPSG:4326 shape as compact EPSG:4326 WKT —
+   *  simplified to ~2 px at the current zoom (a freehand lasso carries
+   *  hundreds of vertices) and rounded to 6 decimals (~0.1 m), so the
+   *  INTERSECTS filter fits comfortably in a WFS GET URL. */
+  shapeToQueryWkt(geojson: Record<string, unknown>): string {
+    const geometry = this.geoJson.readGeometry(geojson, {
+      dataProjection: LAYER_PROJECTION,
+      featureProjection: MAP_PROJECTION
+    });
+    const tolerance = (this.map?.getView().getResolution() ?? 1) * 2;
+    return this.wkt.writeGeometry(geometry.simplify(tolerance), {
+      dataProjection: LAYER_PROJECTION,
+      featureProjection: MAP_PROJECTION,
+      decimals: 6
+    });
+  }
+
   /** Reprojects a GeoJSON geometry `sourceProj` → `targetProj`. */
   reprojectGeoJson(
     geojson: Record<string, unknown>,
@@ -438,6 +487,27 @@ export class MapService {
 
   clearAnalysisGeometry(): void {
     this.analysisLayer?.getSource()?.clear();
+  }
+
+  /** MultiBuffer: concentric buffers (EPSG:4326 GeoJSON, innermost first)
+   *  drawn as graduated bands on the analysis overlay — inner rings on top,
+   *  each in its RING_COLORS shade. Replaces whatever was there. */
+  setAnalysisRings(rings: Record<string, unknown>[]): void {
+    const source = this.ensureAnalysisSource();
+    source.clear();
+    rings.forEach((geojson, index) => {
+      const feature = this.toMapFeature(geojson);
+      if (!feature) return;
+      const color = RING_COLORS[Math.min(index, RING_COLORS.length - 1)];
+      feature.setStyle(
+        new Style({
+          stroke: new Stroke({ color, width: 2 }),
+          fill: new Fill({ color: `${color}26` }),
+          zIndex: rings.length - index
+        })
+      );
+      source.addFeature(feature);
+    });
   }
 
   private ensureAnalysisSource(): VectorSource {
@@ -478,24 +548,36 @@ export class MapService {
   /** Lets the user draw one geometry for a spatial query. Emits the drawn
    *  shape as GeoJSON (EPSG:4326) and keeps it on screen; complete /
    *  `cancelDraw` / `clearDraw` remove it. */
-  beginDraw(kind: 'Point' | 'Line' | 'Rectangle' | 'Polygon'): Observable<Record<string, unknown>> {
+  beginDraw(
+    kind: 'Point' | 'Line' | 'Rectangle' | 'Polygon' | 'Circle' | 'Freehand' | 'Lasso'
+  ): Observable<Record<string, unknown>> {
     this.cancelDraw();
     this.stopMeasure();
     const source = this.ensureDrawSource();
     source.clear();
 
-    const type = kind === 'Point' ? 'Point' : kind === 'Line' ? 'LineString' : kind === 'Rectangle' ? 'Circle' : 'Polygon';
+    const type =
+      kind === 'Point'
+        ? 'Point'
+        : kind === 'Line' || kind === 'Freehand'
+          ? 'LineString'
+          : kind === 'Rectangle' || kind === 'Circle'
+            ? 'Circle'
+            : 'Polygon'; // Polygon, Lasso (freehand polygon)
 
     return new Observable<Record<string, unknown>>((subscriber) => {
       this.drawInteraction = new Draw({
         source,
         type,
+        freehand: kind === 'Freehand' || kind === 'Lasso',
         geometryFunction: kind === 'Rectangle' ? createBox() : undefined
       });
       this.drawInteraction.on('drawstart', () => source.clear());
       this.drawInteraction.on('drawend', (event) => {
         this.suppressClickUntil = Date.now() + 400;
-        const geom = (event as unknown as { feature: Feature }).feature.getGeometry();
+        const drawn = (event as unknown as { feature: Feature }).feature.getGeometry();
+        // GeoJSON has no circle type — a drawn circle becomes a 64-gon.
+        const geom = drawn instanceof CircleGeom ? fromCircle(drawn, 64) : drawn;
         if (geom) {
           const geojson = this.geoJson.writeGeometryObject(geom, {
             dataProjection: LAYER_PROJECTION,
@@ -998,6 +1080,148 @@ export class MapService {
     }
   }
 
+  // ----- navigation history -----
+
+  /** Called on every `moveend`. A view equal to the current history entry
+   *  is ignored — which is exactly what happens when back/forward animate
+   *  to a stored entry, so stepping through history never rewrites it. */
+  private recordView(): void {
+    const view = this.map?.getView();
+    const center = view?.getCenter();
+    const zoom = view?.getZoom();
+    if (!view || !center || zoom === undefined) return;
+    const entry: NavHistoryEntry = { center: [center[0], center[1]], zoom, rotation: view.getRotation() };
+    const current = this.navHistory[this.navIndex];
+    if (current && sameView(current, entry)) return;
+    // A new move after going back discards the forward branch, like a browser.
+    this.navHistory = [...this.navHistory.slice(0, this.navIndex + 1), entry].slice(-NAV_HISTORY_LIMIT);
+    this.navIndex = this.navHistory.length - 1;
+    this.updateNavState();
+  }
+
+  goBack(): void {
+    this.stepHistory(-1);
+  }
+
+  goForward(): void {
+    this.stepHistory(1);
+  }
+
+  private stepHistory(delta: number): void {
+    const view = this.map?.getView();
+    const entry = this.navHistory[this.navIndex + delta];
+    if (!view || !entry) return;
+    this.navIndex += delta;
+    this.updateNavState();
+    view.animate({ center: entry.center, zoom: entry.zoom, rotation: entry.rotation, duration: 250 });
+  }
+
+  private resetNavHistory(): void {
+    this.navHistory = [];
+    this.navIndex = -1;
+    this.updateNavState();
+  }
+
+  private updateNavState(): void {
+    this.canGoBack.set(this.navIndex > 0);
+    this.canGoForward.set(this.navIndex < this.navHistory.length - 1);
+  }
+
+  // ----- draw & mark (sketches) -----
+
+  /** Renders every saved sketch (replacing what was shown): shapes in their
+   *  own colour with an optional label, markers as labelled pins. */
+  setSketches(sketches: Sketch[]): void {
+    const source = this.ensureSketchSource();
+    source.clear();
+    for (const sketch of sketches) {
+      const feature = this.toMapFeature(sketch.geometry);
+      if (!feature) continue;
+      feature.setId(sketch.id);
+      feature.setStyle(this.sketchStyle(sketch));
+      source.addFeature(feature);
+    }
+  }
+
+  private sketchStyle(sketch: Sketch): Style {
+    const text = sketch.label
+      ? new TextStyle({
+          text: sketch.label,
+          font: '600 12px Inter, system-ui, sans-serif',
+          fill: new Fill({ color: '#1b1f23' }),
+          stroke: new Stroke({ color: '#ffffff', width: 3 }),
+          offsetY: sketch.kind === 'Marker' ? -20 : 0,
+          overflow: true
+        })
+      : undefined;
+    if (sketch.kind === 'Marker') {
+      return new Style({
+        image: new CircleStyle({ radius: 7, fill: new Fill({ color: sketch.color }), stroke: new Stroke({ color: '#ffffff', width: 2.5 }) }),
+        text
+      });
+    }
+    return new Style({
+      stroke: new Stroke({ color: sketch.color, width: 2.5 }),
+      fill: new Fill({ color: `${sketch.color}33` }),
+      image: new CircleStyle({ radius: 5, fill: new Fill({ color: sketch.color }), stroke: new Stroke({ color: '#ffffff', width: 1.5 }) }),
+      text
+    });
+  }
+
+  private ensureSketchSource(): VectorSource {
+    if (!this.sketchLayer) {
+      this.sketchLayer = new VectorLayer({
+        source: new VectorSource(),
+        zIndex: 9998,
+        properties: { sketchOverlay: true }
+      });
+      this.map?.addLayer(this.sketchLayer);
+    }
+    return this.sketchLayer.getSource() as VectorSource;
+  }
+
+  // ----- go to X:Y -----
+
+  /** Flies to (x, y) given in `crs` and marks the spot. Returns the target
+   *  in EPSG:4326 (for display), or null when the coordinate can't be
+   *  transformed or lies outside the projection's valid area. */
+  goToCoordinate(x: number, y: number, crs: string): [number, number] | null {
+    const view = this.map?.getView();
+    if (!view || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+    const target = transform([x, y], crs, view.getProjection());
+    const lonLat = transform([x, y], crs, LAYER_PROJECTION);
+    if (!target.every(Number.isFinite) || Math.abs(lonLat[1]) > 85 || Math.abs(lonLat[0]) > 180) return null;
+
+    const source = this.ensureGotoSource();
+    source.clear();
+    source.addFeature(new Feature(new Point(target)));
+    view.animate({ center: target, zoom: Math.max(view.getZoom() ?? 0, GOTO_ZOOM), duration: 400 });
+    return [lonLat[0], lonLat[1]];
+  }
+
+  clearGoToMarker(): void {
+    this.gotoLayer?.getSource()?.clear();
+  }
+
+  private ensureGotoSource(): VectorSource {
+    if (!this.gotoLayer) {
+      const accent = '#b5722a';
+      this.gotoLayer = new VectorLayer({
+        source: new VectorSource(),
+        style: [
+          new Style({ image: new CircleStyle({ radius: 11, stroke: new Stroke({ color: 'rgba(181, 114, 42, 0.45)', width: 2 }) }) }),
+          new Style({
+            image: new CircleStyle({ radius: 5, fill: new Fill({ color: accent }), stroke: new Stroke({ color: '#ffffff', width: 2 }) })
+          })
+        ],
+        zIndex: 10001,
+        properties: { gotoOverlay: true }
+      });
+      this.map?.addLayer(this.gotoLayer);
+    }
+    return this.gotoLayer.getSource() as VectorSource;
+  }
+
   // ----- spatial bookmarks -----
 
   /** Current view centre / zoom / projection — for saving a bookmark. */
@@ -1242,4 +1466,13 @@ function isUsableBbox(bbox: GisLayer['bbox'] | null | undefined): bbox is NonNul
   const { minX, minY, maxX, maxY } = bbox;
   if (![minX, minY, maxX, maxY].every((n) => Number.isFinite(n))) return false;
   return maxX - minX >= 1e-4 && maxY - minY >= 1e-4;
+}
+
+function sameView(a: NavHistoryEntry, b: NavHistoryEntry): boolean {
+  return (
+    Math.abs(a.center[0] - b.center[0]) < 0.01 &&
+    Math.abs(a.center[1] - b.center[1]) < 0.01 &&
+    Math.abs(a.zoom - b.zoom) < 1e-3 &&
+    Math.abs(a.rotation - b.rotation) < 1e-4
+  );
 }

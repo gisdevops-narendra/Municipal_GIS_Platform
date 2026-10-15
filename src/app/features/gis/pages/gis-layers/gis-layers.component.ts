@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, ViewChild, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
@@ -10,7 +10,8 @@ import { PaginatorModule, PaginatorState } from 'primeng/paginator';
 import { TagModule } from 'primeng/tag';
 import { MessageModule } from 'primeng/message';
 import { TooltipModule } from 'primeng/tooltip';
-import { PrimeTemplate } from 'primeng/api';
+import { Menu, MenuModule } from 'primeng/menu';
+import { MenuItem, PrimeTemplate } from 'primeng/api';
 import { SiteHeaderComponent } from '../../../../shared/components/site-header/site-header.component';
 import { SiteFooterComponent } from '../../../../shared/components/site-footer/site-footer.component';
 import { GisLayersService } from '../../../../core/services/gis-layers.service';
@@ -18,6 +19,10 @@ import { CurrentUserService } from '../../../../core/services/current-user.servi
 import { NotificationService } from '../../../../core/services/notification.service';
 import { CurrentUser } from '../../../../core/models/current-user.model';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
+import { LAYER_STYLING_MODULE_ID } from '../../../../core/models/module-access.model';
+import { ModuleAccessService } from '../../../../core/services/module-access.service';
+import { LAYER_EXPORT_FORMATS, LayerExportFormatOption } from '../../../../core/models/layer-export.model';
+import { blobErrorMessage, downloadBlob } from '../../../../core/utils/download-blob';
 import { StyleGeometry } from '../../../../core/models/layer-style.model';
 import { StyleEditorComponent } from '../../components/style-editor/style-editor.component';
 
@@ -50,6 +55,7 @@ import { StyleEditorComponent } from '../../components/style-editor/style-editor
     TagModule,
     MessageModule,
     TooltipModule,
+    MenuModule,
     PrimeTemplate,
     SiteHeaderComponent,
     SiteFooterComponent,
@@ -61,6 +67,7 @@ import { StyleEditorComponent } from '../../components/style-editor/style-editor
 export class GisLayersComponent {
   private readonly gisLayersService = inject(GisLayersService);
   private readonly currentUserService = inject(CurrentUserService);
+  private readonly moduleAccessService = inject(ModuleAccessService);
   private readonly router = inject(Router);
   private readonly notify = inject(NotificationService);
 
@@ -107,8 +114,15 @@ export class GisLayersComponent {
     () => this.layers().filter((l) => l.ownershipType === 'CANONICAL').length
   );
 
+  /** Layer Styling module (Module Access) — the Style button needs it. */
+  private readonly myModuleIds = signal<Set<number>>(new Set());
+  readonly canStyle = computed(() => this.myModuleIds().has(LAYER_STYLING_MODULE_ID));
+
   constructor() {
     this.currentUserService.getMe().subscribe({ next: (user) => this.currentUser.set(user) });
+    this.moduleAccessService.getMyModuleIds().subscribe({
+      next: ({ moduleIds }) => this.myModuleIds.set(new Set(moduleIds))
+    });
     this.loadLayers();
   }
 
@@ -234,23 +248,34 @@ export class GisLayersComponent {
    *  object-URL download, not related to any artifact/sandbox
    *  restriction (this is the deployed application running in the
    *  user's own browser). */
-  export(layer: GisLayer): void {
+  @ViewChild('exportMenu') private exportMenu?: Menu;
+  private exportTarget: GisLayer | null = null;
+
+  /** One popup menu shared by every row — `openExportMenu` records which
+   *  layer it was opened for. */
+  readonly exportMenuItems: MenuItem[] = LAYER_EXPORT_FORMATS.map((format) => ({
+    label: format.label,
+    command: () => {
+      if (this.exportTarget) this.export(this.exportTarget, format);
+    }
+  }));
+
+  openExportMenu(event: Event, layer: GisLayer): void {
+    this.exportTarget = layer;
+    this.exportMenu?.toggle(event);
+  }
+
+  export(layer: GisLayer, format: LayerExportFormatOption = LAYER_EXPORT_FORMATS[0]): void {
     this.exporting.set(layer.id);
-    this.gisLayersService.export(layer.id).subscribe({
-      next: (content) => {
+    this.gisLayersService.export(layer.id, format.value).subscribe({
+      next: (blob) => {
         this.exporting.set(null);
-        const blob = new Blob([content], { type: 'application/geo+json' });
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement('a');
-        anchor.href = url;
-        anchor.download = `${layer.code.toLowerCase()}.geojson`;
-        anchor.click();
-        URL.revokeObjectURL(url);
-        this.notify.success(`Exported "${layer.name}" as GeoJSON.`);
+        downloadBlob(blob, `${layer.code.toLowerCase()}.${format.extension}`);
+        this.notify.success(`Exported "${layer.name}" as ${format.label}.`);
       },
-      error: (error: HttpErrorResponse) => {
+      error: async (error: HttpErrorResponse) => {
         this.exporting.set(null);
-        this.notify.error(error.error?.message ?? 'Export failed. Please try again.');
+        this.notify.error(await blobErrorMessage(error, 'Export failed. Please try again.'));
       }
     });
   }

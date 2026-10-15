@@ -26,6 +26,7 @@ describe('ModuleAccessService', () => {
       findFirst: jest.Mock;
       create: jest.Mock;
       update: jest.Mock;
+      deleteMany: jest.Mock;
     };
     departmentModuleGrant: {
       findMany: jest.Mock;
@@ -73,6 +74,7 @@ describe('ModuleAccessService', () => {
     prisma = {
       module: {
         findMany: jest.fn(),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
         findFirst: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
@@ -410,6 +412,48 @@ describe('ModuleAccessService', () => {
         service.createModule({ name: 'Orphan', parentId: 9999 }),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.module.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('deleteModule — removes the module and its whole branch', () => {
+    const CATALOG = [
+      { id: 5, parentId: null },
+      { id: 11, parentId: 5 },
+      { id: 70, parentId: 5 },
+      { id: 71, parentId: 70 },
+      { id: 72, parentId: 70 },
+      { id: 17, parentId: null },
+    ];
+
+    it('deletes the target and every descendant, nothing else', async () => {
+      prisma.module.findMany.mockResolvedValue(CATALOG);
+
+      const result = await service.deleteModule(70);
+
+      expect(result.deletedIds).toEqual([70, 71, 72]);
+      expect(prisma.module.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: [70, 71, 72] } },
+      });
+    });
+
+    it('404s for an unknown module without deleting anything', async () => {
+      prisma.module.findMany.mockResolvedValue(CATALOG);
+
+      await expect(service.deleteModule(999)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(prisma.module.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('terminates on a cyclic parentId chain', async () => {
+      prisma.module.findMany.mockResolvedValue([
+        { id: 1, parentId: 2 },
+        { id: 2, parentId: 1 },
+      ]);
+
+      const result = await service.deleteModule(1);
+
+      expect(result.deletedIds.sort()).toEqual([1, 2]);
     });
   });
 });

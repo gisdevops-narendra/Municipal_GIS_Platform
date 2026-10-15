@@ -115,6 +115,98 @@ export class GeoServerService {
     return response.text();
   }
 
+  /** Report Generation: features of one layer as parsed GeoJSON — only
+   *  `propertyNames` (no geometry), optionally narrowed by an already
+   *  vetted `cqlFilter` (see assertSafeCql) or by `featureIds`, capped at
+   *  `count`. `numberMatched` is the full match count. */
+  async getFeatureCollection(
+    workspace: string,
+    layer: string,
+    options: {
+      propertyNames: string[];
+      cqlFilter?: string;
+      featureIds?: string[];
+      count: number;
+    },
+  ): Promise<{
+    features: { id?: string; properties: Record<string, unknown> | null }[];
+    numberMatched: number;
+  }> {
+    const params = new URLSearchParams({
+      service: 'WFS',
+      version: '2.0.0',
+      request: 'GetFeature',
+      typeNames: `${workspace}:${layer}`,
+      outputFormat: 'application/json',
+      propertyName: options.propertyNames.join(','),
+      count: String(options.count),
+    });
+    if (options.featureIds?.length) {
+      params.set('featureID', options.featureIds.join(','));
+    } else if (options.cqlFilter) {
+      params.set('cql_filter', options.cqlFilter);
+    }
+    // A selection's featureID list can be long — POST the KVP form so it
+    // never hits the request-line limit.
+    const response = await this.request(
+      `/${encodeURIComponent(workspace)}/wfs`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString(),
+      },
+      60000,
+    );
+    if (!response.ok) {
+      throw await this.toError('fetching report features', response);
+    }
+    const json = (await response.json()) as {
+      features?: { id?: string; properties: Record<string, unknown> | null }[];
+      numberMatched?: number;
+      totalFeatures?: number;
+    };
+    const features = json.features ?? [];
+    return {
+      features,
+      numberMatched:
+        json.numberMatched ?? json.totalFeatures ?? features.length,
+    };
+  }
+
+  /** Whole-layer WFS download in a GeoServer-native `outputFormat` (e.g.
+   *  `csv`, `SHAPE-ZIP`, `KML`) — the bytes are passed through untouched,
+   *  since some formats (zipped shapefiles) are binary. */
+  async getFeaturesInFormat(
+    workspace: string,
+    layer: string,
+    outputFormat: string,
+    options: { srsName?: string; timeoutMs?: number } = {},
+  ): Promise<{ body: Buffer; contentType: string }> {
+    const params = new URLSearchParams({
+      service: 'WFS',
+      version: '2.0.0',
+      request: 'GetFeature',
+      typeNames: `${workspace}:${layer}`,
+      outputFormat,
+    });
+    if (options.srsName) {
+      params.set('srsName', options.srsName);
+    }
+    const response = await this.request(
+      `/${encodeURIComponent(workspace)}/wfs?${params.toString()}`,
+      { method: 'GET' },
+      options.timeoutMs ?? 60000,
+    );
+    if (!response.ok) {
+      throw await this.toError(`exporting layer as ${outputFormat}`, response);
+    }
+    return {
+      body: Buffer.from(await response.arrayBuffer()),
+      contentType:
+        response.headers.get('content-type') ?? 'application/octet-stream',
+    };
+  }
+
   async checkHealth(): Promise<GeoServerHealth> {
     try {
       const response = await this.request(

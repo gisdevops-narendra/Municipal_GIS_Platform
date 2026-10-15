@@ -21,8 +21,14 @@ import {
 } from '../auth/decorators/authorization.decorators';
 import { CurrentAppUser } from '../auth/decorators/current-app-user.decorator';
 import type { AppUser } from '../auth/types/app-user.type';
-import { GisLayersService } from './gis-layers.service';
+import {
+  GisLayersService,
+  LAYER_EXPORT_FORMATS,
+  type LayerExportFormat,
+} from './gis-layers.service';
 import { StyleService } from './style.service';
+import { LayerReportService } from './layer-report.service';
+import { LayerReportDto } from './dto/layer-report.dto';
 import { SetLayerPermissionDto } from './dto/set-layer-permission.dto';
 import { LayerStyleSpecDto } from './dto/layer-style.dto';
 import type { ClassificationMethod } from './dto/layer-style.dto';
@@ -36,6 +42,7 @@ export class GisLayersController {
   constructor(
     private readonly gisLayersService: GisLayersService,
     private readonly styleService: StyleService,
+    private readonly layerReportService: LayerReportService,
   ) {}
 
   // ---- Marker-icon gallery (GIS Layer Styling — ExternalGraphic). The
@@ -94,15 +101,24 @@ export class GisLayersController {
   async exportLayer(
     @CurrentAppUser() appUser: AppUser,
     @Param('id') id: string,
+    @Query('format') format: string | undefined,
     @Res() res: Response,
   ) {
-    const { filename, geojson } = await this.gisLayersService.exportLayer(
-      appUser,
-      id,
-    );
-    res.setHeader('Content-Type', 'application/geo+json');
+    const requested = format ?? 'geojson';
+    if (!Object.hasOwn(LAYER_EXPORT_FORMATS, requested)) {
+      throw new BadRequestException(
+        `format must be one of: ${Object.keys(LAYER_EXPORT_FORMATS).join(', ')}.`,
+      );
+    }
+    const { filename, body, contentType } =
+      await this.gisLayersService.exportLayer(
+        appUser,
+        id,
+        requested as LayerExportFormat,
+      );
+    res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.send(geojson);
+    res.send(body);
   }
 
   /** Task 8 §7. Gated by MANAGE, enforced in the service. */
@@ -123,6 +139,48 @@ export class GisLayersController {
   ): Promise<{ success: true }> {
     await this.gisLayersService.deleteLayer(appUser, id);
     return { success: true };
+  }
+
+  // ---- Report Generation. Gated by VIEW in the service. ----
+
+  @RequireMunicipalityMember()
+  @Post('layers/:id/report')
+  async layerReport(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @Body() dto: LayerReportDto,
+    @Res() res: Response,
+  ) {
+    const { filename, body } = await this.layerReportService.buildReport(
+      appUser,
+      id,
+      dto,
+    );
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', body.length);
+    res.send(body);
+  }
+
+  // ---- Analytics / Data Visualisation. Gated by VIEW in the service. ----
+
+  @RequireMunicipalityMember()
+  @Get('layers/:id/analytics/fields')
+  analyticsFields(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
+    return this.gisLayersService.layerAnalyticsFields(appUser, id);
+  }
+
+  @RequireMunicipalityMember()
+  @Get('layers/:id/analytics/summary')
+  analyticsSummary(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @Query('field') field: string | undefined,
+  ) {
+    if (!field) {
+      throw new BadRequestException('field is required.');
+    }
+    return this.gisLayersService.layerFieldSummary(appUser, id, field);
   }
 
   // ---- Styling (GIS Layer Styling — YSLD). Gated by MANAGE in the service. ----

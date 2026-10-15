@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseIntPipe,
+  Post,
+  Put,
+} from '@nestjs/common';
 import {
   RequireMunicipalityMember,
   RequireMunicipalityOwner,
@@ -35,6 +44,15 @@ export class ModuleAccessController {
     return this.moduleAccessService.createModule(dto);
   }
 
+  /** Owner-only — permanently deletes a module and its descendants from
+   *  the global catalog (shared by every municipality), with their grants.
+   *  See ModuleAccessService.deleteModule. */
+  @RequireMunicipalityOwner()
+  @Delete('catalog/:id')
+  deleteModule(@Param('id', ParseIntPipe) id: number) {
+    return this.moduleAccessService.deleteModule(id);
+  }
+
   /** The caller's own resolved module set — what the live /gis workspace
    *  gates its tool rail on. */
   @RequireMunicipalityMember()
@@ -51,10 +69,7 @@ export class ModuleAccessController {
     @CurrentAppUser() appUser: AppUser,
     @Param('departmentId') departmentId: string,
   ) {
-    return this.moduleAccessService.getDepartmentGrants(
-      appUser,
-      departmentId,
-    );
+    return this.moduleAccessService.getDepartmentGrants(appUser, departmentId);
   }
 
   @RequireMunicipalityOwner()

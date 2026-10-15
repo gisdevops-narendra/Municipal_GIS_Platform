@@ -95,6 +95,7 @@
               [class.gis-ws__panel--hidden]="leftTool() !== 'layers'"
               [layers]="layers()"
               [highlightLayerId]="highlightLayerId()"
+              [canStyle]="canStyleLayers()"
               (styleLayer)="openStyleEditor($event)"
             />
           } @else if (leftTool() === 'layers') {
@@ -133,6 +134,7 @@
             [class.gis-ws__panel--hidden]="leftTool() !== 'buffer'"
             [active]="leftTool() === 'buffer'"
             [layers]="layers()"
+            [allowedModuleIds]="myModuleIds()"
             (queryRun)="onQueryRun($event)"
             (queryCleared)="onQueryCleared()"
           />
@@ -152,6 +154,23 @@
           <app-print-layout
             [class.gis-ws__panel--hidden]="leftTool() !== 'print'"
             [layers]="layers()"
+          />
+        }
+
+        @if (openedLeftTools().has('sketch') && layersReady()) {
+          <app-sketch
+            [class.gis-ws__panel--hidden]="leftTool() !== 'sketch'"
+            [active]="leftTool() === 'sketch'"
+            [workspaceKey]="workspace()?.code ?? ''"
+            [allowedModuleIds]="myModuleIds()"
+          />
+        }
+
+        @if (openedLeftTools().has('export') && layersReady()) {
+          <app-export-data
+            [class.gis-ws__panel--hidden]="leftTool() !== 'export'"
+            [layers]="layers()"
+            [allowedModuleIds]="myModuleIds()"
           />
         }
 
@@ -233,7 +252,7 @@
         (featureInfoResults)="onFeatureInfoResults($event)"
         (mapReady)="onMapReady()"
       />
-      <app-map-controls />
+      <app-map-controls [allowedModuleIds]="myModuleIds()" />
 
       @if (layersReady()) {
         <app-gis-search
@@ -273,7 +292,24 @@
             [initialLayerId]="highlightLayerId()"
             [mapClickFeatures]="mapClickFeatures()"
             [externalFilter]="activeQueryFilter()"
+            [allowedModuleIds]="myModuleIds()"
             (externalFilterCleared)="onQueryCleared()"
+            (selectionChange)="tableSelection.set($event)"
+          />
+        }
+        @if (openedBottomTools().has('reports') && layersReady()) {
+          <app-layer-report
+            [class.gis-ws__panel--hidden]="bottomTool() !== 'reports'"
+            [layers]="layers()"
+            [queryFilter]="activeQueryFilter()"
+            [selection]="tableSelection()"
+          />
+        }
+        @if (openedBottomTools().has('statistics') && layersReady()) {
+          <app-layer-statistics
+            [class.gis-ws__panel--hidden]="bottomTool() !== 'statistics'"
+            [layers]="layers()"
+            [allowedModuleIds]="myModuleIds()"
           />
         }
         @if (activeBottomTool(); as tool) {

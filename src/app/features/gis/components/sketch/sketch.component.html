@@ -1,0 +1,105 @@
+<div class="sketch">
+  @if (kinds().length === 0) {
+    <p class="sketch__hint">You don't have access to the Draw or Marking tools.</p>
+  } @else {
+    <label class="sketch__field">
+      <span class="sketch__label">Label</span>
+      <input
+        pInputText
+        class="sketch__input"
+        maxlength="80"
+        placeholder="Optional for shapes, required for markers"
+        [(ngModel)]="label"
+      />
+    </label>
+
+    <div class="sketch__field">
+      <span class="sketch__label">Colour</span>
+      <div class="sketch__colors" role="radiogroup" aria-label="Sketch colour">
+        @for (swatch of colors; track swatch) {
+          <button
+            type="button"
+            role="radio"
+            class="sketch__color"
+            [style.background]="swatch"
+            [class.is-active]="color() === swatch"
+            [attr.aria-checked]="color() === swatch"
+            [attr.aria-label]="'Colour ' + swatch"
+            (click)="color.set(swatch)"
+          ></button>
+        }
+      </div>
+    </div>
+
+    <div class="sketch__field">
+      <span class="sketch__label">Draw</span>
+      <div class="sketch__kinds">
+        @for (option of kinds(); track option.kind) {
+          <button
+            type="button"
+            class="sketch__kind"
+            [class.is-active]="drawing()?.kind === option.kind"
+            [attr.aria-pressed]="drawing()?.kind === option.kind"
+            (click)="start(option)"
+          >
+            <i [class]="option.icon" aria-hidden="true"></i>{{ option.label }}
+          </button>
+        }
+      </div>
+    </div>
+
+    @if (drawing(); as current) {
+      <div class="sketch__drawing">
+        <span>{{ current.hint }}</span>
+        <button type="button" class="sketch__link" (click)="cancelDrawing()">Cancel</button>
+      </div>
+    }
+    @if (error(); as message) {
+      <p class="sketch__error" role="alert">{{ message }}</p>
+    }
+
+    <div class="sketch__list-head">
+      <span class="sketch__label">Saved ({{ sketches().length }})</span>
+      @if (sketches().length > 0) {
+        <div class="sketch__list-actions">
+          <button type="button" class="sketch__link" (click)="exportGeoJson()">Export GeoJSON</button>
+          <button type="button" class="sketch__link sketch__link--danger" (click)="clearAll()">Clear all</button>
+        </div>
+      }
+    </div>
+
+    @if (sketches().length === 0) {
+      <p class="sketch__hint sketch__hint--muted">Nothing drawn yet. Saved sketches stay on the map in this browser.</p>
+    } @else {
+      <ul class="sketch__list">
+        @for (sketch of sketches(); track sketch.id) {
+          <li class="sketch__item">
+            <span class="sketch__swatch" [style.background]="sketch.color"></span>
+            <i [class]="iconFor(sketch.kind)" class="sketch__item-icon" aria-hidden="true"></i>
+            <span class="sketch__item-label">{{ sketch.label || sketch.kind }}</span>
+            <button
+              type="button"
+              class="sketch__icon-btn"
+              pTooltip="Zoom to"
+              tooltipPosition="top"
+              [attr.aria-label]="'Zoom to ' + (sketch.label || sketch.kind)"
+              (click)="zoomTo(sketch)"
+            >
+              <i class="pi pi-search-plus" aria-hidden="true"></i>
+            </button>
+            <button
+              type="button"
+              class="sketch__icon-btn sketch__icon-btn--danger"
+              pTooltip="Delete"
+              tooltipPosition="top"
+              [attr.aria-label]="'Delete ' + (sketch.label || sketch.kind)"
+              (click)="remove(sketch)"
+            >
+              <i class="pi pi-trash" aria-hidden="true"></i>
+            </button>
+          </li>
+        }
+      </ul>
+    }
+  }
+</div>

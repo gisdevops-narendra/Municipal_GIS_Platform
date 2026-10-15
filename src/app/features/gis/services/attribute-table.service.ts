@@ -123,6 +123,38 @@ export class AttributeTableService {
     );
   }
 
+  /** Selection Tool: features of `layer` intersecting a drawn shape
+   *  (EPSG:4326 WKT). Only the geometry column is requested — the ids and
+   *  geometries are all a selection needs — capped at `limit`;
+   *  `total` reports the full match count so callers can flag truncation. */
+  fetchIdsInShape(
+    layer: GisLayer,
+    geometryField: string,
+    wkt4326: string,
+    limit: number
+  ): Observable<{ rows: AttributeRow[]; total: number }> {
+    const url = `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wfs`;
+    const params = new HttpParams()
+      .set('service', 'WFS')
+      .set('version', '2.0.0')
+      .set('request', 'GetFeature')
+      .set('typeNames', `${layer.geoserverWorkspace}:${layer.geoserverLayer}`)
+      .set('outputFormat', 'application/json')
+      .set('srsName', 'EPSG:4326')
+      .set('propertyName', geometryField)
+      .set('count', String(limit))
+      .set('cql_filter', `INTERSECTS("${geometryField}", SRID=4326;${wkt4326})`);
+
+    return this.http.get<WfsFeatureCollection>(url, { params }).pipe(
+      map((collection) => {
+        const rows = (collection.features ?? [])
+          .filter((feature): feature is WfsFeature & { id: string } => typeof feature.id === 'string')
+          .map((feature) => ({ featureId: feature.id, values: {}, geometry: feature.geometry ?? null }));
+        return { rows, total: collection.numberMatched ?? collection.totalFeatures ?? rows.length };
+      })
+    );
+  }
+
   /** Fetches specific features by their WFS id — used to backfill geometry
    *  for selections made on the map whose row isn't on the current page. */
   fetchByIds(layer: GisLayer, featureIds: string[]): Observable<AttributeRow[]> {

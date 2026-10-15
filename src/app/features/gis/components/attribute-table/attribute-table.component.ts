@@ -14,7 +14,7 @@ import {
 import { NgClass } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Subject, debounceTime, distinctUntilChanged } from 'rxjs';
+import { Subject, Subscription, debounceTime, distinctUntilChanged } from 'rxjs';
 import { TableModule } from 'primeng/table';
 import { PaginatorModule, PaginatorState } from 'primeng/paginator';
 import { ButtonModule } from 'primeng/button';
@@ -41,6 +41,14 @@ export interface MapClickFeatureRef {
   layerId: string;
   featureId: string;
 }
+
+/** Selection Tool (Module Access catalog id, seed-modules.ts). */
+const SELECTION_TOOL_MODULE_ID = 57;
+/** Most features one map selection adds (ids + geometry are fetched). */
+const MAP_SELECT_LIMIT = 2000;
+
+type SelectShape = 'Rectangle' | 'Polygon' | 'Lasso';
+type SelectMode = 'new' | 'add' | 'remove';
 
 /** A Query Builder result applied to the table as a locked filter. */
 export interface AttributeExternalFilter {
@@ -103,8 +111,36 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
    *  in-table search; shown as a removable chip. */
   @Input() externalFilter: AttributeExternalFilter | null = null;
   @Output() externalFilterCleared = new EventEmitter<void>();
+  /** The current selection (ids of the active layer), for Report Generation. */
+  @Output() selectionChange = new EventEmitter<{ layerId: string; featureIds: string[] }>();
 
   readonly baseFilter = signal<AttributeExternalFilter | null>(null);
+
+  /** Module Access ids granted to the current user — the map selection
+   *  tools need the Selection Tool module. */
+  @Input() set allowedModuleIds(value: ReadonlySet<number>) {
+    this.allowedSignal.set(value ?? new Set());
+  }
+  private readonly allowedSignal = signal<ReadonlySet<number>>(new Set());
+  readonly canSelectOnMap = computed(() => this.allowedSignal().has(SELECTION_TOOL_MODULE_ID));
+
+  readonly selectShapes: { shape: SelectShape; icon: string; label: string; hint: string }[] = [
+    { shape: 'Rectangle', icon: 'pi pi-stop', label: 'Select by rectangle', hint: 'Click one corner on the map, then the opposite corner.' },
+    { shape: 'Polygon', icon: 'pi pi-share-alt', label: 'Select by polygon', hint: 'Click to add corners; double-click to finish.' },
+    { shape: 'Lasso', icon: 'pi pi-pencil', label: 'Select by lasso', hint: 'Press and drag around the features; release to finish.' }
+  ];
+  readonly selectModes: { value: SelectMode; label: string }[] = [
+    { value: 'new', label: 'New' },
+    { value: 'add', label: 'Add' },
+    { value: 'remove', label: 'Remove' }
+  ];
+  readonly selectMode = signal<SelectMode>('new');
+  readonly selectingShape = signal<SelectShape | null>(null);
+  readonly selectNote = signal<string | null>(null);
+  readonly selectHint = computed(
+    () => this.selectShapes.find((s) => s.shape === this.selectingShape())?.hint ?? null
+  );
+  private selectSub?: Subscription;
 
   readonly pageSizes = ATTRIBUTE_PAGE_SIZES;
 
@@ -214,6 +250,7 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.cancelMapSelect();
     this.mapService.clearSelectionHighlight();
   }
 
@@ -237,6 +274,8 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
     if (layerId === this.activeLayerId()) {
       return;
     }
+    this.cancelMapSelect();
+    this.selectNote.set(null);
     this.activeLayerId.set(layerId);
     this.first.set(0);
     this.sortField.set(null);
@@ -364,6 +403,71 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
     this.applySelection(ids);
   }
 
+  // ----- selection tool: select on the map by shape -----
+
+  /** Draw a shape on the map; features of the active layer intersecting it
+   *  become the selection (New), join it (Add) or leave it (Remove). */
+  selectOnMap(shape: SelectShape): void {
+    const layer = this.activeLayer();
+    if (!layer) return;
+    this.cancelMapSelect();
+    this.selectNote.set(null);
+    this.selectingShape.set(shape);
+    this.selectSub = this.mapService.beginDraw(shape).subscribe({
+      next: (geometry) => {
+        this.mapService.clearDraw();
+        this.selectingShape.set(null);
+        this.selectSub = this.service.loadMetadata(layer).subscribe({
+          next: ({ geometryField }) => {
+            const wkt = this.mapService.shapeToQueryWkt(geometry);
+            this.selectSub = this.service.fetchIdsInShape(layer, geometryField, wkt, MAP_SELECT_LIMIT).subscribe({
+              next: ({ rows, total }) => this.applyMapSelection(layer.id, rows, total),
+              error: () => this.selectNote.set('Could not select features in that area.')
+            });
+          },
+          error: () => this.selectNote.set('Could not select features in that area.')
+        });
+      },
+      complete: () => this.selectingShape.set(null)
+    });
+  }
+
+  cancelMapSelect(): void {
+    this.selectSub?.unsubscribe();
+    this.selectSub = undefined;
+    if (this.selectingShape()) {
+      this.mapService.clearDraw();
+      this.selectingShape.set(null);
+    }
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscape(): void {
+    if (this.selectingShape()) this.cancelMapSelect();
+  }
+
+  private applyMapSelection(layerId: string, rows: AttributeRow[], total: number): void {
+    if (this.activeLayerId() !== layerId) return;
+    for (const row of rows) {
+      this.geomCache.set(row.featureId, row.geometry);
+    }
+    const found = rows.map((r) => r.featureId);
+    const mode = this.selectMode();
+    const ids = mode === 'new' ? new Set<string>() : new Set(this.selectedIds());
+    for (const id of found) {
+      if (mode === 'remove') ids.delete(id);
+      else ids.add(id);
+    }
+    this.applySelection(ids);
+    const verb = mode === 'remove' ? 'Removed' : mode === 'add' ? 'Added' : 'Selected';
+    const capped = total > rows.length ? ` (first ${rows.length.toLocaleString()} of ${total.toLocaleString()})` : '';
+    this.selectNote.set(
+      found.length === 0
+        ? 'No features in that area.'
+        : `${verb} ${found.length.toLocaleString()} feature${found.length === 1 ? '' : 's'}${capped}.`
+    );
+  }
+
   selectAllOnPage(): void {
     const ids = new Set(this.selectedIds());
     for (const row of this.rows()) {
@@ -390,6 +494,8 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
 
   private applySelection(ids: Set<string>): void {
     this.selectedIds.set(ids);
+    const layerId = this.activeLayerId();
+    if (layerId) this.selectionChange.emit({ layerId, featureIds: [...ids] });
     if (ids.size === 0) {
       this.mapService.clearSelectionHighlight();
       return;

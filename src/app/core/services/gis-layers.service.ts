@@ -3,8 +3,20 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { GisLayer } from '../models/gis-layer.model';
+import { LayerExportFormat } from '../models/layer-export.model';
+import { AnalyticsField, FieldSummary } from '../models/layer-analytics.model';
 import { GisLayerPermissionMatrix, GisPermission } from '../models/gis-layer-permission.model';
 import { ManagedRole } from '../models/municipality-user.model';
+
+/** Body of POST /api/gis/layers/:id/report (a PDF layer data report). */
+export interface LayerReportRequest {
+  title?: string;
+  fields: string[];
+  scope: 'layer' | 'query' | 'selection';
+  cqlFilter?: string;
+  scopeLabel?: string;
+  featureIds?: string[];
+}
 
 /** Talks to /api/gis/layers*. Tenant scoping AND Task 8 permission
  *  enforcement happen entirely server-side — this service never
@@ -24,12 +36,30 @@ export class GisLayersService {
     return this.http.get<GisLayer>(`${this.baseUrl}/${id}`);
   }
 
-  /** Gated by EXPORT permission server-side. Returns the raw GeoJSON text
-   *  (the backend fetches it from GeoServer itself and streams it back —
-   *  never a GeoServer URL handed to the browser, which would bypass this
-   *  permission check entirely). */
-  export(id: string): Observable<string> {
-    return this.http.get(`${this.baseUrl}/${id}/export`, { responseType: 'text' });
+  /** Gated by EXPORT permission server-side. Returns the file as a Blob
+   *  (binary-safe for zipped shapefiles) — the backend fetches it from
+   *  GeoServer itself and streams it back, never a GeoServer URL handed to
+   *  the browser, which would bypass this permission check entirely. */
+  export(id: string, format: LayerExportFormat = 'geojson'): Observable<Blob> {
+    return this.http.get(`${this.baseUrl}/${id}/export`, {
+      params: { format },
+      responseType: 'blob'
+    });
+  }
+
+  /** Analytics (VIEW-gated server-side): the layer's attribute fields. */
+  analyticsFields(id: string): Observable<AnalyticsField[]> {
+    return this.http.get<AnalyticsField[]>(`${this.baseUrl}/${id}/analytics/fields`);
+  }
+
+  /** Analytics: whole-layer summary of one field. */
+  analyticsSummary(id: string, field: string): Observable<FieldSummary> {
+    return this.http.get<FieldSummary>(`${this.baseUrl}/${id}/analytics/summary`, { params: { field } });
+  }
+
+  /** Report Generation (VIEW-gated server-side) — the PDF as a Blob. */
+  report(id: string, request: LayerReportRequest): Observable<Blob> {
+    return this.http.post(`${this.baseUrl}/${id}/report`, request, { responseType: 'blob' });
   }
 
   /** Hard-deletes a layer — unpublishes it from GeoServer and drops its

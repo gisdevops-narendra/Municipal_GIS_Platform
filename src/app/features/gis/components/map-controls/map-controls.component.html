@@ -41,4 +41,106 @@
       (click)="toggleFullscreen()"
     ></button>
   </div>
+
+  @if (showNavHistory()) {
+    <div class="map-controls__group">
+      <button
+        pButton
+        type="button"
+        icon="pi pi-arrow-left"
+        class="p-button-text map-controls__btn"
+        aria-label="Previous view"
+        pTooltip="Previous view"
+        tooltipPosition="left"
+        [disabled]="!canGoBack()"
+        (click)="goBack()"
+      ></button>
+      <button
+        pButton
+        type="button"
+        icon="pi pi-arrow-right"
+        class="p-button-text map-controls__btn"
+        aria-label="Next view"
+        pTooltip="Next view"
+        tooltipPosition="left"
+        [disabled]="!canGoForward()"
+        (click)="goForward()"
+      ></button>
+    </div>
+  }
+
+  @if (showGoTo()) {
+    <div class="map-controls__group">
+      <button
+        pButton
+        type="button"
+        icon="pi pi-map-marker"
+        class="p-button-text map-controls__btn"
+        aria-label="Go to coordinates"
+        pTooltip="Go to X:Y"
+        tooltipPosition="left"
+        (click)="toggleGoTo($event)"
+      ></button>
+    </div>
+  }
 </div>
+
+<p-popover #gotoPopover appendTo="body" styleClass="goto-popover">
+  <form class="goto" (ngSubmit)="goTo()">
+    <span class="goto__title">Go to coordinates</span>
+
+    <label class="goto__field">
+      <span class="goto__label">Coordinate system</span>
+      <p-select
+        class="goto__select"
+        name="crs"
+        [options]="coordinateSystems"
+        optionLabel="label"
+        optionValue="code"
+        [ngModel]="crs()"
+        (ngModelChange)="crs.set($event); gotoError.set(null)"
+        appendTo="body"
+      />
+    </label>
+
+    <div class="goto__pair">
+      <label class="goto__field">
+        <span class="goto__label">{{ crsOption().axes[0] }}</span>
+        <input
+          pInputText
+          class="goto__input"
+          name="x"
+          inputmode="decimal"
+          autocomplete="off"
+          [placeholder]="crsOption().geographic ? '70.4012' : '305000'"
+          [ngModel]="xInput()"
+          (ngModelChange)="xInput.set($event)"
+        />
+      </label>
+      <label class="goto__field">
+        <span class="goto__label">{{ crsOption().axes[1] }}</span>
+        <input
+          pInputText
+          class="goto__input"
+          name="y"
+          inputmode="decimal"
+          autocomplete="off"
+          [placeholder]="crsOption().geographic ? '20.8880' : '2311000'"
+          [ngModel]="yInput()"
+          (ngModelChange)="yInput.set($event)"
+        />
+      </label>
+    </div>
+
+    @if (gotoError(); as message) {
+      <p class="goto__error" role="alert">{{ message }}</p>
+    } @else if (gotoResult()) {
+      <p class="goto__result">{{ gotoResult() }}</p>
+    }
+
+    <div class="goto__actions">
+      <button pButton type="submit" label="Go" icon="pi pi-send" class="p-button-sm"></button>
+      <button pButton type="button" label="Clear marker" class="p-button-sm p-button-text" (click)="clearGoTo()"></button>
+    </div>
+  </form>
+</p-popover>

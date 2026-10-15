@@ -1,0 +1,385 @@
+/* Single-series bar colour, validated (dataviz validate_palette.js) for
+   lightness band, chroma floor and ≥3:1 contrast on each theme surface. */
+:host {
+  --stats-bar: #0d9488;
+  --stats-bar-muted: #8fc9c2;
+  display: block;
+  height: 100%;
+  min-height: 0;
+}
+
+:host-context([data-theme='dark']) {
+  --stats-bar: #0fa194;
+  --stats-bar-muted: #2c5f59;
+}
+
+/* Short, wide bottom dock: controls + figures on the left, the chart
+   takes the full dock height on the right. Stacks on narrow screens. */
+.stats {
+  display: flex;
+  gap: 20px;
+  height: 100%;
+  padding: 10px 14px 12px;
+  font-size: 12.5px;
+  box-sizing: border-box;
+}
+
+.stats__side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 0 1 430px;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+/* ---------- controls ---------- */
+.stats__controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.stats__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.stats__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-500);
+}
+
+.stats__select.p-select,
+.stats__select ::ng-deep .p-select {
+  width: 100%;
+  height: 30px;
+}
+
+.stats__select ::ng-deep .p-select-label {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.stats__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  margin-left: auto;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  color: var(--color-ink-700);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--color-ink-900);
+  }
+}
+
+.stats__toggle {
+  height: 26px;
+  margin-left: 0;
+}
+
+.stats__message {
+  margin: 0;
+  color: var(--color-ink-500);
+
+  &--error {
+    color: var(--color-error-600);
+  }
+}
+
+/* ---------- stat tiles (Analytics) ---------- */
+.stats__tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.stats__tile {
+  padding: 4px 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  min-width: 0;
+
+  dt {
+    font-size: 10.5px;
+    line-height: 1.3;
+    color: var(--color-ink-500);
+  }
+
+  dd {
+    margin: 0;
+    font-size: 13.5px;
+    line-height: 1.3;
+    font-weight: 600;
+    color: var(--color-ink-900);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+/* ---------- chart (Data Visualisation) ---------- */
+.stats__chart {
+  position: relative;
+  flex: 1 1 360px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.stats__chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.stats__chart-title {
+  margin: 0;
+  font-weight: 600;
+  color: var(--color-ink-900);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Lists/tables longer than the dock scroll inside the chart area. */
+.stats__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.hist {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Histogram: touching columns separated by a 2px surface gap, 4px rounded
+   data-end, square at the hairline baseline; recessive 1px grid. */
+.hist__plot {
+  position: relative;
+  flex: 1;
+  min-height: 70px;
+  margin: 8px 0 0 40px;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.hist__grid {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--color-line);
+}
+
+.hist__tick {
+  position: absolute;
+  right: calc(100% + 6px);
+  top: -7px;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-500);
+  white-space: nowrap;
+}
+
+.hist__cols {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.hist__col {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: default;
+
+  &:hover .hist__fill,
+  &:focus-visible .hist__fill {
+    filter: brightness(1.12);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-primary-600);
+    outline-offset: 1px;
+  }
+}
+
+.hist__fill {
+  display: block;
+  width: 100%;
+  background: var(--stats-bar);
+  border-radius: 4px 4px 0 0;
+}
+
+.hist__axis {
+  display: flex;
+  justify-content: space-between;
+  margin: 4px 0 0 40px;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-500);
+}
+
+/* Category bars: ≤16px thick, grow from a single left baseline, value at
+   the tip in text ink (never the bar colour). */
+.cats {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cats__row {
+  display: grid;
+  grid-template-columns: minmax(80px, 30%) 1fr;
+  align-items: center;
+  gap: 10px;
+}
+
+.cats__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--color-ink-700);
+}
+
+.cats__track {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-left: 1px solid var(--color-line);
+  background: transparent;
+  font: inherit;
+  cursor: default;
+
+  &:focus-visible {
+    outline: 2px solid var(--color-primary-600);
+    outline-offset: 1px;
+  }
+
+  &:hover .cats__bar {
+    filter: brightness(1.12);
+  }
+}
+
+.cats__bar {
+  display: block;
+  height: 14px;
+  max-width: calc(100% - 48px);
+  background: var(--stats-bar);
+  border-radius: 0 4px 4px 0;
+
+  &--muted {
+    background: var(--stats-bar-muted);
+  }
+}
+
+.cats__value {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-900);
+}
+
+/* ---------- table view ---------- */
+.stats__table {
+  width: 100%;
+  max-width: 520px;
+  border-collapse: collapse;
+  font-size: 12px;
+
+  th,
+  td {
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--color-line);
+    text-align: left;
+    color: var(--color-ink-700);
+  }
+
+  th {
+    font-weight: 600;
+    color: var(--color-ink-900);
+  }
+
+  .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* ---------- tooltip ---------- */
+.stats__tip {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 6px));
+  padding: 4px 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-panel);
+  color: var(--color-ink-900);
+  font-size: 11.5px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* ---------- narrow docks / phones ---------- */
+@media (max-width: 760px) {
+  .stats {
+    flex-direction: column;
+    height: auto;
+    overflow-y: auto;
+  }
+
+  .stats__side {
+    flex: none;
+    overflow: visible;
+  }
+
+  .stats__tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stats__chart {
+    flex: none;
+  }
+
+  .hist__plot {
+    flex: none;
+    height: 140px;
+  }
+}

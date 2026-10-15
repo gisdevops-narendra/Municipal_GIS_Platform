@@ -24,6 +24,21 @@ type LayerWithDepartment = GISLayer & {
   department?: { id: string; name: string } | null;
 };
 
+/** Download formats for GET /api/gis/layers/:id/export. GeoJSON keeps its
+ *  own code path; the rest are GeoServer WFS `outputFormat`s. KML is
+ *  always WGS84 by spec, so it is requested in EPSG:4326 explicitly. */
+export const LAYER_EXPORT_FORMATS = {
+  geojson: { outputFormat: 'application/json', extension: 'geojson' },
+  csv: { outputFormat: 'csv', extension: 'csv' },
+  shapefile: { outputFormat: 'SHAPE-ZIP', extension: 'zip' },
+  kml: { outputFormat: 'KML', extension: 'kml', srsName: 'EPSG:4326' },
+} as const satisfies Record<
+  string,
+  { outputFormat: string; extension: string; srsName?: string }
+>;
+
+export type LayerExportFormat = keyof typeof LAYER_EXPORT_FORMATS;
+
 interface DemoLayerDefinition {
   code: string;
   name: string;
@@ -234,7 +249,8 @@ export class GisLayersService {
   async exportLayer(
     appUser: AppUser,
     layerId: string,
-  ): Promise<{ filename: string; geojson: string }> {
+    format: LayerExportFormat = 'geojson',
+  ): Promise<{ filename: string; body: string | Buffer; contentType: string }> {
     const layer = await this.findLayerInMunicipality(
       appUser.municipalityId,
       layerId,
@@ -244,11 +260,27 @@ export class GisLayersService {
         'You do not have permission to export this layer.',
       );
     }
-    const geojson = await this.geoServer.getFeaturesAsGeoJson(
+    const base = layer.code.toLowerCase();
+    if (format === 'geojson') {
+      const geojson = await this.geoServer.getFeaturesAsGeoJson(
+        layer.geoserverWorkspace,
+        layer.geoserverLayer,
+      );
+      return {
+        filename: `${base}.geojson`,
+        body: geojson,
+        contentType: 'application/geo+json',
+      };
+    }
+    const spec: { outputFormat: string; extension: string; srsName?: string } =
+      LAYER_EXPORT_FORMATS[format];
+    const { body, contentType } = await this.geoServer.getFeaturesInFormat(
       layer.geoserverWorkspace,
       layer.geoserverLayer,
+      spec.outputFormat,
+      { srsName: spec.srsName },
     );
-    return { filename: `${layer.code.toLowerCase()}.geojson`, geojson };
+    return { filename: `${base}.${spec.extension}`, body, contentType };
   }
 
   /** Task 8 §7: every department that currently has at least one grant on
@@ -540,6 +572,57 @@ export class GisLayersService {
       spec: (layer.styleSpec as unknown as LayerStyleSpecDto | null) ?? null,
       geometry: this.geometryKey(layer),
     };
+  }
+
+  /** Analytics: the layer's attribute fields — anyone who can VIEW the
+   *  layer (unlike the style endpoints, which need MANAGE). */
+  async layerAnalyticsFields(appUser: AppUser, layerId: string) {
+    const { table, workspaceId } = await this.analyticsSource(appUser, layerId);
+    return this.fieldStats.attributes(table, workspaceId);
+  }
+
+  /** Analytics: whole-layer summary of one field (VIEW-gated). */
+  async layerFieldSummary(appUser: AppUser, layerId: string, field: string) {
+    const { table, workspaceId } = await this.analyticsSource(appUser, layerId);
+    return this.fieldStats.summary(table, field, workspaceId);
+  }
+
+  /** Report Generation: the VIEW-checked layer (with its department) and
+   *  its attribute fields — the whitelist a report's columns must come from. */
+  async reportSource(appUser: AppUser, layerId: string) {
+    const layer = await this.findLayerInMunicipality(
+      appUser.municipalityId,
+      layerId,
+    );
+    if (!(await this.gisAuth.canView(appUser, layer))) {
+      throw new ForbiddenException(
+        'You do not have permission to view this layer.',
+      );
+    }
+    const { table, workspaceId } = this.styleSource(layer);
+    const attributes = table
+      ? await this.fieldStats.attributes(table, workspaceId)
+      : [];
+    return { layer, attributes };
+  }
+
+  private async analyticsSource(appUser: AppUser, layerId: string) {
+    const layer = await this.findLayerInMunicipality(
+      appUser.municipalityId,
+      layerId,
+    );
+    if (!(await this.gisAuth.canView(appUser, layer))) {
+      throw new ForbiddenException(
+        'You do not have permission to view this layer.',
+      );
+    }
+    const { table, workspaceId } = this.styleSource(layer);
+    if (!table) {
+      throw new BadRequestException(
+        'This layer has no attribute table to analyse.',
+      );
+    }
+    return { table, workspaceId };
   }
 
   async layerStyleAttributes(appUser: AppUser, layerId: string) {

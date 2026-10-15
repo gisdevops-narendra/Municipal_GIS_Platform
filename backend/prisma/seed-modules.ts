@@ -89,7 +89,37 @@ const MODULES: ModuleSeed[] = [
   { module_id: 73, module_name: 'Marking Tool', isactive: true, module_parent_id: null, node_path: '73', sub_module: null, default_module: null, display_priority: 9, type: 'mainleft' },
   { module_id: 254, module_name: 'module_create_', isactive: true, module_parent_id: 26, node_path: '26.254', sub_module: null, default_module: null, display_priority: null, type: null },
   { module_id: 255, module_name: 'New Module', isactive: true, module_parent_id: 5, node_path: '5.255', sub_module: null, default_module: null, display_priority: null, type: null },
-  { module_id: 67, module_name: 'Time Series', isactive: true, module_parent_id: null, node_path: '67', sub_module: null, default_module: null, display_priority: 8, type: 'mainleft' }
+  { module_id: 67, module_name: 'Time Series', isactive: true, module_parent_id: null, node_path: '67', sub_module: null, default_module: null, display_priority: 8, type: 'mainleft' },
+  // GIS workspace features gated since 2026-10-16 (see migration
+  // 20261016090000_add_ai_assistant_and_layer_styling_modules).
+  { module_id: 900, module_name: 'AI Assistant', isactive: true, module_parent_id: null, node_path: '900', sub_module: null, default_module: false, display_priority: null, type: 'mainleft' },
+  { module_id: 901, module_name: 'Layer Styling', isactive: true, module_parent_id: null, node_path: '901', sub_module: null, default_module: false, display_priority: null, type: 'other' },
+  // Raster Analysis branch (see migration 20261016100000_add_raster_analysis_modules).
+  { module_id: 910, module_name: 'Raster Data', isactive: true, module_parent_id: 69, node_path: '69.910', sub_module: null, default_module: false, display_priority: 1, type: 'mainleft' },
+  { module_id: 920, module_name: 'Terrain Analysis', isactive: true, module_parent_id: 69, node_path: '69.920', sub_module: null, default_module: false, display_priority: 2, type: 'mainleft' },
+  { module_id: 940, module_name: 'Raster Analytics', isactive: true, module_parent_id: 69, node_path: '69.940', sub_module: null, default_module: false, display_priority: 3, type: 'mainleft' },
+  { module_id: 950, module_name: 'Imagery Analysis', isactive: true, module_parent_id: 69, node_path: '69.950', sub_module: null, default_module: false, display_priority: 4, type: 'mainleft' },
+  { module_id: 911, module_name: 'Raster Upload & Publish', isactive: true, module_parent_id: 910, node_path: '69.910.911', sub_module: null, default_module: false, display_priority: 1, type: 'mainleft' },
+  { module_id: 912, module_name: 'Raster Styling', isactive: true, module_parent_id: 910, node_path: '69.910.912', sub_module: null, default_module: false, display_priority: 2, type: 'mainleft' },
+  { module_id: 913, module_name: 'Pixel Identify', isactive: true, module_parent_id: 910, node_path: '69.910.913', sub_module: null, default_module: false, display_priority: 3, type: 'mainleft' },
+  { module_id: 921, module_name: 'Elevation Profile', isactive: true, module_parent_id: 920, node_path: '69.920.921', sub_module: null, default_module: false, display_priority: 1, type: 'mainleft' },
+  { module_id: 922, module_name: 'Slope', isactive: true, module_parent_id: 920, node_path: '69.920.922', sub_module: null, default_module: false, display_priority: 2, type: 'mainleft' },
+  { module_id: 923, module_name: 'Aspect', isactive: true, module_parent_id: 920, node_path: '69.920.923', sub_module: null, default_module: false, display_priority: 3, type: 'mainleft' },
+  { module_id: 924, module_name: 'Hillshade', isactive: true, module_parent_id: 920, node_path: '69.920.924', sub_module: null, default_module: false, display_priority: 4, type: 'mainleft' },
+  { module_id: 925, module_name: 'Contour Generation', isactive: true, module_parent_id: 920, node_path: '69.920.925', sub_module: null, default_module: false, display_priority: 5, type: 'mainleft' },
+  { module_id: 926, module_name: 'Cut & Fill / Volume', isactive: true, module_parent_id: 920, node_path: '69.920.926', sub_module: null, default_module: false, display_priority: 6, type: 'mainleft' },
+  { module_id: 927, module_name: 'Drainage / Watershed', isactive: true, module_parent_id: 920, node_path: '69.920.927', sub_module: null, default_module: false, display_priority: 7, type: 'mainleft' },
+  { module_id: 928, module_name: 'Flood Inundation', isactive: true, module_parent_id: 920, node_path: '69.920.928', sub_module: null, default_module: false, display_priority: 8, type: 'mainleft' },
+  { module_id: 929, module_name: 'Line of Sight', isactive: true, module_parent_id: 920, node_path: '69.920.929', sub_module: null, default_module: false, display_priority: 9, type: 'mainleft' },
+  { module_id: 930, module_name: 'Viewshed', isactive: true, module_parent_id: 920, node_path: '69.920.930', sub_module: null, default_module: false, display_priority: 10, type: 'mainleft' },
+  { module_id: 941, module_name: 'Zonal Statistics', isactive: true, module_parent_id: 940, node_path: '69.940.941', sub_module: null, default_module: false, display_priority: 1, type: 'mainleft' },
+  { module_id: 942, module_name: 'Raster Calculator', isactive: true, module_parent_id: 940, node_path: '69.940.942', sub_module: null, default_module: false, display_priority: 2, type: 'mainleft' },
+  { module_id: 943, module_name: 'Reclassify', isactive: true, module_parent_id: 940, node_path: '69.940.943', sub_module: null, default_module: false, display_priority: 3, type: 'mainleft' },
+  { module_id: 944, module_name: 'Clip to Boundary', isactive: true, module_parent_id: 940, node_path: '69.940.944', sub_module: null, default_module: false, display_priority: 4, type: 'mainleft' },
+  { module_id: 945, module_name: 'Raster to Vector', isactive: true, module_parent_id: 940, node_path: '69.940.945', sub_module: null, default_module: false, display_priority: 5, type: 'mainleft' },
+  { module_id: 951, module_name: 'Swipe / Compare', isactive: true, module_parent_id: 950, node_path: '69.950.951', sub_module: null, default_module: false, display_priority: 1, type: 'mainleft' },
+  { module_id: 952, module_name: 'NDVI / Vegetation Index', isactive: true, module_parent_id: 950, node_path: '69.950.952', sub_module: null, default_module: false, display_priority: 2, type: 'mainleft' },
+  { module_id: 953, module_name: 'Change Detection', isactive: true, module_parent_id: 950, node_path: '69.950.953', sub_module: null, default_module: false, display_priority: 3, type: 'mainleft' },
 ];
 
 async function main() {

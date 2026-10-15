@@ -30,6 +30,30 @@ export interface FieldStats {
 
 const DISTINCT_CAP = 50;
 
+/** Analytics: bars shown per categorical field (the rest fold into
+ *  `otherCount`) and histogram bins per numeric field. */
+const TOP_CATEGORIES = 12;
+const HISTOGRAM_BINS = 10;
+
+export interface FieldSummary {
+  field: string;
+  kind: FieldKind;
+  /** Features in the layer, and how many have a value for this field. */
+  total: number;
+  nonNull: number;
+  numeric?: {
+    min: number;
+    max: number;
+    mean: number;
+    sum: number;
+    median: number;
+    histogram: { from: number; to: number; count: number }[];
+  };
+  categories?: { value: string; count: number }[];
+  distinctCount?: number;
+  otherCount?: number;
+}
+
 /**
  * Geometry / attribute discovery and classification statistics for the
  * style editor, straight from PostGIS — the exact table backing the layer
@@ -133,6 +157,128 @@ export class FieldStatsService {
       kind: attribute.kind,
       distinct: values.slice(0, DISTINCT_CAP),
       distinctTruncated: values.length > DISTINCT_CAP,
+    };
+  }
+
+  /** Analytics summary of one field over the whole layer: numbers get
+   *  count / min / max / mean / sum / median + an equal-width histogram;
+   *  everything else gets its most frequent values. Same field whitelist
+   *  and tenant scoping as `fieldStats`. */
+  async summary(
+    table: string,
+    field: string,
+    workspaceId: string | null,
+  ): Promise<FieldSummary> {
+    this.assertTable(table);
+    const attribute = (await this.attributes(table, workspaceId)).find(
+      (a) => a.name === field,
+    );
+    if (!attribute) {
+      throw new BadRequestException(
+        `"${field}" is not an attribute of this layer.`,
+      );
+    }
+    const col = `"${field.replace(/"/g, '')}"`;
+    const scope =
+      workspaceId && this.isDemoTable(table)
+        ? { clause: `WHERE gis_workspace_id = $1`, params: [workspaceId] }
+        : { clause: '', params: [] as string[] };
+    const notNull = `${scope.clause ? `${scope.clause} AND` : 'WHERE'} ${col} IS NOT NULL`;
+
+    if (attribute.kind === 'number') {
+      const [row] = await this.prisma.$queryRawUnsafe<
+        {
+          total: bigint;
+          non_null: bigint;
+          min: number | null;
+          max: number | null;
+          mean: number | null;
+          sum: number | null;
+          median: number | null;
+        }[]
+      >(
+        `SELECT COUNT(*) AS total, COUNT(${col}) AS non_null,
+                MIN(${col})::float8 AS min, MAX(${col})::float8 AS max,
+                AVG(${col})::float8 AS mean, SUM(${col})::float8 AS sum,
+                percentile_cont(0.5) WITHIN GROUP (ORDER BY ${col})::float8 AS median
+           FROM "${table}" ${scope.clause}`,
+        ...scope.params,
+      );
+      const total = Number(row?.total ?? 0);
+      const nonNull = Number(row?.non_null ?? 0);
+      if (nonNull === 0 || row?.min == null || row?.max == null) {
+        return { field, kind: 'number', total, nonNull };
+      }
+      const { min, max } = row;
+      const bins = min === max ? 1 : HISTOGRAM_BINS;
+      const width = bins === 1 ? 0 : (max - min) / bins;
+      const counts = await this.prisma.$queryRawUnsafe<
+        { bin: number; count: bigint }[]
+      >(
+        bins === 1
+          ? `SELECT 1 AS bin, COUNT(*) AS count FROM "${table}" ${notNull}`
+          : `SELECT LEAST(width_bucket(${col}::float8, ${min}, ${max}, ${bins}), ${bins}) AS bin,
+                    COUNT(*) AS count
+               FROM "${table}" ${notNull}
+              GROUP BY 1`,
+        ...scope.params,
+      );
+      const byBin = new Map(
+        counts.map((c) => [Number(c.bin), Number(c.count)]),
+      );
+      const histogram = Array.from({ length: bins }, (_, i) => ({
+        from: bins === 1 ? min : min + i * width,
+        to: bins === 1 ? max : i === bins - 1 ? max : min + (i + 1) * width,
+        count: byBin.get(i + 1) ?? 0,
+      }));
+      return {
+        field,
+        kind: 'number',
+        total,
+        nonNull,
+        numeric: {
+          min,
+          max,
+          mean: row.mean ?? 0,
+          sum: row.sum ?? 0,
+          median: row.median ?? 0,
+          histogram,
+        },
+      };
+    }
+
+    const [counts] = await this.prisma.$queryRawUnsafe<
+      { total: bigint; non_null: bigint; distinct_count: bigint }[]
+    >(
+      `SELECT COUNT(*) AS total, COUNT(${col}) AS non_null,
+              COUNT(DISTINCT ${col}::text) AS distinct_count
+         FROM "${table}" ${scope.clause}`,
+      ...scope.params,
+    );
+    const top = await this.prisma.$queryRawUnsafe<
+      { value: string; count: bigint }[]
+    >(
+      `SELECT ${col}::text AS value, COUNT(*) AS count
+         FROM "${table}" ${notNull}
+        GROUP BY 1
+        ORDER BY 2 DESC, 1
+        LIMIT ${TOP_CATEGORIES}`,
+      ...scope.params,
+    );
+    const nonNull = Number(counts?.non_null ?? 0);
+    const categories = top.map((t) => ({
+      value: t.value,
+      count: Number(t.count),
+    }));
+    const shown = categories.reduce((sum, c) => sum + c.count, 0);
+    return {
+      field,
+      kind: attribute.kind,
+      total: Number(counts?.total ?? 0),
+      nonNull,
+      categories,
+      distinctCount: Number(counts?.distinct_count ?? 0),
+      otherCount: nonNull - shown,
     };
   }
 

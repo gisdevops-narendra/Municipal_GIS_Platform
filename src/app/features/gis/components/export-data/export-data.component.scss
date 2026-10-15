@@ -1,0 +1,90 @@
+:host {
+  display: block;
+}
+
+.export {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  font-size: 12.5px;
+}
+
+.export__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.export__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-500);
+}
+
+.export__select.p-select,
+.export__select ::ng-deep .p-select {
+  width: 100%;
+  height: 30px;
+}
+
+.export__select ::ng-deep .p-select-label {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.export__formats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.export__format {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  color: var(--color-ink-700);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+
+  &:hover {
+    color: var(--color-ink-900);
+  }
+
+  &.is-active {
+    border-color: var(--color-primary-600);
+    color: var(--color-primary-700);
+    font-weight: 600;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-primary-600);
+    outline-offset: 1px;
+  }
+}
+
+.export__download {
+  align-self: flex-start;
+}
+
+.export__error {
+  margin: 0;
+  color: var(--color-error-600);
+}
+
+.export__hint {
+  margin: 0;
+  color: var(--color-ink-700);
+
+  &--muted {
+    font-size: 11.5px;
+    color: var(--color-ink-500);
+  }
+}

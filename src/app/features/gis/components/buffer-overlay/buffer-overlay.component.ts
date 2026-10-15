@@ -1,7 +1,7 @@
 import { Component, EventEmitter, Input, OnDestroy, Output, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Subscription, of, switchMap } from 'rxjs';
+import { Subscription, forkJoin, of, switchMap } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { SelectModule } from 'primeng/select';
 import { InputTextModule } from 'primeng/inputtext';
@@ -9,7 +9,7 @@ import { MessageModule } from 'primeng/message';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { GeoJsonGeometry } from '../../models/attribute-table.model';
 import { AttributeExternalFilter } from '../attribute-table/attribute-table.component';
-import { MapService } from '../../services/map.service';
+import { MapService, RING_COLORS } from '../../services/map.service';
 import { WpsService, BufferCap, OverlayOp } from '../../services/wps.service';
 import { QueryService } from '../../services/query.service';
 import { AttributeTableService } from '../../services/attribute-table.service';
@@ -21,6 +21,9 @@ type Slot = 'buffer' | 'a' | 'b';
 type GeomKind = 'Point' | 'Line' | 'Polygon';
 
 const MAP_PROJ = 'EPSG:3857';
+/** Module Access catalog id of MultiBuffer (seed-modules.ts). */
+const MULTIBUFFER_MODULE_ID = 187;
+const MAX_RINGS = 6;
 const GEO_PROJ = 'EPSG:4326';
 
 /**
@@ -56,6 +59,14 @@ export class BufferOverlayComponent implements OnDestroy {
     return this.layersSignal();
   }
   private readonly layersSignal = signal<GisLayer[]>([]);
+
+  /** Module Access ids granted to the current user — MultiBuffer (multiple
+   *  rings) is offered only with its own module. */
+  @Input() set allowedModuleIds(value: ReadonlySet<number>) {
+    this.allowedSignal.set(value ?? new Set());
+  }
+  private readonly allowedSignal = signal<ReadonlySet<number>>(new Set());
+  readonly multiRingAllowed = computed(() => this.allowedSignal().has(MULTIBUFFER_MODULE_ID));
   @Output() queryRun = new EventEmitter<AttributeExternalFilter>();
   @Output() queryCleared = new EventEmitter<void>();
 
@@ -88,6 +99,10 @@ export class BufferOverlayComponent implements OnDestroy {
   bufferDistance = 500;
   readonly bufferUnit = signal<LengthUnit>('m');
   readonly bufferCap = signal<BufferCap>('round');
+  /** MultiBuffer: several distances at once, drawn as concentric bands. */
+  readonly multiRing = signal(false);
+  ringDistancesText = '100, 250, 500';
+  readonly ringResults = signal<{ label: string; color: string; count: number | null }[] | null>(null);
 
   // ----- overlay -----
   readonly overlayOp = signal<OverlayOperation>('intersection');
@@ -173,6 +188,10 @@ export class BufferOverlayComponent implements OnDestroy {
     const geometry = this.bufferGeom();
     if (!geometry) {
       this.error.set('Draw a geometry or use the current selection first.');
+      return;
+    }
+    if (this.multiRing() && this.multiRingAllowed()) {
+      this.runMultiBuffer(geometry);
       return;
     }
     if (!(this.bufferDistance > 0)) {
@@ -288,7 +307,87 @@ export class BufferOverlayComponent implements OnDestroy {
     });
   }
 
+  /** One WPS buffer per distance (in parallel), then — with a target
+   *  layer — a feature count per band: within distance i of the input but
+   *  not within distance i-1. Bands are counted with DWITHIN on the small
+   *  input geometry rather than INTERSECTS on the ring polygons, which
+   *  would push two ~100-vertex polygons per band into the WFS GET URL and
+   *  overflow GeoServer's request-line limit. */
+  private runMultiBuffer(geometry: GeoJsonGeometry): void {
+    const distances = parseRingDistances(this.ringDistancesText);
+    if (typeof distances === 'string') {
+      this.error.set(distances);
+      return;
+    }
+    this.begin();
+    const unit = this.bufferUnit();
+    const wkt = this.mapService.wktFromGeoJson(geometry, GEO_PROJ, MAP_PROJ);
+    const latitude = this.mapService.centreLatitude(geometry);
+    forkJoin(distances.map((d) => this.wps.buffer(wkt, toMetres(d, unit), latitude, this.bufferCap()))).subscribe({
+      next: (results3857) => this.handleRings(geometry, distances, results3857),
+      error: (err: HttpErrorResponse) => this.fail(err)
+    });
+  }
+
+  private handleRings(input: GeoJsonGeometry, distances: number[], results3857: (GeoJsonGeometry | null)[]): void {
+    if (results3857.some((r) => !r || this.isEmpty(r))) {
+      this.mapService.clearAnalysisGeometry();
+      this.result.set({ empty: true, affected: null });
+      this.running.set(false);
+      return;
+    }
+    const rings = results3857.map((r) =>
+      this.mapService.reprojectGeoJson(r as Record<string, unknown>, MAP_PROJ, GEO_PROJ)
+    );
+    this.mapService.setAnalysisRings(rings);
+    this.mapService.zoomToGeometries([rings[rings.length - 1]]);
+
+    const unit = this.bufferUnit();
+    this.ringResults.set(
+      distances.map((d, i) => ({
+        label: `${i === 0 ? 0 : distances[i - 1]}–${d} ${unit}`,
+        color: RING_COLORS[Math.min(i, RING_COLORS.length - 1)],
+        count: null
+      }))
+    );
+
+    const targetId = this.targetLayerId();
+    const target = targetId ? this.layers.find((l) => l.id === targetId) : null;
+    if (!target) {
+      this.result.set({ empty: false, affected: null });
+      this.running.set(false);
+      this.queryCleared.emit();
+      return;
+    }
+
+    this.attributes.loadMetadata(target).subscribe({
+      next: ({ geometryField }) => {
+        const origin = `SRID=4326;${this.mapService.wktFromGeoJson(input, GEO_PROJ, GEO_PROJ)}`;
+        const inside = distances.map(
+          (d) => `DWITHIN("${geometryField}", ${origin}, ${toMetres(d, unit)}, meters)`
+        );
+        const bandCql = inside.map((cql, i) => (i === 0 ? cql : `${cql} AND NOT ${inside[i - 1]}`));
+        forkJoin(bandCql.map((cql) => this.queryService.execute(target, cql))).subscribe({
+          next: (executions) => {
+            const counts = executions.map((e) => e.total);
+            this.ringResults.update((bands) => bands?.map((band, i) => ({ ...band, count: counts[i] })) ?? null);
+            this.result.set({ empty: false, affected: counts.reduce((sum, c) => sum + c, 0) });
+            this.running.set(false);
+            this.queryRun.emit({
+              layerId: target.id,
+              cql: inside[inside.length - 1],
+              label: `${target.name} · multibuffer`
+            });
+          },
+          error: (err: HttpErrorResponse) => this.fail(err)
+        });
+      },
+      error: (err: HttpErrorResponse) => this.fail(err)
+    });
+  }
+
   clear(): void {
+    this.ringResults.set(null);
     this.mapService.clearAnalysisGeometry();
     this.mapService.clearDraw();
     this.bufferGeom.set(null);
@@ -302,6 +401,7 @@ export class BufferOverlayComponent implements OnDestroy {
   }
 
   private begin(): void {
+    this.ringResults.set(null);
     this.running.set(true);
     this.error.set(null);
     this.result.set(null);
@@ -331,4 +431,22 @@ export class BufferOverlayComponent implements OnDestroy {
     if (Array.isArray(value)) return value.reduce((sum: number, v) => sum + this.flatLen(v), 0);
     return 0;
   }
+}
+
+/** "100, 250 500" → [100, 250, 500]: positive, de-duplicated, ascending,
+ *  2..MAX_RINGS values. Returns an error message instead when invalid. */
+export function parseRingDistances(text: string): number[] | string {
+  const parts = text.split(/[\s,;]+/).filter(Boolean);
+  const values = parts.map(Number);
+  if (values.some((v) => !Number.isFinite(v) || v <= 0)) {
+    return 'Ring distances must be positive numbers, e.g. "100, 250, 500".';
+  }
+  const unique = [...new Set(values)].sort((a, b) => a - b);
+  if (unique.length < 2) {
+    return 'Enter at least two different ring distances.';
+  }
+  if (unique.length > MAX_RINGS) {
+    return `Enter at most ${MAX_RINGS} ring distances.`;
+  }
+  return unique;
 }
