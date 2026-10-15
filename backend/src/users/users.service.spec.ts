@@ -292,6 +292,49 @@ describe('UsersService', () => {
     });
   });
 
+  describe('department scope (Department Head/User)', () => {
+    it('list forces the caller department, whatever filter was supplied', async () => {
+      prisma.user.findMany.mockResolvedValue([]);
+
+      await service.list('muni-1', {}, 'dept-own');
+
+      expect(prisma.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { municipalityId: 'muni-1', departmentId: 'dept-own' },
+        }),
+      );
+    });
+
+    it('list returns nothing when filtering by another department', async () => {
+      await expect(
+        service.list('muni-1', { departmentId: 'dept-other' }, 'dept-own'),
+      ).resolves.toEqual([]);
+      expect(prisma.user.findMany).not.toHaveBeenCalled();
+    });
+
+    it('list returns nothing for a non-owner with no department', async () => {
+      await expect(service.list('muni-1', {}, null)).resolves.toEqual([]);
+      expect(prisma.user.findMany).not.toHaveBeenCalled();
+    });
+
+    it('getById only matches users of the caller department', async () => {
+      prisma.user.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.getById('muni-1', 'user-in-other-dept', 'dept-own'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.user.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: 'user-in-other-dept',
+            municipalityId: 'muni-1',
+            departmentId: 'dept-own',
+          },
+        }),
+      );
+    });
+  });
+
   describe('tenant isolation', () => {
     it('getById returns null (404) for a user belonging to a different municipality', async () => {
       prisma.user.findFirst.mockResolvedValue(null);

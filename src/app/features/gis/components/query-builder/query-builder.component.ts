@@ -74,7 +74,15 @@ export class QueryBuilderComponent implements OnChanges, OnDestroy {
   private readonly queryService = inject(QueryService);
   private readonly savedQueryService = inject(SavedQueryService);
 
-  @Input() layers: GisLayer[] = [];
+  /** Signal-backed so `layerOptions` recomputes when the list arrives or
+   *  changes (a plain field is read once by `computed()` and cached). */
+  @Input() set layers(value: GisLayer[]) {
+    this.layersSignal.set(value ?? []);
+  }
+  get layers(): GisLayer[] {
+    return this.layersSignal();
+  }
+  private readonly layersSignal = signal<GisLayer[]>([]);
   @Input() initialLayerId: string | null = null;
   @Input() workspaceKey = '';
 

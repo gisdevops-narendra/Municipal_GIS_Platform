@@ -100,6 +100,28 @@ export class GisUploadsComponent {
     return this.currentUser()?.systemRole === 'MUNICIPALITY_OWNER';
   }
 
+  /** Department Users are view-only — only the Owner and Department
+   *  Heads upload GIS data. */
+  get canUpload(): boolean {
+    const role = this.currentUser()?.systemRole;
+    return role === 'MUNICIPALITY_OWNER' || role === 'DEPARTMENT_HEAD';
+  }
+
+  /** Owner, or the Department Head of the upload's own department — who
+   *  reviews, approves and publishes that department's data. The backend
+   *  enforces the real APPROVE/PUBLISH permission. */
+  isReviewer(upload: GisUpload): boolean {
+    const me = this.currentUser();
+    if (!me) return false;
+    if (me.systemRole === 'MUNICIPALITY_OWNER') return true;
+    return (
+      me.systemRole === 'DEPARTMENT_HEAD' &&
+      upload.layer.ownershipType === 'DEPARTMENT' &&
+      !!me.department &&
+      upload.layer.departmentId === me.department.id
+    );
+  }
+
   isMine(upload: GisUpload): boolean {
     return upload.uploadedById === this.currentUser()?.id;
   }
@@ -117,11 +139,11 @@ export class GisUploadsComponent {
   }
 
   canApproveOrReject(upload: GisUpload): boolean {
-    return upload.status === 'IN_REVIEW' && this.isOwner;
+    return upload.status === 'IN_REVIEW' && this.isReviewer(upload);
   }
 
   canPublish(upload: GisUpload): boolean {
-    return (upload.status === 'APPROVED' || upload.status === 'PUBLISH_FAILED') && this.isOwner;
+    return (upload.status === 'APPROVED' || upload.status === 'PUBLISH_FAILED') && this.isReviewer(upload);
   }
 
   statusSeverity(status: GisUpload['status']): 'success' | 'info' | 'warn' | 'danger' | 'secondary' {

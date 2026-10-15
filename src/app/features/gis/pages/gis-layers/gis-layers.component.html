@@ -46,7 +46,7 @@
               <td>v{{ layer.version }}</td>
               <td class="layers-table__actions">
                 <button pButton type="button" label="View" class="p-button-text p-button-sm" (click)="viewDetail(layer)"></button>
-                @if (isOwner) {
+                @if (canManage(layer)) {
                   <button
                     pButton
                     type="button"
@@ -69,6 +69,8 @@
                     [loading]="exporting() === layer.id"
                     (click)="export(layer)"
                   ></button>
+                }
+                @if (isOwner) {
                   <button
                     pButton
                     type="button"

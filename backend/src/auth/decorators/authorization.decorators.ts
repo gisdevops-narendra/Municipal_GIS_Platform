@@ -19,6 +19,19 @@ export function RequireMunicipalityMember() {
 }
 
 /**
+ * MUNICIPALITY_OWNER or DEPARTMENT_HEAD. A DEPARTMENT_USER may only view
+ * the municipal GIS map, so the organizational/management reads behind the
+ * other screens (departments, users, GIS uploads, dashboard summaries)
+ * answer them with a clean 403 — see RolesGuard.
+ */
+export function RequireMunicipalityManager() {
+  return applyDecorators(
+    UseGuards(KeycloakJwtGuard, AppUserGuard, RolesGuard),
+    Roles('MUNICIPALITY_OWNER', 'DEPARTMENT_HEAD'),
+  );
+}
+
+/**
  * MUNICIPALITY_OWNER only. Use for administration endpoints (create/update/
  * deactivate departments and users). A DEPARTMENT_HEAD or DEPARTMENT_USER
  * hitting one of these gets a clean 403 — see RolesGuard.

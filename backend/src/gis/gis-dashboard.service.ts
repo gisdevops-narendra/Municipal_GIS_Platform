@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { GeoServerService } from './geoserver.service';
 import { GisAuthorizationService } from './gis-authorization.service';
 import type { AppUser } from '../auth/types/app-user.type';
+import { departmentScopeOf } from '../auth/department-scope';
 
 export interface DashboardSummary {
   totalLayers: number;
@@ -125,7 +126,7 @@ export class GisDashboardService {
         },
       }),
       this.prisma.department.count({
-        where: { municipalityId: appUser.municipalityId, status: 'ACTIVE' },
+        where: this.visibleDepartmentsWhere(appUser),
       }),
     ]);
 
@@ -138,7 +139,8 @@ export class GisDashboardService {
     };
   }
 
-  /** Task 9 §2: every active department, with a VIEW-authorized layer
+  /** Task 9 §2: every active department visible to the caller (only their
+   *  own for a Department Head/User), with a VIEW-authorized layer
    *  count each (0 for a department the caller has no visible layers
    *  in). Department names/ids themselves are already ordinary
    *  organizational data any municipality member can see via
@@ -147,7 +149,7 @@ export class GisDashboardService {
     appUser: AppUser,
   ): Promise<DepartmentSummaryEntry[]> {
     const departments = await this.prisma.department.findMany({
-      where: { municipalityId: appUser.municipalityId, status: 'ACTIVE' },
+      where: this.visibleDepartmentsWhere(appUser),
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
     });
@@ -247,6 +249,17 @@ export class GisDashboardService {
       .flat()
       .slice(0, MAX_FEATURE_MATCHES_RETURNED);
     return { layers: layerMatches, features };
+  }
+
+  /** Active departments the caller may see — all of them for the Owner,
+   *  only their own for a Department Head/User (see departmentScopeOf). */
+  private visibleDepartmentsWhere(appUser: AppUser) {
+    const scope = departmentScopeOf(appUser);
+    return {
+      municipalityId: appUser.municipalityId,
+      status: 'ACTIVE' as const,
+      ...(scope !== undefined && { id: scope ?? { in: [] } }),
+    };
   }
 
   private async searchLayerFeatures(

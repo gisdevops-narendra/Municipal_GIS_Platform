@@ -47,7 +47,15 @@ export class BufferOverlayComponent implements OnDestroy {
   private readonly queryService = inject(QueryService);
   private readonly attributes = inject(AttributeTableService);
 
-  @Input() layers: GisLayer[] = [];
+  /** Signal-backed so `layerOptions` recomputes when the list arrives or
+   *  changes (a plain field is read once by `computed()` and cached). */
+  @Input() set layers(value: GisLayer[]) {
+    this.layersSignal.set(value ?? []);
+  }
+  get layers(): GisLayer[] {
+    return this.layersSignal();
+  }
+  private readonly layersSignal = signal<GisLayer[]>([]);
   @Output() queryRun = new EventEmitter<AttributeExternalFilter>();
   @Output() queryCleared = new EventEmitter<void>();
 

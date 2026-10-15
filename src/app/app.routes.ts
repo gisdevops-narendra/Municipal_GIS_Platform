@@ -1,6 +1,7 @@
 import { Routes } from '@angular/router';
 import { reviewStepGuard, successStepGuard } from './core/guards/registration-step.guard';
 import { authGuard } from './core/guards/auth.guard';
+import { staffOnlyGuard } from './core/guards/staff-only.guard';
 
 export const routes: Routes = [
   {
@@ -50,7 +51,7 @@ export const routes: Routes = [
   },
   {
     path: 'dashboard',
-    canActivate: [authGuard],
+    canActivate: [authGuard, staffOnlyGuard],
     data: { reuse: true },
     loadComponent: () =>
       import('./features/dashboard/dashboard-placeholder.component').then(
@@ -60,7 +61,7 @@ export const routes: Routes = [
   },
   {
     path: 'departments',
-    canActivate: [authGuard],
+    canActivate: [authGuard, staffOnlyGuard],
     data: { reuse: true },
     loadComponent: () =>
       import('./features/departments/departments.component').then((m) => m.DepartmentsComponent),
@@ -68,7 +69,7 @@ export const routes: Routes = [
   },
   {
     path: 'users',
-    canActivate: [authGuard],
+    canActivate: [authGuard, staffOnlyGuard],
     data: { reuse: true },
     loadComponent: () => import('./features/users/users.component').then((m) => m.UsersComponent),
     title: 'Users — Municipal GIS Platform'
@@ -83,7 +84,7 @@ export const routes: Routes = [
   },
   {
     path: 'settings',
-    canActivate: [authGuard],
+    canActivate: [authGuard, staffOnlyGuard],
     data: { reuse: true },
     loadComponent: () =>
       import('./features/settings/settings.component').then((m) => m.SettingsComponent),
@@ -91,7 +92,7 @@ export const routes: Routes = [
   },
   {
     path: 'gis/uploads',
-    canActivate: [authGuard],
+    canActivate: [authGuard, staffOnlyGuard],
     data: { reuse: true },
     loadComponent: () =>
       import('./features/gis/pages/gis-uploads/gis-uploads.component').then(
@@ -101,7 +102,7 @@ export const routes: Routes = [
   },
   {
     path: 'gis/layers',
-    canActivate: [authGuard],
+    canActivate: [authGuard, staffOnlyGuard],
     data: { reuse: true },
     loadComponent: () =>
       import('./features/gis/pages/gis-layers/gis-layers.component').then((m) => m.GisLayersComponent),
@@ -109,7 +110,7 @@ export const routes: Routes = [
   },
   {
     path: 'gis/layers/:id/permissions',
-    canActivate: [authGuard],
+    canActivate: [authGuard, staffOnlyGuard],
     data: { reuse: true },
     loadComponent: () =>
       import('./features/gis/pages/gis-layer-permissions/gis-layer-permissions.component').then(

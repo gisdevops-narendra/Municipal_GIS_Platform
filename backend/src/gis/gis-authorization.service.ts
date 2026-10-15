@@ -1,4 +1,8 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
 import {
   GisLayerOwnershipType,
   GisPermission,
@@ -26,8 +30,11 @@ const DEFAULT_PERMISSIONS: Record<
   'DEPARTMENT_HEAD' | 'DEPARTMENT_USER',
   GisPermission[]
 > = {
-  DEPARTMENT_HEAD: ['VIEW', 'UPLOAD', 'APPROVE'],
-  DEPARTMENT_USER: ['VIEW', 'UPLOAD'],
+  // The Head reviews/approves uploads, publishes and manages their own
+  // department's data.
+  DEPARTMENT_HEAD: ['VIEW', 'UPLOAD', 'APPROVE', 'PUBLISH', 'EXPORT', 'MANAGE'],
+  // The User only views/visualizes GIS data — see getPermissions.
+  DEPARTMENT_USER: ['VIEW'],
 };
 
 export interface LayerLike {
@@ -70,14 +77,17 @@ export class GisAuthorizationService {
     if (appUser.systemRole === 'MUNICIPALITY_OWNER') {
       return new Set(ALL_PERMISSIONS);
     }
-    if (layer.ownershipType === 'CANONICAL') {
-      // Only the Owner creates/manages canonical layers (Task 7 §12,
-      // unchanged) — every other municipality member gets read-only VIEW,
-      // no per-row grants needed for municipality-wide reference data.
-      return new Set<GisPermission>(['VIEW']);
-    }
-    if (!appUser.departmentId) {
-      return new Set();
+    // Every municipality member may view/visualize all of the
+    // municipality's GIS data. Beyond that, a Department User is strictly
+    // view-only (never widened by grant rows), and only the Owner manages
+    // canonical layers (Task 7 §12).
+    const permissions = new Set<GisPermission>(['VIEW']);
+    if (
+      appUser.systemRole !== 'DEPARTMENT_HEAD' ||
+      layer.ownershipType === 'CANONICAL' ||
+      !appUser.departmentId
+    ) {
+      return permissions;
     }
     const grants = await this.prisma.gISLayerPermission.findMany({
       where: {
@@ -87,7 +97,10 @@ export class GisAuthorizationService {
       },
       select: { permission: true },
     });
-    return new Set(grants.map((g) => g.permission));
+    for (const grant of grants) {
+      permissions.add(grant.permission);
+    }
+    return permissions;
   }
 
   /** Virtual permission set for a DEPARTMENT-ownership layer that has no
@@ -148,33 +161,16 @@ export class GisAuthorizationService {
     return (await this.getPermissions(appUser, layer)).has('MANAGE');
   }
 
-  /** Bulk VIEW filter for a layer list — Task 8 §8: "Do not return all
-   *  layers and merely hide unauthorized layers in Angular." One query
-   *  covering every DEPARTMENT layer in the input, not one query per
-   *  layer. */
-  async filterViewable<T extends LayerLike>(
-    appUser: AppUser,
+  /** Bulk VIEW filter for a layer list. Every municipality member may
+   *  view all of the municipality's GIS data (see getPermissions), so this
+   *  is currently a pass-through — callers still route through it so the
+   *  rule stays in one place (Task 8 §8). Tenant scoping is the caller's
+   *  job: `layers` must already belong to the caller's municipality. */
+  filterViewable<T extends LayerLike>(
+    _appUser: AppUser,
     layers: T[],
   ): Promise<T[]> {
-    if (appUser.systemRole === 'MUNICIPALITY_OWNER') {
-      return layers;
-    }
-    const canonical = layers.filter((l) => l.ownershipType === 'CANONICAL');
-    const department = layers.filter((l) => l.ownershipType === 'DEPARTMENT');
-    if (!appUser.departmentId || department.length === 0) {
-      return canonical;
-    }
-    const grants = await this.prisma.gISLayerPermission.findMany({
-      where: {
-        gisLayerId: { in: department.map((l) => l.id) },
-        departmentId: appUser.departmentId,
-        role: appUser.systemRole,
-        permission: 'VIEW',
-      },
-      select: { gisLayerId: true },
-    });
-    const viewableIds = new Set(grants.map((g) => g.gisLayerId));
-    return [...canonical, ...department.filter((l) => viewableIds.has(l.id))];
+    return Promise.resolve(layers);
   }
 
   /** Seeds the §4 default permission rows for a DEPARTMENT layer's own
@@ -249,6 +245,11 @@ export class GisAuthorizationService {
     if (actor.departmentId === departmentId && actor.systemRole === role) {
       throw new ForbiddenException(
         'You cannot change permissions for your own role.',
+      );
+    }
+    if (granted && role === 'DEPARTMENT_USER' && permission !== 'VIEW') {
+      throw new BadRequestException(
+        'Department Users are view-only and cannot be granted other permissions.',
       );
     }
 

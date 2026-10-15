@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import {
   ALL_PERMISSIONS,
   GisAuthorizationService,
@@ -91,11 +91,12 @@ describe('GisAuthorizationService', () => {
       expect(prisma.gISLayerPermission.findMany).not.toHaveBeenCalled();
     });
 
-    it('gives nothing on a DEPARTMENT layer to a user with no department', async () => {
-      const { service } = buildService();
-      const noDept: AppUser = { ...ROADS_USER, departmentId: null };
+    it('gives VIEW-only on a DEPARTMENT layer to a Head with no department, without a DB lookup', async () => {
+      const { service, prisma } = buildService();
+      const noDept: AppUser = { ...ROADS_HEAD, departmentId: null };
       const permissions = await service.getPermissions(noDept, ROADS_LAYER);
-      expect(permissions.size).toBe(0);
+      expect(permissions).toEqual(new Set(['VIEW']));
+      expect(prisma.gISLayerPermission.findMany).not.toHaveBeenCalled();
     });
 
     it("reflects exactly the grant rows for the caller's own (role, department)", async () => {
@@ -119,27 +120,47 @@ describe('GisAuthorizationService', () => {
       expect(permissions).toEqual(new Set(['VIEW', 'UPLOAD', 'APPROVE']));
     });
 
-    it('supports a cross-department grant — Roads User granted VIEW on the Water layer', async () => {
+    it('gives a Department User VIEW-only on every layer — own or other department — ignoring grant rows', async () => {
       const { service, prisma } = buildService();
       prisma.gISLayerPermission.findMany.mockResolvedValue([
-        { permission: 'VIEW' },
+        { permission: 'UPLOAD' },
+        { permission: 'MANAGE' },
       ]);
 
-      const permissions = await service.getPermissions(ROADS_USER, WATER_LAYER);
+      for (const layer of [ROADS_LAYER, WATER_LAYER]) {
+        expect(await service.getPermissions(ROADS_USER, layer)).toEqual(
+          new Set(['VIEW']),
+        );
+      }
+      expect(prisma.gISLayerPermission.findMany).not.toHaveBeenCalled();
+    });
+
+    it("gives a Department Head VIEW on another department's layer even with no grant rows", async () => {
+      const { service, prisma } = buildService();
+      prisma.gISLayerPermission.findMany.mockResolvedValue([]);
+
+      const permissions = await service.getPermissions(ROADS_HEAD, WATER_LAYER);
+
+      expect(permissions).toEqual(new Set(['VIEW']));
+    });
+
+    it('adds a cross-department grant on top of VIEW — Roads Head granted EXPORT on the Water layer', async () => {
+      const { service, prisma } = buildService();
+      prisma.gISLayerPermission.findMany.mockResolvedValue([
+        { permission: 'EXPORT' },
+      ]);
+
+      const permissions = await service.getPermissions(ROADS_HEAD, WATER_LAYER);
 
       expect(prisma.gISLayerPermission.findMany).toHaveBeenCalledWith({
         where: {
           gisLayerId: 'layer-water',
           departmentId: 'dept-roads',
-          role: 'DEPARTMENT_USER',
+          role: 'DEPARTMENT_HEAD',
         },
         select: { permission: true },
       });
-      expect(permissions).toEqual(new Set(['VIEW']));
-      expect(permissions.has('UPLOAD')).toBe(false);
-      expect(permissions.has('APPROVE')).toBe(false);
-      expect(permissions.has('PUBLISH')).toBe(false);
-      expect(permissions.has('MANAGE')).toBe(false);
+      expect(permissions).toEqual(new Set(['VIEW', 'EXPORT']));
     });
 
     it('canView/canUpload/... each reduce to a single has() check on the same permission set', async () => {
@@ -165,18 +186,20 @@ describe('GisAuthorizationService', () => {
       ).toEqual(new Set(ALL_PERMISSIONS));
     });
 
-    it('gives a Department Head VIEW/UPLOAD/APPROVE for their own department', () => {
+    it('gives a Department Head every permission for their own department — upload, approve, publish, export, manage', () => {
       const { service } = buildService();
       expect(
         service.getDefaultPermissions(ROADS_HEAD, 'DEPARTMENT', 'dept-roads'),
-      ).toEqual(new Set(['VIEW', 'UPLOAD', 'APPROVE']));
+      ).toEqual(
+        new Set(['VIEW', 'UPLOAD', 'APPROVE', 'PUBLISH', 'EXPORT', 'MANAGE']),
+      );
     });
 
-    it('gives a Department User VIEW/UPLOAD (never APPROVE/PUBLISH/MANAGE) for their own department', () => {
+    it('gives a Department User VIEW only (never UPLOAD) for their own department', () => {
       const { service } = buildService();
       expect(
         service.getDefaultPermissions(ROADS_USER, 'DEPARTMENT', 'dept-roads'),
-      ).toEqual(new Set(['VIEW', 'UPLOAD']));
+      ).toEqual(new Set(['VIEW']));
     });
 
     it('gives nothing for a different department — no default cross-department access', () => {
@@ -204,54 +227,25 @@ describe('GisAuthorizationService', () => {
       expect(prisma.gISLayerPermission.findMany).not.toHaveBeenCalled();
     });
 
-    it('always includes canonical layers and only VIEW-granted department layers, in one query', async () => {
+    it('returns every municipal layer to a Department User or Head — all departments plus canonical — without a DB lookup', async () => {
       const { service, prisma } = buildService();
-      prisma.gISLayerPermission.findMany.mockResolvedValue([
-        { gisLayerId: 'layer-roads' },
-      ]);
+      const layers = [CANONICAL_LAYER, ROADS_LAYER, WATER_LAYER];
 
-      const result = await service.filterViewable(ROADS_USER, [
-        CANONICAL_LAYER,
-        ROADS_LAYER,
-        WATER_LAYER,
-      ]);
-
-      expect(prisma.gISLayerPermission.findMany).toHaveBeenCalledTimes(1);
-      expect(prisma.gISLayerPermission.findMany).toHaveBeenCalledWith({
-        where: {
-          gisLayerId: { in: ['layer-roads', 'layer-water'] },
-          departmentId: 'dept-roads',
-          role: 'DEPARTMENT_USER',
-          permission: 'VIEW',
-        },
-        select: { gisLayerId: true },
-      });
-      expect(result.map((l) => l.id).sort()).toEqual([
-        'layer-boundary',
-        'layer-roads',
-      ]);
-    });
-
-    it('returns only canonical layers for a user with no department', async () => {
-      const { service, prisma } = buildService();
-      const noDept: AppUser = { ...ROADS_USER, departmentId: null };
-      const result = await service.filterViewable(noDept, [
-        CANONICAL_LAYER,
-        ROADS_LAYER,
-      ]);
-      expect(result).toEqual([CANONICAL_LAYER]);
+      for (const appUser of [ROADS_USER, ROADS_HEAD]) {
+        expect(await service.filterViewable(appUser, layers)).toEqual(layers);
+      }
       expect(prisma.gISLayerPermission.findMany).not.toHaveBeenCalled();
     });
   });
 
   describe('ensureDefaultPermissions', () => {
-    it('upserts exactly the 5 default rows (3 for Head, 2 for User)', async () => {
+    it('upserts exactly the 7 default rows (6 for Head, VIEW for User)', async () => {
       const { service, prisma } = buildService();
       prisma.gISLayerPermission.upsert.mockResolvedValue({});
 
       await service.ensureDefaultPermissions('layer-roads', 'dept-roads');
 
-      expect(prisma.gISLayerPermission.upsert).toHaveBeenCalledTimes(5);
+      expect(prisma.gISLayerPermission.upsert).toHaveBeenCalledTimes(7);
       const calledWith = prisma.gISLayerPermission.upsert.mock.calls.map(
         // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access -- jest.Mock's default typing is `any`
         (call) => call[0].create,
@@ -262,15 +256,21 @@ describe('GisAuthorizationService', () => {
             gisLayerId: 'layer-roads',
             departmentId: 'dept-roads',
             role: 'DEPARTMENT_HEAD',
-            permission: 'APPROVE',
+            permission: 'PUBLISH',
           },
           {
             gisLayerId: 'layer-roads',
             departmentId: 'dept-roads',
             role: 'DEPARTMENT_USER',
-            permission: 'UPLOAD',
+            permission: 'VIEW',
           },
         ]),
+      );
+      expect(calledWith).not.toContainEqual(
+        expect.objectContaining({
+          role: 'DEPARTMENT_USER',
+          permission: 'UPLOAD',
+        }),
       );
     });
 
@@ -355,6 +355,22 @@ describe('GisAuthorizationService', () => {
           permission: 'UPLOAD',
         },
       });
+      expect(prisma.gISLayerPermission.upsert).not.toHaveBeenCalled();
+    });
+
+    it('refuses to grant a Department User anything beyond VIEW', async () => {
+      const { service, prisma } = buildService();
+
+      await expect(
+        service.setGrant(
+          OWNER,
+          'layer-roads',
+          'dept-roads',
+          'DEPARTMENT_USER',
+          'UPLOAD',
+          true,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.gISLayerPermission.upsert).not.toHaveBeenCalled();
     });
 

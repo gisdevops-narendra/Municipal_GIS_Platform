@@ -140,7 +140,24 @@ export class GisLayerPermissionsComponent {
   }
 
   isChecked(section: DepartmentSection, role: ManagedRole, permission: GisPermission): boolean {
+    if (this.isFixedCell(role, permission)) {
+      return permission === 'VIEW';
+    }
     return section.grants[role].includes(permission);
+  }
+
+  /** Cells the backend decides by role, not by grant rows: every member
+   *  may always VIEW municipal GIS data, and a Department User is
+   *  view-only — so these checkboxes are shown but never editable. */
+  isFixedCell(role: ManagedRole, permission: GisPermission): boolean {
+    return permission === 'VIEW' || role === 'DEPARTMENT_USER';
+  }
+
+  fixedCellTooltip(role: ManagedRole, permission: GisPermission): string | null {
+    if (role === 'DEPARTMENT_USER') {
+      return 'Department Users are view-only.';
+    }
+    return permission === 'VIEW' ? 'Every member can view municipal GIS data.' : null;
   }
 
   /** Never allows the caller to change the cell governing their own

@@ -1,5 +1,8 @@
 import { Controller, Get, Query } from '@nestjs/common';
-import { RequireMunicipalityMember } from '../auth/decorators/authorization.decorators';
+import {
+  RequireMunicipalityManager,
+  RequireMunicipalityMember,
+} from '../auth/decorators/authorization.decorators';
 import { CurrentAppUser } from '../auth/decorators/current-app-user.decorator';
 import type { AppUser } from '../auth/types/app-user.type';
 import { GisDashboardService } from './gis-dashboard.service';
@@ -15,13 +18,13 @@ import { GisDashboardService } from './gis-dashboard.service';
 export class GisDashboardController {
   constructor(private readonly gisDashboardService: GisDashboardService) {}
 
-  @RequireMunicipalityMember()
+  @RequireMunicipalityManager()
   @Get('summary')
   getSummary(@CurrentAppUser() appUser: AppUser) {
     return this.gisDashboardService.getSummary(appUser);
   }
 
-  @RequireMunicipalityMember()
+  @RequireMunicipalityManager()
   @Get('departments')
   getDepartmentSummary(@CurrentAppUser() appUser: AppUser) {
     return this.gisDashboardService.getDepartmentSummary(appUser);

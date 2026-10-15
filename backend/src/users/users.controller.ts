@@ -12,8 +12,9 @@ import { KeycloakJwtGuard } from '../auth/guards/keycloak-jwt.guard';
 import { AppUserGuard } from '../auth/guards/app-user.guard';
 import { CurrentKeycloakUser } from '../auth/decorators/current-keycloak-user.decorator';
 import { CurrentAppUser } from '../auth/decorators/current-app-user.decorator';
+import { departmentScopeOf } from '../auth/department-scope';
 import {
-  RequireMunicipalityMember,
+  RequireMunicipalityManager,
   RequireMunicipalityOwner,
 } from '../auth/decorators/authorization.decorators';
 import type { KeycloakJwtPayload } from '../auth/strategies/keycloak-jwt.strategy';
@@ -47,18 +48,28 @@ export class UsersController {
     return this.usersService.updateOwnProfile(user.sub, dto);
   }
 
-  /** Any authenticated member of the municipality may view the user list —
-   *  only creating/editing/deactivating is Owner-only. */
-  @RequireMunicipalityMember()
+  /** The Owner sees every user of the municipality; a Department Head
+   *  sees only the users of their own department (see departmentScopeOf);
+   *  a Department User (GIS map only) is refused. Creating/editing/
+   *  deactivating is Owner-only. */
+  @RequireMunicipalityManager()
   @Get('users')
   list(@CurrentAppUser() appUser: AppUser, @Query() query: QueryUsersDto) {
-    return this.usersService.list(appUser.municipalityId, query);
+    return this.usersService.list(
+      appUser.municipalityId,
+      query,
+      departmentScopeOf(appUser),
+    );
   }
 
-  @RequireMunicipalityMember()
+  @RequireMunicipalityManager()
   @Get('users/:id')
   getOne(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
-    return this.usersService.getById(appUser.municipalityId, id);
+    return this.usersService.getById(
+      appUser.municipalityId,
+      id,
+      departmentScopeOf(appUser),
+    );
   }
 
   @RequireMunicipalityOwner()

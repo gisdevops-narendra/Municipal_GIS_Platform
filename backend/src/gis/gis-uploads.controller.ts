@@ -14,7 +14,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
-import { RequireMunicipalityMember } from '../auth/decorators/authorization.decorators';
+import { RequireMunicipalityManager } from '../auth/decorators/authorization.decorators';
 import { CurrentAppUser } from '../auth/decorators/current-app-user.decorator';
 import type { AppUser } from '../auth/types/app-user.type';
 import { GisUploadsService } from './gis-uploads.service';
@@ -41,7 +41,7 @@ export class GisUploadsController {
    *  ownership rules enforced in GisUploadsService (Task 7 §12/§26).
    *  Multipart: `file` field + CreateUploadDto fields. municipalityId is
    *  never accepted here — derived from the JWT (Task 7 §17). */
-  @RequireMunicipalityMember()
+  @RequireMunicipalityManager()
   @Post('uploads')
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: MAX_UPLOAD_BYTES } }),
@@ -57,7 +57,7 @@ export class GisUploadsController {
     return this.uploadsService.create(appUser, dto, file);
   }
 
-  @RequireMunicipalityMember()
+  @RequireMunicipalityManager()
   @Get('uploads')
   list(
     @CurrentAppUser() appUser: AppUser,
@@ -71,19 +71,19 @@ export class GisUploadsController {
     );
   }
 
-  @RequireMunicipalityMember()
+  @RequireMunicipalityManager()
   @Get('uploads/:id')
   getById(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
     return this.uploadsService.getById(id, appUser);
   }
 
-  @RequireMunicipalityMember()
+  @RequireMunicipalityManager()
   @Post('uploads/:id/validate')
   validate(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
     return this.uploadsService.validate(id, appUser);
   }
 
-  @RequireMunicipalityMember()
+  @RequireMunicipalityManager()
   @Get('uploads/:id/preview')
   preview(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
     return this.uploadsService.preview(id, appUser);
@@ -91,13 +91,13 @@ export class GisUploadsController {
 
   // ---- Styling in the wizard's Preview step (GIS Layer Styling). ----
 
-  @RequireMunicipalityMember()
+  @RequireMunicipalityManager()
   @Get('uploads/:id/style/attributes')
   styleAttributes(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
     return this.uploadsService.uploadStyleAttributes(id, appUser);
   }
 
-  @RequireMunicipalityMember()
+  @RequireMunicipalityManager()
   @Get('uploads/:id/style/field-stats')
   fieldStats(
     @CurrentAppUser() appUser: AppUser,
@@ -112,7 +112,7 @@ export class GisUploadsController {
     });
   }
 
-  @RequireMunicipalityMember()
+  @RequireMunicipalityManager()
   @Put('uploads/:id/style')
   applyStyle(
     @CurrentAppUser() appUser: AppUser,
@@ -122,7 +122,7 @@ export class GisUploadsController {
     return this.uploadsService.applyUploadStyle(id, appUser, spec);
   }
 
-  @RequireMunicipalityMember()
+  @RequireMunicipalityManager()
   @Post('uploads/:id/style/icon')
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: 512 * 1024 } }),
@@ -138,7 +138,7 @@ export class GisUploadsController {
     return this.uploadsService.uploadStyleIcon(id, appUser, file);
   }
 
-  @RequireMunicipalityMember()
+  @RequireMunicipalityManager()
   @Get('uploads/:id/style/icon/:name')
   async customStyleIcon(
     @CurrentAppUser() appUser: AppUser,
@@ -155,7 +155,7 @@ export class GisUploadsController {
     res.send(icon.body);
   }
 
-  @RequireMunicipalityMember()
+  @RequireMunicipalityManager()
   @Post('uploads/:id/submit-review')
   submitForReview(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
     return this.uploadsService.submitForReview(id, appUser);
@@ -167,13 +167,13 @@ export class GisUploadsController {
    *  enforced inside GisUploadsService.resolvePermissions(). Any other
    *  municipality member reaching this without APPROVE gets a 403 from
    *  the service. */
-  @RequireMunicipalityMember()
+  @RequireMunicipalityManager()
   @Post('uploads/:id/approve')
   approve(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
     return this.uploadsService.approve(id, appUser);
   }
 
-  @RequireMunicipalityMember()
+  @RequireMunicipalityManager()
   @Post('uploads/:id/reject')
   reject(
     @CurrentAppUser() appUser: AppUser,
@@ -187,7 +187,7 @@ export class GisUploadsController {
    *  configurable grant (§4 defaults give it to neither Head nor User;
    *  the Owner must explicitly grant it), enforced the same way as
    *  approve() above. */
-  @RequireMunicipalityMember()
+  @RequireMunicipalityManager()
   @Post('uploads/:id/publish')
   publish(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
     return this.uploadsService.publish(id, appUser);

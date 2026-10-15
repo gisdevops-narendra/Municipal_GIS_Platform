@@ -75,6 +75,21 @@ export class GisLayersComponent {
     return this.currentUser()?.systemRole === 'MUNICIPALITY_OWNER';
   }
 
+  /** Owner, or the Department Head of the layer's own department (the
+   *  backend enforces the real MANAGE/EXPORT permission; this just avoids
+   *  showing buttons that would be refused). Deleting stays Owner-only. */
+  canManage(layer: GisLayer): boolean {
+    const me = this.currentUser();
+    if (!me) return false;
+    if (me.systemRole === 'MUNICIPALITY_OWNER') return true;
+    return (
+      me.systemRole === 'DEPARTMENT_HEAD' &&
+      layer.ownershipType === 'DEPARTMENT' &&
+      !!me.department &&
+      layer.departmentId === me.department.id
+    );
+  }
+
   loadLayers(): void {
     this.loading.set(true);
     this.pageError.set(null);

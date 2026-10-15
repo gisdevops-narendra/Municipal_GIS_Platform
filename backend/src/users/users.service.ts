@@ -9,6 +9,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { KeycloakAdminService } from '../keycloak/keycloak-admin.service';
 import type { AppUser } from '../auth/types/app-user.type';
+import type { DepartmentScope } from '../auth/department-scope';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto, UpdateUserStatusDto } from './dto/update-user.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
@@ -72,10 +73,26 @@ export class UsersService {
     };
   }
 
-  /** Tenant-scoped user list, optionally filtered by department/status/search. */
-  async list(municipalityId: string, query: QueryUsersDto) {
+  /** Tenant-scoped user list, optionally filtered by department/status/search.
+   *  `scope` (see departmentScopeOf) confines a non-owner to their own
+   *  department; a `departmentId` filter outside it matches nothing. */
+  async list(
+    municipalityId: string,
+    query: QueryUsersDto,
+    scope?: DepartmentScope,
+  ) {
+    if (
+      scope === null ||
+      (scope !== undefined &&
+        query.departmentId &&
+        query.departmentId !== scope)
+    ) {
+      return [];
+    }
     const where: Prisma.UserWhereInput = { municipalityId };
-    if (query.departmentId) {
+    if (scope !== undefined) {
+      where.departmentId = scope;
+    } else if (query.departmentId) {
       where.departmentId = query.departmentId;
     }
     if (query.status) {
@@ -99,9 +116,17 @@ export class UsersService {
     return users.map((user) => this.toListResponse(user));
   }
 
-  async getById(municipalityId: string, id: string) {
+  /** Out-of-scope users look identical to "not found". */
+  async getById(municipalityId: string, id: string, scope?: DepartmentScope) {
+    if (scope === null) {
+      throw new NotFoundException('User not found.');
+    }
     const user = await this.prisma.user.findFirst({
-      where: { id, municipalityId },
+      where: {
+        id,
+        municipalityId,
+        ...(scope !== undefined && { departmentId: scope }),
+      },
       include: USER_LIST_INCLUDE,
     });
     if (!user) {

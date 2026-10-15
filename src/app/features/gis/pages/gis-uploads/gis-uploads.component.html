@@ -8,7 +8,9 @@
           <span class="eyebrow">GIS</span>
           <h1 class="uploads-card__heading">GIS Data</h1>
         </div>
-        <button pButton type="button" label="Upload Data" (click)="openWizard()"></button>
+        @if (canUpload) {
+          <button pButton type="button" label="Upload Data" (click)="openWizard()"></button>
+        }
       </div>
 
       @if (pageError(); as message) {
@@ -21,7 +23,7 @@
       @if (loading()) {
         <p class="uploads-card__lede">Loading uploads…</p>
       } @else if (uploads().length === 0) {
-        <p class="uploads-card__lede">No GIS uploads yet. Click "Upload Data" to add your first layer.</p>
+        <p class="uploads-card__lede">No GIS uploads yet.{{ canUpload ? ' Click "Upload Data" to add your first layer.' : '' }}</p>
       } @else {
         <p-table [value]="uploads()" styleClass="uploads-table" [rowHover]="true">
           <ng-template pTemplate="header">

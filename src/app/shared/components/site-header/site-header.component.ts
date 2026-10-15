@@ -60,6 +60,14 @@ export class SiteHeaderComponent {
     return full || token.username || token.email || '';
   });
 
+  /** A Department User may only view the Municipal GIS map, so they get
+   *  just that link (see staffOnlyGuard). Waits for /api/me so the extra
+   *  links never flash for them while it loads. */
+  readonly showFullNav = computed(() => {
+    const me = this.me();
+    return !!me && me.systemRole !== 'DEPARTMENT_USER';
+  });
+
   readonly roleLabel = computed(() => {
     const me = this.me();
     return me ? ROLE_LABELS[me.systemRole] : '';

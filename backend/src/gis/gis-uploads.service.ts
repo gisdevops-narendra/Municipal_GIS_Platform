@@ -986,6 +986,15 @@ export class GisUploadsService {
         'You may only upload to your own department.',
       );
     }
+    if (
+      !this.gisAuth
+        .getDefaultPermissions(appUser, 'DEPARTMENT', dto.departmentId)
+        .has('UPLOAD')
+    ) {
+      throw new ForbiddenException(
+        'You do not have permission to upload GIS data.',
+      );
+    }
   }
 
   private assertCanManage(

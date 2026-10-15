@@ -84,7 +84,17 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
   private readonly service = inject(AttributeTableService);
   private readonly mapService = inject(MapService);
 
-  @Input() layers: GisLayer[] = [];
+  /** Backed by a signal so `layerOptions` recomputes when the list arrives
+   *  or changes — a plain field would be read once by `computed()` and
+   *  cached, leaving the picker empty if the table opened before the
+   *  layers had loaded. */
+  @Input() set layers(value: GisLayer[]) {
+    this.layersSignal.set(value ?? []);
+  }
+  get layers(): GisLayer[] {
+    return this.layersSignal();
+  }
+  private readonly layersSignal = signal<GisLayer[]>([]);
   /** Preferred layer to open (e.g. the one highlighted from a deep link). */
   @Input() initialLayerId: string | null = null;
   /** Features just clicked on the map — toggles them in the selection. */
@@ -156,7 +166,12 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['externalFilter']) {
+    // The first change set contains every bound input — including a null
+    // externalFilter — so only treat it as a filter change when there is
+    // a real filter or it changed later; otherwise fall through and pick
+    // the default layer.
+    const filterChange = changes['externalFilter'];
+    if (filterChange && (!filterChange.firstChange || this.externalFilter)) {
       this.applyExternalFilter();
       return;
     }

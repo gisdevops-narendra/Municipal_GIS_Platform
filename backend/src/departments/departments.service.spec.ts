@@ -74,6 +74,32 @@ describe('DepartmentsService', () => {
     });
   });
 
+  describe('department scope (Department Head/User)', () => {
+    it('list only returns the caller department when scoped', async () => {
+      prisma.department.findMany.mockResolvedValue([]);
+
+      await service.list('muni-1', 'dept-own');
+
+      expect(prisma.department.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { municipalityId: 'muni-1', id: 'dept-own' },
+        }),
+      );
+    });
+
+    it('list returns nothing for a non-owner with no department', async () => {
+      await expect(service.list('muni-1', null)).resolves.toEqual([]);
+      expect(prisma.department.findMany).not.toHaveBeenCalled();
+    });
+
+    it('getById 404s for another department of the same municipality', async () => {
+      await expect(
+        service.getById('muni-1', 'dept-other', 'dept-own'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.department.findFirst).not.toHaveBeenCalled();
+    });
+  });
+
   describe('tenant isolation', () => {
     it('getById 404s for a department belonging to a different municipality', async () => {
       prisma.department.findFirst.mockResolvedValue(null);

@@ -72,8 +72,8 @@
                         <p-checkbox
                           [binary]="true"
                           [ngModel]="isChecked(section, role, permission)"
-                          [disabled]="isSelfCell(section, role) || isSaving(section, role, permission)"
-                          [pTooltip]="isSelfCell(section, role) ? 'You cannot change permissions for your own role.' : ''"
+                          [disabled]="isFixedCell(role, permission) || isSelfCell(section, role) || isSaving(section, role, permission)"
+                          [pTooltip]="fixedCellTooltip(role, permission) ?? (isSelfCell(section, role) ? 'You cannot change permissions for your own role.' : '')"
                           (onChange)="toggle(section, role, permission, $event)"
                         ></p-checkbox>
                       </td>

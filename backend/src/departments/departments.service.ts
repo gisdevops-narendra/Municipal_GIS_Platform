@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import type { DepartmentScope } from '../auth/department-scope';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CreateDepartmentDto,
@@ -21,16 +22,26 @@ import {
 export class DepartmentsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(municipalityId: string) {
+  /** `scope` (see departmentScopeOf) confines a non-owner to their own
+   *  department; omitted/undefined means every department. */
+  async list(municipalityId: string, scope?: DepartmentScope) {
+    if (scope === null) {
+      return [];
+    }
     const departments = await this.prisma.department.findMany({
-      where: { municipalityId },
+      where: { municipalityId, ...(scope !== undefined && { id: scope }) },
       orderBy: { name: 'asc' },
       include: { _count: { select: { users: true } } },
     });
     return departments.map((department) => this.toResponse(department));
   }
 
-  async getById(municipalityId: string, id: string) {
+  /** Out-of-scope departments look identical to "not found", same as
+   *  another municipality's. */
+  async getById(municipalityId: string, id: string, scope?: DepartmentScope) {
+    if (scope === null || (scope !== undefined && scope !== id)) {
+      throw new NotFoundException('Department not found.');
+    }
     const department = await this.prisma.department.findFirst({
       where: { id, municipalityId },
       include: { _count: { select: { users: true } } },

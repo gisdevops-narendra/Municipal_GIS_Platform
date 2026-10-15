@@ -8,10 +8,11 @@ import {
   Post,
 } from '@nestjs/common';
 import {
-  RequireMunicipalityMember,
+  RequireMunicipalityManager,
   RequireMunicipalityOwner,
 } from '../auth/decorators/authorization.decorators';
 import { CurrentAppUser } from '../auth/decorators/current-app-user.decorator';
+import { departmentScopeOf } from '../auth/department-scope';
 import type { AppUser } from '../auth/types/app-user.type';
 import { DepartmentsService } from './departments.service';
 import {
@@ -23,18 +24,26 @@ import {
 export class DepartmentsController {
   constructor(private readonly departmentsService: DepartmentsService) {}
 
-  /** Any authenticated member of the municipality may view departments —
-   *  only creating/editing/deleting is Owner-only (see RequireMunicipalityOwner). */
-  @RequireMunicipalityMember()
+  /** The Owner sees every department; a Department Head sees only their
+   *  own (see departmentScopeOf); a Department User (GIS map only) is
+   *  refused. Creating/editing/deleting is Owner-only. */
+  @RequireMunicipalityManager()
   @Get()
   list(@CurrentAppUser() appUser: AppUser) {
-    return this.departmentsService.list(appUser.municipalityId);
+    return this.departmentsService.list(
+      appUser.municipalityId,
+      departmentScopeOf(appUser),
+    );
   }
 
-  @RequireMunicipalityMember()
+  @RequireMunicipalityManager()
   @Get(':id')
   getOne(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
-    return this.departmentsService.getById(appUser.municipalityId, id);
+    return this.departmentsService.getById(
+      appUser.municipalityId,
+      id,
+      departmentScopeOf(appUser),
+    );
   }
 
   @RequireMunicipalityOwner()
