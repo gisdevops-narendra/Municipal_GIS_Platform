@@ -60,17 +60,26 @@ export interface MapFishPrintSpec {
   };
 }
 
-/** Server-side allowlist — mirrors the front-end map.service.ts BASEMAPS.
- *  The client only ever sends an id, never a URL, so the print engine can
+/** Server-side allowlist — mirrors the front-end map.service.ts BASEMAPS,
+ *  restricted to the ones this print pipeline can actually render. The
+ *  client only ever sends an id, never a URL, so the print engine can
  *  only ever be pointed at one of these hosts. All use MapFish's `osm`
- *  layer type ({z}/{x}/{y}.png under baseURL). */
+ *  layer type (`{baseURL}/{z}/{x}/{y}.png`) — the live map's Esri
+ *  basemaps use a different tile path (`{z}/{y}/{x}`, y before x) that
+ *  this fixed layer type doesn't support, so they're deliberately not
+ *  offered here; the frontend falls back to 'osm' when printing while
+ *  one of those is active (see PrintLayoutComponent.toPrintBasemapId). */
 const BASEMAPS: Record<string, BasemapDefinition> = {
   osm: {
     baseURL: 'https://tile.openstreetmap.org',
     attribution: '© OpenStreetMap contributors',
   },
-  'carto-light': {
-    baseURL: 'https://basemaps.cartocdn.com/light_all',
+  'carto-voyager': {
+    baseURL: 'https://basemaps.cartocdn.com/rastertiles/voyager',
+    attribution: '© OpenStreetMap contributors © CARTO',
+  },
+  'carto-dark': {
+    baseURL: 'https://basemaps.cartocdn.com/dark_all',
     attribution: '© OpenStreetMap contributors © CARTO',
   },
   topo: {

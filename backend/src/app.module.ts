@@ -12,6 +12,7 @@ import { GisModule } from './gis/gis.module';
 import { GisAiModule } from './gis-ai/gis-ai.module';
 import { SettingsModule } from './settings/settings.module';
 import { SystemModule } from './system/system.module';
+import { ModuleAccessModule } from './module-access/module-access.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { SystemModule } from './system/system.module';
     GisAiModule,
     SettingsModule,
     SystemModule,
+    ModuleAccessModule,
   ],
   controllers: [AppController],
   providers: [AppService],

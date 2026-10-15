@@ -9,7 +9,6 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { KeycloakAdminService } from '../keycloak/keycloak-admin.service';
 import type { AppUser } from '../auth/types/app-user.type';
-import type { DepartmentScope } from '../auth/department-scope';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto, UpdateUserStatusDto } from './dto/update-user.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
@@ -73,27 +72,27 @@ export class UsersService {
     };
   }
 
-  /** Tenant-scoped user list, optionally filtered by department/status/search.
-   *  `scope` (see departmentScopeOf) confines a non-owner to their own
-   *  department; a `departmentId` filter outside it matches nothing. */
-  async list(
-    municipalityId: string,
-    query: QueryUsersDto,
-    scope?: DepartmentScope,
-  ) {
-    if (
-      scope === null ||
-      (scope !== undefined &&
-        query.departmentId &&
-        query.departmentId !== scope)
-    ) {
-      return [];
-    }
-    const where: Prisma.UserWhereInput = { municipalityId };
-    if (scope !== undefined) {
-      where.departmentId = scope;
-    } else if (query.departmentId) {
-      where.departmentId = query.departmentId;
+  /**
+   * Tenant-scoped user list, optionally filtered by department/status/search.
+   * A DEPARTMENT_HEAD/DEPARTMENT_USER is additionally locked to their own
+   * department — `query.departmentId` is only honored for the Owner; a
+   * non-Owner caller always gets their own department's roster, regardless
+   * of what (if anything) they pass, and gets nothing back if they somehow
+   * have no department assigned.
+   */
+  async list(appUser: AppUser, query: QueryUsersDto) {
+    const where: Prisma.UserWhereInput = {
+      municipalityId: appUser.municipalityId,
+    };
+    if (appUser.systemRole === 'MUNICIPALITY_OWNER') {
+      if (query.departmentId) {
+        where.departmentId = query.departmentId;
+      }
+    } else {
+      if (!appUser.departmentId) {
+        return [];
+      }
+      where.departmentId = appUser.departmentId;
     }
     if (query.status) {
       where.status = query.status;
@@ -116,17 +115,23 @@ export class UsersService {
     return users.map((user) => this.toListResponse(user));
   }
 
-  /** Out-of-scope users look identical to "not found". */
-  async getById(municipalityId: string, id: string, scope?: DepartmentScope) {
-    if (scope === null) {
-      throw new NotFoundException('User not found.');
+  /** A DEPARTMENT_HEAD/DEPARTMENT_USER may only look up a user within their
+   *  own department — anyone else's id, including another department's
+   *  member, 404s exactly like a user from a different municipality. */
+  async getById(appUser: AppUser, id: string) {
+    const where: Prisma.UserWhereInput = {
+      id,
+      municipalityId: appUser.municipalityId,
+    };
+    if (appUser.systemRole !== 'MUNICIPALITY_OWNER') {
+      if (!appUser.departmentId) {
+        throw new NotFoundException('User not found.');
+      }
+      where.departmentId = appUser.departmentId;
     }
+
     const user = await this.prisma.user.findFirst({
-      where: {
-        id,
-        municipalityId,
-        ...(scope !== undefined && { departmentId: scope }),
-      },
+      where,
       include: USER_LIST_INCLUDE,
     });
     if (!user) {
@@ -271,9 +276,49 @@ export class UsersService {
     return this.toListResponse(user);
   }
 
+  /**
+   * Permanently removes a user. Both the MUNICIPALITY_OWNER and a
+   * DEPARTMENT_HEAD may delete — the Owner may delete anyone but the
+   * Owner (via `assertManageableUser`); a DEPARTMENT_HEAD may only delete
+   * a DEPARTMENT_USER within their own department (never a peer Head, and
+   * never anyone outside their department). The DB row is removed first
+   * — the source of truth for "does this user still exist" — then the
+   * Keycloak identity is deleted best-effort (logged, not fatal): every
+   * other record that references this user (`GISLayerUpload.uploadedById`,
+   * `Department.createdById`, etc.) is a plain audit string, not a
+   * relation, by design (see schema.prisma), so a deleted user never
+   * blocks reading data they once created.
+   */
+  async deleteUser(actor: AppUser, id: string): Promise<void> {
+    const target = await this.assertManageableUser(actor.municipalityId, id);
+
+    if (actor.systemRole !== 'MUNICIPALITY_OWNER') {
+      const canHeadDelete =
+        actor.systemRole === 'DEPARTMENT_HEAD' &&
+        !!actor.departmentId &&
+        target.departmentId === actor.departmentId &&
+        target.systemRole === 'DEPARTMENT_USER';
+      if (!canHeadDelete) {
+        throw new ForbiddenException(
+          'You do not have permission to delete this user.',
+        );
+      }
+    }
+
+    await this.prisma.user.delete({ where: { id: target.id } });
+
+    try {
+      await this.keycloakAdmin.deleteUser(target.keycloakUserId);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to delete Keycloak identity for removed user ${target.id}: ${(error as Error).message}`,
+      );
+    }
+  }
+
   /** Confirms `id` is a user within `municipalityId` and is not the
-   *  MUNICIPALITY_OWNER — the owner can never be edited, deactivated, or
-   *  reassigned through these generic management endpoints. */
+   *  MUNICIPALITY_OWNER — the owner can never be edited, deactivated,
+   *  deleted, or reassigned through these generic management endpoints. */
   private async assertManageableUser(municipalityId: string, id: string) {
     const user = await this.prisma.user.findFirst({
       where: { id, municipalityId },

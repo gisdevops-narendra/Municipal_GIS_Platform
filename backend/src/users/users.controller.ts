@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -12,9 +13,9 @@ import { KeycloakJwtGuard } from '../auth/guards/keycloak-jwt.guard';
 import { AppUserGuard } from '../auth/guards/app-user.guard';
 import { CurrentKeycloakUser } from '../auth/decorators/current-keycloak-user.decorator';
 import { CurrentAppUser } from '../auth/decorators/current-app-user.decorator';
-import { departmentScopeOf } from '../auth/department-scope';
 import {
   RequireMunicipalityManager,
+  RequireMunicipalityMember,
   RequireMunicipalityOwner,
 } from '../auth/decorators/authorization.decorators';
 import type { KeycloakJwtPayload } from '../auth/strategies/keycloak-jwt.strategy';
@@ -49,27 +50,19 @@ export class UsersController {
   }
 
   /** The Owner sees every user of the municipality; a Department Head
-   *  sees only the users of their own department (see departmentScopeOf);
-   *  a Department User (GIS map only) is refused. Creating/editing/
-   *  deactivating is Owner-only. */
+   *  sees only the users of their own department (enforced in
+   *  UsersService); a Department User (GIS map only) is refused.
+   *  Creating/editing/deactivating is Owner-only. */
   @RequireMunicipalityManager()
   @Get('users')
   list(@CurrentAppUser() appUser: AppUser, @Query() query: QueryUsersDto) {
-    return this.usersService.list(
-      appUser.municipalityId,
-      query,
-      departmentScopeOf(appUser),
-    );
+    return this.usersService.list(appUser, query);
   }
 
   @RequireMunicipalityManager()
   @Get('users/:id')
   getOne(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
-    return this.usersService.getById(
-      appUser.municipalityId,
-      id,
-      departmentScopeOf(appUser),
-    );
+    return this.usersService.getById(appUser, id);
   }
 
   @RequireMunicipalityOwner()
@@ -96,5 +89,19 @@ export class UsersController {
     @Body() dto: UpdateUserStatusDto,
   ) {
     return this.usersService.updateUserStatus(appUser.municipalityId, id, dto);
+  }
+
+  /** Owner may delete anyone (but the Owner); a DEPARTMENT_HEAD may delete
+   *  a DEPARTMENT_USER within their own department — see
+   *  UsersService.deleteUser for the real gate (not Owner-only, unlike the
+   *  other management endpoints above). */
+  @RequireMunicipalityMember()
+  @Delete('users/:id')
+  async remove(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+  ): Promise<{ success: true }> {
+    await this.usersService.deleteUser(appUser, id);
+    return { success: true };
   }
 }

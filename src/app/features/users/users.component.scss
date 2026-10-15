@@ -1,10 +1,71 @@
-.users-shell {
-  padding: 48px 0 80px;
-  min-height: calc(100vh - 72px - 90px);
+/* Fixed 3-row app shell: header and footer are pinned (never scroll or
+   leave the viewport, matching the /gis workspace shell) and only this
+   middle region scrolls, when the table needs more room than the
+   viewport gives it — never the whole page. */
+:host {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
 }
 
+app-site-header {
+  flex-shrink: 0;
+}
+
+app-site-footer {
+  flex-shrink: 0;
+}
+
+::ng-deep app-site-footer .site-footer {
+  margin-top: 0;
+}
+
+.users-shell {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 48px 0 40px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* A data table benefits from more room than the site's default 1440px
+   reading-width container — widen just this page rather than the global
+   --content-max (which also governs marketing/text pages where a
+   narrower measure is still the right call). */
+.users-shell__inner {
+  --content-max: 1800px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The card itself never scrolls as a block — header/filters/stats/
+   paginator stay put and only the table rows below scroll, via
+   .users-card__table's [scrollable]+scrollHeight="flex" (same pattern as
+   the GIS Attribute Table panel). */
 .users-card {
   padding: 32px 36px 36px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.users-card__table {
+  flex: 1;
+  /* Safety floor: on an unusually short viewport, never let the row area
+     collapse to zero visible rows — a little page-level scroll in that
+     rare case is better than an apparently-empty table. */
+  min-height: 180px;
+  overflow: hidden;
+}
+
+.users-card__table ::ng-deep .p-datatable-table-container {
+  height: 100%;
 }
 
 .users-card__header {
@@ -37,9 +98,46 @@
   margin-bottom: 20px;
 }
 
+/* ---------- summary tiles ---------- */
+/* Mirrors .dashboard-stat on the dashboard / .dept-stat on Departments —
+   same visual language app-wide. */
+.users-card__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.users-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 16px 14px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+
+.users-stat__value {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--color-ink-900);
+  line-height: 1.1;
+}
+
+.users-stat__label {
+  font-size: 12px;
+  color: var(--color-ink-500);
+}
+
 .users-card__search {
   flex: 1 1 220px;
   min-width: 200px;
+}
+
+.users-card__paginator {
+  flex-shrink: 0;
+  margin-top: 12px;
 }
 
 .users-table {

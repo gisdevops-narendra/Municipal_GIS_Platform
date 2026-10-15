@@ -2,6 +2,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { DepartmentsService } from './departments.service';
 import { PrismaService } from '../prisma/prisma.service';
+import type { AppUser } from '../auth/types/app-user.type';
 
 describe('DepartmentsService', () => {
   let service: DepartmentsService;
@@ -13,6 +14,24 @@ describe('DepartmentsService', () => {
       update: jest.Mock;
       delete: jest.Mock;
     };
+  };
+
+  const owner: AppUser = {
+    id: 'owner-1',
+    keycloakUserId: 'kc-owner-1',
+    municipalityId: 'muni-A',
+    departmentId: null,
+    systemRole: 'MUNICIPALITY_OWNER',
+    status: 'ACTIVE',
+  };
+
+  const head: AppUser = {
+    id: 'head-1',
+    keycloakUserId: 'kc-head-1',
+    municipalityId: 'muni-A',
+    departmentId: 'dept-own',
+    systemRole: 'DEPARTMENT_HEAD',
+    status: 'ACTIVE',
   };
 
   beforeEach(() => {
@@ -74,38 +93,12 @@ describe('DepartmentsService', () => {
     });
   });
 
-  describe('department scope (Department Head/User)', () => {
-    it('list only returns the caller department when scoped', async () => {
-      prisma.department.findMany.mockResolvedValue([]);
-
-      await service.list('muni-1', 'dept-own');
-
-      expect(prisma.department.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { municipalityId: 'muni-1', id: 'dept-own' },
-        }),
-      );
-    });
-
-    it('list returns nothing for a non-owner with no department', async () => {
-      await expect(service.list('muni-1', null)).resolves.toEqual([]);
-      expect(prisma.department.findMany).not.toHaveBeenCalled();
-    });
-
-    it('getById 404s for another department of the same municipality', async () => {
-      await expect(
-        service.getById('muni-1', 'dept-other', 'dept-own'),
-      ).rejects.toBeInstanceOf(NotFoundException);
-      expect(prisma.department.findFirst).not.toHaveBeenCalled();
-    });
-  });
-
   describe('tenant isolation', () => {
     it('getById 404s for a department belonging to a different municipality', async () => {
       prisma.department.findFirst.mockResolvedValue(null);
 
       await expect(
-        service.getById('muni-A', 'dept-in-muni-B'),
+        service.getById(owner, 'dept-in-muni-B'),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(prisma.department.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -130,6 +123,51 @@ describe('DepartmentsService', () => {
         service.remove('muni-A', 'dept-in-muni-B'),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(prisma.department.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('department-scoped access (non-Owner)', () => {
+    it('list only queries the caller own department for a DEPARTMENT_HEAD', async () => {
+      prisma.department.findMany.mockResolvedValue([]);
+
+      await service.list(head);
+
+      expect(prisma.department.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { municipalityId: 'muni-A', id: 'dept-own' },
+        }),
+      );
+    });
+
+    it('list returns an empty array without querying when the caller has no department', async () => {
+      await service.list({ ...head, departmentId: null });
+
+      expect(prisma.department.findMany).not.toHaveBeenCalled();
+    });
+
+    it('getById 404s when a DEPARTMENT_HEAD requests a department other than their own', async () => {
+      await expect(
+        service.getById(head, 'dept-other'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.department.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('getById succeeds for a DEPARTMENT_HEAD requesting their own department', async () => {
+      prisma.department.findFirst.mockResolvedValue({
+        id: 'dept-own',
+        municipalityId: 'muni-A',
+        name: 'Roads',
+        code: 'ROADS',
+        description: null,
+        status: 'ACTIVE',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        _count: { users: 2 },
+      });
+
+      const result = await service.getById(head, 'dept-own');
+
+      expect(result.id).toBe('dept-own');
     });
   });
 

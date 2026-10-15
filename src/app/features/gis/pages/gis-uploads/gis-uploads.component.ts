@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
@@ -6,6 +6,7 @@ import { Observable } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { TableModule } from 'primeng/table';
 import { DialogModule } from 'primeng/dialog';
+import { PaginatorModule, PaginatorState } from 'primeng/paginator';
 import { TagModule } from 'primeng/tag';
 import { MessageModule } from 'primeng/message';
 import { TextareaModule } from 'primeng/textarea';
@@ -18,7 +19,8 @@ import { CurrentUser } from '../../../../core/models/current-user.model';
 import { GisUpload } from '../../../../core/models/gis-upload.model';
 import { UploadWizardComponent } from '../../components/upload-wizard/upload-wizard.component';
 
-const PAGE_SIZE = 20;
+const DEFAULT_PAGE_SIZE = 20;
+const PAGE_SIZES = [10, 20, 50];
 
 @Component({
   selector: 'app-gis-uploads',
@@ -29,6 +31,7 @@ const PAGE_SIZE = 20;
     ButtonModule,
     TableModule,
     DialogModule,
+    PaginatorModule,
     TagModule,
     MessageModule,
     TextareaModule,
@@ -48,8 +51,19 @@ export class GisUploadsComponent {
   readonly uploads = signal<GisUpload[]>([]);
   readonly total = signal(0);
   readonly page = signal(1);
-  readonly pageSize = PAGE_SIZE;
+  readonly pageSize = signal(DEFAULT_PAGE_SIZE);
+  readonly pageSizes = PAGE_SIZES;
+  /** 0-based offset of the current page's first row — what
+   *  `<p-paginator>` needs, derived from the 1-based `page` this
+   *  component's own loading logic uses everywhere else. */
+  readonly first = computed(() => (this.page() - 1) * this.pageSize());
   readonly loading = signal(true);
+  /** True once the first successful load has completed. Used to keep the
+   *  table + paginator mounted across a page/rows change — without this,
+   *  every reload flips `loading()` true and the template's `@if` tears
+   *  down and rebuilds the whole table+paginator, which reads as "nothing
+   *  happened" (or a jarring flash) rather than a page change. */
+  readonly hasLoaded = signal(false);
   readonly pageError = signal<string | null>(null);
   readonly actionError = signal<string | null>(null);
 
@@ -67,11 +81,12 @@ export class GisUploadsComponent {
   loadUploads(): void {
     this.loading.set(true);
     this.pageError.set(null);
-    this.uploadsService.list(this.page(), this.pageSize).subscribe({
+    this.uploadsService.list(this.page(), this.pageSize()).subscribe({
       next: (result) => {
         this.uploads.set(result.items);
         this.total.set(result.total);
         this.loading.set(false);
+        this.hasLoaded.set(true);
       },
       error: () => {
         this.pageError.set('Could not load uploads. Please try again.');
@@ -81,18 +96,19 @@ export class GisUploadsComponent {
   }
 
   get totalPages(): number {
-    return Math.max(1, Math.ceil(this.total() / this.pageSize));
+    return Math.max(1, Math.ceil(this.total() / this.pageSize()));
   }
 
-  nextPage(): void {
-    if (this.page() >= this.totalPages) return;
-    this.page.update((p) => p + 1);
-    this.loadUploads();
-  }
-
-  previousPage(): void {
-    if (this.page() <= 1) return;
-    this.page.update((p) => p - 1);
+  /** Server-side pagination — a page (or rows-per-page) change re-fetches
+   *  from the backend rather than slicing a locally-held array, since
+   *  uploads are never all fetched at once (see GisUploadsService.list). */
+  onPageChange(event: PaginatorState): void {
+    const rows = event.rows ?? this.pageSize();
+    if (rows !== this.pageSize()) {
+      this.pageSize.set(rows);
+    }
+    const first = event.first ?? 0;
+    this.page.set(Math.floor(first / rows) + 1);
     this.loadUploads();
   }
 

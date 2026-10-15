@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { HttpErrorResponse } from '@angular/common/http';
 import { ButtonModule } from 'primeng/button';
@@ -53,9 +53,19 @@ export class DashboardPlaceholderComponent {
   readonly gisSummaryLoading = signal(true);
 
   /** Task 9 §2: per-department GIS layer counts, clickable through to the
-   *  map filtered to that department's authorized layers. */
+   *  map filtered to that department's authorized layers. Rendered as a
+   *  small bar-list (name + relative bar) rather than a plain list so a
+   *  municipality with many departments reads as a chart, not a wall of
+   *  rows — see barWidthPercent(). */
   readonly departmentSummaries = signal<GisDepartmentSummary[]>([]);
   readonly departmentSummariesLoading = signal(true);
+
+  /** Highest layer count among the visible departments — the denominator
+   *  for each bar's relative width. Floored at 1 so an all-zero summary
+   *  (a brand-new municipality) never divides by zero. */
+  private readonly maxDepartmentLayerCount = computed(() =>
+    Math.max(1, ...this.departmentSummaries().map((d) => d.layerCount))
+  );
 
   constructor() {
     this.currentUserService.getMe().subscribe({
@@ -95,5 +105,15 @@ export class DashboardPlaceholderComponent {
 
   roleLabel(role: CurrentUser['systemRole']): string {
     return SYSTEM_ROLE_LABELS[role] ?? role;
+  }
+
+  /** Bar width for one department's row, relative to the busiest
+   *  department. A department with 0 layers still gets a thin visible
+   *  stub (4%) so its bar reads as "zero", not as a rendering glitch. */
+  barWidthPercent(layerCount: number): number {
+    if (layerCount <= 0) {
+      return 4;
+    }
+    return Math.max(6, Math.round((layerCount / this.maxDepartmentLayerCount()) * 100));
   }
 }

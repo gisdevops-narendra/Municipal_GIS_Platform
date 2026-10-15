@@ -1,0 +1,354 @@
+/* Fixed 3-row app shell: header and footer are pinned (never scroll or
+   leave the viewport, matching the /gis workspace shell) — only the
+   module tree below scrolls, never the whole page or the card around it. */
+:host {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+app-site-header {
+  flex-shrink: 0;
+}
+
+app-site-footer {
+  flex-shrink: 0;
+}
+
+::ng-deep app-site-footer .site-footer {
+  margin-top: 0;
+}
+
+.module-access-shell {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 48px 0 40px;
+  display: flex;
+  flex-direction: column;
+}
+
+.module-access-shell__inner {
+  --content-max: 1560px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.module-access-card {
+  padding: 32px 36px 36px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.module-access-card__header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.module-access-card__heading {
+  font-size: 22px;
+  margin: 6px 0 6px;
+}
+
+.module-access-card__lede {
+  font-size: 13.5px;
+  color: var(--color-ink-500);
+  max-width: 62ch;
+  margin: 0;
+}
+
+.module-access-card__message {
+  flex-shrink: 0;
+  margin-bottom: 16px;
+  display: block;
+}
+
+.module-access-card__hint {
+  font-size: 13.5px;
+  color: var(--color-ink-500);
+}
+
+/* ---------- two-pane body: target picker | module tree ---------- */
+.module-access__body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 24px;
+}
+
+.module-access__sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.module-access__main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--color-line);
+  padding-left: 24px;
+}
+
+.module-access__kind-toggle {
+  flex-shrink: 0;
+  display: flex;
+  gap: 8px;
+}
+
+.module-access__target-picker {
+  flex-shrink: 0;
+}
+
+.module-access__picker {
+  min-width: 0;
+}
+
+/* ---------- at-a-glance stats (mirrors .dept-stat) ---------- */
+.module-access__stats {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.module-access__stat {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+
+.module-access__stat-value {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-ink-900);
+  line-height: 1.1;
+}
+
+.module-access__stat-label {
+  font-size: 11.5px;
+  color: var(--color-ink-500);
+  text-align: right;
+}
+
+.module-access__legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-ink-500);
+}
+
+.module-access__legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.module-access__swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex-shrink: 0;
+
+  &--default {
+    background: var(--color-primary-500);
+  }
+
+  &--auto {
+    background: var(--color-ink-300);
+  }
+
+  &--reach {
+    /* Same amber accent as .contour-field's decorative texture — the
+       app has no dedicated "warning" token, and error-600 reads as too
+       alarming for "just not in this department". */
+    background: #b5722a;
+  }
+}
+
+/* ---------- empty state ---------- */
+.module-access__empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--color-ink-500);
+  text-align: center;
+
+  i {
+    font-size: 26px;
+    color: var(--color-ink-300);
+  }
+
+  p {
+    font-size: 13.5px;
+    max-width: 32ch;
+    margin: 0;
+  }
+}
+
+/* ---------- toolbar + search ---------- */
+.module-access__toolbar {
+  flex-shrink: 0;
+  margin-bottom: 14px;
+}
+
+.module-access__search {
+  position: relative;
+  max-width: 320px;
+
+  i {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 13px;
+    color: var(--color-ink-300);
+    pointer-events: none;
+  }
+
+  input {
+    padding-left: 32px;
+  }
+}
+
+/* ---------- module tree ---------- */
+.module-access__tree {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  padding: 8px 4px;
+}
+
+.module-access__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+
+  &:hover {
+    background: var(--color-surface-alt);
+  }
+
+  &--out-of-reach {
+    opacity: 0.55;
+  }
+}
+
+.module-access__label {
+  font-size: 13.5px;
+  color: var(--color-ink-900);
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-access__type {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-ink-300);
+  flex-shrink: 0;
+}
+
+.module-access__tag {
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 900px) {
+  .module-access__body {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+
+  .module-access__sidebar {
+    overflow-y: visible;
+  }
+
+  .module-access__main {
+    border-left: none;
+    padding-left: 0;
+    border-top: 1px solid var(--color-line);
+    padding-top: 20px;
+  }
+}
+
+@media (max-width: 720px) {
+  .module-access-card {
+    padding: 24px 18px 28px;
+  }
+
+  .module-access-card__header {
+    flex-direction: column;
+  }
+}
+
+/* ---------- Add Module dialog form (mirrors .dept-form) ---------- */
+.module-access-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.module-access-form__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.module-access-form__field--checkbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  label {
+    font-size: 13.5px;
+    color: var(--color-ink-900);
+    cursor: pointer;
+  }
+}
+
+.module-access-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+@media (max-width: 480px) {
+  .module-access-form__row {
+    grid-template-columns: 1fr;
+  }
+}

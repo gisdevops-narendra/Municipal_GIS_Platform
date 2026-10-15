@@ -91,6 +91,16 @@ export const routes: Routes = [
     title: 'Settings — Municipal GIS Platform'
   },
   {
+    path: 'module-access',
+    canActivate: [authGuard, staffOnlyGuard],
+    data: { reuse: true },
+    loadComponent: () =>
+      import('./features/module-access/module-access.component').then(
+        (m) => m.ModuleAccessComponent
+      ),
+    title: 'Module Access — Municipal GIS Platform'
+  },
+  {
     path: 'gis/uploads',
     canActivate: [authGuard, staffOnlyGuard],
     data: { reuse: true },

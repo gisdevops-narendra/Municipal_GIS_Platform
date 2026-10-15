@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
@@ -7,9 +7,11 @@ import { ButtonModule } from 'primeng/button';
 import { TableModule } from 'primeng/table';
 import { DialogModule } from 'primeng/dialog';
 import { InputTextModule } from 'primeng/inputtext';
+import { PaginatorModule, PaginatorState } from 'primeng/paginator';
 import { SelectModule } from 'primeng/select';
 import { TagModule } from 'primeng/tag';
 import { MessageModule } from 'primeng/message';
+import { TooltipModule } from 'primeng/tooltip';
 import { PrimeTemplate } from 'primeng/api';
 import { SiteHeaderComponent } from '../../shared/components/site-header/site-header.component';
 import { SiteFooterComponent } from '../../shared/components/site-footer/site-footer.component';
@@ -37,9 +39,11 @@ interface FilterOption {
     TableModule,
     DialogModule,
     InputTextModule,
+    PaginatorModule,
     SelectModule,
     TagModule,
     MessageModule,
+    TooltipModule,
     PrimeTemplate,
     SiteHeaderComponent,
     SiteFooterComponent
@@ -59,11 +63,23 @@ export class UsersComponent {
   readonly departments = signal<Department[]>([]);
   readonly loading = signal(true);
   readonly isOwner = signal(false);
+  /** A Department Head may delete (but not create/edit/deactivate) a
+   *  Department User within their own department — see canDelete(). */
+  readonly isDepartmentHead = signal(false);
+  readonly currentDepartmentId = signal<string | null>(null);
   readonly pageError = signal<string | null>(null);
 
   readonly searchTerm = signal('');
   readonly departmentFilter = signal<string | null>(null);
   readonly statusFilter = signal<MunicipalityUserStatus | null>(null);
+
+  /** Pagination is client-side over the already server-filtered list
+   *  (search/department/status are applied by the backend in loadUsers) —
+   *  the paginator only slices the current filtered result set. */
+  readonly first = signal(0);
+  readonly pageSize = signal(10);
+  readonly pageSizes = [10, 25, 50];
+  readonly pagedUsers = computed(() => this.users().slice(this.first(), this.first() + this.pageSize()));
 
   readonly statusOptions: FilterOption[] = [
     { label: 'All statuses', value: null },
@@ -77,6 +93,19 @@ export class UsersComponent {
     { label: 'Department User', value: 'DEPARTMENT_USER' },
     { label: 'Department Head', value: 'DEPARTMENT_HEAD' }
   ];
+
+  /** At-a-glance summary tiles above the table — turns the otherwise-empty
+   *  space above a short list into real context instead of dead air.
+   *  Reflects the currently active search/department/status filter (the
+   *  same set the table below shows), not a separate unfiltered total. */
+  readonly totalUsersShown = computed(() => this.users().length);
+  readonly activeUsersCount = computed(
+    () => this.users().filter((u) => u.status === 'ACTIVE').length
+  );
+  readonly disabledUsersCount = computed(() => this.totalUsersShown() - this.activeUsersCount());
+  readonly departmentHeadCount = computed(
+    () => this.users().filter((u) => u.systemRole === 'DEPARTMENT_HEAD').length
+  );
 
   readonly dialogVisible = signal(false);
   readonly editingUser = signal<MunicipalityUser | null>(null);
@@ -102,8 +131,16 @@ export class UsersComponent {
     }
 
     this.currentUserService.getMe().subscribe({
-      next: (user) => this.isOwner.set(user.systemRole === 'MUNICIPALITY_OWNER'),
-      error: () => this.isOwner.set(false)
+      next: (user) => {
+        this.isOwner.set(user.systemRole === 'MUNICIPALITY_OWNER');
+        this.isDepartmentHead.set(user.systemRole === 'DEPARTMENT_HEAD');
+        this.currentDepartmentId.set(user.department?.id ?? null);
+      },
+      error: () => {
+        this.isOwner.set(false);
+        this.isDepartmentHead.set(false);
+        this.currentDepartmentId.set(null);
+      }
     });
     this.departmentService.list().subscribe({ next: (departments) => this.departments.set(departments) });
     this.loadUsers();
@@ -133,6 +170,7 @@ export class UsersComponent {
       .subscribe({
         next: (users) => {
           this.users.set(users);
+          this.clampFirst(users.length);
           this.loading.set(false);
         },
         error: () => {
@@ -144,17 +182,41 @@ export class UsersComponent {
 
   onSearchChange(value: string): void {
     this.searchTerm.set(value);
+    this.first.set(0);
     this.loadUsers();
   }
 
   onDepartmentFilterChange(value: string | null): void {
     this.departmentFilter.set(value);
+    this.first.set(0);
     this.loadUsers();
   }
 
   onStatusFilterChange(value: MunicipalityUserStatus | null): void {
     this.statusFilter.set(value);
+    this.first.set(0);
     this.loadUsers();
+  }
+
+  onPageChange(event: PaginatorState): void {
+    this.first.set(event.first ?? 0);
+    if (event.rows) {
+      this.pageSize.set(event.rows);
+    }
+  }
+
+  /** Keeps the current page in range after the underlying list shrinks
+   *  (e.g. deleting the last user on the last page) — never leaves the
+   *  paginator pointing at a page that no longer exists. */
+  private clampFirst(total: number): void {
+    if (total === 0) {
+      this.first.set(0);
+      return;
+    }
+    const lastPageFirst = Math.floor((total - 1) / this.pageSize()) * this.pageSize();
+    if (this.first() > lastPageFirst) {
+      this.first.set(lastPageFirst);
+    }
   }
 
   openCreateDialog(): void {
@@ -270,6 +332,39 @@ export class UsersComponent {
       confirmLabel: 'Deactivate',
       destructive: true,
       accept: apply
+    });
+  }
+
+  /** Mirrors the server-side rule in UsersService.deleteUser: the Owner
+   *  may delete anyone but the Owner; a Department Head may only delete a
+   *  Department User within their own department. Client-side only for
+   *  UI gating — the backend re-enforces this regardless. */
+  canDelete(user: MunicipalityUser): boolean {
+    if (user.systemRole === 'MUNICIPALITY_OWNER') {
+      return false;
+    }
+    if (this.isOwner()) {
+      return true;
+    }
+    return (
+      this.isDepartmentHead() &&
+      user.systemRole === 'DEPARTMENT_USER' &&
+      user.department?.id === this.currentDepartmentId()
+    );
+  }
+
+  deleteUser(user: MunicipalityUser): void {
+    this.notify.confirmDelete({
+      message: `Delete ${user.fullName}? This permanently removes their account and cannot be undone.`,
+      accept: () => {
+        this.userService.remove(user.id).subscribe({
+          next: () => {
+            this.notify.success(`${user.fullName} was deleted.`);
+            this.loadUsers();
+          },
+          error: (error: HttpErrorResponse) => this.notify.error(this.resolveErrorMessage(error))
+        });
+      }
     });
   }
 

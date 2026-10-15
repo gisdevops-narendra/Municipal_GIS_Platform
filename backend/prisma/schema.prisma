@@ -390,11 +390,12 @@ model Department {
   createdAt      DateTime         @default(now()) @map("created_at")
   updatedAt      DateTime         @updatedAt @map("updated_at")
 
-  municipality Municipality         @relation(fields: [municipalityId], references: [id])
+  municipality Municipality            @relation(fields: [municipalityId], references: [id])
   users        User[]
   layers       GISLayer[]
   uploads      GISLayerUpload[]
   permissions  GISLayerPermission[]
+  moduleGrants DepartmentModuleGrant[]
 
   // Enforced at the database level, not just in application code: a
   // department name/code must be unique within its municipality, but the
@@ -423,9 +424,10 @@ model User {
   createdAt      DateTime   @default(now()) @map("created_at")
   updatedAt      DateTime   @updatedAt @map("updated_at")
 
-  municipality Municipality @relation(fields: [municipalityId], references: [id])
-  department   Department?  @relation(fields: [departmentId], references: [id])
+  municipality Municipality      @relation(fields: [municipalityId], references: [id])
+  department   Department?       @relation(fields: [departmentId], references: [id])
   setting      UserSetting?
+  moduleGrants UserModuleGrant[]
 
   @@map("users")
 }
@@ -443,4 +445,93 @@ model UserSetting {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_settings")
+}
+
+/// Module Access (hierarchical feature-module RBAC). Global reference
+/// catalog of every application module/tool (Pan, Measure, Basemap,
+/// Export to CSV, ...), shared across every municipality — not
+/// tenant-scoped, the same way an enum wouldn't be. Bulk-seeded once (see
+/// prisma/seed-modules.ts) from the client-supplied module list; a
+/// Municipality Owner can also add further rows one at a time via
+/// POST /api/module-access/catalog (ModuleAccessService.createModule) —
+/// `id` is `@default(autoincrement())` precisely so that path never has
+/// to pick an id itself. The seed script keeps using its own explicit
+/// ids (upsert by id), which is safe: the autoincrement sequence is
+/// seeded to start after the highest id already in use (see the
+/// `module_autoincrement` migration).
+///
+/// `parentId`/`nodePath` encode the hierarchy (`nodePath` is the
+/// authoritative source — dot-separated ancestor chain, e.g. "226.227"
+/// for "Export to csv" under "Export Data"; ModuleAccessService walks it
+/// rather than recursing through `parentId`, since a handful of seed rows
+/// have a `parentId` with no corresponding row — e.g. id 33's parent 0 —
+/// while `nodePath` stays reliable). `parentId` is therefore a plain
+/// field, not a Prisma relation, mirroring this schema's existing
+/// plain-audit-field convention (see GISLayer.sourceUploadId) — a
+/// dangling parent must never block reading the module itself.
+///
+/// `defaultModule: true` means every user gets it regardless of any
+/// grant (Pan/Zoom/Basemap/Measure/...) — ModuleAccessService always
+/// includes these (and their ancestors) in every resolved module set.
+model Module {
+  id              Int      @id @default(autoincrement()) @map("module_id")
+  name            String   @map("module_name")
+  isActive        Boolean  @default(true) @map("isactive")
+  parentId        Int?     @map("module_parent_id")
+  nodePath        String?  @map("node_path")
+  subModule       String?  @map("sub_module")
+  defaultModule   Boolean? @map("default_module")
+  displayPriority Int?     @map("display_priority")
+  type            String?
+
+  departmentGrants DepartmentModuleGrant[]
+  userGrants       UserModuleGrant[]
+
+  @@map("modules")
+}
+
+/// Municipality Owner → Department module grants (Task: hierarchical
+/// module assignment). What a Department (and therefore its Head) has
+/// access to beyond the always-on default modules. Explicit rows only —
+/// ancestor modules implied by `Module.nodePath` are resolved at read
+/// time (ModuleAccessService.resolveModuleIds), never materialized here,
+/// so a later edit to the hierarchy never leaves stale ancestor rows
+/// behind.
+model DepartmentModuleGrant {
+  id           String   @id @default(uuid())
+  departmentId String   @map("department_id")
+  moduleId     Int      @map("module_id")
+  /// User.id of the MUNICIPALITY_OWNER who granted this — plain audit
+  /// field, not a relation, matching Department.createdById.
+  grantedById  String?  @map("granted_by")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  module     Module     @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([departmentId, moduleId])
+  @@map("department_module_grants")
+}
+
+/// Department Head → Department User module grants. Deliberately a
+/// separate table from DepartmentModuleGrant rather than a shared
+/// "grant" table with a polymorphic target — a User's grants are
+/// validated against (must be a subset of) their own department's
+/// resolved module set on every write, which is a fundamentally
+/// different rule than what governs a Department's own grants (see
+/// ModuleAccessService.setUserGrants) and is clearer as its own model.
+model UserModuleGrant {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  moduleId    Int      @map("module_id")
+  /// User.id of whoever granted this (the Owner or the user's own
+  /// Department Head) — plain audit field, not a relation.
+  grantedById String?  @map("granted_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  module Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, moduleId])
+  @@map("user_module_grants")
 }

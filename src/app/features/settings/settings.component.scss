@@ -1,9 +1,44 @@
+/* Fixed 3-row app shell: header and footer are pinned (never scroll or
+   leave the viewport, matching the /gis workspace shell) — the settings
+   nav and the active panel scroll independently within the space between
+   them, never the whole page. */
+:host {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+app-site-header {
+  flex-shrink: 0;
+}
+
+app-site-footer {
+  flex-shrink: 0;
+}
+
+::ng-deep app-site-footer .site-footer {
+  margin-top: 0;
+}
+
 .settings {
-  padding: 40px 0 80px;
-  min-height: calc(100vh - var(--app-header-h) - 90px);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 40px 0 40px;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings__inner {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .settings__intro {
+  flex-shrink: 0;
   margin-bottom: 24px;
 }
 
@@ -20,17 +55,27 @@
 }
 
 .settings__layout {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: 232px minmax(0, 1fr);
-  gap: 28px;
-  align-items: start;
+  gap: 20px;
+  align-items: stretch;
 }
 
 /* --- left nav ---------------------------------------------------------- */
+/* Its own bordered card, matching .settings__panel's visual weight
+   instead of floating unboxed text next to a framed panel — and its own
+   scroll region (independent of the panel), so a long section list never
+   forces the page itself to scroll. */
 
 .settings__nav {
-  position: sticky;
-  top: 24px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 12px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
 }
 
 .settings__nav-group {
@@ -69,6 +114,7 @@
   color: var(--color-ink-700);
   text-align: left;
   cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .settings__nav-item:hover {
@@ -93,12 +139,19 @@
 }
 
 /* --- content panel --------------------------------------------------- */
+/* A flex column of its own: the head (title + blurb) stays put and only
+   the body below scrolls, independent of the nav beside it. */
 
 .settings__panel {
-  padding: 26px 30px 30px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 26px 30px 0;
+  overflow: hidden;
 }
 
 .settings__panel-head {
+  flex-shrink: 0;
   padding-bottom: 16px;
   margin-bottom: 8px;
   border-bottom: 1px solid var(--color-line);
@@ -116,19 +169,31 @@
 }
 
 .settings__panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   padding-top: 6px;
+  padding-bottom: 30px;
 }
 
 /* --- responsive ---------------------------------------------------------- */
+/* Below 900px the nav becomes a horizontal wrapping pill row above the
+   panel rather than a sidebar, so the two-column independent-scroll
+   layout no longer makes sense — let the whole settings area scroll as
+   one region instead (still never the page itself, which stays governed
+   by the fixed shell above). */
 
 @media (max-width: 900px) {
   .settings__layout {
     grid-template-columns: 1fr;
     gap: 18px;
+    overflow-y: auto;
+    min-height: 0;
   }
 
   .settings__nav {
-    position: static;
+    flex-shrink: 0;
+    overflow: visible;
   }
 
   .settings__nav-list {
@@ -140,10 +205,22 @@
   .settings__nav-item {
     width: auto;
   }
+
+  .settings__panel {
+    overflow: visible;
+  }
+
+  .settings__panel-body {
+    overflow: visible;
+  }
 }
 
 @media (max-width: 560px) {
   .settings__panel {
-    padding: 20px 16px 24px;
+    padding: 20px 16px 0;
+  }
+
+  .settings__panel-body {
+    padding-bottom: 24px;
   }
 }

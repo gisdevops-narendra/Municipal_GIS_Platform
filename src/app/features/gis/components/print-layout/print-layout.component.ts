@@ -19,6 +19,16 @@ import { PrintService } from '../../../../core/services/print.service';
 
 type PanelState = 'idle' | 'generating' | 'done' | 'error';
 
+/** Every live-map basemap id the print backend can actually render — see
+ *  PrintBasemapId. */
+const PRINTABLE_BASEMAP_IDS: ReadonlySet<PrintBasemapId> = new Set([
+  'osm',
+  'carto-voyager',
+  'carto-dark',
+  'topo',
+  'none'
+]);
+
 /**
  * Print Layout — GIS workspace left dock. Produces a professional map
  * document (A4/A3, portrait/landscape, PDF or PNG) from the **live
@@ -109,6 +119,16 @@ export class PrintLayoutComponent implements OnDestroy {
     this.releaseObjectUrl();
   }
 
+  /** Falls back to OpenStreetMap when the live map's active basemap isn't
+   *  one the print backend can render (currently the Esri basemaps — see
+   *  PrintBasemapId) — printing must never hard-fail just because the map
+   *  happens to be showing satellite/street imagery. */
+  private toPrintBasemapId(basemapId: string): PrintBasemapId {
+    return PRINTABLE_BASEMAP_IDS.has(basemapId as PrintBasemapId)
+      ? (basemapId as PrintBasemapId)
+      : 'osm';
+  }
+
   /** Marks any prior result/error stale once the user changes an option. */
   optionChanged(): void {
     if (this.state() !== 'generating') {
@@ -162,7 +182,7 @@ export class PrintLayoutComponent implements OnDestroy {
       includeScalebar: this.includeScalebar,
       includeNorthArrow: this.includeNorthArrow,
       includeDate: this.includeDate,
-      basemapId: context.basemapId as PrintBasemapId,
+      basemapId: this.toPrintBasemapId(context.basemapId),
       map: {
         center: context.center,
         scale: context.scale,

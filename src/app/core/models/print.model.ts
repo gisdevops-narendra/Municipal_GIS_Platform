@@ -5,7 +5,12 @@
 export type PrintPageSize = 'A4' | 'A3';
 export type PrintOrientation = 'portrait' | 'landscape';
 export type PrintFormat = 'pdf' | 'png';
-export type PrintBasemapId = 'osm' | 'carto-light' | 'topo' | 'none';
+/** Not every live-map basemap can be printed: MapFish's fixed 'osm' layer
+ *  type only ever requests `{baseURL}/{z}/{x}/{y}.png` — the Esri
+ *  basemaps use a different tile path (`{z}/{y}/{x}`, y before x) that
+ *  this print pipeline doesn't support, so they're intentionally absent
+ *  here (see PrintLayoutComponent.toPrintBasemapId for the fallback). */
+export type PrintBasemapId = 'osm' | 'carto-voyager' | 'carto-dark' | 'topo' | 'none';
 
 export interface PrintLayerRequest {
   layerId: string;

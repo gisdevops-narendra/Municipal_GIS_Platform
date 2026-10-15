@@ -111,22 +111,62 @@ export interface PrintMapContext {
 }
 
 /** Task 9 §7/§16: open-source/public tile sources only — no commercial
- *  provider is ever required for the map to function (OSM stays the
- *  default). CartoDB Positron and OpenTopoMap are both free, no-API-key
- *  XYZ tile services suitable for a non-production demo/dev deployment. */
+ *  provider is ever required for the map to function, and none of these
+ *  need an API key/token (OSM stays the default). Esri's ArcGIS Online
+ *  "World_Imagery"/"World_Street_Map" services are free, anonymous XYZ
+ *  endpoints — the same satellite/street basemaps Esri's own products
+ *  use — suitable for a non-production demo/dev deployment like the
+ *  others here. Note Esri's tile path is `{z}/{y}/{x}` (y before x),
+ *  unlike every other entry below. */
 const BASEMAPS: Record<string, { label: string; attribution: string; build: () => TileLayer<OSM | XYZ> }> = {
   osm: {
     label: 'OpenStreetMap',
     attribution: '© OpenStreetMap contributors',
     build: () => new TileLayer({ source: new OSM() })
   },
-  'carto-light': {
-    label: 'Light (CARTO)',
+  'esri-imagery': {
+    label: 'Satellite (Esri)',
+    attribution: 'Esri, Maxar, Earthstar Geographics, and the GIS community',
+    build: () =>
+      new TileLayer({
+        source: new XYZ({
+          url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+          attributions: 'Esri, Maxar, Earthstar Geographics, and the GIS community',
+          maxZoom: 19
+        })
+      })
+  },
+  'esri-streets': {
+    label: 'Streets (Esri)',
+    attribution: 'Esri, HERE, Garmin, FAO, NOAA, USGS',
+    build: () =>
+      new TileLayer({
+        source: new XYZ({
+          url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+          attributions: 'Esri, HERE, Garmin, FAO, NOAA, USGS',
+          maxZoom: 19
+        })
+      })
+  },
+  'carto-voyager': {
+    label: 'Voyager (CARTO)',
     attribution: '© OpenStreetMap contributors © CARTO',
     build: () =>
       new TileLayer({
         source: new XYZ({
-          url: 'https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+          url: 'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+          attributions: '© OpenStreetMap contributors © CARTO',
+          maxZoom: 20
+        })
+      })
+  },
+  'carto-dark': {
+    label: 'Dark (CARTO)',
+    attribution: '© OpenStreetMap contributors © CARTO',
+    build: () =>
+      new TileLayer({
+        source: new XYZ({
+          url: 'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
           attributions: '© OpenStreetMap contributors © CARTO',
           maxZoom: 20
         })

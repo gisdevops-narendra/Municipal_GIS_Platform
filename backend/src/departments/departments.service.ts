@@ -4,8 +4,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import type { DepartmentScope } from '../auth/department-scope';
 import { PrismaService } from '../prisma/prisma.service';
+import type { AppUser } from '../auth/types/app-user.type';
 import {
   CreateDepartmentDto,
   UpdateDepartmentDto,
@@ -17,33 +17,52 @@ import {
  * from a client-supplied id. This is what makes cross-tenant access
  * impossible: a Department belonging to another municipality simply never
  * matches the `where` clause, so it looks identical to "not found".
+ *
+ * `list`/`getById` additionally scope by *department* for a non-Owner
+ * caller: a DEPARTMENT_HEAD or DEPARTMENT_USER may only ever see their own
+ * department, never the municipality's full roster (see docs/backend.md
+ * "Department-scoped access").
  */
 @Injectable()
 export class DepartmentsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** `scope` (see departmentScopeOf) confines a non-owner to their own
-   *  department; omitted/undefined means every department. */
-  async list(municipalityId: string, scope?: DepartmentScope) {
-    if (scope === null) {
+  async list(appUser: AppUser) {
+    if (
+      appUser.systemRole !== 'MUNICIPALITY_OWNER' &&
+      !appUser.departmentId
+    ) {
       return [];
     }
+
+    const where: Prisma.DepartmentWhereInput = {
+      municipalityId: appUser.municipalityId,
+    };
+    if (appUser.systemRole !== 'MUNICIPALITY_OWNER') {
+      where.id = appUser.departmentId!;
+    }
+
     const departments = await this.prisma.department.findMany({
-      where: { municipalityId, ...(scope !== undefined && { id: scope }) },
+      where,
       orderBy: { name: 'asc' },
       include: { _count: { select: { users: true } } },
     });
     return departments.map((department) => this.toResponse(department));
   }
 
-  /** Out-of-scope departments look identical to "not found", same as
-   *  another municipality's. */
-  async getById(municipalityId: string, id: string, scope?: DepartmentScope) {
-    if (scope === null || (scope !== undefined && scope !== id)) {
+  async getById(appUser: AppUser, id: string) {
+    // A non-Owner caller can never look up a department that isn't their
+    // own — checked before the query so it fails the same way (404) as a
+    // department that doesn't exist at all.
+    if (
+      appUser.systemRole !== 'MUNICIPALITY_OWNER' &&
+      appUser.departmentId !== id
+    ) {
       throw new NotFoundException('Department not found.');
     }
+
     const department = await this.prisma.department.findFirst({
-      where: { id, municipalityId },
+      where: { id, municipalityId: appUser.municipalityId },
       include: { _count: { select: { users: true } } },
     });
     if (!department) {

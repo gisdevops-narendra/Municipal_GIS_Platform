@@ -10,6 +10,34 @@
         </div>
       </div>
 
+      @if (layers().length > 0) {
+        <div class="layers-card__stats">
+          <div class="layers-stat">
+            <span class="layers-stat__value">{{ totalLayers() }}</span>
+            <span class="layers-stat__label">Total Layers</span>
+          </div>
+          <div class="layers-stat">
+            <span class="layers-stat__value">{{ departmentLayerCount() }}</span>
+            <span class="layers-stat__label">Department Layers</span>
+          </div>
+          <div class="layers-stat">
+            <span class="layers-stat__value">{{ canonicalLayerCount() }}</span>
+            <span class="layers-stat__label">Canonical Layers</span>
+          </div>
+        </div>
+
+        <div class="layers-card__filters">
+          <input
+            pInputText
+            type="search"
+            placeholder="Search by name or department"
+            class="layers-card__search"
+            [ngModel]="searchTerm()"
+            (ngModelChange)="onSearchChange($event)"
+          />
+        </div>
+      }
+
       @if (pageError(); as message) {
         <p-message severity="error" [text]="message" styleClass="w-full layers-card__message" />
       }
@@ -18,8 +46,17 @@
         <p class="layers-card__lede">Loading layers…</p>
       } @else if (layers().length === 0) {
         <p class="layers-card__lede">No GIS layers are visible to you yet.</p>
+      } @else if (filteredLayers().length === 0) {
+        <p class="layers-card__lede">No layers match "{{ searchTerm() }}".</p>
       } @else {
-        <p-table [value]="layers()" styleClass="layers-table" [rowHover]="true">
+        <div class="layers-card__table">
+          <p-table
+            [value]="pagedLayers()"
+            styleClass="layers-table"
+            [rowHover]="true"
+            [scrollable]="true"
+            scrollHeight="flex"
+          >
           <ng-template pTemplate="header">
             <tr>
               <th>Layer Name</th>
@@ -45,27 +82,45 @@
               <td><p-tag severity="success" value="ACTIVE"></p-tag></td>
               <td>v{{ layer.version }}</td>
               <td class="layers-table__actions">
-                <button pButton type="button" label="View" class="p-button-text p-button-sm" (click)="viewDetail(layer)"></button>
+                <button
+                  pButton
+                  type="button"
+                  icon="pi pi-eye"
+                  class="p-button-text p-button-sm p-button-rounded"
+                  aria-label="View"
+                  pTooltip="View"
+                  tooltipPosition="top"
+                  (click)="viewDetail(layer)"
+                ></button>
                 @if (canManage(layer)) {
                   <button
                     pButton
                     type="button"
-                    label="Style"
-                    class="p-button-text p-button-sm"
+                    icon="pi pi-palette"
+                    class="p-button-text p-button-sm p-button-rounded"
+                    aria-label="Style"
+                    pTooltip="Style"
+                    tooltipPosition="top"
                     (click)="openStyle(layer)"
                   ></button>
                   <button
                     pButton
                     type="button"
-                    label="Permissions"
-                    class="p-button-text p-button-sm"
+                    icon="pi pi-shield"
+                    class="p-button-text p-button-sm p-button-rounded"
+                    aria-label="Permissions"
+                    pTooltip="Permissions"
+                    tooltipPosition="top"
                     (click)="openPermissions(layer)"
                   ></button>
                   <button
                     pButton
                     type="button"
-                    label="Export"
-                    class="p-button-text p-button-sm"
+                    icon="pi pi-download"
+                    class="p-button-text p-button-sm p-button-rounded"
+                    aria-label="Export"
+                    pTooltip="Export"
+                    tooltipPosition="top"
                     [loading]="exporting() === layer.id"
                     (click)="export(layer)"
                   ></button>
@@ -74,8 +129,11 @@
                   <button
                     pButton
                     type="button"
-                    label="Delete"
-                    class="p-button-text p-button-sm p-button-danger"
+                    icon="pi pi-trash"
+                    class="p-button-text p-button-sm p-button-rounded p-button-danger"
+                    aria-label="Delete"
+                    pTooltip="Delete"
+                    tooltipPosition="top"
                     [loading]="deleting() === layer.id"
                     (click)="deleteLayer(layer)"
                   ></button>
@@ -83,7 +141,17 @@
               </td>
             </tr>
           </ng-template>
-        </p-table>
+          </p-table>
+        </div>
+        <p-paginator
+          [rows]="pageSize()"
+          [totalRecords]="filteredLayers().length"
+          [first]="first()"
+          [rowsPerPageOptions]="pageSizes"
+          [alwaysShow]="false"
+          (onPageChange)="onPageChange($event)"
+          styleClass="layers-card__paginator"
+        />
       }
     </div>
   </div>

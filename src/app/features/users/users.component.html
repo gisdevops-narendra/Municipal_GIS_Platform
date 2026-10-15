@@ -40,6 +40,29 @@
         ></p-select>
       </div>
 
+      @if (!loading() && users().length > 0) {
+        <div class="users-card__stats">
+          <div class="users-stat">
+            <span class="users-stat__value">{{ totalUsersShown() }}</span>
+            <span class="users-stat__label">{{ isOwner() ? 'Users Shown' : 'Department Users' }}</span>
+          </div>
+          <div class="users-stat">
+            <span class="users-stat__value">{{ activeUsersCount() }}</span>
+            <span class="users-stat__label">Active</span>
+          </div>
+          <div class="users-stat">
+            <span class="users-stat__value">{{ disabledUsersCount() }}</span>
+            <span class="users-stat__label">Disabled</span>
+          </div>
+          @if (isOwner()) {
+            <div class="users-stat">
+              <span class="users-stat__value">{{ departmentHeadCount() }}</span>
+              <span class="users-stat__label">Department Heads</span>
+            </div>
+          }
+        </div>
+      }
+
       @if (pageError(); as message) {
         <p-message severity="error" [text]="message" styleClass="w-full users-card__message" />
       }
@@ -49,7 +72,14 @@
       } @else if (users().length === 0) {
         <p class="users-card__lede">No users match these filters.</p>
       } @else {
-        <p-table [value]="users()" styleClass="users-table" [rowHover]="true">
+        <div class="users-card__table">
+          <p-table
+            [value]="pagedUsers()"
+            styleClass="users-table"
+            [rowHover]="true"
+            [scrollable]="true"
+            scrollHeight="flex"
+          >
           <ng-template pTemplate="header">
             <tr>
               <th>Name</th>
@@ -58,7 +88,7 @@
               <th>Role</th>
               <th>Status</th>
               <th>Created</th>
-              @if (isOwner()) {
+              @if (isOwner() || isDepartmentHead()) {
                 <th>Actions</th>
               }
             </tr>
@@ -81,25 +111,61 @@
                 <p-tag [severity]="user.status === 'ACTIVE' ? 'success' : 'secondary'" [value]="user.status"></p-tag>
               </td>
               <td>{{ user.createdAt | date: 'mediumDate' }}</td>
-              @if (isOwner()) {
+              @if (isOwner() || isDepartmentHead()) {
                 <td class="users-table__actions">
-                  @if (user.systemRole !== 'MUNICIPALITY_OWNER') {
-                    <button pButton type="button" label="Edit" class="p-button-text p-button-sm" (click)="openEditDialog(user)"></button>
-                    <button
-                      pButton
-                      type="button"
-                      [label]="user.status === 'ACTIVE' ? 'Deactivate' : 'Activate'"
-                      class="p-button-text p-button-sm"
-                      (click)="toggleStatus(user)"
-                    ></button>
-                  } @else {
+                  @if (user.systemRole === 'MUNICIPALITY_OWNER') {
                     <span class="users-table__owner-note">Owner account</span>
+                  } @else {
+                    @if (isOwner()) {
+                      <button
+                        pButton
+                        type="button"
+                        icon="pi pi-pencil"
+                        class="p-button-text p-button-sm p-button-rounded"
+                        aria-label="Edit"
+                        pTooltip="Edit"
+                        tooltipPosition="top"
+                        (click)="openEditDialog(user)"
+                      ></button>
+                      <button
+                        pButton
+                        type="button"
+                        [icon]="user.status === 'ACTIVE' ? 'pi pi-ban' : 'pi pi-check-circle'"
+                        class="p-button-text p-button-sm p-button-rounded"
+                        [attr.aria-label]="user.status === 'ACTIVE' ? 'Deactivate' : 'Activate'"
+                        [pTooltip]="user.status === 'ACTIVE' ? 'Deactivate' : 'Activate'"
+                        tooltipPosition="top"
+                        (click)="toggleStatus(user)"
+                      ></button>
+                    }
+                    @if (canDelete(user)) {
+                      <button
+                        pButton
+                        type="button"
+                        icon="pi pi-trash"
+                        class="p-button-text p-button-sm p-button-rounded p-button-danger"
+                        aria-label="Delete"
+                        pTooltip="Delete"
+                        tooltipPosition="top"
+                        (click)="deleteUser(user)"
+                      ></button>
+                    }
                   }
                 </td>
               }
             </tr>
           </ng-template>
         </p-table>
+        </div>
+        <p-paginator
+          [rows]="pageSize()"
+          [totalRecords]="users().length"
+          [first]="first()"
+          [rowsPerPageOptions]="pageSizes"
+          [alwaysShow]="false"
+          (onPageChange)="onPageChange($event)"
+          styleClass="users-card__paginator"
+        />
       }
     </div>
   </div>

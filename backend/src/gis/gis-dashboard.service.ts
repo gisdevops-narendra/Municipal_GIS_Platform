@@ -3,7 +3,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { GeoServerService } from './geoserver.service';
 import { GisAuthorizationService } from './gis-authorization.service';
 import type { AppUser } from '../auth/types/app-user.type';
-import { departmentScopeOf } from '../auth/department-scope';
 
 export interface DashboardSummary {
   totalLayers: number;
@@ -139,15 +138,23 @@ export class GisDashboardService {
     };
   }
 
-  /** Task 9 §2: every active department visible to the caller (only their
-   *  own for a Department Head/User), with a VIEW-authorized layer
-   *  count each (0 for a department the caller has no visible layers
-   *  in). Department names/ids themselves are already ordinary
-   *  organizational data any municipality member can see via
-   *  GET /api/departments — this just adds the GIS-specific count. */
+  /** Task 9 §2: every active department the caller may see, with a
+   *  VIEW-authorized layer count each (0 for a department the caller has
+   *  no visible layers in). MUNICIPALITY_OWNER sees every department;
+   *  a DEPARTMENT_HEAD/DEPARTMENT_USER only ever sees their own — same
+   *  department-scoped visibility as GET /api/departments, since these
+   *  rows carry other departments' names, which a non-Owner must never
+   *  see (see DepartmentsService.list). */
   async getDepartmentSummary(
     appUser: AppUser,
   ): Promise<DepartmentSummaryEntry[]> {
+    if (
+      appUser.systemRole !== 'MUNICIPALITY_OWNER' &&
+      !appUser.departmentId
+    ) {
+      return [];
+    }
+
     const departments = await this.prisma.department.findMany({
       where: this.visibleDepartmentsWhere(appUser),
       select: { id: true, name: true },
@@ -252,13 +259,15 @@ export class GisDashboardService {
   }
 
   /** Active departments the caller may see — all of them for the Owner,
-   *  only their own for a Department Head/User (see departmentScopeOf). */
+   *  only their own for anyone else (same rule as DepartmentsService.list);
+   *  `in: []` matches nothing for a non-Owner with no department. */
   private visibleDepartmentsWhere(appUser: AppUser) {
-    const scope = departmentScopeOf(appUser);
     return {
       municipalityId: appUser.municipalityId,
       status: 'ACTIVE' as const,
-      ...(scope !== undefined && { id: scope ?? { in: [] } }),
+      ...(appUser.systemRole !== 'MUNICIPALITY_OWNER' && {
+        id: appUser.departmentId ?? { in: [] },
+      }),
     };
   }
 
