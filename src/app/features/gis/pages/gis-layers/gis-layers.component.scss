@@ -183,3 +183,36 @@ app-site-footer {
     flex-direction: column;
   }
 }
+
+/* Short or narrow viewports (laptops, tablets, phones): the fixed shell
+   above has no room for the card, which then clips its own content. Fall
+   back to ordinary page scrolling instead — everything stays reachable and
+   the footer still sits at the bottom. Tall screens keep the fixed shell. */
+@media (max-width: 900px), (max-height: 960px) {
+  :host {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .layers-shell {
+    flex: 1 0 auto;
+    overflow: visible;
+  }
+
+  .layers-shell__inner,
+  .layers-card {
+    flex: none;
+    overflow: visible;
+  }
+
+  .layers-card__table {
+    flex: none;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .layers-card__table ::ng-deep .p-datatable-table-container {
+    height: auto;
+  }
+}

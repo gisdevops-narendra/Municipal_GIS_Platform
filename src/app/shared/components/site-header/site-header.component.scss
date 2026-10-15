@@ -213,6 +213,22 @@
     display: none;
   }
 
+  /* Wrap the nav links onto extra rows instead of a sideways strip whose
+     hidden scrollbar gives no hint that more links are off-screen. */
+  .site-header__nav-inner {
+    flex-wrap: wrap;
+    height: auto;
+    overflow-x: visible;
+  }
+
+  .site-header__nav-inner a {
+    height: 40px;
+  }
+
+  .site-header__nav-settings {
+    margin-left: 0;
+  }
+
   .site-header__register--compact {
     display: inline-flex;
   }

@@ -352,3 +352,33 @@ app-site-footer {
     grid-template-columns: 1fr;
   }
 }
+
+/* Short or narrow viewports (laptops, tablets, phones): the fixed shell
+   above has no room for the card, which then clips its own content. Fall
+   back to ordinary page scrolling instead — everything stays reachable and
+   the footer still sits at the bottom. Tall screens keep the fixed shell. */
+@media (max-width: 900px), (max-height: 960px) {
+  :host {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .module-access-shell {
+    flex: 1 0 auto;
+    overflow: visible;
+  }
+
+  .module-access-shell__inner,
+  .module-access-card,
+  .module-access__body,
+  .module-access__main {
+    flex: none;
+    overflow: visible;
+  }
+
+  .module-access__sidebar,
+  .module-access__tree {
+    overflow: visible;
+  }
+}
