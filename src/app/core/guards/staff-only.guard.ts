@@ -1,6 +1,6 @@
 import { inject } from '@angular/core';
 import { CanActivateFn, Router } from '@angular/router';
-import { catchError, map, of } from 'rxjs';
+import { catchError, map, of, timeout } from 'rxjs';
 import { AuthService } from '../services/auth.service';
 import { CurrentUserService } from '../services/current-user.service';
 
@@ -22,8 +22,12 @@ export const staffOnlyGuard: CanActivateFn = () => {
   return inject(CurrentUserService)
     .getMe()
     .pipe(
+      // The route renders nothing until this resolves, so a backend that is
+      // still booting (slow `nest start --watch` on Windows bind mounts) or
+      // a hung request would otherwise leave a blank screen indefinitely.
+      timeout(8000),
       map((me) => (me.systemRole === 'DEPARTMENT_USER' ? router.createUrlTree(['/gis']) : true)),
-      // If /me itself fails, let the page load and surface its own error.
+      // If /me itself fails or times out, let the page load and surface its own error.
       catchError(() => of(true))
     );
 };

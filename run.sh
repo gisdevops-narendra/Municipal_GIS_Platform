@@ -110,6 +110,26 @@ log "Applying Keycloak auth settings (reset-password + SMTP)"
 bash keycloak/apply-auth-settings.sh
 
 # 5. Apply Prisma migrations against the containerised backend/DB.
+#
+# 5a. Databases created before the migration squash still carry the 14 old
+#     migration rows (20260826111730_init … 20261016100000_*). Their schema
+#     already IS 20261016120000_baseline, so running the baseline fails with
+#     "already exists" (42710) and blocks every later migration — the backend
+#     then 500s on the newer tables and the dashboard never loads. Mark the
+#     baseline as applied for those databases. Fresh databases are untouched.
+PG_USER="$(sed -n 's/^POSTGRES_USER=//p' .env | head -n1)"; PG_USER="${PG_USER:-municipal_gis}"
+PG_DB="$(sed -n 's/^POSTGRES_DB=//p' .env | head -n1)";     PG_DB="${PG_DB:-municipal_gis}"
+BASELINE=20261016120000_baseline
+needs_baseline="$(docker exec municipal-gis-postgres psql -U "$PG_USER" -d "$PG_DB" -tAc "
+  SELECT CASE WHEN to_regclass('public._prisma_migrations') IS NULL THEN 'no'
+    WHEN EXISTS (SELECT 1 FROM _prisma_migrations WHERE migration_name = '20260826111730_init' AND finished_at IS NOT NULL)
+     AND NOT EXISTS (SELECT 1 FROM _prisma_migrations WHERE migration_name = '$BASELINE' AND finished_at IS NOT NULL)
+    THEN 'yes' ELSE 'no' END" 2>/dev/null | tr -d '[:space:]' || echo no)"
+if [ "$needs_baseline" = "yes" ]; then
+  log "Pre-squash database detected — marking $BASELINE as applied"
+  "${DC[@]}" exec -T backend npx prisma migrate resolve --applied "$BASELINE"
+fi
+
 log "Applying database migrations (prisma migrate deploy)"
 for i in $(seq 1 10); do
   if "${DC[@]}" exec -T backend npx prisma migrate deploy; then
