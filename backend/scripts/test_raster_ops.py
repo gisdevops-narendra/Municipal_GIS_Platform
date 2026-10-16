@@ -179,6 +179,22 @@ class RasterOpsTest(unittest.TestCase):
         self.assertGreater(r["accuracyPct"], 95)
         self.assertEqual([round(c["pct"]) for c in r["classes"]], [50, 50])
 
+    def test_mesh_for_3d_view(self):
+        r = self.ok({"op": "mesh", "path": self.dem, "size": 50})
+        self.assertEqual(len(r["z"]), r["width"] * r["height"])
+        self.assertLessEqual(max(r["width"], r["height"]), 50)
+        self.assertAlmostEqual(r["cellX"], 40, delta=2)
+
+    def test_find_raster_in_zip(self):
+        import zipfile
+        archive = self.out("bundle.zip")
+        with zipfile.ZipFile(archive, "w") as z:
+            z.writestr("readme.txt", "hello")
+            z.write(self.dem, "data/dem.tif")
+        r = self.ok({"op": "find_raster", "path": archive})
+        self.assertTrue(r["path"].endswith("data/dem.tif"))
+        self.ok({"op": "info", "path": r["path"]})
+
     def test_errors_are_reported_as_json(self):
         code, body = run({"op": "contour", "path": self.dem, "interval": 100000, "output": self.out("ct.gpkg")})
         self.assertEqual(code, 1)

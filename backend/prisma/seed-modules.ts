@@ -91,6 +91,7 @@ const MODULES: ModuleSeed[] = [
   { module_id: 931, module_name: 'Terrain Ruggedness', isactive: true, module_parent_id: 920, node_path: '69.920.931', sub_module: null, default_module: false, display_priority: 11, type: 'mainleft' },
   { module_id: 932, module_name: 'Fill Sinks', isactive: true, module_parent_id: 920, node_path: '69.920.932', sub_module: null, default_module: false, display_priority: 12, type: 'mainleft' },
   { module_id: 933, module_name: 'Stream Network', isactive: true, module_parent_id: 920, node_path: '69.920.933', sub_module: null, default_module: false, display_priority: 13, type: 'mainleft' },
+  { module_id: 934, module_name: '3D Terrain View', isactive: true, module_parent_id: 920, node_path: '69.920.934', sub_module: null, default_module: false, display_priority: 14, type: 'mainleft' },
   { module_id: 940, module_name: 'Raster Analytics', isactive: true, module_parent_id: 69, node_path: '69.940', sub_module: null, default_module: false, display_priority: 3, type: 'mainleft' },
   { module_id: 942, module_name: 'Raster Calculator', isactive: true, module_parent_id: 940, node_path: '69.940.942', sub_module: null, default_module: false, display_priority: 2, type: 'mainleft' },
   { module_id: 943, module_name: 'Reclassify', isactive: true, module_parent_id: 940, node_path: '69.940.943', sub_module: null, default_module: false, display_priority: 3, type: 'mainleft' },

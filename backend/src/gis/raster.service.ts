@@ -18,13 +18,14 @@ import { GeoServerService } from './geoserver.service';
 import { GdalService } from './gdal.service';
 import { GisAuthorizationService } from './gis-authorization.service';
 import { GisLayersService } from './gis-layers.service';
+import { StyleService } from './style.service';
 import { deriveLayerCode, generateLayerTableName } from './layer-naming.util';
 import { rasterFilePath } from './raster-paths.util';
 import { rasterYsld, type RasterStyleSpec } from './raster-style';
 import { rasterJobContext } from './raster-job-context';
 
 const execFileAsync = promisify(execFile);
-const RASTER_EXTENSIONS = /\.(tif|tiff|geotiff|gtiff)$/i;
+const RASTER_EXTENSIONS = /\.(tif|tiff|geotiff|gtiff|jp2|j2k|img|zip)$/i;
 const OP_TIMEOUT_MS = 15 * 60 * 1000;
 
 export interface RasterBandInfo {
@@ -115,6 +116,7 @@ export class RasterService {
     private readonly gdal: GdalService,
     private readonly gisAuth: GisAuthorizationService,
     private readonly gisLayers: GisLayersService,
+    private readonly styles: StyleService,
   ) {
     this.storageRoot = path.resolve(
       this.config.get<string>('GIS_UPLOAD_STORAGE_DIR', './storage/uploads'),
@@ -139,7 +141,8 @@ export class RasterService {
       if (!RASTER_EXTENSIONS.test(file.originalname)) {
         throw new BadRequestException('Only GeoTIFF rasters (.tif / .tiff) are supported.');
       }
-      const { stdout } = await execFileAsync('gdalinfo', ['-json', source], {
+      const input = /\.zip$/i.test(file.originalname) ? await this.rasterInZip(source) : source;
+      const { stdout } = await execFileAsync('gdalinfo', ['-json', input], {
         maxBuffer: 64 * 1024 * 1024,
       }).catch(() => {
         throw new BadRequestException('The file is not a readable GeoTIFF.');
@@ -154,18 +157,35 @@ export class RasterService {
         name: dto.name,
         description: dto.description,
         departmentId: dto.departmentId,
-        sourcePath: source,
+        sourcePath: input,
       });
     } finally {
       await fsp.rm(source, { force: true });
     }
   }
 
+  /** The first raster inside an uploaded .zip, as a GDAL /vsizip/ path
+   *  (so an .img with its .ige, or a .tif with .tfw/.prj, works). */
+  private async rasterInZip(zipPath: string): Promise<string> {
+    const { path: inner } = await this.runOp<{ path: string | null }>({ op: 'find_raster', path: zipPath });
+    if (!inner) throw new BadRequestException('The .zip contains no GeoTIFF, JPEG 2000 or .img raster.');
+    return inner;
+  }
+
   // ----- Raster Styling / Pixel Identify / info -----
 
-  async info(appUser: AppUser, layerId: string): Promise<RasterInfo> {
+  /** Raster metadata plus its current style and description, so the
+   *  panel can edit classes and show where the layer came from. */
+  async info(appUser: AppUser, layerId: string) {
+    const { file, layer } = await this.resolveRaster(appUser, layerId);
+    const info = await this.runOp<RasterInfo>({ op: 'info', path: file });
+    return { ...info, styleSpec: layer.styleSpec ?? null, description: layer.description };
+  }
+
+  /** 3D Terrain View: a ≤ `size`² elevation grid of the DEM + its bbox. */
+  async mesh(appUser: AppUser, layerId: string, band: number, size: number) {
     const { file } = await this.resolveRaster(appUser, layerId);
-    return this.runOp<RasterInfo>({ op: 'info', path: file });
+    return this.runOp({ op: 'mesh', path: file, band, size });
   }
 
   async identify(appUser: AppUser, layerId: string, point: [number, number]) {
@@ -201,6 +221,7 @@ export class RasterService {
     if (layer.layerType !== 'RASTER') {
       throw new BadRequestException(`"${layer.name}" is not a raster layer.`);
     }
+    rasterJobContext.getStore()?.sources.push(layer.name);
     const file = rasterFilePath(this.storageRoot, appUser.municipalityId, layer.id);
     await fsp.access(file).catch(() => {
       throw new BadRequestException(`The raster file of "${layer.name}" is missing.`);
@@ -226,6 +247,7 @@ export class RasterService {
     if (layer.layerType !== 'VECTOR' || !layer.postgisTable) {
       throw new BadRequestException(`"${layer.name}" is not a vector layer.`);
     }
+    rasterJobContext.getStore()?.sources.push(layer.name);
     return { layer, source: { conn: this.pgConnection(), table: layer.postgisTable } };
   }
 
@@ -343,9 +365,10 @@ export class RasterService {
       style?: RasterStyleSpec;
     },
   ) {
-    const owner = this.outputOwnership(appUser, params.departmentId);
+    const job = rasterJobContext.getStore();
+    const owner = this.outputOwnership(appUser, params.departmentId ?? job?.outputDepartmentId);
     const { workspace, code } = await this.newLayerCode(appUser, params.name);
-    rasterJobContext.getStore()?.setStage('Optimising and publishing the layer', false);
+    job?.setStage('Optimising and publishing the layer', false);
     const id = randomUUID();
     const file = rasterFilePath(this.storageRoot, appUser.municipalityId, id);
     await fsp.mkdir(path.dirname(file), { recursive: true });
@@ -372,7 +395,7 @@ export class RasterService {
           gisWorkspaceId: workspace.id,
           name: params.name,
           code,
-          description: params.description,
+          description: params.description ?? job?.describe(),
           layerType: 'RASTER',
           geoserverWorkspace: workspace.geoserverWorkspace,
           geoserverLayer,
@@ -405,14 +428,31 @@ export class RasterService {
     }
   }
 
+  /** Styles a layer this service just created (e.g. the Zonal Statistics
+   *  choropleth) — best effort, the layer stays usable unstyled. */
+  async applyVectorStyle(layerId: string, spec: Record<string, unknown>): Promise<void> {
+    const layer = await this.prisma.gISLayer.findUnique({ where: { id: layerId } });
+    if (!layer) return;
+    try {
+      const { styleName } = await this.styles.applyStyle(
+        { workspace: layer.geoserverWorkspace, geoserverLayer: layer.geoserverLayer },
+        spec as never,
+      );
+      await this.prisma.gISLayer.update({ where: { id: layer.id }, data: { styleName, styleSpec: spec as object } });
+    } catch (error) {
+      this.logger.warn(`Layer ${layer.id} published without its style: ${(error as Error).message}`);
+    }
+  }
+
   /** Imports a GeoPackage (layer "result") as a new vector layer. */
   async createVectorLayer(
     appUser: AppUser,
     params: { name: string; sourcePath: string; geometryType: GisGeometryType; description?: string },
   ) {
-    const owner = this.outputOwnership(appUser);
+    const job = rasterJobContext.getStore();
+    const owner = this.outputOwnership(appUser, job?.outputDepartmentId);
     const { workspace, code } = await this.newLayerCode(appUser, params.name);
-    rasterJobContext.getStore()?.setStage('Importing and publishing the layer', false);
+    job?.setStage('Importing and publishing the layer', false);
     const table = generateLayerTableName();
     await this.gdal.importToPostgis({
       sourcePath: params.sourcePath,
@@ -441,7 +481,7 @@ export class RasterService {
           gisWorkspaceId: workspace.id,
           name: params.name,
           code,
-          description: params.description,
+          description: params.description ?? job?.describe(),
           layerType: 'VECTOR',
           geoserverWorkspace: workspace.geoserverWorkspace,
           geoserverLayer,

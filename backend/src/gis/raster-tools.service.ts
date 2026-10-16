@@ -47,6 +47,9 @@ const CALC_FUNCTIONS = new Set([
   'sin', 'cos', 'tan', 'logical_and', 'logical_or', 'logical_not',
 ]);
 
+/** Yellow → red, for zonal choropleths (up to 5 classes). */
+const CHOROPLETH = ['#ffffb2', '#fecc5c', '#fd8d3c', '#f03b20', '#bd0026'];
+
 /** ESA WorldCover legend colours. */
 const WORLDCOVER_COLORS: Record<number, string> = {
   10: '#006400', 20: '#ffbb22', 30: '#ffff4c', 40: '#f096ff', 50: '#fa0000', 60: '#b4b4b4',
@@ -262,9 +265,22 @@ export class RasterToolsService {
       labelField: dto.labelField, allTouched: dto.allTouched ?? false,
     };
     if (!dto.outputName?.trim()) return { result: await this.rasters.runOp({ ...request }) };
-    return this.toVectorLayer(appUser, dto.outputName.trim(), 'POLYGON', (output) =>
-      this.rasters.runOp({ ...request, output }),
+    const published = await this.toVectorLayer(appUser, dto.outputName.trim(), 'POLYGON', (output) =>
+      this.rasters.runOp<{ breaks: number[] }>({ ...request, output }),
     );
+    // A ready-made choropleth of the zone means.
+    const breaks = (published.result as { breaks?: number[] }).breaks ?? [];
+    if (breaks.length >= 3) {
+      const count = breaks.length - 1;
+      await this.rasters.applyVectorStyle(published.layer.id, {
+        version: 1,
+        geometry: 'polygon',
+        mode: 'graduated',
+        symbol: { fillColor: '#cccccc', fillOpacity: 0.75, strokeColor: '#555555', strokeWidth: 0.6 },
+        graduate: { field: 'z_mean', method: 'quantile', classCount: count, breaks, ramp: CHOROPLETH.slice(-count) },
+      });
+    }
+    return published;
   }
 
   async idw(appUser: AppUser, dto: IdwDto) {
@@ -615,7 +631,7 @@ export class RasterToolsService {
     if (!/^[\w\s+\-*/%().,<>=!&|~]+$/.test(expression) || expression.includes('__')) {
       throw new BadRequestException('The expression contains characters that are not allowed.');
     }
-    const letters = 'ABCD'.slice(0, inputCount);
+    const letters = 'ABCDEF'.slice(0, inputCount);
     for (const word of expression.match(/[A-Za-z_]\w*/g) ?? []) {
       if (word.length === 1 && letters.includes(word)) continue;
       if (CALC_FUNCTIONS.has(word)) continue;

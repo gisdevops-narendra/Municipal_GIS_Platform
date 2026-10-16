@@ -296,7 +296,7 @@ export class RasterCalculatorDto {
   /** Bound to A, B, C, D in the expression, in order. */
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(4)
+  @ArrayMaxSize(6)
   @ValidateNested({ each: true })
   @Type(() => CalcInputDto)
   inputs!: CalcInputDto[];

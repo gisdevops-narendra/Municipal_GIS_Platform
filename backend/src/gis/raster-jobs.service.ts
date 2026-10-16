@@ -56,7 +56,7 @@ export class RasterJobsService {
 
   constructor(private readonly tools: RasterToolsService) {}
 
-  async start(appUser: AppUser, tool: string, body: unknown) {
+  async start(appUser: AppUser, tool: string, body: unknown, outputDepartmentId?: string) {
     const def = RASTER_JOB_TOOLS[tool];
     if (!def) throw new NotFoundException(`Unknown raster tool "${tool}".`);
     const dto = plainToInstance(def.dto, body ?? {});
@@ -87,7 +87,7 @@ export class RasterJobsService {
       result: null,
       error: null,
       abort: new AbortController(),
-      start: () => void this.execute(job, () => def.run(this.tools, appUser, dto as never)),
+      start: () => void this.execute(job, () => def.run(this.tools, appUser, dto as never), body, outputDepartmentId),
     };
     this.jobs.set(job.id, job);
     this.queue.push(job);
@@ -136,13 +136,21 @@ export class RasterJobsService {
     }
   }
 
-  private async execute(job: RasterJob, run: () => Promise<unknown>): Promise<void> {
+  private async execute(
+    job: RasterJob,
+    run: () => Promise<unknown>,
+    body: unknown,
+    outputDepartmentId?: string,
+  ): Promise<void> {
     const context: RasterJobContext = {
       signal: job.abort.signal,
       setStage: (stage, cancellable = true) => {
         job.stage = stage;
         job.cancellable = cancellable;
       },
+      outputDepartmentId,
+      sources: [],
+      describe: () => provenance(job.tool, body, context.sources),
     };
     try {
       const result = await rasterJobContext.run(context, run);
@@ -206,4 +214,19 @@ export class RasterJobsService {
       error: job.error,
     };
   }
+}
+
+/** Keys too large or too technical for a layer description. */
+const SKIP_PARAMS = new Set(['polygon', 'bbox', 'outputName', 'classes', 'rules', 'inputs', 'points', 'line', 'layerIds']);
+
+/** "Raster Analysis · slope from "DEM" (2026-10-16) · percent: true" —
+ *  stored as the new layer's description so its origin is never lost. */
+function provenance(tool: string, body: unknown, sources: string[]): string {
+  const params = Object.entries((body ?? {}) as Record<string, unknown>)
+    .filter(([key, value]) => !SKIP_PARAMS.has(key) && !/Id$/.test(key) && value !== undefined && value !== null && typeof value !== 'object')
+    .map(([key, value]) => `${key}: ${String(value)}`)
+    .slice(0, 8);
+  const from = sources.length ? ` from ${[...new Set(sources)].map((s) => `"${s}"`).join(', ')}` : '';
+  const text = `Raster Analysis · ${tool}${from} (${new Date().toISOString().slice(0, 10)})${params.length ? ' · ' + params.join(', ') : ''}`;
+  return text.slice(0, 500);
 }

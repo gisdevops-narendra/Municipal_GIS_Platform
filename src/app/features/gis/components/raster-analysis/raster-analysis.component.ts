@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, OnDestroy, Output, computed, inject, signal } from '@angular/core';
+import { Component, EventEmitter, Input, OnDestroy, Output, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { NgTemplateOutlet } from '@angular/common';
 import { HttpErrorResponse, HttpEventType } from '@angular/common/http';
@@ -9,6 +9,9 @@ import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { Department } from '../../../../core/models/department.model';
 import { DepartmentService } from '../../../../core/services/department.service';
 import { MapService } from '../../services/map.service';
+import { SettingsService } from '../../../../core/services/settings.service';
+import { environment } from '../../../../../environments/environment';
+import { Terrain3dComponent, TerrainMesh } from './terrain-3d.component';
 import {
   GeoJsonGeometry,
   LayerResult,
@@ -31,7 +34,7 @@ export type RasterToolId =
   | 'profile' | 'slope' | 'aspect' | 'hillshade' | 'contour' | 'rugged' | 'cutfill' | 'fillsinks'
   | 'watershed' | 'flood' | 'los' | 'viewshed'
   | 'calc' | 'reclass' | 'clip' | 'polygonize' | 'zonal' | 'idw' | 'heatmap' | 'proximity'
-  | 'streams' | 'swipe' | 'change' | 'changematrix' | 'series' | 'ndvi' | 'indices' | 'heat' | 'classify' | 'supervised';
+  | 'streams' | 'view3d' | 'swipe' | 'change' | 'changematrix' | 'series' | 'ndvi' | 'indices' | 'heat' | 'classify' | 'supervised';
 
 interface ToolDef {
   id: RasterToolId;
@@ -65,6 +68,7 @@ export const RASTER_TOOLS: ToolDef[] = [
   { id: 'rugged', label: 'Terrain Ruggedness', group: 'Terrain Analysis', section: 'Surface', moduleId: 931, icon: 'pi pi-chart-scatter', description: 'Roughness, Terrain Ruggedness Index (TRI) or Topographic Position (TPI).' },
   { id: 'fillsinks', label: 'Fill Sinks', group: 'Terrain Analysis', section: 'Hydrology & Earthwork', moduleId: 932, icon: 'pi pi-filter-fill', description: 'Remove pits from a DEM so water can drain — run before watershed.' },
   { id: 'streams', label: 'Stream Network', group: 'Terrain Analysis', section: 'Hydrology & Earthwork', moduleId: 933, icon: 'pi pi-share-alt', description: 'Extract drainage lines with Strahler order from a DEM.' },
+  { id: 'view3d', label: '3D Terrain View', group: 'Terrain Analysis', section: 'Visualise', moduleId: 934, icon: 'pi pi-video', description: 'Rotate a DEM in 3D, draped with imagery or any layer.' },
   { id: 'cutfill', label: 'Cut & Fill / Volume', group: 'Terrain Analysis', section: 'Hydrology & Earthwork', moduleId: 926, icon: 'pi pi-box', description: 'Earthwork volumes to bring an area to a target height.' },
   { id: 'watershed', label: 'Drainage / Watershed', group: 'Terrain Analysis', section: 'Hydrology & Earthwork', moduleId: 927, icon: 'pi pi-share-alt', description: 'Flow paths and catchment area draining to a point.' },
   { id: 'flood', label: 'Flood Inundation', group: 'Terrain Analysis', section: 'Hydrology & Earthwork', moduleId: 928, icon: 'pi pi-cloud', description: 'Area flooded at a given water level.' },
@@ -121,7 +125,7 @@ const GROUP_META: Record<string, { short: string; icon: string }> = {
 @Component({
   selector: 'app-raster-analysis',
   standalone: true,
-  imports: [FormsModule, NgTemplateOutlet, ButtonModule, SelectModule],
+  imports: [FormsModule, NgTemplateOutlet, ButtonModule, SelectModule, Terrain3dComponent],
   templateUrl: './raster-analysis.component.html',
   styleUrls: ['../buffer-overlay/buffer-overlay.component.scss', './raster-analysis.component.scss']
 })
@@ -129,6 +133,14 @@ export class RasterAnalysisComponent implements OnDestroy {
   private readonly mapService = inject(MapService);
   private readonly api = inject(RasterService);
   private readonly departmentService = inject(DepartmentService);
+  private readonly settings = inject(SettingsService);
+
+  constructor() {
+    // Settings → Units: lengths / areas / volumes in results follow it.
+    effect(() => {
+      imperial = this.settings.mapUnits() === 'imperial';
+    });
+  }
 
   @Input() set layers(value: GisLayer[]) {
     this.layersSignal.set(value ?? []);
@@ -249,7 +261,8 @@ export class RasterAnalysisComponent implements OnDestroy {
   uploadName = '';
   uploadDepartmentId: string | null = null;
 
-  styleMode: 'ramp' | 'rgb' = 'ramp';
+  styleMode: 'ramp' | 'rgb' | 'values' = 'ramp';
+  styleClasses: { value: number; color: string; label: string }[] = [];
   styleRamp = 'terrain';
   styleMin: number | null = null;
   styleMax: number | null = null;
@@ -354,6 +367,26 @@ export class RasterAnalysisComponent implements OnDestroy {
   soilFactor = 0.5;
   classCount = 6;
 
+  // usability: output department, reclass breaks, calculator, compare, 3D
+  outputDepartmentId: string | null = null;
+  breakMethod: 'equal' | 'quantile' | 'jenks' = 'jenks';
+  breakCount = 5;
+  readonly recipes = CALC_RECIPES;
+  recipeHint = '';
+  private readonly expressionSignal = signal('A * 1');
+  readonly expressionError = computed(() => checkExpression(this.expressionSignal(), this.calcCount()));
+  private readonly calcCount = signal(1);
+  compareMode: 'swipe' | 'spyglass' = 'swipe';
+  spyRadius = 120;
+  readonly hoverX = signal<number | null>(null);
+  readonly hoverReadout = signal<string | null>(null);
+  readonly drapeLayers = computed(() => this.layersSignal().map((l) => ({ label: l.name, value: l.id })));
+  drapeLayerId: string | null = null;
+  meshSize = 140;
+  readonly mesh = signal<TerrainMesh | null>(null);
+  readonly drapeUrl = signal<string | null>(null);
+  readonly meshTitle = signal('3D terrain');
+
   readonly swipeLayerId = signal<string | null>(null);
   swipeFraction = 50;
 
@@ -377,6 +410,8 @@ export class RasterAnalysisComponent implements OnDestroy {
     this.pickSub?.unsubscribe();
     this.mapService.cancelDraw();
     this.mapService.setSwipe(null);
+    this.mapService.setSpyglass(null);
+    this.mapService.setHoverMarker(null);
     this.clearPreview();
     this.jobSub?.unsubscribe();
   }
@@ -396,7 +431,10 @@ export class RasterAnalysisComponent implements OnDestroy {
   }
 
   selectTool(id: RasterToolId): void {
-    if (this.tool() === 'swipe' && id !== 'swipe') this.mapService.setSwipe(null);
+    if (this.tool() === 'swipe' && id !== 'swipe') {
+      this.mapService.setSwipe(null);
+      this.mapService.setSpyglass(null);
+    }
     if (this.picking()) this.cancelPick();
     if (this.aoiMode === 'point' && id !== 'series') this.aoiMode = 'view';
     this.tool.set(id);
@@ -461,7 +499,9 @@ export class RasterAnalysisComponent implements OnDestroy {
     const b = info.bands[0];
     const min = b?.min ?? 0;
     const max = b?.max ?? 1;
-    this.styleMode = info.bandCount >= 3 ? 'rgb' : 'ramp';
+    const current = info.styleSpec;
+    this.styleClasses = (current?.classes ?? []).map((c) => ({ value: c.value, color: c.color, label: c.label ?? String(c.value) }));
+    this.styleMode = current?.mode === 'values' ? 'values' : info.bandCount >= 3 ? 'rgb' : 'ramp';
     this.styleMin = round(min);
     this.styleMax = round(max);
     this.floodLevel = round(min + (max - min) * 0.1);
@@ -576,15 +616,17 @@ export class RasterAnalysisComponent implements OnDestroy {
   // ----- list editors -----
 
   addCalcInput(): void {
-    if (this.calcInputs.length < 4) this.calcInputs = [...this.calcInputs, { layerId: null, band: 1 }];
+    if (this.calcInputs.length < 6) this.calcInputs = [...this.calcInputs, { layerId: null, band: 1 }];
+    this.calcCount.set(this.calcInputs.length);
   }
 
   removeCalcInput(index: number): void {
     this.calcInputs = this.calcInputs.filter((_, i) => i !== index);
+    this.calcCount.set(this.calcInputs.length);
   }
 
   calcLetter(index: number): string {
-    return 'ABCD'[index];
+    return 'ABCDEF'[index];
   }
 
   setOnlineSource(source: 'dem' | 'landcover' | 'sentinel2' | 'population' | 'water'): void {
@@ -751,7 +793,199 @@ export class RasterAnalysisComponent implements OnDestroy {
   onSwipe(): void {
     const id = this.swipeLayerId();
     if (id) this.mapService.setLayerVisibility(id, true);
-    this.mapService.setSwipe(id, this.swipeFraction / 100);
+    if (this.compareMode === 'swipe') {
+      this.mapService.setSpyglass(null);
+      this.mapService.setSwipe(id, this.swipeFraction / 100);
+    } else {
+      this.mapService.setSwipe(null);
+      this.mapService.setSpyglass(id, this.spyRadius);
+    }
+  }
+
+  setCompareMode(mode: 'swipe' | 'spyglass'): void {
+    this.compareMode = mode;
+    this.onSwipe();
+  }
+
+  // ----- calculator -----
+
+  setExpression(value: string): void {
+    this.expression = value;
+    this.expressionSignal.set(value);
+  }
+
+  useRecipe(expression: string): void {
+    const recipe = CALC_RECIPES.find((r) => r.expression === expression);
+    if (!recipe) return;
+    const needed = recipe.inputs;
+    while (this.calcInputs.length < needed) this.calcInputs = [...this.calcInputs, { layerId: this.layerId(), band: 1 }];
+    this.calcCount.set(this.calcInputs.length);
+    this.recipeHint = recipe.hint;
+    this.setExpression(expression);
+  }
+
+  // ----- reclassify: automatic classes -----
+
+  /** Builds `breakCount` ranges from the band's histogram by equal
+   *  interval, quantile or Jenks natural breaks. */
+  autoClasses(): void {
+    const layerId = this.layerId();
+    if (!layerId) return this.error.set('Choose a raster layer first.');
+    const k = Math.min(Math.max(Math.round(this.breakCount) || 5, 2), 10);
+    this.execute(this.api.statistics({ layerId, band: this.band, bins: 100 }), (r) => {
+      const breaks = classBreaks(this.breakMethod, k, r.histogram.counts, r.histogram.edges);
+      const names = k === 3 ? ['Low', 'Medium', 'High'] : k === 5 ? ['Very low', 'Low', 'Medium', 'High', 'Very high'] : [];
+      this.reclassRules = breaks.slice(0, -1).map((lo, i) => ({
+        min: round(lo),
+        max: round(i === k - 1 ? breaks[i + 1] + Math.abs(breaks[i + 1]) * 1e-6 + 1e-9 : breaks[i + 1]),
+        value: i + 1,
+        label: names[i] ?? `Class ${i + 1}`
+      }));
+      this.message.set(`${k} classes by ${this.breakMethod === 'jenks' ? 'natural breaks' : this.breakMethod === 'quantile' ? 'quantile' : 'equal interval'}.`);
+    });
+  }
+
+  // ----- styling: classes -----
+
+  addStyleClass(): void {
+    const last = this.styleClasses[this.styleClasses.length - 1];
+    this.styleClasses = [...this.styleClasses, { value: (last?.value ?? 0) + 1, color: '#999999', label: '' }];
+  }
+
+  removeStyleClass(index: number): void {
+    this.styleClasses = this.styleClasses.filter((_, i) => i !== index);
+  }
+
+  /** Fills the class list from the distinct whole values of the band. */
+  detectClasses(): void {
+    const layerId = this.layerId();
+    if (!layerId) return this.error.set('Choose a raster layer first.');
+    this.execute(this.api.statistics({ layerId, band: this.band, bins: 100 }), (r) => {
+      const values = new Set<number>();
+      r.histogram.counts.forEach((c, i) => {
+        if (!c) return;
+        for (let v = Math.ceil(r.histogram.edges[i]); v <= Math.floor(r.histogram.edges[i + 1]); v++) values.add(v);
+      });
+      if (values.size === 0 || values.size > 60) {
+        this.error.set('This band does not look like classes (too many distinct values) — reclassify it first.');
+        return;
+      }
+      const known = new Map(this.styleClasses.map((c) => [c.value, c]));
+      const palette = ['#1a9850', '#fee08b', '#d73027', '#4575b4', '#984ea3', '#ff7f00', '#a65628', '#f781bf', '#66c2a5', '#999999'];
+      this.styleClasses = [...values].sort((a, b) => a - b).map((v, i) => known.get(v) ?? { value: v, color: palette[i % palette.length], label: String(v) });
+    });
+  }
+
+  // ----- profile chart hover -----
+
+  onProfileHover(event: MouseEvent, svg: Element): void {
+    const points = this.profile();
+    const c = this.chart();
+    if (!points || !c) return;
+    const rect = svg.getBoundingClientRect();
+    const fx = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1);
+    const total = points[points.length - 1].d || 1;
+    let best = points[0];
+    for (const p of points) if (Math.abs(p.d / total - fx) < Math.abs(best.d / total - fx)) best = p;
+    this.hoverX.set((best.d / total) * c.w);
+    this.hoverReadout.set(`${formatLength(best.d)} · ${best.z === null ? 'NoData' : fmt(best.z)}${best.visible === false ? ' · hidden' : ''}`);
+    this.mapService.setHoverMarker([best.lon, best.lat]);
+  }
+
+  onProfileLeave(): void {
+    this.hoverX.set(null);
+    this.hoverReadout.set(null);
+    this.mapService.setHoverMarker(null);
+  }
+
+  // ----- export -----
+
+  exportFacts(): void {
+    downloadCsv(`${this.tool()}_results.csv`, [['Measure', 'Value'], ...this.facts().map((f) => [f.label, f.value])]);
+  }
+
+  exportProfile(): void {
+    const pts = this.profile() ?? [];
+    downloadCsv(`${this.tool()}_profile.csv`, [
+      ['distance_m', 'elevation', 'longitude', 'latitude', 'visible'],
+      ...pts.map((p) => [p.d.toFixed(1), p.z ?? '', p.lon, p.lat, p.visible === undefined ? '' : p.visible ? 'yes' : 'no'])
+    ]);
+  }
+
+  exportHistogram(): void {
+    const s = this.statistics();
+    if (!s) return;
+    downloadCsv('histogram.csv', [
+      ['from', 'to', 'pixels'],
+      ...s.histogram.counts.map((c, i) => [s.histogram.edges[i], s.histogram.edges[i + 1], c])
+    ]);
+  }
+
+  exportSeries(): void {
+    downloadCsv(`${this.seriesKind}_time_series.csv`, [
+      ['date', 'mean', 'p10', 'p90'],
+      ...(this.series() ?? []).map((p) => [p.date, p.mean, p.min, p.max])
+    ]);
+  }
+
+  exportZones(): void {
+    downloadCsv('zonal_statistics.csv', [
+      ['zone', 'pixels', 'mean', 'min', 'max', 'sum', 'area_m2'],
+      ...(this.zoneRows() ?? []).map((r) => [r.zone, r.count, r.mean ?? '', r.min ?? '', r.max ?? '', r.sum ?? '', r.areaM2])
+    ]);
+  }
+
+  exportTransitions(): void {
+    downloadCsv('change_matrix.csv', [
+      ['from', 'to', 'area_m2'],
+      ...(this.transitions() ?? []).map((t) => [t.fromLabel, t.toLabel, t.areaM2])
+    ]);
+  }
+
+  /** SVG chart → PNG (white background, 2× resolution). */
+  exportChart(svg: Element): void {
+    const rect = svg.getBoundingClientRect();
+    const clone = svg.cloneNode(true) as Element;
+    clone.setAttribute('width', String(rect.width));
+    clone.setAttribute('height', String(rect.height));
+    clone.setAttribute('color', getComputedStyle(svg).color);
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(clone)], { type: 'image/svg+xml' }));
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = rect.width * 2;
+      canvas.height = rect.height * 2;
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      const a = document.createElement('a');
+      a.href = canvas.toDataURL('image/png');
+      a.download = `${this.tool()}_chart.png`;
+      a.click();
+    };
+    img.src = url;
+  }
+
+  // ----- 3D view -----
+
+  private open3d(layerId: string): void {
+    const layer = this.layersSignal().find((l) => l.id === layerId);
+    this.execute(this.api.mesh(layerId, this.band, this.meshSize), (m) => {
+      const drape = this.layersSignal().find((l) => l.id === this.drapeLayerId);
+      const [minX, minY, maxX, maxY] = m.bbox;
+      this.drapeUrl.set(
+        drape
+          ? `${environment.geoserverUrl}/${drape.geoserverWorkspace}/wms?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap` +
+              `&LAYERS=${encodeURIComponent(`${drape.geoserverWorkspace}:${drape.geoserverLayer}`)}&STYLES=&SRS=EPSG:4326` +
+              `&BBOX=${minX},${minY},${maxX},${maxY}&WIDTH=${m.width * 3}&HEIGHT=${m.height * 3}&FORMAT=image/png&TRANSPARENT=true`
+          : null
+      );
+      this.meshTitle.set(`${layer?.name ?? 'DEM'}${drape ? ' · ' + drape.name : ''}`);
+      this.mesh.set(m);
+    });
   }
 
   // ----- run -----
@@ -812,9 +1046,9 @@ export class RasterAnalysisComponent implements OnDestroy {
             this.facts.set([
               { label: 'Design level', value: fmt(r.baseLevel) },
               { label: 'Area', value: formatArea(r.areaM2) },
-              { label: 'Cut volume', value: `${fmtInt(r.cutM3)} m³` },
-              { label: 'Fill volume', value: `${fmtInt(r.fillM3)} m³` },
-              { label: 'Net (cut − fill)', value: `${fmtInt(r.netM3)} m³` },
+              { label: 'Cut volume', value: formatVolume(r.cutM3) },
+              { label: 'Fill volume', value: formatVolume(r.fillM3) },
+              { label: 'Net (cut − fill)', value: formatVolume(r.netM3) },
               { label: 'Ground min / mean / max', value: `${fmt(r.minZ)} / ${fmt(r.meanZ)} / ${fmt(r.maxZ)}` }
             ]);
           }
@@ -881,6 +1115,8 @@ export class RasterAnalysisComponent implements OnDestroy {
       case 'calc': {
         const inputs = this.calcInputs.filter((i) => i.layerId);
         if (inputs.length !== this.calcInputs.length || inputs.length === 0) return this.error.set('Choose a raster for every input.');
+        const problem = checkExpression(this.expression, inputs.length);
+        if (problem) return this.error.set(problem);
         if (!this.outputName.trim()) return this.error.set('Enter a name for the new layer.');
         return this.runLayerTool('calculator', { inputs, expression: this.expression, outputName: this.outputName.trim() });
       }
@@ -964,6 +1200,8 @@ export class RasterAnalysisComponent implements OnDestroy {
         if (!this.afterLayerId) return this.error.set('Choose the "after" raster.');
         if (this.afterLayerId === layerId) return this.error.set('Choose two different rasters.');
         return this.runLayerTool('change-matrix', { beforeLayerId: layerId, afterLayerId: this.afterLayerId, outputName: base.outputName });
+      case 'view3d':
+        return this.open3d(layerId!);
       case 'stats':
         this.execute(this.api.statistics({ layerId: layerId!, band: this.band, bins: this.histogramBins }), (r) => {
           this.statistics.set(r);
@@ -1098,6 +1336,7 @@ export class RasterAnalysisComponent implements OnDestroy {
     if (this.tool() === 'swipe') {
       this.swipeLayerId.set(null);
       this.mapService.setSwipe(null);
+      this.mapService.setSpyglass(null);
     }
   }
 
@@ -1138,6 +1377,22 @@ export class RasterAnalysisComponent implements OnDestroy {
   }
 
   private runStyle(layerId: string): void {
+    if (this.styleMode === 'values') {
+      if (this.styleClasses.length === 0) return this.error.set('Add at least one class.');
+      return void this.execute(
+        this.api.style(layerId, {
+          mode: 'values',
+          band: this.band,
+          opacity: this.styleOpacity,
+          classes: this.styleClasses.map((c) => ({ value: c.value, color: c.color, label: c.label.trim() || String(c.value) }))
+        }),
+        () => {
+          this.mapService.setLayerVisibility(layerId, true);
+          this.mapService.refreshLayerStyle(layerId);
+          this.message.set('Classes applied — the legend is updated.');
+        }
+      );
+    }
     const spec: RasterStyleSpec =
       this.styleMode === 'rgb'
         ? { mode: 'rgb', bands: this.rgbBands, stretch: this.rgbStretch, opacity: this.styleOpacity }
@@ -1216,7 +1471,7 @@ export class RasterAnalysisComponent implements OnDestroy {
     this.jobSub?.unsubscribe();
     this.running.set(true);
     this.jobSub = this.api
-      .startJob<T>(tool, body)
+      .startJob<T>(tool, body, this.isOwner ? this.outputDepartmentId : null)
       .pipe(
         switchMap((started) => {
           this.job.set(started);
@@ -1390,7 +1645,7 @@ const LABELS: Record<string, [string, (v: number) => string]> = {
   increaseM2: ['Increase', formatArea],
   decreaseM2: ['Decrease', formatArea],
   unchangedM2: ['No change', formatArea],
-  volumeM3: ['Water volume', (v) => `${fmtInt(v)} m³`],
+  volumeM3: ['Water volume', formatVolume],
   maxDepth: ['Max depth', fmt],
   meanDepth: ['Mean depth', fmt],
   count: ['Features', fmtInt],
@@ -1403,7 +1658,7 @@ const LABELS: Record<string, [string, (v: number) => string]> = {
   builtUpPct: ['Built-up (NDBI > 0)', (v) => `${v.toFixed(1)} %`],
   filledCells: ['Pits filled (cells)', fmtInt],
   filledAreaM2: ['Filled area', formatArea],
-  fillVolumeM3: ['Fill volume', (v) => `${fmtInt(v)} m³`],
+  fillVolumeM3: ['Fill volume', formatVolume],
   maxFillDepth: ['Deepest pit', (v) => `${fmt(v)} m`],
   points: ['Points used', fmtInt],
   peakPerKm2: ['Peak density', (v) => `${fmt(v)} / km²`],
@@ -1480,14 +1735,138 @@ function niceInterval(raw: number): number {
   return (n < 1.5 ? 1 : n < 3.5 ? 2 : n < 7.5 ? 5 : 10) * p;
 }
 
+/** Settings → Units (set by the component's effect); results are
+ *  computed in metres and converted only for display. */
+let imperial = false;
+
 function formatLength(m: number): string {
+  if (imperial) {
+    const ft = m * 3.28084;
+    return ft >= 5280 ? `${(ft / 5280).toFixed(2)} mi` : `${Math.round(ft)} ft`;
+  }
   return m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${Math.round(m)} m`;
 }
 
 function formatArea(m2: number): string {
+  if (imperial) {
+    const acres = m2 / 4046.856;
+    if (acres >= 640) return `${(acres / 640).toFixed(2)} mi²`;
+    if (acres >= 1) return `${acres.toFixed(2)} acres`;
+    return `${Math.round(m2 * 10.7639)} ft²`;
+  }
   if (m2 >= 1e6) return `${(m2 / 1e6).toFixed(2)} km²`;
   if (m2 >= 1e4) return `${(m2 / 1e4).toFixed(2)} ha`;
   return `${Math.round(m2)} m²`;
+}
+
+function formatVolume(m3: number): string {
+  return imperial ? `${fmtInt(m3 * 1.30795)} yd³` : `${fmtInt(m3)} m³`;
+}
+
+/** Raster Calculator presets. */
+const CALC_RECIPES: { label: string; expression: string; inputs: number; hint: string }[] = [
+  { label: 'Normalised difference (NDVI-style)', expression: '(A - B) / (A + B)', inputs: 2, hint: 'A = NIR band, B = Red band (same raster, different bands).' },
+  { label: 'Difference (after − before)', expression: 'B - A', inputs: 2, hint: 'A = before, B = after.' },
+  { label: 'Percent change', expression: '(B - A) / A * 100', inputs: 2, hint: 'A = before, B = after; result in %.' },
+  { label: 'Threshold → 1 / 0', expression: 'where(A > 100, 1, 0)', inputs: 1, hint: 'Edit 100 to your threshold.' },
+  { label: 'Keep A only where B > 0 (mask)', expression: 'where(B > 0, A, 0)', inputs: 2, hint: 'B is the mask raster.' },
+  { label: 'Average of three', expression: '(A + B + C) / 3', inputs: 3, hint: 'Inputs are aligned to A\'s grid.' },
+  { label: 'Metres → feet', expression: 'A * 3.28084', inputs: 1, hint: 'Unit conversion.' }
+];
+
+const CALC_FUNCTIONS = ['where', 'sqrt', 'log', 'log10', 'exp', 'abs', 'minimum', 'maximum', 'sin', 'cos', 'tan', 'logical_and', 'logical_or', 'logical_not'];
+
+/** Same rules as the backend, checked as you type. */
+function checkExpression(expression: string, inputs: number): string | null {
+  const text = expression.trim();
+  if (!text) return 'Enter an expression.';
+  if (!/^[\w\s+\-*/%().,<>=!&|~]+$/.test(text) || text.includes('__')) return 'The expression contains characters that are not allowed.';
+  let depth = 0;
+  for (const ch of text) {
+    depth += ch === '(' ? 1 : ch === ')' ? -1 : 0;
+    if (depth < 0) return 'A ")" has no matching "(".';
+  }
+  if (depth !== 0) return 'A "(" is not closed.';
+  const letters = 'ABCDEF'.slice(0, inputs);
+  for (const word of text.match(/[A-Za-z_]\w*/g) ?? []) {
+    if (word.length === 1 && letters.includes(word)) continue;
+    if (CALC_FUNCTIONS.includes(word)) continue;
+    if (word.length === 1 && 'ABCDEF'.includes(word)) return `"${word}" is not an input — add more inputs or use ${letters.split('').join(', ')}.`;
+    return `"${word}" is not allowed.`;
+  }
+  return null;
+}
+
+/** Class boundaries (k + 1 values) from a histogram. */
+function classBreaks(method: 'equal' | 'quantile' | 'jenks', k: number, counts: number[], edges: number[]): number[] {
+  const lo = edges[0];
+  const hi = edges[edges.length - 1];
+  if (method === 'equal') return Array.from({ length: k + 1 }, (_, i) => lo + ((hi - lo) * i) / k);
+  const centres = counts.map((_, i) => (edges[i] + edges[i + 1]) / 2);
+  if (method === 'quantile') {
+    const total = counts.reduce((a, b) => a + b, 0) || 1;
+    const out = [lo];
+    let cum = 0;
+    let next = 1;
+    counts.forEach((c, i) => {
+      cum += c;
+      while (next < k && cum >= (total * next) / k) {
+        out.push(edges[i + 1]);
+        next++;
+      }
+    });
+    while (out.length < k) out.push(hi);
+    out.push(hi);
+    return out;
+  }
+  // Jenks natural breaks on the weighted histogram bins (Fisher's DP).
+  const n = centres.length;
+  const w = counts;
+  const cost = (a: number, b: number) => {
+    let sw = 0, s = 0, s2 = 0;
+    for (let i = a; i <= b; i++) {
+      sw += w[i];
+      s += w[i] * centres[i];
+      s2 += w[i] * centres[i] * centres[i];
+    }
+    return sw ? s2 - (s * s) / sw : 0;
+  };
+  const dp = Array.from({ length: k + 1 }, () => new Array<number>(n).fill(Infinity));
+  const cut = Array.from({ length: k + 1 }, () => new Array<number>(n).fill(0));
+  for (let j = 0; j < n; j++) dp[1][j] = cost(0, j);
+  for (let c = 2; c <= k; c++) {
+    for (let j = c - 1; j < n; j++) {
+      for (let m = c - 2; m < j; m++) {
+        const v = dp[c - 1][m] + cost(m + 1, j);
+        if (v < dp[c][j]) {
+          dp[c][j] = v;
+          cut[c][j] = m;
+        }
+      }
+    }
+  }
+  const out = [hi];
+  let j = n - 1;
+  for (let c = k; c >= 2; c--) {
+    j = cut[c][j];
+    out.unshift(edges[j + 1]);
+  }
+  out.unshift(lo);
+  return out;
+}
+
+function downloadCsv(filename: string, rows: (string | number)[][]): void {
+  const esc = (v: string | number) => {
+    const t = String(v);
+    return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+  };
+  const blob = new Blob(['\ufeff' + rows.map((r) => r.map(esc).join(',')).join('\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function isoDate(offsetDays: number): string {

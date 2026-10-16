@@ -67,8 +67,8 @@
   <!-- ============ UPLOAD ============ -->
   @if (tool() === 'upload') {
     <label class="bo__field">
-      <span class="bo__label">GeoTIFF file (.tif)</span>
-      <input type="file" class="ra__file" accept=".tif,.tiff" (change)="onFile($event)" />
+      <span class="bo__label">Raster file — GeoTIFF, JPEG 2000, Erdas .img or a .zip of them</span>
+      <input type="file" class="ra__file" accept=".tif,.tiff,.jp2,.j2k,.img,.zip" (change)="onFile($event)" />
     </label>
     <label class="bo__field">
       <span class="bo__label">Layer name</span>
@@ -126,6 +126,9 @@
           · range {{ b.min?.toFixed(2) }} – {{ b.max?.toFixed(2) }}
         }
       </p>
+      @if (i.description) {
+        <p class="ra__provenance" [title]="i.description"><i class="pi pi-history"></i> {{ i.description }}</p>
+      }
     }
     @if (bandOptions().length > 1 && !['ndvi', 'clip', 'indices', 'classify', 'supervised', 'changematrix', 'download', 'resample'].includes(tool()) && !(tool() === 'style' && styleMode === 'rgb')) {
       <label class="bo__field">
@@ -159,8 +162,26 @@
       <div class="bo__modes" role="tablist">
         <button type="button" class="bo__mode" [class.bo__mode--active]="styleMode === 'ramp'" (click)="styleMode = 'ramp'">Colour ramp</button>
         <button type="button" class="bo__mode" [class.bo__mode--active]="styleMode === 'rgb'" (click)="styleMode = 'rgb'">RGB imagery</button>
+        <button type="button" class="bo__mode" [class.bo__mode--active]="styleMode === 'values'" (click)="styleMode = 'values'">Classes</button>
       </div>
-      @if (styleMode === 'ramp') {
+      @if (styleMode === 'values') {
+        <div class="ra__rules">
+          <div class="ra__rule ra__rule--cls ra__rule--head"><span>Value</span><span>Colour</span><span>Label</span><span></span></div>
+          @for (c of styleClasses; track $index; let i = $index) {
+            <div class="ra__rule ra__rule--cls">
+              <input type="number" class="bo__input" [(ngModel)]="c.value" />
+              <input type="color" class="ra__color" [(ngModel)]="c.color" />
+              <input type="text" class="bo__input" maxlength="60" [(ngModel)]="c.label" />
+              <button type="button" class="bo__chip bo__chip--ghost" (click)="removeStyleClass(i)"><i class="pi pi-times"></i></button>
+            </div>
+          }
+        </div>
+        <div class="bo__row">
+          <button type="button" class="bo__cancel ra__add" (click)="addStyleClass()">+ Add class</button>
+          <button type="button" class="bo__cancel ra__add" [disabled]="running()" (click)="detectClasses()"><i class="pi pi-search"></i> Detect values</button>
+        </div>
+        <p class="bo__hint">For classified rasters (land cover, reclassify, classification). Rename and recolour classes; the legend follows.</p>
+      } @else if (styleMode === 'ramp') {
         <label class="bo__field">
           <span class="bo__label">Ramp</span>
           <select class="bo__input" [(ngModel)]="styleRamp">
@@ -375,17 +396,40 @@
           }
         </div>
       }
-      @if (calcInputs.length < 4) {
+      @if (calcInputs.length < 6) {
         <button type="button" class="bo__cancel ra__add" (click)="addCalcInput()">+ Add input</button>
       }
       <label class="bo__field">
-        <span class="bo__label">Expression</span>
-        <input type="text" class="bo__input" [(ngModel)]="expression" placeholder="(B - A) / (B + A)" />
+        <span class="bo__label">Recipe</span>
+        <select class="bo__input" [ngModel]="''" (ngModelChange)="useRecipe($event)">
+          <option value="" disabled>Insert a common formula…</option>
+          @for (r of recipes; track r.label) {
+            <option [value]="r.expression">{{ r.label }}</option>
+          }
+        </select>
       </label>
-      <p class="bo__hint">Use A–D, numbers, + − * / ** &lt; &gt; == &amp; | and where(), sqrt(), log(), abs(), minimum(), maximum(). Inputs are aligned to A's grid.</p>
+      <label class="bo__field">
+        <span class="bo__label">Expression</span>
+        <input type="text" class="bo__input" [class.ra__invalid]="expressionError()" [ngModel]="expression" (ngModelChange)="setExpression($event)" placeholder="(B - A) / (B + A)" />
+      </label>
+      @if (expressionError(); as ee) {
+        <p class="bo__result bo__result--empty">{{ ee }}</p>
+      } @else if (recipeHint) {
+        <p class="bo__hint">{{ recipeHint }}</p>
+      }
+      <p class="bo__hint">Use A–F, numbers, + − * / ** &lt; &gt; == &amp; | and where(), sqrt(), log(), abs(), minimum(), maximum(). Inputs are aligned to A's grid.</p>
     }
 
     @case ('reclass') {
+      <div class="bo__row ra__auto">
+        <select class="bo__input bo__field--grow" [(ngModel)]="breakMethod">
+          <option value="equal">Equal interval</option>
+          <option value="quantile">Quantile (equal count)</option>
+          <option value="jenks">Natural breaks (Jenks)</option>
+        </select>
+        <input type="number" class="bo__input ra__band" min="2" max="10" [(ngModel)]="breakCount" title="Number of classes" />
+        <button type="button" class="bo__chip" [disabled]="running()" (click)="autoClasses()"><i class="pi pi-bolt"></i>Generate</button>
+      </div>
       <div class="ra__rules">
         <div class="ra__rule ra__rule--head"><span>From ≥</span><span>To &lt;</span><span>Value</span><span>Label</span><span></span></div>
         @for (rule of reclassRules; track $index; let i = $index) {
@@ -410,8 +454,12 @@
     }
 
     @case ('swipe') {
+      <div class="bo__modes" role="tablist">
+        <button type="button" class="bo__mode" [class.bo__mode--active]="compareMode === 'swipe'" (click)="setCompareMode('swipe')">Swipe</button>
+        <button type="button" class="bo__mode" [class.bo__mode--active]="compareMode === 'spyglass'" (click)="setCompareMode('spyglass')">Spyglass</button>
+      </div>
       <label class="bo__field">
-        <span class="bo__label">Layer to swipe (shown on the left)</span>
+        <span class="bo__label">{{ compareMode === 'swipe' ? 'Layer to swipe (shown on the left)' : 'Layer seen through the spyglass' }}</span>
         <p-select
           class="bo__select"
           [options]="rasterLayers()"
@@ -423,11 +471,18 @@
           appendTo="body"
         />
       </label>
-      <label class="bo__field">
-        <span class="bo__label">Position {{ swipeFraction }} %</span>
-        <input type="range" min="0" max="100" [(ngModel)]="swipeFraction" (input)="onSwipe()" />
-      </label>
-      <p class="bo__hint">Turn on the layer to compare it with (for example the older image) — it shows to the right of the line.</p>
+      @if (compareMode === 'swipe') {
+        <label class="bo__field">
+          <span class="bo__label">Position {{ swipeFraction }} %</span>
+          <input type="range" min="0" max="100" [(ngModel)]="swipeFraction" (input)="onSwipe()" />
+        </label>
+      } @else {
+        <label class="bo__field">
+          <span class="bo__label">Lens radius {{ spyRadius }} px</span>
+          <input type="range" min="40" max="300" step="10" [(ngModel)]="spyRadius" (input)="onSwipe()" />
+        </label>
+      }
+      <p class="bo__hint">Turn on the layer to compare it with (for example the older image) — it shows {{ compareMode === 'swipe' ? 'to the right of the line' : 'outside the lens; move the mouse over the map' }}.</p>
     }
 
     @case ('ndvi') {
@@ -636,6 +691,28 @@
         />
       </label>
       <p class="bo__hint">Both rasters must hold classes (land cover, reclassified or classification results). Class names come from their styles.</p>
+    }
+
+    @case ('view3d') {
+      <label class="bo__field">
+        <span class="bo__label">Drape (colour the surface with) — optional</span>
+        <p-select
+          class="bo__select"
+          [options]="drapeLayers()"
+          optionLabel="label"
+          optionValue="value"
+          [(ngModel)]="drapeLayerId"
+          [showClear]="true"
+          [filter]="true"
+          placeholder="Elevation colours"
+          appendTo="body"
+        />
+      </label>
+      <label class="bo__field">
+        <span class="bo__label">Detail ({{ meshSize }} × {{ meshSize }} cells)</span>
+        <input type="range" min="60" max="200" step="20" [(ngModel)]="meshSize" />
+      </label>
+      <p class="bo__hint">Opens an interactive 3D view of the DEM — drag to rotate, scroll to zoom, adjust vertical exaggeration, save as PNG.</p>
     }
 
     @case ('stats') {
@@ -880,6 +957,21 @@
       <span class="bo__label">New layer name</span>
       <input type="text" class="bo__input" maxlength="80" [(ngModel)]="outputName" />
     </label>
+    @if (isOwner) {
+      <label class="bo__field">
+        <span class="bo__label">Save the result to</span>
+        <p-select
+          class="bo__select"
+          [options]="departments()"
+          optionLabel="label"
+          optionValue="value"
+          [(ngModel)]="outputDepartmentId"
+          [showClear]="true"
+          placeholder="Municipality-wide (no department)"
+          appendTo="body"
+        />
+      </label>
+    }
   }
 
   <!-- ============ RESULTS ============ -->
@@ -913,6 +1005,9 @@
     <p class="bo__result">{{ m }}</p>
   }
   @if (facts().length > 0) {
+    <div class="ra__export">
+      <button type="button" class="ra__export-btn" (click)="exportFacts()" title="Download these results as CSV"><i class="pi pi-download"></i> CSV</button>
+    </div>
     <ul class="bo__rings">
       @for (f of facts(); track f.label) {
         <li class="bo__ring">
@@ -923,22 +1018,46 @@
     </ul>
   }
   @if (chart(); as c) {
-    <figure class="ra__chart">
-      <svg [attr.viewBox]="'0 0 ' + c.w + ' ' + c.h" preserveAspectRatio="none" role="img" aria-label="Elevation profile">
-        <path [attr.d]="c.path" fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke" />
-        @for (p of c.hidden; track $index) {
-          <circle [attr.cx]="p.cx" [attr.cy]="p.cy" r="1.5" class="ra__hidden" />
-        }
-      </svg>
+    <figure class="ra__chart ra__chart--axes">
+      <div class="ra__chart-tools">
+        <span class="ra__chart-read">{{ hoverReadout() ?? 'Hover the chart to find the spot on the map' }}</span>
+        <button type="button" class="ra__export-btn" (click)="exportProfile()" title="Profile points as CSV"><i class="pi pi-download"></i> CSV</button>
+        <button type="button" class="ra__export-btn" (click)="exportChart(profileSvg)" title="Chart as PNG"><i class="pi pi-image"></i> PNG</button>
+      </div>
+      <div class="ra__chart-body">
+        <div class="ra__yaxis"><span>{{ c.max }}</span><span>{{ c.min }}</span></div>
+        <svg
+          #profileSvg
+          [attr.viewBox]="'0 0 ' + c.w + ' ' + c.h"
+          preserveAspectRatio="none"
+          role="img"
+          aria-label="Elevation profile"
+          (mousemove)="onProfileHover($event, profileSvg)"
+          (mouseleave)="onProfileLeave()"
+        >
+          <path [attr.d]="c.path" fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke" />
+          @for (p of c.hidden; track $index) {
+            <circle [attr.cx]="p.cx" [attr.cy]="p.cy" r="1.5" class="ra__hidden" />
+          }
+          @if (hoverX() !== null) {
+            <line [attr.x1]="hoverX()" [attr.x2]="hoverX()" y1="0" [attr.y2]="c.h" stroke="#f59e0b" stroke-width="1" vector-effect="non-scaling-stroke" />
+          }
+        </svg>
+      </div>
       <figcaption>
-        <span>{{ c.min }} – {{ c.max }}</span><span>{{ c.length }}</span>
+        <span>0</span><span>distance</span><span>{{ c.length }}</span>
       </figcaption>
     </figure>
   }
 
   @if (histogram(); as hg) {
     <figure class="ra__chart">
-      <svg [attr.viewBox]="'0 0 ' + hg.w + ' ' + hg.h" preserveAspectRatio="none" role="img" aria-label="Histogram">
+      <div class="ra__chart-tools">
+        <span class="ra__chart-read">Histogram</span>
+        <button type="button" class="ra__export-btn" (click)="exportHistogram()"><i class="pi pi-download"></i> CSV</button>
+        <button type="button" class="ra__export-btn" (click)="exportChart(histSvg)"><i class="pi pi-image"></i> PNG</button>
+      </div>
+      <svg #histSvg [attr.viewBox]="'0 0 ' + hg.w + ' ' + hg.h" preserveAspectRatio="none" role="img" aria-label="Histogram">
         @for (b of hg.bars; track $index) {
           <rect [attr.x]="b.x" [attr.y]="b.y" [attr.width]="b.w" [attr.height]="b.h" fill="currentColor" opacity="0.85">
             <title>{{ b.title }}</title>
@@ -952,7 +1071,12 @@
   }
   @if (seriesChart(); as sc) {
     <figure class="ra__chart">
-      <svg [attr.viewBox]="'0 0 ' + sc.w + ' ' + sc.h" preserveAspectRatio="none" role="img" aria-label="Index time series">
+      <div class="ra__chart-tools">
+        <span class="ra__chart-read">{{ seriesKind.toUpperCase() }} over time</span>
+        <button type="button" class="ra__export-btn" (click)="exportSeries()"><i class="pi pi-download"></i> CSV</button>
+        <button type="button" class="ra__export-btn" (click)="exportChart(seriesSvg)"><i class="pi pi-image"></i> PNG</button>
+      </div>
+      <svg #seriesSvg [attr.viewBox]="'0 0 ' + sc.w + ' ' + sc.h" preserveAspectRatio="none" role="img" aria-label="Index time series">
         <path [attr.d]="sc.band" fill="currentColor" opacity="0.15" />
         <path [attr.d]="sc.line" fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke" />
         @for (d of sc.dots; track $index) {
@@ -965,6 +1089,9 @@
     </figure>
   }
   @if (transitions(); as tr) {
+    <div class="ra__export">
+      <button type="button" class="ra__export-btn" (click)="exportTransitions()"><i class="pi pi-download"></i> Change matrix CSV</button>
+    </div>
     <div class="ra__table-wrap">
       <table class="ra__table">
         <thead>
@@ -979,6 +1106,9 @@
     </div>
   }
   @if (zoneRows(); as rows) {
+    <div class="ra__export">
+      <button type="button" class="ra__export-btn" (click)="exportZones()"><i class="pi pi-download"></i> Zone table CSV</button>
+    </div>
     <div class="ra__table-wrap">
       <table class="ra__table">
         <thead>
@@ -1004,7 +1134,7 @@
       <button
         pButton
         type="button"
-        [label]="running() ? 'Working…' : tool() === 'upload' ? 'Upload & publish' : tool() === 'online' ? 'Download & publish' : tool() === 'style' ? 'Apply style' : tool() === 'identify' ? 'Identify' : tool() === 'download' ? 'Download' : tool() === 'stats' ? 'Compute' : tool() === 'series' ? 'Build time series' : tool() === 'supervised' ? 'Classify' : 'Run'"
+        [label]="running() ? 'Working…' : tool() === 'upload' ? 'Upload & publish' : tool() === 'online' ? 'Download & publish' : tool() === 'style' ? 'Apply style' : tool() === 'identify' ? 'Identify' : tool() === 'download' ? 'Download' : tool() === 'stats' ? 'Compute' : tool() === 'series' ? 'Build time series' : tool() === 'supervised' ? 'Classify' : tool() === 'view3d' ? 'Open 3D view' : 'Run'"
         icon="pi pi-play"
         class="p-button-sm bo__run"
         [disabled]="running()"
@@ -1021,6 +1151,11 @@
     }
   </div>
 </div>
+
+
+@if (mesh(); as m) {
+  <app-terrain-3d [mesh]="m" [drapeUrl]="drapeUrl()" [title]="meshTitle()" (closed)="mesh.set(null)" />
+}
 
 <ng-template #polygonInput>
   <div class="bo__section">

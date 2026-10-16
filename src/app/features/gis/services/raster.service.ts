@@ -20,6 +20,13 @@ export interface RasterBandInfo {
   description?: string | null;
 }
 
+export interface RasterStyleClass {
+  value: number;
+  color: string;
+  label?: string;
+  opacity?: number;
+}
+
 export interface RasterInfo {
   width: number;
   height: number;
@@ -29,6 +36,10 @@ export interface RasterInfo {
   pixelSize: [number, number];
   pixelSizeM: number;
   bands: RasterBandInfo[];
+  /** The layer's current raster style (null = GeoServer default). */
+  styleSpec?: RasterStyleSpec | null;
+  /** How the layer was made (Raster Analysis writes its provenance here). */
+  description?: string | null;
 }
 
 export interface RasterStyleSpec {
@@ -40,6 +51,7 @@ export interface RasterStyleSpec {
   invert?: boolean;
   bands?: [number, number, number];
   stretch?: 'normalize' | 'histogram';
+  classes?: RasterStyleClass[];
   opacity?: number;
 }
 
@@ -142,6 +154,17 @@ export interface RasterJob<T = unknown> {
   error: string | null;
 }
 
+export interface TerrainMeshData {
+  width: number;
+  height: number;
+  cellX: number;
+  cellY: number;
+  bbox: [number, number, number, number];
+  z: (number | null)[];
+  min: number;
+  max: number;
+}
+
 /** A tool that published its output as a new layer. */
 export interface LayerResult {
   layer: GisLayer;
@@ -223,8 +246,14 @@ export class RasterService {
   }
 
   /** Background job for a layer-producing tool (same body as `run`). */
-  startJob<T = LayerResult>(tool: string, body: Record<string, unknown>): Observable<RasterJob<T>> {
-    return this.http.post<RasterJob<T>>(`${this.baseUrl}/jobs/${tool}`, body);
+  /** `departmentId`: the owner's choice of department for the output. */
+  startJob<T = LayerResult>(tool: string, body: Record<string, unknown>, departmentId?: string | null): Observable<RasterJob<T>> {
+    const params: Record<string, string> = departmentId ? { departmentId } : {};
+    return this.http.post<RasterJob<T>>(`${this.baseUrl}/jobs/${tool}`, body, { params });
+  }
+
+  mesh(layerId: string, band: number, size = 140): Observable<TerrainMeshData> {
+    return this.http.get<TerrainMeshData>(`${this.baseUrl}/${layerId}/mesh`, { params: { band, size } });
   }
 
   job<T = LayerResult>(id: string): Observable<RasterJob<T>> {

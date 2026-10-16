@@ -55,6 +55,7 @@ export const RASTER_MODULES = {
   ruggedness: 931,
   fillSinks: 932,
   streams: 933,
+  view3d: 934,
   calculator: 942,
   reclassify: 943,
   clip: 944,

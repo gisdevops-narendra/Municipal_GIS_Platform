@@ -1189,6 +1189,79 @@ export class MapService {
     this.map?.render();
   }
 
+  private spyglass: { layerId: string; radius: number; pos: number[] | null; keys: EventsKey[] } | null = null;
+
+  /** Spyglass compare: the layer shows only inside a circle that follows
+   *  the mouse; `null` turns it off. Radius in CSS pixels. */
+  setSpyglass(layerId: string | null, radius = 120): void {
+    if (this.spyglass && this.spyglass.layerId !== layerId) {
+      unByKey(this.spyglass.keys);
+      this.spyglass = null;
+    }
+    const olLayer = layerId ? this.managedLayers.get(layerId)?.olLayer : undefined;
+    if (!this.map || !layerId || !olLayer) {
+      this.map?.render();
+      return;
+    }
+    if (!this.spyglass) {
+      const state = { layerId, radius, pos: null as number[] | null, keys: [] as EventsKey[] };
+      const map = this.map;
+      state.keys = [
+        map.on('pointermove', (e) => {
+          state.pos = e.pixel;
+          map.render();
+        }),
+        olLayer.on('prerender', (event) => {
+          const ctx = event.context as CanvasRenderingContext2D;
+          ctx.save();
+          ctx.beginPath();
+          if (state.pos) {
+            const ratio = event.frameState?.pixelRatio ?? 1;
+            ctx.arc(state.pos[0] * ratio, state.pos[1] * ratio, state.radius * ratio, 0, 2 * Math.PI);
+          }
+          ctx.clip();
+        }),
+        olLayer.on('postrender', (event) => {
+          const ctx = event.context as CanvasRenderingContext2D;
+          ctx.restore();
+          if (!state.pos) return;
+          const ratio = event.frameState?.pixelRatio ?? 1;
+          ctx.save();
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 3 * ratio;
+          ctx.beginPath();
+          ctx.arc(state.pos[0] * ratio, state.pos[1] * ratio, state.radius * ratio, 0, 2 * Math.PI);
+          ctx.stroke();
+          ctx.restore();
+        })
+      ];
+      this.spyglass = state;
+    }
+    this.spyglass.radius = radius;
+    this.map.render();
+  }
+
+  private hoverLayer: VectorLayer<VectorSource> | null = null;
+
+  /** A single highlighted point (e.g. the spot under the cursor on an
+   *  elevation profile chart); `null` hides it. EPSG:4326. */
+  setHoverMarker(lonLat: [number, number] | null): void {
+    if (!this.map) return;
+    if (!this.hoverLayer) {
+      this.hoverLayer = new VectorLayer({
+        source: new VectorSource(),
+        zIndex: 1000,
+        style: new Style({
+          image: new CircleStyle({ radius: 7, fill: new Fill({ color: '#f59e0b' }), stroke: new Stroke({ color: '#fff', width: 2 }) })
+        })
+      });
+      this.map.addLayer(this.hoverLayer);
+    }
+    const source = this.hoverLayer.getSource()!;
+    source.clear();
+    if (lonLat) source.addFeature(new Feature(new Point(fromLonLat(lonLat))));
+  }
+
   /** Analysis overlay with one colour per geometry (e.g. line of sight:
    *  visible green, hidden red). Replaces whatever was there. */
   setAnalysisColoredGeometries(items: { geometry: Record<string, unknown>; color: string }[]): void {

@@ -601,7 +601,7 @@ def op_calc(req):
     inputs = req["inputs"]
     ref = gdal.Open(inputs[0]["path"])
     names = {}
-    for letter, spec in zip("ABCD", inputs):
+    for letter, spec in zip("ABCDEF", inputs):
         names[letter] = (
             read_band(ref, spec.get("band", 1)) if letter == "A" and spec["path"] == inputs[0]["path"]
             else aligned(ref, spec["path"], spec.get("band", 1))
@@ -994,7 +994,12 @@ def op_zonal(req):
         vds = None
         if req.get("output"):
             gdal.VectorTranslate(req["output"], path, format="GPKG", layerName="result")
+        means = np.array([r["mean"] for r in rows if r["mean"] is not None])
+        breaks = []
+        if means.size >= 3:
+            breaks = sorted({float(v) for v in np.quantile(means, np.linspace(0, 1, min(5, means.size) + 1))})
         return {
+            "breaks": breaks if len(breaks) >= 3 else [],
             "zones": len(rows),
             "zonesWithData": covered,
             "rows": rows[:MAX_ZONE_ROWS],
@@ -1957,6 +1962,42 @@ def op_viewshed_multi(req):
             "multiVisibleM2": float((count >= 2).sum() * area), "maxObservers": int(count.max())}
 
 
+def op_mesh(req):
+    """Downsampled elevation grid (row-major, north first) for the 3D view."""
+    src = gdal.Open(req["path"])
+    size = int(req.get("size", 140))
+    f = min(1.0, size / max(src.RasterXSize, src.RasterYSize))
+    w, h = max(int(src.RasterXSize * f), 2), max(int(src.RasterYSize * f), 2)
+    ds = gdal.Warp("", src, format="MEM", width=w, height=h, resampleAlg="average",
+                   dstSRS="EPSG:4326", outputType=gdal.GDT_Float32)
+    z = read_band(ds, req.get("band", 1))
+    gt = ds.GetGeoTransform()
+    bbox = [gt[0], gt[3] + gt[5] * ds.RasterYSize, gt[0] + gt[1] * ds.RasterXSize, gt[3]]
+    lat = math.radians((bbox[1] + bbox[3]) / 2)
+    return {
+        "width": ds.RasterXSize, "height": ds.RasterYSize,
+        "cellX": abs(gt[1]) * 111320 * math.cos(lat), "cellY": abs(gt[5]) * 110540,
+        "bbox": bbox,
+        "z": [round(float(v), 2) if np.isfinite(v) else None for v in z.ravel()],
+        "min": float(np.nanmin(z)) if np.isfinite(z).any() else 0.0,
+        "max": float(np.nanmax(z)) if np.isfinite(z).any() else 1.0,
+    }
+
+def op_find_raster(req):
+    """First raster file inside a .zip (recursive), as a /vsizip/ path."""
+    root = "/vsizip/" + req["path"]
+    stack = [root]
+    while stack:
+        folder = stack.pop()
+        for name in gdal.ReadDir(folder) or []:
+            child = f"{folder}/{name}"
+            if name.lower().endswith((".tif", ".tiff", ".jp2", ".j2k", ".img")):
+                return {"path": child}
+            stat = gdal.VSIStatL(child)
+            if stat is not None and stat.IsDirectory():
+                stack.append(child)
+    return {"path": None}
+
 OPS = {
     "info": op_info, "identify": op_identify, "profile": op_profile,
     "line_of_sight": op_line_of_sight, "terrain": op_terrain, "contour": op_contour,
@@ -1972,7 +2013,8 @@ OPS = {
     "s2_composite": op_s2_composite, "index_series": op_index_series, "lst": op_lst,
     "supervised": op_supervised, "change_matrix": op_change_matrix, "streams": op_streams,
     "online_population": op_online_population, "online_water": op_online_water,
-    "viewshed_multi": op_viewshed_multi,
+    "viewshed_multi": op_viewshed_multi, "find_raster": op_find_raster,
+    "mesh": op_mesh,
 }
 
 

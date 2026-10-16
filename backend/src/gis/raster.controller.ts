@@ -6,6 +6,7 @@ import type { AppUser } from '../auth/types/app-user.type';
 import { diskStorage } from 'multer';
 import { randomUUID } from 'crypto';
 import { mkdirSync } from 'fs';
+import { extname } from 'path';
 import { RasterService } from './raster.service';
 import { RasterJobsService } from './raster-jobs.service';
 import { RequireRasterModule } from './raster-module.guard';
@@ -64,8 +65,13 @@ export class RasterController {
    *  the background; poll GET jobs/:id for its stage and result. */
   @RequireRasterModule('job')
   @Post('jobs/:tool')
-  startJob(@CurrentAppUser() appUser: AppUser, @Param('tool') tool: string, @Body() body: Record<string, unknown>) {
-    return this.jobs.start(appUser, tool, body);
+  startJob(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('tool') tool: string,
+    @Body() body: Record<string, unknown>,
+    @Query('departmentId', new ParseUUIDPipe({ optional: true })) departmentId?: string,
+  ) {
+    return this.jobs.start(appUser, tool, body, departmentId);
   }
 
   @RequireRasterModule(ANY_RASTER_MODULE)
@@ -100,7 +106,7 @@ export class RasterController {
           mkdirSync(UPLOAD_TMP_DIR, { recursive: true });
           cb(null, UPLOAD_TMP_DIR);
         },
-        filename: (_req, _file, cb) => cb(null, `${randomUUID()}.tif`),
+        filename: (_req, file, cb) => cb(null, `${randomUUID()}${extname(file.originalname).toLowerCase().slice(0, 6)}`),
       }),
     }),
   )
@@ -116,6 +122,19 @@ export class RasterController {
   @Get(':layerId/info')
   info(@CurrentAppUser() appUser: AppUser, @Param('layerId') layerId: string) {
     return this.rasters.info(appUser, layerId);
+  }
+
+  @RequireRasterModule([RASTER_MODULES.view3d])
+  @Get(':layerId/mesh')
+  mesh(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('layerId', ParseUUIDPipe) layerId: string,
+    @Query('band') band?: string,
+    @Query('size') size?: string,
+  ) {
+    const b = Math.max(1, Math.trunc(Number(band) || 1));
+    const n = Math.min(Math.max(Math.trunc(Number(size) || 140), 20), 200);
+    return this.rasters.mesh(appUser, layerId, b, n);
   }
 
   @RequireRasterModule([RASTER_MODULES.identify])

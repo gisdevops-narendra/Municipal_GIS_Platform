@@ -4,6 +4,12 @@ import { AsyncLocalStorage } from 'async_hooks';
 export interface RasterJobContext {
   signal: AbortSignal;
   setStage(stage: string, cancellable?: boolean): void;
+  /** Owner's choice of department for the layers the job creates. */
+  outputDepartmentId?: string;
+  /** Names of the input layers, collected as they are resolved. */
+  sources: string[];
+  /** Provenance text for the new layer's description. */
+  describe(): string;
 }
 
 /** Set while a background job runs, so RasterService.runOp can report its
