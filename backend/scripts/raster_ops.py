@@ -13,6 +13,7 @@ import os
 import shutil
 import sys
 import tempfile
+import urllib.request
 
 import numpy as np
 from osgeo import gdal, ogr, osr
@@ -1181,6 +1182,224 @@ def op_classify(req):
     ]}
 
 
+# ------------------------------------------------- online data sources
+
+COP_DEM_URL = "https://copernicus-dem-30m.s3.amazonaws.com/{name}/{name}.tif"
+WORLDCOVER_URL = (
+    "https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/"
+    "ESA_WorldCover_10m_2021_v200_{tile}_Map.tif"
+)
+STAC_URL = "https://earth-search.aws.element84.com/v1"
+S2_BANDS = [("blue", "Blue (B2)"), ("green", "Green (B3)"), ("red", "Red (B4)"),
+            ("nir", "NIR (B8)"), ("swir16", "SWIR (B11)")]
+WORLDCOVER_CLASSES = {
+    10: "Tree cover", 20: "Shrubland", 30: "Grassland", 40: "Cropland", 50: "Built-up",
+    60: "Bare / sparse vegetation", 70: "Snow and ice", 80: "Permanent water",
+    90: "Herbaceous wetland", 95: "Mangroves", 100: "Moss and lichen",
+}
+
+gdal.SetConfigOption("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
+gdal.SetConfigOption("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif,.TIF")
+gdal.SetConfigOption("GDAL_HTTP_MAX_RETRY", "3")
+gdal.SetConfigOption("GDAL_HTTP_RETRY_DELAY", "1")
+
+
+def http_json(url, body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    request = urllib.request.Request(
+        url, data=data, headers={"Content-Type": "application/json", "Accept": "application/geo+json"}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return json.load(response)
+    except Exception as e:  # network / HTTP failure
+        raise OpError(f"The online catalogue could not be reached ({e}).")
+
+
+def aoi_area_km2(bbox):
+    minx, miny, maxx, maxy = bbox
+    lat = math.radians((miny + maxy) / 2)
+    return abs((maxx - minx) * 111.32 * math.cos(lat) * (maxy - miny) * 110.57)
+
+
+def remote_tiles(bbox, step, name_of):
+    minx, miny, maxx, maxy = bbox
+    names = []
+    lat = math.floor(miny / step) * step
+    while lat < maxy:
+        lon = math.floor(minx / step) * step
+        while lon < maxx:
+            names.append(name_of(int(lat), int(lon)))
+            lon += step
+        lat += step
+    return names
+
+
+def open_remote(urls):
+    """The remote COGs that exist (sea tiles are simply missing)."""
+    found = []
+    for url in urls:
+        try:
+            if gdal.Open("/vsicurl/" + url) is not None:
+                found.append("/vsicurl/" + url)
+        except RuntimeError:
+            continue
+    return found
+
+
+def warp_to_aoi(sources, output, req, **options):
+    cutline = write_geojson_temp(req["polygon"]) if req.get("polygon") else None
+    try:
+        minx, miny, maxx, maxy = req["bbox"]
+        gdal.Warp(
+            output, sources, format="GTiff", creationOptions=GTIFF_OPTIONS,
+            outputBounds=(minx, miny, maxx, maxy), outputBoundsSRS="EPSG:4326",
+            cutlineDSName=cutline, multithread=True, **options,
+        )
+    finally:
+        if cutline:
+            os.remove(cutline)
+
+
+def op_online_dem(req):
+    if aoi_area_km2(req["bbox"]) > 20000:
+        raise OpError("The area is too large for the elevation download (max 20 000 km²).")
+
+    def name(lat, lon):
+        ns, ew = ("N" if lat >= 0 else "S"), ("E" if lon >= 0 else "W")
+        tile = f"Copernicus_DSM_COG_10_{ns}{abs(lat):02d}_00_{ew}{abs(lon):03d}_00_DEM"
+        return COP_DEM_URL.format(name=tile)
+
+    sources = open_remote(remote_tiles(req["bbox"], 1, name))
+    if not sources:
+        raise OpError("No Copernicus DEM coverage for this area.")
+    warp_to_aoi(sources, req["output"], req, resampleAlg="bilinear", dstNodata=FLOAT_NODATA,
+                outputType=gdal.GDT_Float32)
+    out = gdal.Open(req["output"])
+    arr = read_band(out)
+    if not np.isfinite(arr).any():
+        raise OpError("No elevation data inside this area.")
+    return {"source": "Copernicus DEM GLO-30", "tiles": len(sources), "width": out.RasterXSize,
+            "height": out.RasterYSize, "stats": stats_of(arr)}
+
+
+def op_online_landcover(req):
+    if aoi_area_km2(req["bbox"]) > 2500:
+        raise OpError("The area is too large for the 10 m land-cover download (max 2 500 km²).")
+
+    def name(lat, lon):
+        ns, ew = ("N" if lat >= 0 else "S"), ("E" if lon >= 0 else "W")
+        return WORLDCOVER_URL.format(tile=f"{ns}{abs(lat):02d}{ew}{abs(lon):03d}")
+
+    sources = open_remote(remote_tiles(req["bbox"], 3, name))
+    if not sources:
+        raise OpError("No ESA WorldCover data for this area.")
+    warp_to_aoi(sources, req["output"], req, resampleAlg="near", dstNodata=0)
+    out = gdal.Open(req["output"])
+    arr = out.GetRasterBand(1).ReadAsArray()
+    area = pixel_area_m2(out)
+    counts = np.bincount(arr.ravel(), minlength=101)
+    total = counts[1:].sum() or 1
+    classes = [
+        {"value": v, "label": label, "areaM2": float(counts[v] * area), "pct": float(counts[v] * 100 / total)}
+        for v, label in WORLDCOVER_CLASSES.items() if counts[v]
+    ]
+    if not classes:
+        raise OpError("No land-cover data inside this area.")
+    return {"source": "ESA WorldCover 2021 (10 m)", "classes": classes,
+            "width": out.RasterXSize, "height": out.RasterYSize}
+
+
+def op_stac_search(req):
+    body = {
+        "collections": ["sentinel-2-l2a"],
+        "bbox": req["bbox"],
+        "datetime": f"{req['from']}T00:00:00Z/{req['to']}T23:59:59Z",
+        "query": {"eo:cloud_cover": {"lte": req.get("maxCloud", 20)}},
+        "sortby": [{"field": "properties.eo:cloud_cover", "direction": "asc"}],
+        "limit": 30,
+    }
+    found = http_json(f"{STAC_URL}/search", body)
+    scenes = []
+    minx, miny, maxx, maxy = req["bbox"]
+    aoi = ogr.CreateGeometryFromJson(json.dumps({
+        "type": "Polygon",
+        "coordinates": [[[minx, miny], [maxx, miny], [maxx, maxy], [minx, maxy], [minx, miny]]],
+    }))
+    for item in found.get("features", []):
+        props = item.get("properties", {})
+        footprint = ogr.CreateGeometryFromJson(json.dumps(item["geometry"]))
+        coverage = footprint.Intersection(aoi).GetArea() / aoi.GetArea() * 100 if aoi.GetArea() else 0
+        scenes.append({
+            "id": item["id"],
+            "datetime": props.get("datetime"),
+            "cloud": props.get("eo:cloud_cover"),
+            "coverage": coverage,
+            "platform": props.get("platform"),
+            "thumbnail": (item.get("assets", {}).get("thumbnail") or {}).get("href"),
+            "footprint": item["geometry"],
+        })
+    scenes.sort(key=lambda sc: (-round(sc["coverage"] / 10), sc["cloud"] if sc["cloud"] is not None else 100))
+    return {"scenes": scenes}
+
+
+def op_stac_preview(req):
+    """True-colour PNG of the scene over the area, in EPSG:4326, for a quick
+    look on the map before downloading."""
+    item = http_json(f"{STAC_URL}/collections/sentinel-2-l2a/items/{req['sceneId']}")
+    visual = (item.get("assets", {}).get("visual") or {}).get("href")
+    if not visual:
+        raise OpError("The scene has no true-colour image.")
+    minx, miny, maxx, maxy = req["bbox"]
+    lat = math.radians((miny + maxy) / 2)
+    aspect = ((maxx - minx) * math.cos(lat)) / (maxy - miny)
+    size = int(req.get("size", 1024))
+    width, height = (size, max(int(size / aspect), 1)) if aspect >= 1 else (max(int(size * aspect), 1), size)
+    mem = gdal.Warp(
+        "", "/vsicurl/" + visual, format="MEM", dstSRS="EPSG:4326",
+        outputBounds=(minx, miny, maxx, maxy), width=width, height=height,
+        resampleAlg="average", srcNodata=0, dstAlpha=True,
+    )
+    gdal.Translate(req["output"], mem, format="PNG")
+    return {"width": width, "height": height}
+
+
+def op_stac_fetch(req):
+    if aoi_area_km2(req["bbox"]) > 2500:
+        raise OpError("The area is too large for a 10 m Sentinel-2 download (max 2 500 km²).")
+    item = http_json(f"{STAC_URL}/collections/sentinel-2-l2a/items/{req['sceneId']}")
+    assets = item.get("assets", {})
+    missing = [key for key, _ in S2_BANDS if key not in assets]
+    if missing:
+        raise OpError(f"The scene is missing bands: {', '.join(missing)}.")
+    folder = tempfile.mkdtemp()
+    try:
+        red = gdal.Open("/vsicurl/" + assets["red"]["href"])
+        srs = red.GetProjection()
+        parts = []
+        for key, _ in S2_BANDS:
+            part = os.path.join(folder, f"{key}.tif")
+            warp_to_aoi(["/vsicurl/" + assets[key]["href"]], part, req, dstSRS=srs, xRes=10, yRes=10,
+                        targetAlignedPixels=True, resampleAlg="bilinear", srcNodata=0, dstNodata=0,
+                        outputType=gdal.GDT_UInt16)
+            parts.append(part)
+        vrt = gdal.BuildVRT(os.path.join(folder, "stack.vrt"), parts, separate=True)
+        out = gdal.Translate(req["output"], vrt, format="GTiff", creationOptions=GTIFF_OPTIONS, noData=0)
+        for i, (_, label) in enumerate(S2_BANDS, start=1):
+            out.GetRasterBand(i).SetDescription(label)
+        width, height = out.RasterXSize, out.RasterYSize
+        if not out.GetRasterBand(3).ReadAsArray().any():
+            raise OpError("The scene has no data inside this area.")
+        out = None
+        vrt = None
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+    props = item.get("properties", {})
+    return {"source": "Sentinel-2 L2A", "sceneId": item["id"], "date": props.get("datetime"),
+            "cloud": props.get("eo:cloud_cover"), "bands": [label for _, label in S2_BANDS],
+            "width": width, "height": height}
+
+
 OPS = {
     "info": op_info, "identify": op_identify, "profile": op_profile,
     "line_of_sight": op_line_of_sight, "terrain": op_terrain, "contour": op_contour,
@@ -1191,6 +1410,8 @@ OPS = {
     "rasterize": op_rasterize, "fill_sinks": op_fill_sinks, "zonal": op_zonal,
     "idw": op_idw, "heatmap": op_heatmap, "proximity": op_proximity,
     "index": op_index, "classify": op_classify,
+    "online_dem": op_online_dem, "online_landcover": op_online_landcover,
+    "stac_search": op_stac_search, "stac_fetch": op_stac_fetch, "stac_preview": op_stac_preview,
 }
 
 

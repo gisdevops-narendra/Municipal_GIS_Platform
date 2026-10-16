@@ -19,12 +19,13 @@ import {
   RasterService,
   RasterStatistics,
   RasterStyleSpec,
+  SentinelScene,
   VectorField,
   ZoneRow
 } from '../../services/raster.service';
 
 export type RasterToolId =
-  | 'upload' | 'style' | 'identify' | 'stats' | 'download' | 'mosaic' | 'resample' | 'rasterize'
+  | 'upload' | 'online' | 'style' | 'identify' | 'stats' | 'download' | 'mosaic' | 'resample' | 'rasterize'
   | 'profile' | 'slope' | 'aspect' | 'hillshade' | 'contour' | 'rugged' | 'cutfill' | 'fillsinks'
   | 'watershed' | 'flood' | 'los' | 'viewshed'
   | 'calc' | 'reclass' | 'clip' | 'polygonize' | 'zonal' | 'idw' | 'heatmap' | 'proximity'
@@ -45,11 +46,12 @@ interface ToolDef {
 
 /** Raster Analysis (69) and its sub-modules, in catalog order. */
 export const RASTER_TOOLS: ToolDef[] = [
-  { id: 'upload', label: 'Raster Upload & Publish', group: 'Raster Data', section: 'Publish & Inspect', moduleId: 911, icon: 'pi pi-upload', description: 'Publish a GeoTIFF (DEM, satellite or drone image) as a map layer.' },
-  { id: 'style', label: 'Raster Styling', group: 'Raster Data', section: 'Publish & Inspect', moduleId: 912, icon: 'pi pi-palette', description: 'Colour a raster with a ramp, stretch and opacity.' },
-  { id: 'identify', label: 'Pixel Identify', group: 'Raster Data', section: 'Publish & Inspect', moduleId: 913, icon: 'pi pi-info-circle', description: 'Click the map to read pixel values from every band.' },
-  { id: 'stats', label: 'Statistics & Histogram', group: 'Raster Data', section: 'Publish & Inspect', moduleId: 914, icon: 'pi pi-chart-bar', description: 'Value distribution, percentiles and NoData coverage of a band.' },
-  { id: 'download', label: 'Download Raster', group: 'Raster Data', section: 'Publish & Inspect', moduleId: 918, icon: 'pi pi-download', description: 'Export a raster as GeoTIFF — whole layer or just the current view.' },
+  { id: 'upload', label: 'Raster Upload & Publish', group: 'Raster Data', section: 'Get Data', moduleId: 911, icon: 'pi pi-upload', description: 'Publish a GeoTIFF (DEM, satellite or drone image) as a map layer.' },
+  { id: 'online', label: 'Download from Online Sources', group: 'Raster Data', section: 'Get Data', moduleId: 919, icon: 'pi pi-cloud-download', description: 'Free elevation (Copernicus DEM), land cover (ESA WorldCover) or Sentinel-2 imagery for any area.' },
+  { id: 'style', label: 'Raster Styling', group: 'Raster Data', section: 'Inspect & Export', moduleId: 912, icon: 'pi pi-palette', description: 'Colour a raster with a ramp, stretch and opacity.' },
+  { id: 'identify', label: 'Pixel Identify', group: 'Raster Data', section: 'Inspect & Export', moduleId: 913, icon: 'pi pi-info-circle', description: 'Click the map to read pixel values from every band.' },
+  { id: 'stats', label: 'Statistics & Histogram', group: 'Raster Data', section: 'Inspect & Export', moduleId: 914, icon: 'pi pi-chart-bar', description: 'Value distribution, percentiles and NoData coverage of a band.' },
+  { id: 'download', label: 'Download Raster', group: 'Raster Data', section: 'Inspect & Export', moduleId: 918, icon: 'pi pi-download', description: 'Export a raster as GeoTIFF — whole layer or just the current view.' },
   { id: 'mosaic', label: 'Mosaic / Merge', group: 'Raster Data', section: 'Transform', moduleId: 915, icon: 'pi pi-objects-column', description: 'Stitch several raster tiles into one seamless layer.' },
   { id: 'resample', label: 'Resample / Reproject', group: 'Raster Data', section: 'Transform', moduleId: 916, icon: 'pi pi-expand', description: 'Change the pixel size and/or coordinate system.' },
   { id: 'rasterize', label: 'Rasterize Vector', group: 'Raster Data', section: 'Transform', moduleId: 917, icon: 'pi pi-table', description: 'Burn a vector layer (or one of its fields) into a raster grid.' },
@@ -85,13 +87,13 @@ export const RASTER_TOOL_MODULE_IDS = RASTER_TOOLS.map((t) => t.moduleId);
 const OUTPUT_TOOLS: RasterToolId[] = [
   'slope', 'aspect', 'hillshade', 'contour', 'rugged', 'fillsinks', 'watershed', 'flood', 'viewshed',
   'calc', 'reclass', 'clip', 'polygonize', 'ndvi', 'change', 'mosaic', 'resample', 'rasterize',
-  'idw', 'heatmap', 'proximity', 'indices', 'classify'
+  'idw', 'heatmap', 'proximity', 'indices', 'classify', 'online'
 ];
 
 /** Tools whose main input is a vector layer instead of a raster. */
 const VECTOR_TOOLS: RasterToolId[] = ['rasterize', 'idw', 'heatmap', 'proximity'];
 /** Tools that pick their own rasters (no single "input raster" picker). */
-const NO_RASTER_INPUT: RasterToolId[] = ['upload', 'calc', 'swipe', 'mosaic', ...VECTOR_TOOLS];
+const NO_RASTER_INPUT: RasterToolId[] = ['upload', 'online', 'calc', 'swipe', 'mosaic', ...VECTOR_TOOLS];
 
 type Slot = 'a' | 'b' | 'line' | 'polygon';
 
@@ -279,6 +281,26 @@ export class RasterAnalysisComponent implements OnDestroy {
   proximityMax = 2000;
   zonalPublish = false;
 
+  // online data
+  onlineSource: 'dem' | 'landcover' | 'sentinel2' = 'dem';
+  aoiMode: 'view' | 'draw' | 'layer' = 'view';
+  aoiLayerId: string | null = null;
+  readonly extentLayers = computed(() =>
+    this.layersSignal()
+      .filter((l) => l.bbox)
+      .map((l) => ({ label: l.name, value: l.id }))
+  );
+  s2From = isoDate(-90);
+  s2To = isoDate(0);
+  s2Cloud = 20;
+  readonly scenes = signal<SentinelScene[] | null>(null);
+  readonly sceneId = signal<string | null>(null);
+  readonly searching = signal(false);
+  /** Scene whose map preview is loading. */
+  readonly previewing = signal<string | null>(null);
+  private previewUrl: string | null = null;
+  private previewSub?: Subscription;
+
   // terrain / imagery extras
   ruggedKind: 'roughness' | 'TRI' | 'TPI' = 'TRI';
   indexKind: 'ndwi' | 'ndbi' | 'savi' = 'ndwi';
@@ -305,6 +327,7 @@ export class RasterAnalysisComponent implements OnDestroy {
     this.pickSub?.unsubscribe();
     this.mapService.cancelDraw();
     this.mapService.setSwipe(null);
+    this.clearPreview();
   }
 
   // ----- selection of tool / raster -----
@@ -328,6 +351,7 @@ export class RasterAnalysisComponent implements OnDestroy {
     if (group) this.activeGroup.set(group);
     this.resetResult();
     this.clearInputs();
+    this.clearPreview();
     this.zonalPublish = false;
     this.suggestOutputName();
   }
@@ -400,6 +424,12 @@ export class RasterAnalysisComponent implements OnDestroy {
   }
 
   private suggestOutputName(): void {
+    if (this.tool() === 'online') {
+      this.outputName = { dem: 'Elevation (Copernicus DEM)', landcover: 'Land cover (ESA WorldCover)', sentinel2: 'Sentinel-2 image' }[
+        this.onlineSource
+      ];
+      return;
+    }
     const sourceId = VECTOR_TOOLS.includes(this.tool()) ? this.vectorLayerId() : this.layerId();
     const layer = this.layersSignal().find((l) => l.id === sourceId);
     const label = RASTER_TOOLS.find((t) => t.id === this.tool())?.label.split(' /')[0] ?? '';
@@ -468,6 +498,95 @@ export class RasterAnalysisComponent implements OnDestroy {
 
   calcLetter(index: number): string {
     return 'ABCD'[index];
+  }
+
+  setOnlineSource(source: 'dem' | 'landcover' | 'sentinel2'): void {
+    this.onlineSource = source;
+    this.resetResult();
+    this.suggestOutputName();
+  }
+
+  /** The area of interest as an EPSG:4326 bbox (+ exact polygon when drawn). */
+  private aoi(): { bbox: [number, number, number, number]; polygon?: GeoJsonGeometry } | null {
+    if (this.aoiMode === 'view') {
+      const bbox = this.mapService.getViewExtent4326();
+      return bbox ? { bbox } : null;
+    }
+    if (this.aoiMode === 'layer') {
+      const b = this.layersSignal().find((l) => l.id === this.aoiLayerId)?.bbox;
+      return b ? { bbox: [b.minX, b.minY, b.maxX, b.maxY] } : null;
+    }
+    const polygon = this.polygon();
+    return polygon ? { bbox: geometryBbox(polygon), polygon } : null;
+  }
+
+  searchScenes(): void {
+    const aoi = this.aoi();
+    if (!aoi) return this.error.set(this.aoiHint());
+    this.resetResult();
+    this.scenes.set(null);
+    this.sceneId.set(null);
+    this.clearPreview();
+    this.mapService.clearAnalysisGeometry();
+    this.searching.set(true);
+    this.api.sentinelSearch({ bbox: aoi.bbox, from: this.s2From, to: this.s2To, maxCloud: this.s2Cloud }).subscribe({
+      next: (r) => {
+        this.searching.set(false);
+        this.scenes.set(r.scenes);
+        if (r.scenes.length) this.pickScene(r.scenes[0]);
+        else this.message.set('No scenes match — widen the dates or allow more cloud.');
+      },
+      error: (err: HttpErrorResponse) => {
+        this.searching.set(false);
+        this.fail(err);
+      }
+    });
+  }
+
+  /** Selecting a scene previews it on the map: its footprint outline and
+   *  a true-colour quick-look over the chosen area. */
+  pickScene(scene: SentinelScene): void {
+    this.sceneId.set(scene.id);
+    this.outputName = `Sentinel-2 ${scene.datetime?.slice(0, 10) ?? scene.id}`;
+    const aoi = this.aoi();
+    this.mapService.setAnalysisGeometry(scene.footprint);
+    if (!aoi) return;
+    if (this.aoiMode !== 'view') this.mapService.zoomToExtent4326(aoi.bbox);
+    this.previewSub?.unsubscribe();
+    this.previewing.set(scene.id);
+    this.previewSub = this.api.sentinelPreview(scene.id, aoi.bbox).subscribe({
+      next: (blob) => {
+        if (this.sceneId() !== scene.id) return;
+        this.previewing.set(null);
+        this.revokePreview();
+        this.previewUrl = URL.createObjectURL(blob);
+        this.mapService.setPreviewImage(this.previewUrl, aoi.bbox);
+      },
+      error: (err: HttpErrorResponse) => {
+        this.previewing.set(null);
+        this.fail(err);
+      }
+    });
+  }
+
+  private clearPreview(): void {
+    this.previewSub?.unsubscribe();
+    this.previewing.set(null);
+    this.mapService.clearPreviewImage();
+    this.revokePreview();
+  }
+
+  private revokePreview(): void {
+    if (this.previewUrl) URL.revokeObjectURL(this.previewUrl);
+    this.previewUrl = null;
+  }
+
+  private aoiHint(): string {
+    return this.aoiMode === 'draw'
+      ? 'Draw the area (or use selected polygons) first.'
+      : this.aoiMode === 'layer'
+        ? 'Choose a layer whose extent to use.'
+        : 'The map view is not ready yet.';
   }
 
   addMosaicInput(): void {
@@ -625,6 +744,18 @@ export class RasterAnalysisComponent implements OnDestroy {
         return this.runLayerTool('polygonize', base);
       case 'ndvi':
         return this.runLayerTool('ndvi', { layerId, redBand: this.redBand, nirBand: this.nirBand, outputName: base.outputName });
+      case 'online': {
+        const aoi = this.aoi();
+        if (!aoi) return this.error.set(this.aoiHint());
+        if (this.onlineSource === 'sentinel2' && !this.sceneId()) return this.error.set('Search and pick a Sentinel-2 scene first.');
+        if (!this.outputName.trim()) return this.error.set('Enter a name for the new layer.');
+        return this.runLayerTool('online', {
+          source: this.onlineSource,
+          ...aoi,
+          sceneId: this.onlineSource === 'sentinel2' ? this.sceneId() : undefined,
+          outputName: this.outputName.trim()
+        });
+      }
       case 'stats':
         this.execute(this.api.statistics({ layerId: layerId!, band: this.band, bins: this.histogramBins }), (r) => {
           this.statistics.set(r);
@@ -748,6 +879,9 @@ export class RasterAnalysisComponent implements OnDestroy {
 
   clear(): void {
     this.cancelPick();
+    this.clearPreview();
+    this.scenes.set(null);
+    this.sceneId.set(null);
     this.clearInputs();
     this.resetResult();
     if (this.tool() === 'swipe') {
@@ -827,6 +961,7 @@ export class RasterAnalysisComponent implements OnDestroy {
   private runLayerTool(tool: string, body: Record<string, unknown>): void {
     this.execute(this.api.run(tool, body), (r: LayerResult) => {
       this.message.set(`New layer "${r.layer.name}" added to the map.`);
+      if (this.tool() === 'online') this.clearPreview();
       this.facts.set(describe(r.result));
       this.mapService.clearAnalysisGeometry();
       this.layerCreated.emit(r.layer);
@@ -947,6 +1082,7 @@ const LABELS: Record<string, [string, (v: number) => string]> = {
   peakPerKm2: ['Peak density', (v) => `${fmt(v)} / km²`],
   withinM2: ['Area within distance', formatArea],
   inputs: ['Rasters merged', fmtInt],
+  tiles: ['Source tiles', fmtInt],
   pixelSizeM: ['Pixel size', (v) => `${fmt(v)} m`]
 };
 
@@ -964,6 +1100,11 @@ function describe(result: Record<string, unknown>): { label: string; value: stri
     const label = c.label?.startsWith('Class') ? c.label : `Class ${c.label || c.value}`;
     facts.push({ label, value: formatArea(c.areaM2) });
   }
+  for (const key of ['source', 'sceneId'] as const) {
+    if (typeof result?.[key] === 'string') facts.push({ label: key === 'source' ? 'Source' : 'Scene', value: result[key] as string });
+  }
+  if (typeof result?.['cloud'] === 'number') facts.push({ label: 'Cloud cover', value: `${(result['cloud'] as number).toFixed(1)} %` });
+  if (Array.isArray(result?.['bands'])) facts.push({ label: 'Bands', value: (result['bands'] as string[]).join(' · ') });
   if (typeof result?.['crs'] === 'string') facts.push({ label: 'Coordinate system', value: result['crs'] as string });
   if (typeof result?.['width'] === 'number') facts.push({ label: 'Size', value: `${fmtInt(result['width'] as number)} × ${fmtInt(result['height'] as number)} px` });
   if (result?.['resampled']) facts.push({ label: 'Note', value: 'Large DEM — processed at reduced resolution' });
@@ -998,4 +1139,25 @@ function formatArea(m2: number): string {
   if (m2 >= 1e6) return `${(m2 / 1e6).toFixed(2)} km²`;
   if (m2 >= 1e4) return `${(m2 / 1e4).toFixed(2)} ha`;
   return `${Math.round(m2)} m²`;
+}
+
+function isoDate(offsetDays: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  return d.toISOString().slice(0, 10);
+}
+
+/** EPSG:4326 bbox of a GeoJSON geometry. */
+function geometryBbox(geometry: GeoJsonGeometry): [number, number, number, number] {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const walk = (c: unknown): void => {
+    if (Array.isArray(c) && typeof c[0] === 'number') {
+      minX = Math.min(minX, c[0] as number);
+      maxX = Math.max(maxX, c[0] as number);
+      minY = Math.min(minY, c[1] as number);
+      maxY = Math.max(maxY, c[1] as number);
+    } else if (Array.isArray(c)) c.forEach(walk);
+  };
+  walk(geometry['coordinates']);
+  return [minX, minY, maxX, maxY];
 }

@@ -111,6 +111,16 @@ export interface ZonalResult {
   truncated: boolean;
 }
 
+export interface SentinelScene {
+  id: string;
+  datetime: string | null;
+  cloud: number | null;
+  coverage: number;
+  platform: string | null;
+  thumbnail: string | null;
+  footprint: GeoJsonGeometry;
+}
+
 export interface VectorField {
   name: string;
   type: string;
@@ -165,6 +175,15 @@ export class RasterService {
 
   cutFill(body: Record<string, unknown>): Observable<CutFillResult> {
     return this.http.post<CutFillResult>(`${this.baseUrl}/cut-fill`, body);
+  }
+
+  sentinelSearch(body: { bbox: number[]; from: string; to: string; maxCloud: number }): Observable<{ scenes: SentinelScene[] }> {
+    return this.http.post<{ scenes: SentinelScene[] }>(`${this.baseUrl}/online/sentinel2/search`, body);
+  }
+
+  /** True-colour PNG of a scene over the area (EPSG:4326 bbox). */
+  sentinelPreview(sceneId: string, bbox: number[]): Observable<Blob> {
+    return this.http.post(`${this.baseUrl}/online/sentinel2/preview`, { sceneId, bbox }, { responseType: 'blob' });
   }
 
   vectorFields(layerId: string): Observable<VectorField[]> {

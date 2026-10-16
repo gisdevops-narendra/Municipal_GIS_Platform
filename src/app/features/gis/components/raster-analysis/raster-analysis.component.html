@@ -419,6 +419,102 @@
       <p class="bo__hint">NDVI = (NIR − Red) / (NIR + Red). Sentinel-2: Red = 4, NIR = 8 · Landsat 8/9: Red = 4, NIR = 5.</p>
     }
 
+    @case ('online') {
+      <span class="bo__label">Dataset</span>
+      <div class="ra__sources">
+        <button type="button" class="ra__source" [class.is-active]="onlineSource === 'dem'" (click)="setOnlineSource('dem')">
+          <i class="pi pi-chart-line" aria-hidden="true"></i>
+          <span class="ra__source-name">Elevation</span>
+          <span class="ra__source-meta">Copernicus DEM · 30 m</span>
+        </button>
+        <button type="button" class="ra__source" [class.is-active]="onlineSource === 'landcover'" (click)="setOnlineSource('landcover')">
+          <i class="pi pi-map" aria-hidden="true"></i>
+          <span class="ra__source-name">Land cover</span>
+          <span class="ra__source-meta">ESA WorldCover · 10 m</span>
+        </button>
+        <button type="button" class="ra__source" [class.is-active]="onlineSource === 'sentinel2'" (click)="setOnlineSource('sentinel2')">
+          <i class="pi pi-globe" aria-hidden="true"></i>
+          <span class="ra__source-name">Satellite image</span>
+          <span class="ra__source-meta">Sentinel-2 · 10 m</span>
+        </button>
+      </div>
+
+      <span class="bo__label">Area</span>
+      <div class="bo__modes" role="tablist">
+        <button type="button" class="bo__mode" [class.bo__mode--active]="aoiMode === 'view'" (click)="aoiMode = 'view'">Map view</button>
+        <button type="button" class="bo__mode" [class.bo__mode--active]="aoiMode === 'layer'" (click)="aoiMode = 'layer'">Layer extent</button>
+        <button type="button" class="bo__mode" [class.bo__mode--active]="aoiMode === 'draw'" (click)="aoiMode = 'draw'">Draw</button>
+      </div>
+      @if (aoiMode === 'layer') {
+        <p-select
+          class="bo__select"
+          [options]="extentLayers()"
+          optionLabel="label"
+          optionValue="value"
+          [(ngModel)]="aoiLayerId"
+          [filter]="true"
+          placeholder="e.g. the municipal boundary"
+          appendTo="body"
+        />
+      } @else if (aoiMode === 'draw') {
+        <ng-container *ngTemplateOutlet="polygonInput"></ng-container>
+      } @else {
+        <p class="bo__hint">Uses whatever is visible on the map — zoom to your area first.</p>
+      }
+
+      @if (onlineSource === 'sentinel2') {
+        <div class="bo__row">
+          <label class="bo__field bo__field--grow">
+            <span class="bo__label">From</span>
+            <input type="date" class="bo__input" [(ngModel)]="s2From" />
+          </label>
+          <label class="bo__field bo__field--grow">
+            <span class="bo__label">To</span>
+            <input type="date" class="bo__input" [(ngModel)]="s2To" />
+          </label>
+        </div>
+        <label class="bo__field">
+          <span class="bo__label">Max cloud cover {{ s2Cloud }} %</span>
+          <input type="range" min="0" max="100" step="5" [(ngModel)]="s2Cloud" />
+        </label>
+        <button pButton type="button" [label]="searching() ? 'Searching…' : 'Search scenes'" icon="pi pi-search" class="p-button-sm p-button-outlined" [disabled]="searching()" (click)="searchScenes()"></button>
+        @if (scenes(); as list) {
+          @if (list.length) {
+            <ul class="ra__scenes">
+              @for (sc of list; track sc.id) {
+                <li>
+                  <button type="button" class="ra__scene" [class.is-active]="sc.id === sceneId()" (click)="pickScene(sc)">
+                    @if (sc.thumbnail) {
+                      <img [src]="sc.thumbnail" alt="" loading="lazy" />
+                    } @else {
+                      <span class="ra__scene-ph"><i class="pi pi-image"></i></span>
+                    }
+                    <span class="ra__scene-text">
+                      <span class="ra__scene-date">{{ sc.datetime?.slice(0, 10) }} · {{ sc.platform }}</span>
+                      <span class="ra__scene-meta">
+                        <i class="pi pi-cloud"></i> {{ sc.cloud?.toFixed(1) }} % ·
+                        covers {{ sc.coverage.toFixed(0) }} %
+                      </span>
+                      @if (previewing() === sc.id) {
+                        <span class="ra__scene-meta"><i class="pi pi-spin pi-spinner"></i> Loading map preview…</span>
+                      } @else if (sc.id === sceneId()) {
+                        <span class="ra__scene-meta ra__scene-on"><i class="pi pi-eye"></i> Previewing on map</span>
+                      }
+                    </span>
+                  </button>
+                </li>
+              }
+            </ul>
+          }
+        }
+        <p class="bo__hint">Click a scene to preview it on the map. Bands saved: 1 Blue · 2 Green · 3 Red · 4 NIR · 5 SWIR — ready for NDVI, NDWI, NDBI, SAVI and classification. Max 2 500 km².</p>
+      } @else if (onlineSource === 'landcover') {
+        <p class="bo__hint">11 classes (trees, cropland, built-up, water…) with the official legend colours. Max 2 500 km².</p>
+      } @else {
+        <p class="bo__hint">Global 30 m surface elevation in metres — use it for slope, contours, watershed, flood and viewshed. Max 20 000 km².</p>
+      }
+    }
+
     @case ('stats') {
       <label class="bo__field">
         <span class="bo__label">Histogram bins</span>
@@ -737,7 +833,7 @@
       <button
         pButton
         type="button"
-        [label]="running() ? 'Working…' : tool() === 'upload' ? 'Upload & publish' : tool() === 'style' ? 'Apply style' : tool() === 'identify' ? 'Identify' : tool() === 'download' ? 'Download' : tool() === 'stats' ? 'Compute' : 'Run'"
+        [label]="running() ? 'Working…' : tool() === 'upload' ? 'Upload & publish' : tool() === 'online' ? 'Download & publish' : tool() === 'style' ? 'Apply style' : tool() === 'identify' ? 'Identify' : tool() === 'download' ? 'Download' : tool() === 'stats' ? 'Compute' : 'Run'"
         icon="pi pi-play"
         class="p-button-sm bo__run"
         [disabled]="running()"

@@ -402,3 +402,133 @@
 .ra__table-empty td {
   color: var(--color-ink-500);
 }
+
+/* ---------- online sources ---------- */
+.ra__sources {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.ra__source {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  text-align: left;
+  cursor: pointer;
+
+  i {
+    font-size: 15px;
+    color: var(--color-ink-500);
+  }
+
+  &:hover {
+    border-color: var(--color-primary-500, #2563eb);
+  }
+
+  &.is-active {
+    border-color: var(--color-primary-500, #2563eb);
+    background: var(--color-surface-alt);
+    box-shadow: inset 0 0 0 1px var(--color-primary-500, #2563eb);
+
+    i {
+      color: var(--color-primary-600, #2563eb);
+    }
+  }
+}
+
+.ra__source-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-ink-900);
+}
+
+.ra__source-meta {
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--color-ink-500);
+}
+
+.ra__scenes {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 260px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.ra__scene {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 5px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  text-align: left;
+  cursor: pointer;
+
+  img,
+  .ra__scene-ph {
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-sm);
+    object-fit: cover;
+    background: var(--color-surface-alt);
+  }
+
+  .ra__scene-ph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-ink-500);
+  }
+
+  &:hover {
+    border-color: var(--color-primary-500, #2563eb);
+  }
+
+  &.is-active {
+    border-color: var(--color-primary-500, #2563eb);
+    background: var(--color-surface-alt);
+    box-shadow: inset 3px 0 0 var(--color-primary-500, #2563eb);
+  }
+}
+
+.ra__scene-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ra__scene-date {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-ink-900);
+}
+
+.ra__scene-meta {
+  font-size: 11px;
+  color: var(--color-ink-500);
+
+  i {
+    font-size: 10px;
+  }
+}
+
+.ra__scene-on {
+  color: var(--color-primary-600, #2563eb);
+  font-weight: 600;
+}

@@ -76,6 +76,7 @@ const MODULES: ModuleSeed[] = [
   { module_id: 916, module_name: 'Resample / Reproject', isactive: true, module_parent_id: 910, node_path: '69.910.916', sub_module: null, default_module: false, display_priority: 6, type: 'mainleft' },
   { module_id: 917, module_name: 'Rasterize Vector', isactive: true, module_parent_id: 910, node_path: '69.910.917', sub_module: null, default_module: false, display_priority: 7, type: 'mainleft' },
   { module_id: 918, module_name: 'Download Raster', isactive: true, module_parent_id: 910, node_path: '69.910.918', sub_module: null, default_module: false, display_priority: 8, type: 'mainleft' },
+  { module_id: 919, module_name: 'Download from Online Sources', isactive: true, module_parent_id: 910, node_path: '69.910.919', sub_module: null, default_module: false, display_priority: 9, type: 'mainleft' },
   { module_id: 920, module_name: 'Terrain Analysis', isactive: true, module_parent_id: 69, node_path: '69.920', sub_module: null, default_module: false, display_priority: 2, type: 'mainleft' },
   { module_id: 921, module_name: 'Elevation Profile', isactive: true, module_parent_id: 920, node_path: '69.920.921', sub_module: null, default_module: false, display_priority: 1, type: 'mainleft' },
   { module_id: 922, module_name: 'Slope', isactive: true, module_parent_id: 920, node_path: '69.920.922', sub_module: null, default_module: false, display_priority: 2, type: 'mainleft' },

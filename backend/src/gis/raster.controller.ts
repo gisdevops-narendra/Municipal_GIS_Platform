@@ -14,6 +14,9 @@ import {
   HeatmapDto,
   IdwDto,
   MosaicDto,
+  OnlineRasterDto,
+  SentinelPreviewDto,
+  SentinelSearchDto,
   ProximityDto,
   RasterizeDto,
   RasterStatisticsDto,
@@ -108,6 +111,28 @@ export class RasterController {
     res.setHeader('Content-Type', 'image/tiff');
     res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
     res.send(file.body);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('online/sentinel2/search')
+  @HttpCode(200)
+  sentinelSearch(@Body() dto: SentinelSearchDto) {
+    return this.tools.sentinelSearch(dto);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('online/sentinel2/preview')
+  async sentinelPreview(@CurrentAppUser() appUser: AppUser, @Body() dto: SentinelPreviewDto, @Res() res: Response) {
+    const png = await this.tools.sentinelPreview(appUser, dto);
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(png);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('online')
+  online(@CurrentAppUser() appUser: AppUser, @Body() dto: OnlineRasterDto) {
+    return this.tools.onlineRaster(appUser, dto);
   }
 
   @RequireMunicipalityMember()

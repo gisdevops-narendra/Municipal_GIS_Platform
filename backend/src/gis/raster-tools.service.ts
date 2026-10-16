@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { mkdir } from 'fs/promises';
+import { mkdir, readFile } from 'fs/promises';
 import { dirname } from 'path';
 import type { GisGeometryType } from '@prisma/client';
 import type { AppUser } from '../auth/types/app-user.type';
@@ -13,6 +13,9 @@ import type {
   HeatmapDto,
   IdwDto,
   MosaicDto,
+  OnlineRasterDto,
+  SentinelPreviewDto,
+  SentinelSearchDto,
   ProximityDto,
   RasterizeDto,
   RasterStatisticsDto,
@@ -38,6 +41,12 @@ const CALC_FUNCTIONS = new Set([
   'where', 'sqrt', 'log', 'log10', 'exp', 'abs', 'minimum', 'maximum',
   'sin', 'cos', 'tan', 'logical_and', 'logical_or', 'logical_not',
 ]);
+
+/** ESA WorldCover legend colours. */
+const WORLDCOVER_COLORS: Record<number, string> = {
+  10: '#006400', 20: '#ffbb22', 30: '#ffff4c', 40: '#f096ff', 50: '#fa0000', 60: '#b4b4b4',
+  70: '#f0f0f0', 80: '#0064c8', 90: '#0096a0', 95: '#00cf75', 100: '#fae6a0',
+};
 
 /** Reclassify / class colours, in rule order. */
 const CLASS_COLORS = [
@@ -383,6 +392,62 @@ export class RasterToolsService {
       };
       return { style, result };
     });
+  }
+
+  // ----- Online Data -----
+
+  /** Sentinel-2 L2A scenes over the area (Earth Search STAC, no key). */
+  async sentinelSearch(dto: SentinelSearchDto) {
+    this.assertBbox(dto.bbox);
+    if (dto.from > dto.to) throw new BadRequestException('"From" must be before "To".');
+    return this.rasters.runOp({ op: 'stac_search', bbox: dto.bbox, from: dto.from, to: dto.to, maxCloud: dto.maxCloud ?? 20 });
+  }
+
+  /** PNG quick-look of a scene over the area (EPSG:4326 bbox). */
+  async sentinelPreview(appUser: AppUser, dto: SentinelPreviewDto): Promise<Buffer> {
+    this.assertBbox(dto.bbox);
+    const output = this.rasters.tempPath(appUser.municipalityId, '.png');
+    await this.ensureDir(output);
+    try {
+      await this.rasters.runOp({ op: 'stac_preview', sceneId: dto.sceneId, bbox: dto.bbox, output });
+      return await readFile(output);
+    } finally {
+      await this.rasters.removeTemp(output, `${output}.aux.xml`);
+    }
+  }
+
+  /** Downloads open data (Copernicus DEM, ESA WorldCover, Sentinel-2) for
+   *  the area and publishes it as a raster layer. */
+  async onlineRaster(appUser: AppUser, dto: OnlineRasterDto) {
+    this.assertBbox(dto.bbox);
+    if (dto.source === 'sentinel2' && !dto.sceneId) {
+      throw new BadRequestException('Search and pick a Sentinel-2 scene first.');
+    }
+    const request = { bbox: dto.bbox, polygon: dto.polygon, sceneId: dto.sceneId };
+    return this.toRasterLayer(appUser, dto.outputName, async (output) => {
+      if (dto.source === 'dem') {
+        const r = await this.rasters.runOp<{ stats: RasterStats }>({ op: 'online_dem', ...request, output });
+        const [min, max] = span(r.stats, [0, 100]);
+        return { style: { mode: 'ramp', ramp: 'terrain', min, max }, result: r };
+      }
+      if (dto.source === 'landcover') {
+        const r = await this.rasters.runOp<{ classes: { value: number; label: string }[] }>({ op: 'online_landcover', ...request, output });
+        const style: RasterStyleSpec = {
+          mode: 'values',
+          classes: r.classes.map((c) => ({ value: c.value, color: WORLDCOVER_COLORS[c.value] ?? '#999999', label: c.label })),
+        };
+        return { style, result: r };
+      }
+      const r = await this.rasters.runOp({ op: 'stac_fetch', ...request, output });
+      return { style: { mode: 'rgb', bands: [3, 2, 1] }, result: r };
+    });
+  }
+
+  private assertBbox(bbox: [number, number, number, number]): void {
+    const [minX, minY, maxX, maxY] = bbox;
+    if (!(minX < maxX && minY < maxY) || minY < -90 || maxY > 90) {
+      throw new BadRequestException('The area is not a valid longitude / latitude box.');
+    }
   }
 
   // ----- helpers -----

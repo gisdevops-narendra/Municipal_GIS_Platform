@@ -547,3 +547,54 @@ export class ClassifyDto extends RasterOutputDto {
   @Min(1, { each: true })
   bands?: number[];
 }
+
+// ----- Online Data -----
+
+/** `[minLon, minLat, maxLon, maxLat]` in EPSG:4326. */
+class AoiDto {
+  @IsArray()
+  @ArrayMinSize(4)
+  @ArrayMaxSize(4)
+  @IsNumber({}, { each: true })
+  @Min(-180, { each: true })
+  @Max(180, { each: true })
+  bbox!: [number, number, number, number];
+}
+
+export class SentinelSearchDto extends AoiDto {
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  from!: string;
+
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  to!: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  maxCloud?: number;
+}
+
+export class OnlineRasterDto extends AoiDto {
+  @IsIn(['dem', 'landcover', 'sentinel2'])
+  source!: 'dem' | 'landcover' | 'sentinel2';
+
+  /** Optional exact boundary (GeoJSON Polygon / MultiPolygon, EPSG:4326). */
+  @IsOptional()
+  @IsObject()
+  polygon?: GeoJsonPolygon;
+
+  /** Sentinel-2 scene id from the search. */
+  @IsOptional()
+  @Matches(/^S2[A-D]_[A-Z0-9_]{10,80}$/)
+  sceneId?: string;
+
+  @IsString()
+  @Length(1, 80)
+  outputName!: string;
+}
+
+export class SentinelPreviewDto extends AoiDto {
+  @Matches(/^S2[A-D]_[A-Z0-9_]{10,80}$/)
+  sceneId!: string;
+}

@@ -9,6 +9,7 @@ import VectorLayer from 'ol/layer/Vector';
 import OSM from 'ol/source/OSM';
 import XYZ from 'ol/source/XYZ';
 import ImageWMS from 'ol/source/ImageWMS';
+import ImageStatic from 'ol/source/ImageStatic';
 import VectorSource from 'ol/source/Vector';
 import GeoJSON from 'ol/format/GeoJSON';
 import WKT from 'ol/format/WKT';
@@ -516,6 +517,26 @@ export class MapService {
     if (feature) {
       source.addFeature(feature);
     }
+  }
+
+  private previewLayer: ImageLayer<ImageStatic> | null = null;
+
+  /** Raster quick-look (e.g. a Sentinel-2 scene before download): a static
+   *  image stretched over an EPSG:4326 bbox, just above the data layers. */
+  setPreviewImage(url: string, bbox: [number, number, number, number]): void {
+    if (!this.map) return;
+    this.clearPreviewImage();
+    this.previewLayer = new ImageLayer({
+      source: new ImageStatic({ url, imageExtent: bbox, projection: LAYER_PROJECTION, interpolate: true }),
+      properties: { preview: true }
+    });
+    const layers = this.map.getLayers();
+    layers.insertAt(Math.min(this.managedLayers.size + 1, layers.getLength()), this.previewLayer);
+  }
+
+  clearPreviewImage(): void {
+    if (this.previewLayer) this.map?.removeLayer(this.previewLayer);
+    this.previewLayer = null;
   }
 
   clearAnalysisGeometry(): void {
@@ -1481,7 +1502,7 @@ export class MapService {
     this.zoomToExtent4326(bbox);
   }
 
-  private zoomToExtent4326(bbox: [number, number, number, number]): void {
+  zoomToExtent4326(bbox: [number, number, number, number]): void {
     const view = this.map?.getView();
     if (!view) return;
     const extent = transformExtent(bbox, LAYER_PROJECTION, MAP_PROJECTION);
