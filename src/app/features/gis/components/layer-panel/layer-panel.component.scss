@@ -152,3 +152,12 @@
   border-radius: 2px;
   background: var(--color-surface);
 }
+
+.layer-panel__tag {
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--color-surface-alt);
+  font-size: 10px;
+  color: var(--color-ink-500);
+}

@@ -39,6 +39,8 @@ export interface GisLayer {
    *  YSLD, or null when it uses GeoServer's built-in default. */
   styleName?: string | null;
   hasCustomStyle?: boolean;
+  /** Produced by Raster Analysis — listed in its own Layers-panel group. */
+  rasterAnalysis?: boolean;
   /** EPSG:4326 (lon/lat) extent captured from GeoServer at publish time, or
    *  null if unavailable (e.g. a layer with zero features yet). */
   bbox: GisLayerBoundingBox | null;

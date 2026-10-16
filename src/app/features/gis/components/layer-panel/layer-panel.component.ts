@@ -67,13 +67,18 @@ export class LayerPanelComponent {
   }
 
   get canonicalLayers(): GisLayer[] {
-    return this.layers.filter((layer) => layer.ownershipType === 'CANONICAL');
+    return this.layers.filter((layer) => layer.ownershipType === 'CANONICAL' && !layer.rasterAnalysis);
+  }
+
+  /** Raster Analysis uploads, downloads and results, whoever owns them. */
+  get rasterAnalysisLayers(): GisLayer[] {
+    return this.layers.filter((layer) => layer.rasterAnalysis);
   }
 
   get departmentGroups(): LayerPanelDepartmentGroup[] {
     const groups = new Map<string, LayerPanelDepartmentGroup>();
     for (const layer of this.layers) {
-      if (layer.ownershipType !== 'DEPARTMENT') continue;
+      if (layer.ownershipType !== 'DEPARTMENT' || layer.rasterAnalysis) continue;
       const departmentId = layer.departmentId ?? 'unassigned';
       const departmentName = layer.departmentName ?? 'Unassigned';
       const existing = groups.get(departmentId);

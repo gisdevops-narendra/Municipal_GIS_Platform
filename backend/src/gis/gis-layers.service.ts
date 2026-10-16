@@ -548,6 +548,7 @@ export class GisLayersService {
       version: layer.version,
       styleName: layer.styleName,
       hasCustomStyle: !!layer.styleName,
+      rasterAnalysis: layer.rasterAnalysis,
       bbox:
         layer.bboxMinX !== null &&
         layer.bboxMinY !== null &&

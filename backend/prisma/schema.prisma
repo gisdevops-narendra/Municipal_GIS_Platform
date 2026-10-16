@@ -240,6 +240,9 @@ model GISLayer {
   /// editor can reopen the exact settings. See
   /// backend/src/gis/dto/layer-style.dto.ts and docs/backend.md.
   styleSpec      Json?                 @map("style_spec")
+  /// Produced by Raster Analysis (uploaded / downloaded rasters and every
+  /// tool output) — the Layers panel lists these in their own group.
+  rasterAnalysis Boolean               @default(false) @map("raster_analysis")
 
   gisWorkspace GISWorkspace         @relation(fields: [gisWorkspaceId], references: [id])
   department   Department?          @relation(fields: [departmentId], references: [id])

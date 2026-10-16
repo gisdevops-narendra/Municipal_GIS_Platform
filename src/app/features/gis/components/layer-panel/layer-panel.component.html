@@ -110,6 +110,63 @@
         }
       </div>
     }
+
+    @if (rasterAnalysisLayers.length > 0) {
+      <div class="layer-panel__group">
+        <h3 class="layer-panel__group-title">Raster Analysis</h3>
+        <ul class="layer-panel__list">
+          @for (layer of rasterAnalysisLayers; track layer.id) {
+            <li class="layer-panel__item" [class.layer-panel__item--highlight]="layer.id === highlightLayerId">
+              <p-checkbox
+                [inputId]="'layer-' + layer.id"
+                [binary]="true"
+                [ngModel]="isVisible(layer.id)"
+                (onChange)="onToggle(layer.id, $event)"
+              ></p-checkbox>
+              <label [for]="'layer-' + layer.id" class="layer-panel__label" [title]="layer.description ?? layer.name">
+                {{ layer.name }}
+                @if (layer.departmentName) {
+                  <span class="layer-panel__tag">{{ layer.departmentName }}</span>
+                }
+              </label>
+              @if (layer.bbox) {
+                <button
+                  type="button"
+                  class="layer-panel__style"
+                  pTooltip="Zoom to layer"
+                  tooltipPosition="left"
+                  aria-label="Zoom to layer"
+                  (click)="onZoom(layer, $event)"
+                >
+                  <i class="pi pi-search-plus" aria-hidden="true"></i>
+                </button>
+              }
+              @if (canStyle) {
+                <button
+                  type="button"
+                  class="layer-panel__style"
+                  pTooltip="Style layer"
+                  tooltipPosition="left"
+                  aria-label="Style layer"
+                  (click)="onStyle(layer, $event)"
+                >
+                  <i class="pi pi-palette" aria-hidden="true"></i>
+                </button>
+              }
+              @if (isVisible(layer.id)) {
+                <img
+                  class="layer-panel__swatch"
+                  [src]="legendUrl(layer)"
+                  [alt]="layer.name + ' legend'"
+                  (error)="$any($event.target).hidden = true"
+                  (load)="$any($event.target).hidden = false"
+                />
+              }
+            </li>
+          }
+        </ul>
+      </div>
+    }
   </div>
 
   @if (showBasemap) {
