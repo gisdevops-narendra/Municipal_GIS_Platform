@@ -1200,7 +1200,7 @@ WORLDCOVER_CLASSES = {
 }
 
 gdal.SetConfigOption("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
-gdal.SetConfigOption("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif,.TIF")
+gdal.SetConfigOption("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif,.TIF,.vrt")
 gdal.SetConfigOption("GDAL_HTTP_MAX_RETRY", "3")
 gdal.SetConfigOption("GDAL_HTTP_RETRY_DELAY", "1")
 
@@ -1420,6 +1420,543 @@ def op_stac_fetch(req):
             "width": width, "height": height}
 
 
+# ------------------------------------------- shared online helpers (v2)
+
+PC_STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
+PC_TOKEN_URL = "https://planetarycomputer.microsoft.com/api/sas/v1/token/{collection}"
+HRSL_VRT = "https://dataforgood-fb-data.s3.amazonaws.com/hrsl-cogs/hrsl_general/hrsl_general-latest.vrt"
+JRC_URL = "https://storage.googleapis.com/global-surface-water/downloads2021/occurrence/occurrence_{tile}v1_4_2021.tif"
+SCL_CLOUDY = (0, 1, 3, 8, 9, 10)  # no data, saturated, shadow, cloud, cirrus
+
+
+def stac_items(url, collection, bbox, start, end, max_cloud, limit=50, extra_query=None):
+    query = {"eo:cloud_cover": {"lte": max_cloud}}
+    query.update(extra_query or {})
+    body = {
+        "collections": [collection], "bbox": bbox,
+        "datetime": f"{start}T00:00:00Z/{end}T23:59:59Z",
+        "query": query, "limit": limit,
+        "sortby": [{"field": "properties.datetime", "direction": "asc"}],
+    }
+    return http_json(f"{url}/search", body).get("features", [])
+
+
+def covering(items, bbox, min_pct=60):
+    """Items whose footprint covers at least `min_pct` % of the bbox."""
+    minx, miny, maxx, maxy = bbox
+    aoi = ogr.CreateGeometryFromJson(json.dumps({"type": "Polygon", "coordinates": [[
+        [minx, miny], [maxx, miny], [maxx, maxy], [minx, maxy], [minx, miny]]]}))
+    out = []
+    for item in items:
+        fp = ogr.CreateGeometryFromJson(json.dumps(item["geometry"]))
+        if fp.Intersection(aoi).GetArea() / aoi.GetArea() * 100 >= min_pct:
+            out.append(item)
+    return out
+
+
+def utm_for_bbox(bbox):
+    lon = (bbox[0] + bbox[2]) / 2
+    lat = (bbox[1] + bbox[3]) / 2
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG((32600 if lat >= 0 else 32700) + int((lon + 180) // 6) + 1)
+    srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    return srs
+
+
+def grid_for_bbox(bbox, pixel):
+    """A north-up UTM grid of `pixel` metres covering the lon/lat bbox."""
+    srs = utm_for_bbox(bbox)
+    tr = osr.CoordinateTransformation(wgs84(), srs)
+    xs, ys = [], []
+    for lon, lat in ((bbox[0], bbox[1]), (bbox[0], bbox[3]), (bbox[2], bbox[1]), (bbox[2], bbox[3])):
+        x, y, _ = tr.TransformPoint(lon, lat)
+        xs.append(x); ys.append(y)
+    minx, maxx = math.floor(min(xs) / pixel) * pixel, math.ceil(max(xs) / pixel) * pixel
+    miny, maxy = math.floor(min(ys) / pixel) * pixel, math.ceil(max(ys) / pixel) * pixel
+    w, h = int((maxx - minx) / pixel), int((maxy - miny) / pixel)
+    if w * h > MAX_GRID_CELLS:
+        raise OpError("The area is too large for this resolution.")
+    return srs, (minx, miny, maxx, maxy), w, h
+
+
+def read_on_grid(href, srs, bounds, w, h, resample="bilinear", band=1, nodata=0):
+    """One band of a remote COG resampled onto the grid (float, NaN = nodata)."""
+    ds = gdal.Warp("", "/vsicurl/" + href, format="MEM", dstSRS=srs.ExportToWkt(),
+                   outputBounds=bounds, width=w, height=h, resampleAlg=resample,
+                   srcNodata=nodata, dstNodata=nodata, outputType=gdal.GDT_Float32)
+    arr = ds.GetRasterBand(band).ReadAsArray().astype(np.float32)
+    if nodata is not None:
+        arr[arr == nodata] = np.nan
+    return arr
+
+
+def write_grid(path, arrays, srs, bounds, pixel, dtype=gdal.GDT_Float32, nodata=FLOAT_NODATA, names=None):
+    h, w = arrays[0].shape
+    ds = gdal.GetDriverByName("GTiff").Create(path, w, h, len(arrays), dtype, GTIFF_OPTIONS)
+    ds.SetGeoTransform((bounds[0], pixel, 0, bounds[3], 0, -pixel))
+    ds.SetProjection(srs.ExportToWkt())
+    for i, arr in enumerate(arrays, start=1):
+        band = ds.GetRasterBand(i)
+        band.SetNoDataValue(nodata)
+        band.WriteArray(np.where(np.isfinite(arr), arr, nodata))
+        if names:
+            band.SetDescription(names[i - 1])
+    ds = None
+
+
+def geojson_in_srs(geometry, srs_wkt):
+    """A temporary GeoPackage of an EPSG:4326 GeoJSON geometry, reprojected to
+    `srs_wkt` (gdal.Rasterize does not reproject). Caller removes it."""
+    src = write_geojson_temp(geometry)
+    fd, dst = tempfile.mkstemp(suffix=".gpkg")
+    os.close(fd)
+    os.remove(dst)
+    try:
+        gdal.VectorTranslate(dst, src, format="GPKG", srcSRS="EPSG:4326", dstSRS=srs_wkt, layerName="g")
+    finally:
+        os.remove(src)
+    return dst
+
+
+def cutline_mask(polygon, srs, bounds, w, h):
+    """Boolean grid mask of a GeoJSON (EPSG:4326) polygon, or None."""
+    if not polygon:
+        return None
+    path = geojson_in_srs(polygon, srs.ExportToWkt())
+    try:
+        mem = gdal.GetDriverByName("MEM").Create("", w, h, 1, gdal.GDT_Byte)
+        mem.SetGeoTransform((bounds[0], (bounds[2] - bounds[0]) / w, 0, bounds[3], 0, -(bounds[3] - bounds[1]) / h))
+        mem.SetProjection(srs.ExportToWkt())
+        gdal.Rasterize(mem, path, burnValues=[1])
+        return mem.GetRasterBand(1).ReadAsArray() == 1
+    finally:
+        os.remove(path)
+
+
+# ------------------------------------------- 6. cloud-free composite
+
+def op_s2_composite(req):
+    bbox = req["bbox"]
+    if aoi_area_km2(bbox) > 400:
+        raise OpError("A cloud-free composite is limited to 400 km² — choose a smaller area.")
+    items = covering(stac_items(STAC_URL, "sentinel-2-l2a", bbox, req["from"], req["to"], req.get("maxCloud", 60)), bbox, 30)
+    items = sorted(items, key=lambda i: i["properties"].get("eo:cloud_cover", 100))[: int(req.get("maxScenes", 10))]
+    if len(items) < 2:
+        raise OpError("Fewer than 2 usable scenes — widen the dates or allow more cloud.")
+    srs, bounds, w, h = grid_for_bbox(bbox, 10)
+    masks = []
+    for item in items:
+        scl = read_on_grid(item["assets"]["scl"]["href"], srs, bounds, w, h, "near")
+        masks.append(np.isnan(scl) | np.isin(np.nan_to_num(scl, nan=0), SCL_CLOUDY))
+    clear = np.sum(~np.stack(masks), axis=0)
+    bands = []
+    for key, _ in S2_BANDS:
+        stack = np.stack([
+            np.where(m, np.nan, read_on_grid(item["assets"][key]["href"], srs, bounds, w, h))
+            for item, m in zip(items, masks)
+        ])
+        with np.errstate(all="ignore"):
+            bands.append(np.nanmedian(stack, axis=0))
+        del stack
+    inside = cutline_mask(req.get("polygon"), srs, bounds, w, h)
+    if inside is not None:
+        bands = [np.where(inside, b, np.nan) for b in bands]
+    write_grid(req["output"], bands, srs, bounds, 10, gdal.GDT_UInt16, 0, [label for _, label in S2_BANDS])
+    covered = np.isfinite(bands[2])
+    return {
+        "source": "Sentinel-2 L2A median composite",
+        "scenes": len(items),
+        "dates": sorted({i["properties"]["datetime"][:10] for i in items}),
+        "clearCoveragePct": float(covered.sum() * 100 / covered.size),
+        "meanClearObservations": float(clear[covered].mean()) if covered.any() else 0.0,
+        "bands": [label for _, label in S2_BANDS],
+        "width": w, "height": h,
+    }
+
+
+# ------------------------------------------- 7. index time series
+
+SERIES_BANDS = {"ndvi": ("red", "nir"), "ndwi": ("green", "nir"), "ndbi": ("swir16", "nir")}
+
+
+def op_index_series(req):
+    bbox = req["bbox"]
+    if aoi_area_km2(bbox) > 100:
+        raise OpError("Time series are limited to 100 km² — use a smaller area or a point.")
+    kind = req.get("kind", "ndvi")
+    a_key, b_key = SERIES_BANDS[kind]
+    items = covering(stac_items(STAC_URL, "sentinel-2-l2a", bbox, req["from"], req["to"], req.get("maxCloud", 60), 100), bbox, 95)
+    if not items:
+        raise OpError("No Sentinel-2 scenes in this period.")
+    srs, bounds, w, h = grid_for_bbox(bbox, 10)
+    inside = cutline_mask(req.get("polygon"), srs, bounds, w, h)
+    series = []
+    seen = set()
+    for item in items[:120]:
+        date = item["properties"]["datetime"][:10]
+        if date in seen:
+            continue
+        try:
+            scl = read_on_grid(item["assets"]["scl"]["href"], srs, bounds, w, h, "near")
+            ok = ~(np.isnan(scl) | np.isin(np.nan_to_num(scl, nan=0), SCL_CLOUDY))
+            if inside is not None:
+                ok &= inside
+            total = inside.sum() if inside is not None else ok.size
+            if ok.sum() < max(1, 0.5 * total):
+                continue
+            a = read_on_grid(item["assets"][a_key]["href"], srs, bounds, w, h)
+            b = read_on_grid(item["assets"][b_key]["href"], srs, bounds, w, h)
+        except RuntimeError:
+            continue
+        with np.errstate(all="ignore"):
+            idx = (a - b) / (a + b) if kind != "ndvi" else (b - a) / (b + a)
+        vals = idx[ok & np.isfinite(idx)]
+        if vals.size == 0:
+            continue
+        seen.add(date)
+        series.append({"date": date, "mean": float(vals.mean()), "min": float(np.percentile(vals, 10)),
+                       "max": float(np.percentile(vals, 90)), "clearPct": float(ok.sum() * 100 / total)})
+    if not series:
+        raise OpError("Every scene in this period was too cloudy over the area.")
+    means = [p["mean"] for p in series]
+    return {"kind": kind, "series": series, "observations": len(series),
+            "first": means[0], "last": means[-1], "change": means[-1] - means[0]}
+
+
+# ------------------------------------------- 8. land surface temperature
+
+def pc_sign(href, token):
+    return f"{href}{'&' if '?' in href else '?'}{token}"
+
+
+def op_lst(req):
+    bbox = req["bbox"]
+    if aoi_area_km2(bbox) > 2500:
+        raise OpError("Land surface temperature is limited to 2 500 km².")
+    items = stac_items(PC_STAC_URL, "landsat-c2-l2", bbox, req["from"], req["to"], req.get("maxCloud", 30), 50,
+                       {"platform": {"in": ["landsat-8", "landsat-9"]}})
+    items = sorted(covering(items, bbox, 80), key=lambda i: i["properties"].get("eo:cloud_cover", 100))
+    items = items[: int(req.get("maxScenes", 5))]
+    if not items:
+        raise OpError("No Landsat 8/9 scenes for this area and period — widen the dates.")
+    token = http_json(PC_TOKEN_URL.format(collection="landsat-c2-l2"))["token"]
+    srs, bounds, w, h = grid_for_bbox(bbox, 30)
+    stack = []
+    for item in items:
+        st = read_on_grid(pc_sign(item["assets"]["lwir11"]["href"], token), srs, bounds, w, h)
+        qa = read_on_grid(pc_sign(item["assets"]["qa_pixel"]["href"], token), srs, bounds, w, h, "near", nodata=1)
+        bad = np.isnan(qa) | ((np.nan_to_num(qa, nan=0).astype(np.uint16) & 0b11110) > 0)
+        celsius = st * 0.00341802 + 149.0 - 273.15
+        stack.append(np.where(bad, np.nan, celsius))
+    with np.errstate(all="ignore"):
+        lst = np.nanmedian(np.stack(stack), axis=0)
+    inside = cutline_mask(req.get("polygon"), srs, bounds, w, h)
+    if inside is not None:
+        lst = np.where(inside, lst, np.nan)
+    if not np.isfinite(lst).any():
+        raise OpError("All scenes were cloudy over the area.")
+    write_grid(req["output"], [lst], srs, bounds, 30)
+    valid = lst[np.isfinite(lst)]
+    mean = float(valid.mean())
+    hot = valid > mean + 2
+    return {
+        "source": "Landsat 8/9 Collection 2 surface temperature (median)",
+        "scenes": len(items),
+        "dates": sorted({i["properties"]["datetime"][:10] for i in items}),
+        "meanC": mean, "maxC": float(valid.max()), "minC": float(valid.min()),
+        "hotspotM2": float(hot.sum() * 900), "hotspotPct": float(hot.sum() * 100 / valid.size),
+        "stats": stats_of(lst),
+    }
+
+
+# ------------------------------------------- 9. supervised classification
+
+def op_supervised(req):
+    ds = gdal.Open(req["path"])
+    bands = req.get("bands") or list(range(1, ds.RasterCount + 1))
+    stack = np.stack([read_band(ds, b) for b in bands], axis=-1)
+    h, w, nb = stack.shape
+    training = np.zeros((h, w), dtype=np.int32)
+    classes = req["classes"]
+    for i, c in enumerate(classes, start=1):
+        path = geojson_in_srs(c["geometry"], ds.GetProjection())
+        try:
+            mem = gdal.GetDriverByName("MEM").Create("", w, h, 1, gdal.GDT_Byte)
+            mem.SetGeoTransform(ds.GetGeoTransform())
+            mem.SetProjection(ds.GetProjection())
+            gdal.Rasterize(mem, path, burnValues=[1], allTouched=True)
+            training[mem.GetRasterBand(1).ReadAsArray() == 1] = i
+        finally:
+            os.remove(path)
+    flat = stack.reshape(-1, nb)
+    ok = np.all(np.isfinite(flat), axis=1)
+    labels = training.ravel()
+    means, inv_covs, log_dets = [], [], []
+    for i, c in enumerate(classes, start=1):
+        x = flat[(labels == i) & ok]
+        if x.shape[0] < nb + 2:
+            raise OpError(f'"{c["label"]}" has only {x.shape[0]} training pixels — draw a larger area.')
+        cov = np.cov(x, rowvar=False).reshape(nb, nb) + np.eye(nb) * 1e-3 * (np.var(x) + 1)
+        means.append(x.mean(axis=0))
+        inv_covs.append(np.linalg.inv(cov))
+        log_dets.append(np.linalg.slogdet(cov)[1])
+    method = req.get("method", "maxlike")
+
+    def predict(x):
+        scores = []
+        for m, ic, ld in zip(means, inv_covs, log_dets):
+            d = x - m
+            if method == "mindist":
+                scores.append(-(d * d).sum(axis=1))
+            else:
+                scores.append(-0.5 * (ld + np.einsum("ij,jk,ik->i", d, ic, d)))
+        return np.argmax(np.stack(scores, axis=1), axis=1) + 1
+
+    out = np.zeros(flat.shape[0], dtype=np.uint8)
+    idx = np.flatnonzero(ok)
+    for start in range(0, idx.size, 500_000):
+        part = idx[start:start + 500_000]
+        out[part] = predict(flat[part])
+    # Resubstitution accuracy on the training pixels.
+    train_idx = np.flatnonzero((labels > 0) & ok)
+    truth = labels[train_idx]
+    pred = out[train_idx]
+    k = len(classes)
+    matrix = np.zeros((k, k), dtype=np.int64)
+    np.add.at(matrix, (truth - 1, pred.astype(np.int64) - 1), 1)
+    accuracy = float(np.trace(matrix) / max(matrix.sum(), 1) * 100)
+    drv = gdal.GetDriverByName("GTiff").Create(req["output"], w, h, 1, gdal.GDT_Byte, GTIFF_OPTIONS)
+    drv.SetGeoTransform(ds.GetGeoTransform())
+    drv.SetProjection(ds.GetProjection())
+    band = drv.GetRasterBand(1)
+    band.SetNoDataValue(0)
+    band.WriteArray(out.reshape(h, w))
+    drv = None
+    area = pixel_area_m2(ds)
+    counts = np.bincount(out, minlength=k + 1)
+    total = counts[1:].sum() or 1
+    return {
+        "accuracyPct": accuracy,
+        "trainingPixels": int(train_idx.size),
+        "confusion": matrix.tolist(),
+        "classes": [{"value": i, "label": c["label"], "areaM2": float(counts[i] * area), "pct": float(counts[i] * 100 / total)}
+                    for i, c in enumerate(classes, start=1)],
+    }
+
+
+# ------------------------------------------- 10. change matrix
+
+def op_change_matrix(req):
+    ref = gdal.Open(req["before"])
+    before = ref.GetRasterBand(1).ReadAsArray()
+    nd_b = ref.GetRasterBand(1).GetNoDataValue()
+    gt = ref.GetGeoTransform()
+    warped = gdal.Warp("", req["after"], format="MEM", dstSRS=ref.GetProjection(),
+                       outputBounds=(gt[0], gt[3] + gt[5] * ref.RasterYSize, gt[0] + gt[1] * ref.RasterXSize, gt[3]),
+                       width=ref.RasterXSize, height=ref.RasterYSize, resampleAlg="near")
+    after = warped.GetRasterBand(1).ReadAsArray()
+    nd_a = warped.GetRasterBand(1).GetNoDataValue()
+    for name, arr in (("before", before), ("after", after)):
+        if np.issubdtype(arr.dtype, np.floating) and not np.all(np.mod(arr[np.isfinite(arr)], 1) == 0):
+            raise OpError(f'The "{name}" raster is not categorical — reclassify or classify it first.')
+    valid = np.ones(before.shape, dtype=bool)
+    if nd_b is not None:
+        valid &= before != nd_b
+    if nd_a is not None:
+        valid &= after != nd_a
+    b = before[valid].astype(np.int64)
+    a = after[valid].astype(np.int64)
+    if np.unique(b).size > 50 or np.unique(a).size > 50:
+        raise OpError("Too many classes for a change matrix (max 50).")
+    area = pixel_area_m2(ref)
+    pairs, counts = np.unique(np.stack([b, a]), axis=1, return_counts=True)
+    transitions = sorted(
+        [{"from": int(f), "to": int(t), "areaM2": float(c * area)} for (f, t), c in zip(pairs.T, counts)],
+        key=lambda r: -r["areaM2"],
+    )
+    changed = [t for t in transitions if t["from"] != t["to"]]
+    code = {(t["from"], t["to"]): i for i, t in enumerate(changed[:250], start=1)}
+    out = np.zeros(before.shape, dtype=np.uint8)
+    bb = before.astype(np.int64)
+    aa = after.astype(np.int64)
+    for (f, t), v in code.items():
+        out[valid & (bb == f) & (aa == t)] = v
+    drv = gdal.GetDriverByName("GTiff").Create(req["output"], ref.RasterXSize, ref.RasterYSize, 1, gdal.GDT_Byte, GTIFF_OPTIONS)
+    drv.SetGeoTransform(gt)
+    drv.SetProjection(ref.GetProjection())
+    drv.GetRasterBand(1).SetNoDataValue(0)
+    drv.GetRasterBand(1).WriteArray(out)
+    drv = None
+    total = float(valid.sum() * area)
+    changed_area = sum(t["areaM2"] for t in changed)
+    return {
+        "transitions": transitions[:200],
+        "codes": [{"value": v, "from": f, "to": t} for (f, t), v in code.items()],
+        "changedM2": changed_area, "unchangedM2": total - changed_area,
+        "changedPct": changed_area * 100 / total if total else 0.0,
+    }
+
+
+# ------------------------------------------- 11. stream network
+
+def op_streams(req):
+    src = gdal.Open(req["path"])
+    ds = src
+    cells = src.RasterXSize * src.RasterYSize
+    if cells > MAX_WATERSHED_CELLS:
+        f = math.sqrt(MAX_WATERSHED_CELLS / cells)
+        ds = gdal.Warp("", src, format="MEM", width=max(int(src.RasterXSize * f), 1),
+                       height=max(int(src.RasterYSize * f), 1), resampleAlg="average", outputType=gdal.GDT_Float64)
+    z = read_band(ds, req.get("band", 1))
+    h, w = z.shape
+    order, down = priority_flood(z)
+    acc = np.zeros(h * w)
+    acc[order] = 1.0
+    for i in order[::-1]:
+        d = down[i]
+        if d >= 0:
+            acc[d] += acc[i]
+    area = pixel_area_m2(ds)
+    upstream_km2 = acc * area / 1e6
+    stream = (upstream_km2 >= req["thresholdKm2"]) & np.isfinite(z.ravel())
+    if stream.sum() < 2:
+        raise OpError("No streams at this threshold — use a smaller catchment area.")
+    if stream.sum() > 400_000:
+        raise OpError("Too many stream cells — use a larger catchment threshold.")
+
+    # Strahler order, upstream → downstream (the reverse priority-flood order).
+    inflow = {}
+    for i in np.flatnonzero(stream):
+        d = down[i]
+        if d >= 0 and stream[d]:
+            inflow.setdefault(int(d), []).append(int(i))
+    strahler = {}
+    for i in order[::-1]:
+        i = int(i)
+        if not stream[i]:
+            continue
+        ups = [strahler[u] for u in inflow.get(i, [])]
+        if not ups:
+            strahler[i] = 1
+        else:
+            top = max(ups)
+            strahler[i] = top + 1 if ups.count(top) >= 2 else top
+
+    gt = ds.GetGeoTransform()
+
+    def xy(i):
+        r, c = divmod(i, w)
+        return gt[0] + (c + 0.5) * gt[1], gt[3] + (r + 0.5) * gt[5]
+
+    # A segment starts at a head or a junction / order change, and runs
+    # downstream until the next one (or the outlet).
+    starts = [i for i in strahler if len(inflow.get(i, [])) != 1
+              or strahler[inflow[i][0]] != strahler[i]]
+    driver = ogr.GetDriverByName("GPKG")
+    if os.path.exists(req["output"]):
+        driver.DeleteDataSource(req["output"])
+    vds = driver.CreateDataSource(req["output"])
+    layer = vds.CreateLayer("result", ds_srs(ds), ogr.wkbLineString)
+    for name, kind in (("strahler", ogr.OFTInteger), ("upstream_km2", ogr.OFTReal), ("length_m", ogr.OFTReal)):
+        layer.CreateField(ogr.FieldDefn(name, kind))
+    segments = 0
+    max_order = 0
+    for s0 in starts:
+        line = ogr.Geometry(ogr.wkbLineString)
+        line.AddPoint_2D(*xy(s0))
+        i, n = s0, 1
+        while True:
+            d = int(down[i])
+            if d < 0 or not stream[d]:
+                break
+            line.AddPoint_2D(*xy(d))
+            n += 1
+            if len(inflow.get(d, [])) != 1 or strahler[d] != strahler[s0]:
+                break
+            i = d
+        if n < 2:
+            continue
+        feature = ogr.Feature(layer.GetLayerDefn())
+        feature.SetField("strahler", strahler[s0])
+        feature.SetField("upstream_km2", float(upstream_km2[i]))
+        feature.SetField("length_m", float((n - 1) * math.sqrt(area)))
+        feature.SetGeometry(line)
+        layer.CreateFeature(feature)
+        segments += 1
+        max_order = max(max_order, strahler[s0])
+    vds = None
+    return {"count": segments, "maxOrder": max_order, "streamCells": int(stream.sum()), "resampled": ds is not src}
+
+
+# ------------------------------------------- 12. population & water
+
+def op_online_population(req):
+    if aoi_area_km2(req["bbox"]) > 5000:
+        raise OpError("The area is too large for the population download (max 5 000 km²).")
+    warp_to_aoi(["/vsicurl/" + HRSL_VRT], req["output"], req, resampleAlg="near", dstNodata=FLOAT_NODATA,
+                outputType=gdal.GDT_Float32)
+    out = gdal.Open(req["output"])
+    arr = read_band(out)
+    if not np.isfinite(arr).any():
+        raise OpError("No population data for this area.")
+    return {"source": "Meta High-Resolution Settlement Layer (≈30 m)", "population": float(np.nansum(arr)),
+            "width": out.RasterXSize, "height": out.RasterYSize, "stats": stats_of(arr)}
+
+
+def op_online_water(req):
+    if aoi_area_km2(req["bbox"]) > 5000:
+        raise OpError("The area is too large for the surface-water download (max 5 000 km²).")
+
+    def name(lat, lon):
+        lat_top = lat + 10
+        ns, ew = ("N" if lat_top >= 0 else "S"), ("E" if lon >= 0 else "W")
+        return JRC_URL.format(tile=f"{abs(lon)}{ew}_{abs(lat_top)}{ns}")
+
+    sources = open_remote(remote_tiles(req["bbox"], 10, name))
+    if not sources:
+        raise OpError("No JRC surface-water data for this area.")
+    warp_to_aoi(sources, req["output"], req, resampleAlg="near", srcNodata=255, dstNodata=255)
+    out = gdal.Open(req["output"])
+    arr = out.GetRasterBand(1).ReadAsArray()
+    area = pixel_area_m2(out)
+    ever = (arr > 0) & (arr <= 100)
+    permanent = (arr >= 90) & (arr <= 100)
+    return {"source": "JRC Global Surface Water occurrence 1984–2021", "everWaterM2": float(ever.sum() * area),
+            "permanentWaterM2": float(permanent.sum() * area), "width": out.RasterXSize, "height": out.RasterYSize}
+
+
+# ------------------------------------------- 13. multi-observer viewshed
+
+def op_viewshed_multi(req):
+    ds = gdal.Open(req["path"])
+    band = ds.GetRasterBand(req.get("band", 1))
+    max_distance = req.get("maxDistance") or 0
+    if max_distance and is_geographic(ds):
+        max_distance = max_distance / 111120
+    count = np.zeros((ds.RasterYSize, ds.RasterXSize), dtype=np.uint8)
+    used = 0
+    for lon, lat in req["points"]:
+        x, y = to_raster_xy(ds, lon, lat)
+        col, row = to_pixel(ds, x, y)
+        if not (0 <= col < ds.RasterXSize and 0 <= row < ds.RasterYSize):
+            continue
+        vs = gdal.ViewshedGenerate(band, "MEM", "", [], x, y, req.get("observerHeight", 1.7), req.get("targetHeight", 0.0),
+                                   1, 0, 0, 0, 0.85714, gdal.GVM_Edge, max_distance)
+        count += (vs.GetRasterBand(1).ReadAsArray() == 1).astype(np.uint8)
+        used += 1
+    if used == 0:
+        raise OpError("None of the observers is on the elevation raster.")
+    drv = gdal.GetDriverByName("GTiff").Create(req["output"], ds.RasterXSize, ds.RasterYSize, 1, gdal.GDT_Byte, GTIFF_OPTIONS)
+    drv.SetGeoTransform(ds.GetGeoTransform())
+    drv.SetProjection(ds.GetProjection())
+    drv.GetRasterBand(1).SetNoDataValue(0)
+    drv.GetRasterBand(1).WriteArray(count)
+    drv = None
+    area = pixel_area_m2(ds)
+    return {"observers": used, "visibleM2": float((count >= 1).sum() * area),
+            "multiVisibleM2": float((count >= 2).sum() * area), "maxObservers": int(count.max())}
+
+
 OPS = {
     "info": op_info, "identify": op_identify, "profile": op_profile,
     "line_of_sight": op_line_of_sight, "terrain": op_terrain, "contour": op_contour,
@@ -1432,6 +1969,10 @@ OPS = {
     "index": op_index, "classify": op_classify,
     "online_dem": op_online_dem, "online_landcover": op_online_landcover,
     "stac_search": op_stac_search, "stac_fetch": op_stac_fetch, "stac_preview": op_stac_preview,
+    "s2_composite": op_s2_composite, "index_series": op_index_series, "lst": op_lst,
+    "supervised": op_supervised, "change_matrix": op_change_matrix, "streams": op_streams,
+    "online_population": op_online_population, "online_water": op_online_water,
+    "viewshed_multi": op_viewshed_multi,
 }
 
 

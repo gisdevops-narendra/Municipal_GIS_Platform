@@ -144,6 +144,41 @@ class RasterOpsTest(unittest.TestCase):
         r = self.ok({"op": "resample", "path": self.dem, "pixelSize": 20, "targetCrs": "same", "output": self.out("rs.tif")})
         self.assertAlmostEqual(r["pixelSizeM"], 20, places=3)
 
+    def test_stream_network(self):
+        r = self.ok({"op": "streams", "path": self.dem, "thresholdKm2": 0.05, "output": self.out("streams.gpkg")})
+        self.assertGreater(r["count"], 0)
+        self.assertGreaterEqual(r["maxOrder"], 1)
+
+    def test_multi_observer_viewshed(self):
+        lon, lat = LONLAT_INSIDE
+        r = self.ok({"op": "viewshed_multi", "path": self.dem, "points": [[lon, lat], [lon + 0.003, lat + 0.003]],
+                     "output": self.out("vsm.tif")})
+        self.assertEqual(r["observers"], 2)
+        self.assertGreater(r["multiVisibleM2"], 0)
+
+    def test_change_matrix(self):
+        a = np.ones((200, 200), dtype=np.uint8)
+        b = a.copy()
+        b[:, 150:] = 2
+        before = write(self.out("lc_a.tif"), [a], gdal.GDT_Byte, 0)
+        after = write(self.out("lc_b.tif"), [b], gdal.GDT_Byte, 0)
+        r = self.ok({"op": "change_matrix", "before": before, "after": after, "output": self.out("cm.tif")})
+        self.assertAlmostEqual(r["changedPct"], 25, delta=0.5)
+        self.assertEqual(r["codes"][0]["from"], 1)
+        self.assertEqual(r["codes"][0]["to"], 2)
+
+    def test_supervised_classification(self):
+        lon, lat = LONLAT_INSIDE
+        # Training squares well inside the vegetated (west) and water (east) halves.
+        def square(dlon):
+            x0, y0 = lon + dlon, lat
+            return {"type": "Polygon", "coordinates": [[[x0, y0], [x0 + 0.002, y0], [x0 + 0.002, y0 + 0.002],
+                                                        [x0, y0 + 0.002], [x0, y0]]]}
+        classes = [{"label": "Vegetation", "geometry": square(-0.008)}, {"label": "Water", "geometry": square(0.005)}]
+        r = self.ok({"op": "supervised", "path": self.image, "classes": classes, "output": self.out("sup.tif")})
+        self.assertGreater(r["accuracyPct"], 95)
+        self.assertEqual([round(c["pct"]) for c in r["classes"]], [50, 50])
+
     def test_errors_are_reported_as_json(self):
         code, body = run({"op": "contour", "path": self.dem, "interval": 100000, "output": self.out("ct.gpkg")})
         self.assertEqual(code, 1)

@@ -7,10 +7,13 @@ import { RasterService, type RasterStats } from './raster.service';
 import type { RasterStyleSpec } from './raster-style';
 import type {
   ChangeDetectionDto,
+  ChangeMatrixDto,
   ClassifyDto,
   ClipDto,
   FillSinksDto,
   HeatmapDto,
+  IndexSeriesDto,
+  LandSurfaceTempDto,
   IdwDto,
   MosaicDto,
   OnlineRasterDto,
@@ -21,6 +24,8 @@ import type {
   RasterStatisticsDto,
   ResampleDto,
   SpectralIndexDto,
+  StreamNetworkDto,
+  SupervisedClassifyDto,
   ZonalStatisticsDto,
   ContourDto,
   CutFillDto,
@@ -153,6 +158,19 @@ export class RasterToolsService {
 
   async viewshed(appUser: AppUser, dto: ViewshedDto) {
     const { file } = await this.rasters.resolveRaster(appUser, dto.layerId);
+    if ((dto.points?.length ?? 0) > 1) {
+      const points = dto.points!.filter((p) => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite));
+      return this.toRasterLayer(appUser, dto.outputName, async (output) => {
+        const r = await this.rasters.runOp<{ maxObservers: number }>({
+          op: 'viewshed_multi', path: file, band: dto.band ?? 1, points, output,
+          observerHeight: dto.observerHeight ?? 1.7, targetHeight: dto.targetHeight ?? 0, maxDistance: dto.maxDistance,
+        });
+        return {
+          style: { mode: 'ramp', ramp: 'heat', min: 1, max: Math.max(r.maxObservers, 2), opacity: 0.7 },
+          result: r,
+        };
+      });
+    }
     return this.toRasterLayer(appUser, dto.outputName, async (output) => {
       const result = await this.rasters.runOp({
         op: 'viewshed', path: file, band: dto.band ?? 1, point: dto.point, output,
@@ -438,9 +456,111 @@ export class RasterToolsService {
         };
         return { style, result: r };
       }
+      if (dto.source === 'population') {
+        const r = await this.rasters.runOp<{ stats: RasterStats }>({ op: 'online_population', ...request, output });
+        return { style: { mode: 'ramp', ramp: 'heat', min: 0, max: r.stats.p98 ?? r.stats.max ?? 10, opacity: 0.85 }, result: r };
+      }
+      if (dto.source === 'water') {
+        const r = await this.rasters.runOp({ op: 'online_water', ...request, output });
+        return { style: { mode: 'ramp', ramp: 'water', min: 1, max: 100 }, result: r };
+      }
+      if (dto.source === 'composite') {
+        if (!dto.from || !dto.to) throw new BadRequestException('Choose the date range for the composite.');
+        const r = await this.rasters.runOp({
+          op: 's2_composite', ...request, from: dto.from, to: dto.to,
+          maxCloud: dto.maxCloud ?? 60, maxScenes: dto.maxScenes ?? 10, output,
+        });
+        return { style: { mode: 'rgb', bands: [3, 2, 1], stretch: 'histogram' }, result: r };
+      }
       const r = await this.rasters.runOp({ op: 'stac_fetch', ...request, output });
       return { style: { mode: 'rgb', bands: [3, 2, 1], stretch: 'histogram' }, result: r };
     });
+  }
+
+  // ----- Imagery (v2) -----
+
+  /** Mean index per clear Sentinel-2 date over a point / area. */
+  async indexSeries(dto: IndexSeriesDto) {
+    this.assertBbox(dto.bbox);
+    if (dto.from > dto.to) throw new BadRequestException('"From" must be before "To".');
+    return this.rasters.runOp({
+      op: 'index_series', bbox: dto.bbox, polygon: dto.polygon, kind: dto.kind,
+      from: dto.from, to: dto.to, maxCloud: dto.maxCloud ?? 60,
+    });
+  }
+
+  /** Urban heat island: median Landsat 8/9 land surface temperature (°C). */
+  async landSurfaceTemperature(appUser: AppUser, dto: LandSurfaceTempDto) {
+    this.assertBbox(dto.bbox);
+    return this.toRasterLayer(appUser, dto.outputName, async (output) => {
+      const { stats, ...result } = await this.rasters.runOp<Record<string, unknown> & { stats: RasterStats }>({
+        op: 'lst', bbox: dto.bbox, polygon: dto.polygon, from: dto.from, to: dto.to,
+        maxCloud: dto.maxCloud ?? 30, output,
+      });
+      const [min, max] = span(stats, [20, 50]);
+      return { style: { mode: 'ramp', ramp: 'heat', min, max, opacity: 0.8 }, result: { ...result, stats } };
+    });
+  }
+
+  async supervisedClassify(appUser: AppUser, dto: SupervisedClassifyDto) {
+    const { file } = await this.rasters.resolveRaster(appUser, dto.layerId);
+    return this.toRasterLayer(appUser, dto.outputName, async (output) => {
+      const result = await this.rasters.runOp<{ classes: { value: number; label: string }[] }>({
+        op: 'supervised', path: file, method: dto.method ?? 'maxlike',
+        classes: dto.classes.map((c) => ({ label: c.label, geometry: c.geometry })), output,
+      });
+      const style: RasterStyleSpec = {
+        mode: 'values',
+        classes: result.classes.map((c, i) => ({
+          value: c.value,
+          color: dto.classes[i]?.color ?? CLASS_COLORS[i % CLASS_COLORS.length],
+          label: c.label,
+        })),
+      };
+      return { style, result };
+    });
+  }
+
+  /** From → to areas between two categorical rasters (e.g. two land-cover
+   *  years); publishes the changed pixels coded by transition. */
+  async changeMatrix(appUser: AppUser, dto: ChangeMatrixDto) {
+    const before = await this.rasters.resolveRaster(appUser, dto.beforeLayerId);
+    const after = await this.rasters.resolveRaster(appUser, dto.afterLayerId);
+    const labelsOf = (spec: unknown) =>
+      new Map(((spec as RasterStyleSpec | null)?.classes ?? []).map((c) => [c.value, c.label ?? String(c.value)]));
+    const fromLabels = labelsOf(before.layer.styleSpec);
+    const toLabels = labelsOf(after.layer.styleSpec);
+    const name = (labels: Map<number, string>, v: number) => labels.get(v) ?? String(v);
+    return this.toRasterLayer(appUser, dto.outputName, async (output) => {
+      const r = await this.rasters.runOp<{
+        transitions: { from: number; to: number; areaM2: number }[];
+        codes: { value: number; from: number; to: number }[];
+      }>({ op: 'change_matrix', before: before.file, after: after.file, output });
+      const style: RasterStyleSpec = {
+        mode: 'values',
+        classes: r.codes.slice(0, 60).map((c, i) => ({
+          value: c.value,
+          color: CLASS_COLORS[i % CLASS_COLORS.length],
+          label: `${name(fromLabels, c.from)} → ${name(toLabels, c.to)}`,
+        })),
+      };
+      return {
+        style,
+        result: {
+          ...r,
+          transitions: r.transitions.map((t) => ({ ...t, fromLabel: name(fromLabels, t.from), toLabel: name(toLabels, t.to) })),
+        },
+      };
+    });
+  }
+
+  // ----- Terrain (v2) -----
+
+  async streamNetwork(appUser: AppUser, dto: StreamNetworkDto) {
+    const { file } = await this.rasters.resolveRaster(appUser, dto.layerId);
+    return this.toVectorLayer(appUser, dto.outputName, 'LINE', (output) =>
+      this.rasters.runOp({ op: 'streams', path: file, band: dto.band ?? 1, thresholdKm2: dto.thresholdKm2, output }),
+    );
   }
 
   private assertBbox(bbox: [number, number, number, number]): void {

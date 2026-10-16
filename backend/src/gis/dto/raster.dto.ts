@@ -273,6 +273,13 @@ export class ViewshedDto extends RasterOutputDto {
   @IsNumber()
   @Min(1)
   maxDistance?: number;
+
+  /** Several observers → a cumulative "seen by how many" raster. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsArray({ each: true })
+  points?: LonLat[];
 }
 
 export class CalcInputDto {
@@ -580,8 +587,29 @@ export class SentinelSearchDto extends AoiDto {
 }
 
 export class OnlineRasterDto extends AoiDto {
-  @IsIn(['dem', 'landcover', 'sentinel2'])
-  source!: 'dem' | 'landcover' | 'sentinel2';
+  @IsIn(['dem', 'landcover', 'sentinel2', 'composite', 'population', 'water'])
+  source!: 'dem' | 'landcover' | 'sentinel2' | 'composite' | 'population' | 'water';
+
+  /** Composite: date range, cloud limit and number of scenes. */
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  from?: string;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  to?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  maxCloud?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(2)
+  @Max(15)
+  maxScenes?: number;
 
   /** Optional exact boundary (GeoJSON Polygon / MultiPolygon, EPSG:4326). */
   @IsOptional()
@@ -606,4 +634,96 @@ export class OnlineRasterDto extends AoiDto {
 export class SentinelPreviewDto extends AoiDto {
   @Matches(/^S2[A-D]_[A-Z0-9_]{10,80}$/)
   sceneId!: string;
+}
+
+// ----- Imagery (v2) / Terrain (v2) -----
+
+export class IndexSeriesDto extends AoiDto {
+  @IsIn(['ndvi', 'ndwi', 'ndbi'])
+  kind!: 'ndvi' | 'ndwi' | 'ndbi';
+
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  from!: string;
+
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  to!: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  maxCloud?: number;
+
+  @IsOptional()
+  @IsObject()
+  polygon?: GeoJsonPolygon;
+}
+
+export class LandSurfaceTempDto extends AoiDto {
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  from!: string;
+
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  to!: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  maxCloud?: number;
+
+  @IsOptional()
+  @IsObject()
+  polygon?: GeoJsonPolygon;
+
+  @IsString()
+  @Length(1, 80)
+  outputName!: string;
+}
+
+class TrainingClassDto {
+  @IsString()
+  @Length(1, 60)
+  label!: string;
+
+  @IsOptional()
+  @IsHexColor()
+  color?: string;
+
+  /** Training areas — GeoJSON (Multi)Polygon in EPSG:4326. */
+  @IsObject()
+  geometry!: GeoJsonPolygon;
+}
+
+export class SupervisedClassifyDto extends RasterOutputDto {
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(12)
+  @ValidateNested({ each: true })
+  @Type(() => TrainingClassDto)
+  classes!: TrainingClassDto[];
+
+  @IsOptional()
+  @IsIn(['maxlike', 'mindist'])
+  method?: 'maxlike' | 'mindist';
+}
+
+export class ChangeMatrixDto {
+  @IsUUID()
+  beforeLayerId!: string;
+
+  @IsUUID()
+  afterLayerId!: string;
+
+  @IsString()
+  @Length(1, 80)
+  outputName!: string;
+}
+
+export class StreamNetworkDto extends RasterOutputDto {
+  /** Minimum upstream catchment (km²) for a cell to count as a stream. */
+  @IsNumber()
+  @Min(0.001)
+  @Max(100000)
+  thresholdKm2!: number;
 }

@@ -63,6 +63,15 @@ const OP_STAGES: Record<string, string> = {
   idw: 'Interpolating',
   heatmap: 'Computing density',
   proximity: 'Computing distances',
+  s2_composite: 'Downloading scenes and building the median composite',
+  index_series: 'Reading every clear Sentinel-2 date',
+  lst: 'Downloading Landsat thermal bands',
+  supervised: 'Training and classifying',
+  change_matrix: 'Cross-tabulating classes',
+  streams: 'Tracing the stream network',
+  online_population: 'Downloading population data',
+  online_water: 'Downloading surface-water data',
+  viewshed_multi: 'Computing each observer\'s viewshed',
 };
 
 export interface VectorField {

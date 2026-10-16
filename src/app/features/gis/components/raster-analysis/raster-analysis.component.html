@@ -103,7 +103,7 @@
   <!-- ============ INPUT RASTER ============ -->
   @if (needsRasterInput()) {
     <label class="bo__field">
-      <span class="bo__label">{{ tool() === 'change' ? 'Before raster' : 'Raster layer' }}</span>
+      <span class="bo__label">{{ tool() === 'change' || tool() === 'changematrix' ? 'Before raster' : 'Raster layer' }}</span>
       <p-select
         class="bo__select"
         [options]="rasterLayers()"
@@ -127,7 +127,7 @@
         }
       </p>
     }
-    @if (bandOptions().length > 1 && !['ndvi', 'clip', 'indices', 'classify', 'download', 'resample'].includes(tool()) && !(tool() === 'style' && styleMode === 'rgb')) {
+    @if (bandOptions().length > 1 && !['ndvi', 'clip', 'indices', 'classify', 'supervised', 'changematrix', 'download', 'resample'].includes(tool()) && !(tool() === 'style' && styleMode === 'rgb')) {
       <label class="bo__field">
         <span class="bo__label">Band</span>
         <p-select class="bo__select" [options]="bandOptions()" optionLabel="label" optionValue="value" [(ngModel)]="band" appendTo="body" />
@@ -333,13 +333,19 @@
 
     @case ('viewshed') {
       <div class="bo__section">
-        <span class="bo__section-title">Observer</span>
-        <span class="bo__operand-state">{{ pointLabel(pointA()) }}</span>
+        <span class="bo__section-title">Observers ({{ observers().length || (pointA() ? 1 : 0) }})</span>
+        @for (o of observers(); track $index; let i = $index) {
+          <div class="ra__obs">
+            <span class="bo__operand-state">{{ i + 1 }}. {{ pointLabel(o) }}</span>
+            <button type="button" class="bo__chip bo__chip--ghost" (click)="removeObserver(i)"><i class="pi pi-times"></i></button>
+          </div>
+        }
         <div class="bo__operand-actions">
-          <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'a'" (click)="pick('a')">
-            <i class="pi pi-eye" aria-hidden="true"></i>Pick on map
+          <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'observer'" [disabled]="observers().length >= 20" (click)="pick('observer')">
+            <i class="pi pi-plus" aria-hidden="true"></i>Add observer
           </button>
         </div>
+        <p class="bo__hint">One observer = visible / not visible. Several (e.g. CCTV or towers) = how many observers see each place.</p>
       </div>
       <ng-container *ngTemplateOutlet="heights"></ng-container>
       <label class="bo__field">
@@ -456,32 +462,25 @@
           <span class="ra__source-name">Satellite image</span>
           <span class="ra__source-meta">Sentinel-2 · 10 m</span>
         </button>
+        <button type="button" class="ra__source" [class.is-active]="onlineSource === 'population'" (click)="setOnlineSource('population')">
+          <i class="pi pi-users" aria-hidden="true"></i>
+          <span class="ra__source-name">Population</span>
+          <span class="ra__source-meta">Meta HRSL · 30 m</span>
+        </button>
+        <button type="button" class="ra__source" [class.is-active]="onlineSource === 'water'" (click)="setOnlineSource('water')">
+          <i class="pi pi-cloud" aria-hidden="true"></i>
+          <span class="ra__source-name">Surface water</span>
+          <span class="ra__source-meta">JRC 1984–2021 · 30 m</span>
+        </button>
       </div>
 
-      <span class="bo__label">Area</span>
-      <div class="bo__modes" role="tablist">
-        <button type="button" class="bo__mode" [class.bo__mode--active]="aoiMode === 'view'" (click)="aoiMode = 'view'">Map view</button>
-        <button type="button" class="bo__mode" [class.bo__mode--active]="aoiMode === 'layer'" (click)="aoiMode = 'layer'">Layer extent</button>
-        <button type="button" class="bo__mode" [class.bo__mode--active]="aoiMode === 'draw'" (click)="aoiMode = 'draw'">Draw</button>
-      </div>
-      @if (aoiMode === 'layer') {
-        <p-select
-          class="bo__select"
-          [options]="extentLayers()"
-          optionLabel="label"
-          optionValue="value"
-          [(ngModel)]="aoiLayerId"
-          [filter]="true"
-          placeholder="e.g. the municipal boundary"
-          appendTo="body"
-        />
-      } @else if (aoiMode === 'draw') {
-        <ng-container *ngTemplateOutlet="polygonInput"></ng-container>
-      } @else {
-        <p class="bo__hint">Uses whatever is visible on the map — zoom to your area first.</p>
-      }
+      <ng-container *ngTemplateOutlet="aoiInput"></ng-container>
 
       @if (onlineSource === 'sentinel2') {
+        <div class="bo__modes" role="tablist">
+          <button type="button" class="bo__mode" [class.bo__mode--active]="s2Mode === 'scene'" (click)="s2Mode = 'scene'">Single scene</button>
+          <button type="button" class="bo__mode" [class.bo__mode--active]="s2Mode === 'composite'" (click)="s2Mode = 'composite'; outputName = 'Sentinel-2 cloud-free composite'">Cloud-free composite</button>
+        </div>
         <div class="bo__row">
           <label class="bo__field bo__field--grow">
             <span class="bo__label">From</span>
@@ -496,43 +495,147 @@
           <span class="bo__label">Max cloud cover {{ s2Cloud }} %</span>
           <input type="range" min="0" max="100" step="5" [(ngModel)]="s2Cloud" />
         </label>
+        @if (s2Mode === 'composite') {
+          <label class="bo__field">
+            <span class="bo__label">Scenes to combine (up to {{ compositeScenes }})</span>
+            <input type="range" min="3" max="15" step="1" [(ngModel)]="compositeScenes" />
+          </label>
+          <p class="bo__hint">Takes the per-pixel median of the clearest scenes in the period, after removing clouds and shadows — gap-free even when no single day is clear. Max 400 km².</p>
+        } @else {
         <label class="bo__toggle"><input type="checkbox" [(ngModel)]="maskClouds" /><span>Mask clouds &amp; shadows</span></label>
-        <button pButton type="button" [label]="searching() ? 'Searching…' : 'Search scenes'" icon="pi pi-search" class="p-button-sm p-button-outlined" [disabled]="searching()" (click)="searchScenes()"></button>
-        @if (scenes(); as list) {
-          @if (list.length) {
-            <ul class="ra__scenes">
-              @for (sc of list; track sc.id) {
-                <li>
-                  <button type="button" class="ra__scene" [class.is-active]="sc.id === sceneId()" (click)="pickScene(sc)">
-                    @if (sc.thumbnail) {
-                      <img [src]="sc.thumbnail" alt="" loading="lazy" />
-                    } @else {
-                      <span class="ra__scene-ph"><i class="pi pi-image"></i></span>
-                    }
-                    <span class="ra__scene-text">
-                      <span class="ra__scene-date">{{ sc.datetime?.slice(0, 10) }} · {{ sc.platform }}</span>
-                      <span class="ra__scene-meta">
-                        <i class="pi pi-cloud"></i> {{ sc.cloud?.toFixed(1) }} % ·
-                        covers {{ sc.coverage.toFixed(0) }} %
-                      </span>
-                      @if (previewing() === sc.id) {
-                        <span class="ra__scene-meta"><i class="pi pi-spin pi-spinner"></i> Loading map preview…</span>
-                      } @else if (sc.id === sceneId()) {
-                        <span class="ra__scene-meta ra__scene-on"><i class="pi pi-eye"></i> Previewing on map</span>
+          <button pButton type="button" [label]="searching() ? 'Searching…' : 'Search scenes'" icon="pi pi-search" class="p-button-sm p-button-outlined" [disabled]="searching()" (click)="searchScenes()"></button>
+          @if (scenes(); as list) {
+            @if (list.length) {
+              <ul class="ra__scenes">
+                @for (sc of list; track sc.id) {
+                  <li>
+                    <button type="button" class="ra__scene" [class.is-active]="sc.id === sceneId()" (click)="pickScene(sc)">
+                      @if (sc.thumbnail) {
+                        <img [src]="sc.thumbnail" alt="" loading="lazy" />
+                      } @else {
+                        <span class="ra__scene-ph"><i class="pi pi-image"></i></span>
                       }
-                    </span>
-                  </button>
-                </li>
-              }
-            </ul>
+                      <span class="ra__scene-text">
+                        <span class="ra__scene-date">{{ sc.datetime?.slice(0, 10) }} · {{ sc.platform }}</span>
+                        <span class="ra__scene-meta">
+                          <i class="pi pi-cloud"></i> {{ sc.cloud?.toFixed(1) }} % ·
+                          covers {{ sc.coverage.toFixed(0) }} %
+                        </span>
+                        @if (previewing() === sc.id) {
+                          <span class="ra__scene-meta"><i class="pi pi-spin pi-spinner"></i> Loading map preview…</span>
+                        } @else if (sc.id === sceneId()) {
+                          <span class="ra__scene-meta ra__scene-on"><i class="pi pi-eye"></i> Previewing on map</span>
+                        }
+                      </span>
+                    </button>
+                  </li>
+                }
+              </ul>
+            }
           }
         }
         <p class="bo__hint">Click a scene to preview it on the map. Bands saved: 1 Blue · 2 Green · 3 Red · 4 NIR · 5 SWIR — ready for NDVI, NDWI, NDBI, SAVI and classification. Max 2 500 km².</p>
+      } @else if (onlineSource === 'population') {
+        <p class="bo__hint">Estimated people per ≈30 m pixel, built from census data and building footprints. The result reports the total population of the area. Max 5 000 km².</p>
+      } @else if (onlineSource === 'water') {
+        <p class="bo__hint">How often each pixel was water between 1984 and 2021 (%), from 38 years of Landsat — flood-prone and seasonal water bodies. Max 5 000 km².</p>
       } @else if (onlineSource === 'landcover') {
         <p class="bo__hint">11 classes (trees, cropland, built-up, water…) with the official legend colours. Max 2 500 km².</p>
       } @else {
         <p class="bo__hint">Global 30 m surface elevation in metres — use it for slope, contours, watershed, flood and viewshed. Max 20 000 km².</p>
       }
+    }
+
+    @case ('streams') {
+      <label class="bo__field">
+        <span class="bo__label">Minimum catchment for a stream (km²)</span>
+        <input type="number" class="bo__input" min="0.001" step="any" [(ngModel)]="streamThreshold" />
+      </label>
+      <p class="bo__hint">Cells draining at least this area become stream lines, with Strahler order and upstream area. Smaller = denser network. Run Fill Sinks first on noisy DEMs.</p>
+    }
+
+    @case ('series') {
+      <div class="bo__modes" role="tablist">
+        <button type="button" class="bo__mode" [class.bo__mode--active]="seriesKind === 'ndvi'" (click)="seriesKind = 'ndvi'">NDVI</button>
+        <button type="button" class="bo__mode" [class.bo__mode--active]="seriesKind === 'ndwi'" (click)="seriesKind = 'ndwi'">NDWI</button>
+        <button type="button" class="bo__mode" [class.bo__mode--active]="seriesKind === 'ndbi'" (click)="seriesKind = 'ndbi'">NDBI</button>
+      </div>
+      <ng-container *ngTemplateOutlet="aoiInput"></ng-container>
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">From</span>
+          <input type="date" class="bo__input" [(ngModel)]="seriesFrom" />
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">To</span>
+          <input type="date" class="bo__input" [(ngModel)]="seriesTo" />
+        </label>
+      </div>
+      <p class="bo__hint">Mean index of the cloud-free pixels for every clear Sentinel-2 date (every ~5 days). Max 100 km²; a year takes a minute or two.</p>
+    }
+
+    @case ('heat') {
+      <ng-container *ngTemplateOutlet="aoiInput"></ng-container>
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">From</span>
+          <input type="date" class="bo__input" [(ngModel)]="heatFrom" />
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">To</span>
+          <input type="date" class="bo__input" [(ngModel)]="heatTo" />
+        </label>
+      </div>
+      <label class="bo__field">
+        <span class="bo__label">Max cloud cover {{ heatCloud }} %</span>
+        <input type="range" min="0" max="80" step="5" [(ngModel)]="heatCloud" />
+      </label>
+      <p class="bo__hint">Median land surface temperature (°C) of the 5 clearest Landsat 8/9 scenes, 30 m. Pick summer months (e.g. March – May) to see heat islands. Max 2 500 km².</p>
+    }
+
+    @case ('supervised') {
+      <span class="bo__label">Classes — draw a few typical areas of each</span>
+      <div class="ra__classes">
+        @for (c of training(); track $index; let i = $index) {
+          <div class="ra__class">
+            <span class="ra__swatch" [style.background]="c.color"></span>
+            <input type="text" class="bo__input" maxlength="60" [ngModel]="c.label" (ngModelChange)="renameTraining(i, $event)" />
+            <span class="ra__class-count" [title]="c.polygons.length + ' areas'">{{ c.polygons.length }}</span>
+            <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'training' && trainingIndex === i" (click)="drawTraining(i)" title="Draw a training area">
+              <i class="pi pi-pencil"></i>
+            </button>
+            <button type="button" class="bo__chip bo__chip--ghost" (click)="c.polygons.length ? clearTraining(i) : removeTrainingClass(i)" [title]="c.polygons.length ? 'Clear areas' : 'Remove class'">
+              <i class="pi" [class.pi-eraser]="c.polygons.length" [class.pi-times]="!c.polygons.length"></i>
+            </button>
+          </div>
+        }
+      </div>
+      @if (training().length < 12) {
+        <button type="button" class="bo__cancel ra__add" (click)="addTrainingClass()">+ Add class</button>
+      }
+      <label class="bo__field">
+        <span class="bo__label">Method</span>
+        <select class="bo__input" [(ngModel)]="supervisedMethod">
+          <option value="maxlike">Maximum likelihood (recommended)</option>
+          <option value="mindist">Minimum distance (few training pixels)</option>
+        </select>
+      </label>
+    }
+
+    @case ('changematrix') {
+      <label class="bo__field">
+        <span class="bo__label">After raster (classified)</span>
+        <p-select
+          class="bo__select"
+          [options]="rasterLayers()"
+          optionLabel="label"
+          optionValue="value"
+          [(ngModel)]="afterLayerId"
+          placeholder="Choose a raster"
+          appendTo="body"
+        />
+      </label>
+      <p class="bo__hint">Both rasters must hold classes (land cover, reclassified or classification results). Class names come from their styles.</p>
     }
 
     @case ('stats') {
@@ -847,6 +950,34 @@
       </figcaption>
     </figure>
   }
+  @if (seriesChart(); as sc) {
+    <figure class="ra__chart">
+      <svg [attr.viewBox]="'0 0 ' + sc.w + ' ' + sc.h" preserveAspectRatio="none" role="img" aria-label="Index time series">
+        <path [attr.d]="sc.band" fill="currentColor" opacity="0.15" />
+        <path [attr.d]="sc.line" fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke" />
+        @for (d of sc.dots; track $index) {
+          <circle [attr.cx]="d.cx" [attr.cy]="d.cy" r="2" fill="currentColor"><title>{{ d.title }}</title></circle>
+        }
+      </svg>
+      <figcaption>
+        <span>{{ sc.first }}</span><span>{{ sc.lo }} – {{ sc.hi }}</span><span>{{ sc.last }}</span>
+      </figcaption>
+    </figure>
+  }
+  @if (transitions(); as tr) {
+    <div class="ra__table-wrap">
+      <table class="ra__table">
+        <thead>
+          <tr><th>From</th><th>To</th><th>Area</th></tr>
+        </thead>
+        <tbody>
+          @for (t of tr; track $index) {
+            <tr><td [title]="t.fromLabel">{{ t.fromLabel }}</td><td style="text-align: left">{{ t.toLabel }}</td><td>{{ area(t.areaM2) }}</td></tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
   @if (zoneRows(); as rows) {
     <div class="ra__table-wrap">
       <table class="ra__table">
@@ -873,7 +1004,7 @@
       <button
         pButton
         type="button"
-        [label]="running() ? 'Working…' : tool() === 'upload' ? 'Upload & publish' : tool() === 'online' ? 'Download & publish' : tool() === 'style' ? 'Apply style' : tool() === 'identify' ? 'Identify' : tool() === 'download' ? 'Download' : tool() === 'stats' ? 'Compute' : 'Run'"
+        [label]="running() ? 'Working…' : tool() === 'upload' ? 'Upload & publish' : tool() === 'online' ? 'Download & publish' : tool() === 'style' ? 'Apply style' : tool() === 'identify' ? 'Identify' : tool() === 'download' ? 'Download' : tool() === 'stats' ? 'Compute' : tool() === 'series' ? 'Build time series' : tool() === 'supervised' ? 'Classify' : 'Run'"
         icon="pi pi-play"
         class="p-button-sm bo__run"
         [disabled]="running()"
@@ -924,4 +1055,42 @@
     <span class="bo__label">Pixel size (m)</span>
     <input type="number" class="bo__input" min="0.1" step="any" [(ngModel)]="gridPixel" />
   </label>
+</ng-template>
+
+<ng-template #aoiInput>
+  <span class="bo__label">Area</span>
+  <div class="bo__modes" role="tablist">
+    <button type="button" class="bo__mode" [class.bo__mode--active]="aoiMode === 'view'" (click)="aoiMode = 'view'">Map view</button>
+    <button type="button" class="bo__mode" [class.bo__mode--active]="aoiMode === 'layer'" (click)="aoiMode = 'layer'">Layer extent</button>
+    <button type="button" class="bo__mode" [class.bo__mode--active]="aoiMode === 'draw'" (click)="aoiMode = 'draw'">Draw</button>
+    @if (tool() === 'series') {
+      <button type="button" class="bo__mode" [class.bo__mode--active]="aoiMode === 'point'" (click)="aoiMode = 'point'">Point</button>
+    }
+  </div>
+  @if (aoiMode === 'layer') {
+    <p-select
+      class="bo__select"
+      [options]="extentLayers()"
+      optionLabel="label"
+      optionValue="value"
+      [(ngModel)]="aoiLayerId"
+      [filter]="true"
+      placeholder="e.g. the municipal boundary"
+      appendTo="body"
+    />
+  } @else if (aoiMode === 'point') {
+    <div class="bo__section">
+      <span class="bo__section-title">Point</span>
+      <span class="bo__operand-state">{{ pointLabel(pointA()) }}</span>
+      <div class="bo__operand-actions">
+        <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'a'" (click)="pick('a')">
+          <i class="pi pi-map-marker" aria-hidden="true"></i>Pick on map
+        </button>
+      </div>
+    </div>
+  } @else if (aoiMode === 'draw') {
+    <ng-container *ngTemplateOutlet="polygonInput"></ng-container>
+  } @else {
+    <p class="bo__hint">Uses whatever is visible on the map — zoom to your area first.</p>
+  }
 </ng-template>

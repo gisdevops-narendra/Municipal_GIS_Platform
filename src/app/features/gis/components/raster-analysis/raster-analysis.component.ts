@@ -31,7 +31,7 @@ export type RasterToolId =
   | 'profile' | 'slope' | 'aspect' | 'hillshade' | 'contour' | 'rugged' | 'cutfill' | 'fillsinks'
   | 'watershed' | 'flood' | 'los' | 'viewshed'
   | 'calc' | 'reclass' | 'clip' | 'polygonize' | 'zonal' | 'idw' | 'heatmap' | 'proximity'
-  | 'swipe' | 'change' | 'ndvi' | 'indices' | 'classify';
+  | 'streams' | 'swipe' | 'change' | 'changematrix' | 'series' | 'ndvi' | 'indices' | 'heat' | 'classify' | 'supervised';
 
 interface ToolDef {
   id: RasterToolId;
@@ -64,6 +64,7 @@ export const RASTER_TOOLS: ToolDef[] = [
   { id: 'contour', label: 'Contour Generation', group: 'Terrain Analysis', section: 'Surface', moduleId: 925, icon: 'pi pi-wave-pulse', description: 'Generate contour lines at a fixed elevation interval.' },
   { id: 'rugged', label: 'Terrain Ruggedness', group: 'Terrain Analysis', section: 'Surface', moduleId: 931, icon: 'pi pi-chart-scatter', description: 'Roughness, Terrain Ruggedness Index (TRI) or Topographic Position (TPI).' },
   { id: 'fillsinks', label: 'Fill Sinks', group: 'Terrain Analysis', section: 'Hydrology & Earthwork', moduleId: 932, icon: 'pi pi-filter-fill', description: 'Remove pits from a DEM so water can drain — run before watershed.' },
+  { id: 'streams', label: 'Stream Network', group: 'Terrain Analysis', section: 'Hydrology & Earthwork', moduleId: 933, icon: 'pi pi-share-alt', description: 'Extract drainage lines with Strahler order from a DEM.' },
   { id: 'cutfill', label: 'Cut & Fill / Volume', group: 'Terrain Analysis', section: 'Hydrology & Earthwork', moduleId: 926, icon: 'pi pi-box', description: 'Earthwork volumes to bring an area to a target height.' },
   { id: 'watershed', label: 'Drainage / Watershed', group: 'Terrain Analysis', section: 'Hydrology & Earthwork', moduleId: 927, icon: 'pi pi-share-alt', description: 'Flow paths and catchment area draining to a point.' },
   { id: 'flood', label: 'Flood Inundation', group: 'Terrain Analysis', section: 'Hydrology & Earthwork', moduleId: 928, icon: 'pi pi-cloud', description: 'Area flooded at a given water level.' },
@@ -78,10 +79,14 @@ export const RASTER_TOOLS: ToolDef[] = [
   { id: 'heatmap', label: 'Heatmap (Kernel Density)', group: 'Raster Analytics', section: 'Spatial Statistics', moduleId: 948, icon: 'pi pi-map-marker', description: 'Hotspots of point features such as trees, complaints or incidents.' },
   { id: 'proximity', label: 'Proximity / Distance', group: 'Raster Analytics', section: 'Spatial Statistics', moduleId: 949, icon: 'pi pi-arrows-alt', description: 'Distance to the nearest feature — road, hospital, garden…' },
   { id: 'swipe', label: 'Swipe / Compare', group: 'Imagery Analysis', section: 'Compare', moduleId: 951, icon: 'pi pi-arrows-h', description: 'Slide between two layers to compare them.' },
-  { id: 'change', label: 'Change Detection', group: 'Imagery Analysis', section: 'Compare', moduleId: 953, icon: 'pi pi-sync', description: 'Detect what changed between two dates.' },
+  { id: 'change', label: 'Change Detection', group: 'Imagery Analysis', section: 'Compare', moduleId: 953, icon: 'pi pi-sync', description: 'Difference between two dates of a continuous raster.' },
+  { id: 'changematrix', label: 'Land-cover Change Matrix', group: 'Imagery Analysis', section: 'Compare', moduleId: 959, icon: 'pi pi-table', description: 'From → to areas between two classified rasters (e.g. cropland → built-up).' },
+  { id: 'series', label: 'Index Time Series', group: 'Imagery Analysis', section: 'Compare', moduleId: 956, icon: 'pi pi-chart-line', description: 'NDVI / NDWI / NDBI over months for a point or area, from Sentinel-2.' },
   { id: 'ndvi', label: 'NDVI / Vegetation Index', group: 'Imagery Analysis', section: 'Spectral', moduleId: 952, icon: 'pi pi-sparkles', description: 'Vegetation health from red and near-infrared bands.' },
   { id: 'indices', label: 'Spectral Indices', group: 'Imagery Analysis', section: 'Spectral', moduleId: 954, icon: 'pi pi-palette', description: 'NDWI (water), NDBI (built-up) or SAVI (vegetation on bare soil).' },
-  { id: 'classify', label: 'Unsupervised Classification', group: 'Imagery Analysis', section: 'Spectral', moduleId: 955, icon: 'pi pi-clone', description: 'K-means land-cover classes from multi-band imagery.' }
+  { id: 'heat', label: 'Urban Heat Island', group: 'Imagery Analysis', section: 'Spectral', moduleId: 957, icon: 'pi pi-sun', description: 'Land surface temperature (°C) from Landsat 8/9 — find hotspots.' },
+  { id: 'classify', label: 'Unsupervised Classification', group: 'Imagery Analysis', section: 'Classification', moduleId: 955, icon: 'pi pi-clone', description: 'K-means land-cover classes from multi-band imagery.' },
+  { id: 'supervised', label: 'Supervised Classification', group: 'Imagery Analysis', section: 'Classification', moduleId: 958, icon: 'pi pi-pencil', description: 'Draw examples of each class and classify the image, with accuracy.' }
 ];
 export const RASTER_TOOL_MODULE_IDS = RASTER_TOOLS.map((t) => t.moduleId);
 
@@ -89,15 +94,15 @@ export const RASTER_TOOL_MODULE_IDS = RASTER_TOOLS.map((t) => t.moduleId);
 const OUTPUT_TOOLS: RasterToolId[] = [
   'slope', 'aspect', 'hillshade', 'contour', 'rugged', 'fillsinks', 'watershed', 'flood', 'viewshed',
   'calc', 'reclass', 'clip', 'polygonize', 'ndvi', 'change', 'mosaic', 'resample', 'rasterize',
-  'idw', 'heatmap', 'proximity', 'indices', 'classify', 'online'
+  'idw', 'heatmap', 'proximity', 'indices', 'classify', 'online', 'streams', 'heat', 'supervised', 'changematrix'
 ];
 
 /** Tools whose main input is a vector layer instead of a raster. */
 const VECTOR_TOOLS: RasterToolId[] = ['rasterize', 'idw', 'heatmap', 'proximity'];
 /** Tools that pick their own rasters (no single "input raster" picker). */
-const NO_RASTER_INPUT: RasterToolId[] = ['upload', 'online', 'calc', 'swipe', 'mosaic', ...VECTOR_TOOLS];
+const NO_RASTER_INPUT: RasterToolId[] = ['upload', 'online', 'series', 'heat', 'calc', 'swipe', 'mosaic', ...VECTOR_TOOLS];
 
-type Slot = 'a' | 'b' | 'line' | 'polygon';
+type Slot = 'a' | 'b' | 'line' | 'polygon' | 'observer' | 'training';
 
 /** Rail icon + short caption per tool category. */
 const GROUP_META: Record<string, { short: string; icon: string }> = {
@@ -298,8 +303,8 @@ export class RasterAnalysisComponent implements OnDestroy {
   zonalPublish = false;
 
   // online data
-  onlineSource: 'dem' | 'landcover' | 'sentinel2' = 'dem';
-  aoiMode: 'view' | 'draw' | 'layer' = 'view';
+  onlineSource: 'dem' | 'landcover' | 'sentinel2' | 'population' | 'water' = 'dem';
+  aoiMode: 'view' | 'draw' | 'layer' | 'point' = 'view';
   aoiLayerId: string | null = null;
   readonly extentLayers = computed(() =>
     this.layersSignal()
@@ -317,6 +322,29 @@ export class RasterAnalysisComponent implements OnDestroy {
   readonly previewing = signal<string | null>(null);
   private previewUrl: string | null = null;
   private previewSub?: Subscription;
+
+  // v2: composite, series, heat, supervised, change matrix, streams, observers
+  s2Mode: 'scene' | 'composite' = 'scene';
+  compositeScenes = 8;
+  seriesKind: 'ndvi' | 'ndwi' | 'ndbi' = 'ndvi';
+  seriesFrom = isoDate(-365);
+  seriesTo = isoDate(0);
+  heatFrom = isoDate(-365);
+  heatTo = isoDate(0);
+  heatCloud = 30;
+  readonly series = signal<{ date: string; mean: number; min: number; max: number }[] | null>(null);
+  readonly transitions = signal<{ fromLabel: string; toLabel: string; areaM2: number }[] | null>(null);
+  supervisedMethod: 'maxlike' | 'mindist' = 'maxlike';
+  readonly training = signal<{ label: string; color: string; polygons: number[][][][] }[]>([
+    { label: 'Water', color: '#2b83ba', polygons: [] },
+    { label: 'Vegetation', color: '#1a9641', polygons: [] },
+    { label: 'Built-up', color: '#d7191c', polygons: [] },
+    { label: 'Bare soil', color: '#c49a6c', polygons: [] }
+  ]);
+  /** Class whose training area is being drawn. */
+  trainingIndex = 0;
+  streamThreshold = 1;
+  readonly observers = signal<LonLat[]>([]);
 
   // terrain / imagery extras
   ruggedKind: 'roughness' | 'TRI' | 'TPI' = 'TRI';
@@ -370,6 +398,7 @@ export class RasterAnalysisComponent implements OnDestroy {
   selectTool(id: RasterToolId): void {
     if (this.tool() === 'swipe' && id !== 'swipe') this.mapService.setSwipe(null);
     if (this.picking()) this.cancelPick();
+    if (this.aoiMode === 'point' && id !== 'series') this.aoiMode = 'view';
     this.tool.set(id);
     const group = RASTER_TOOLS.find((t) => t.id === id)?.group;
     if (group) this.activeGroup.set(group);
@@ -462,8 +491,12 @@ export class RasterAnalysisComponent implements OnDestroy {
   }
 
   private suggestOutputName(): void {
+    if (this.tool() === 'heat') {
+      this.outputName = `Land surface temperature ${this.heatFrom.slice(0, 7)} – ${this.heatTo.slice(0, 7)}`;
+      return;
+    }
     if (this.tool() === 'online') {
-      this.outputName = { dem: 'Elevation (Copernicus DEM)', landcover: 'Land cover (ESA WorldCover)', sentinel2: 'Sentinel-2 image' }[
+      this.outputName = { dem: 'Elevation (Copernicus DEM)', landcover: 'Land cover (ESA WorldCover)', sentinel2: 'Sentinel-2 image', population: 'Population (Meta HRSL)', water: 'Surface water occurrence (JRC)' }[
         this.onlineSource
       ];
       return;
@@ -480,14 +513,24 @@ export class RasterAnalysisComponent implements OnDestroy {
     this.picking.set(slot);
     this.error.set(null);
     this.pickSub?.unsubscribe();
-    const kind = slot === 'line' ? 'Line' : slot === 'polygon' ? 'Polygon' : 'Point';
+    const kind = slot === 'line' ? 'Line' : slot === 'polygon' || slot === 'training' ? 'Polygon' : 'Point';
     this.pickSub = this.mapService.beginDraw(kind).subscribe({
       next: (geometry) => {
         const coords = geometry['coordinates'] as unknown;
         if (slot === 'a') this.pointA.set((coords as number[]).slice(0, 2) as LonLat);
         else if (slot === 'b') this.pointB.set((coords as number[]).slice(0, 2) as LonLat);
         else if (slot === 'line') this.line.set((coords as number[][]).map((c) => [c[0], c[1]] as LonLat));
-        else this.polygon.set(geometry);
+        else if (slot === 'observer') {
+          this.observers.update((list) => [...list, (coords as number[]).slice(0, 2) as LonLat]);
+          this.showObservers();
+        } else if (slot === 'training') {
+          const i = this.trainingIndex;
+          this.training.update((list) =>
+            list.map((c, k) => (k === i ? { ...c, polygons: [...c.polygons, coords as number[][][]] } : c))
+          );
+          this.showTraining();
+        }
+        else if (slot === 'polygon') this.polygon.set(geometry);
         this.picking.set(null);
         if (slot === 'a' && this.tool() === 'identify') {
           this.runIdentify();
@@ -544,7 +587,7 @@ export class RasterAnalysisComponent implements OnDestroy {
     return 'ABCD'[index];
   }
 
-  setOnlineSource(source: 'dem' | 'landcover' | 'sentinel2'): void {
+  setOnlineSource(source: 'dem' | 'landcover' | 'sentinel2' | 'population' | 'water'): void {
     this.onlineSource = source;
     this.resetResult();
     this.suggestOutputName();
@@ -559,6 +602,11 @@ export class RasterAnalysisComponent implements OnDestroy {
     if (this.aoiMode === 'layer') {
       const b = this.layersSignal().find((l) => l.id === this.aoiLayerId)?.bbox;
       return b ? { bbox: [b.minX, b.minY, b.maxX, b.maxY] } : null;
+    }
+    if (this.aoiMode === 'point') {
+      const p = this.pointA();
+      // ~30 m around the clicked point (3 × 3 Sentinel-2 pixels).
+      return p ? { bbox: [p[0] - 0.00015, p[1] - 0.00015, p[0] + 0.00015, p[1] + 0.00015] } : null;
     }
     const polygon = this.polygon();
     return polygon ? { bbox: geometryBbox(polygon), polygon } : null;
@@ -626,11 +674,58 @@ export class RasterAnalysisComponent implements OnDestroy {
   }
 
   private aoiHint(): string {
+    if (this.aoiMode === 'point') return 'Pick the point on the map first.';
     return this.aoiMode === 'draw'
       ? 'Draw the area (or use selected polygons) first.'
       : this.aoiMode === 'layer'
         ? 'Choose a layer whose extent to use.'
         : 'The map view is not ready yet.';
+  }
+
+  // ----- training areas / observers -----
+
+  drawTraining(index: number): void {
+    this.trainingIndex = index;
+    this.pick('training');
+  }
+
+  addTrainingClass(): void {
+    if (this.training().length >= 12) return;
+    const colors = ['#984ea3', '#ff7f00', '#a65628', '#f781bf', '#66c2a5', '#999999', '#4575b4', '#fee08b'];
+    this.training.update((list) => [...list, { label: `Class ${list.length + 1}`, color: colors[list.length % colors.length], polygons: [] }]);
+  }
+
+  removeTrainingClass(index: number): void {
+    this.training.update((list) => list.filter((_, i) => i !== index));
+    this.showTraining();
+  }
+
+  clearTraining(index: number): void {
+    this.training.update((list) => list.map((c, i) => (i === index ? { ...c, polygons: [] } : c)));
+    this.showTraining();
+  }
+
+  renameTraining(index: number, label: string): void {
+    this.training.update((list) => list.map((c, i) => (i === index ? { ...c, label } : c)));
+  }
+
+  private showTraining(): void {
+    this.mapService.setAnalysisColoredGeometries(
+      this.training()
+        .filter((c) => c.polygons.length)
+        .map((c) => ({ geometry: { type: 'MultiPolygon', coordinates: c.polygons }, color: c.color }))
+    );
+  }
+
+  removeObserver(index: number): void {
+    this.observers.update((list) => list.filter((_, i) => i !== index));
+    this.showObservers();
+  }
+
+  private showObservers(): void {
+    const list = this.observers();
+    if (list.length) this.mapService.setAnalysisGeometry({ type: 'MultiPoint', coordinates: list });
+    else this.mapService.clearAnalysisGeometry();
   }
 
   addMosaicInput(): void {
@@ -764,6 +859,17 @@ export class RasterAnalysisComponent implements OnDestroy {
         return;
       }
       case 'viewshed':
+        if (this.observers().length > 1) {
+          return this.runLayerTool('viewshed', {
+            ...base,
+            point: this.observers()[0],
+            points: this.observers(),
+            observerHeight: this.observerHeight,
+            targetHeight: this.targetHeight,
+            maxDistance: this.maxDistance || undefined
+          });
+        }
+        if (!this.pointA() && this.observers().length === 1) this.pointA.set(this.observers()[0]);
         if (!this.pointA()) return this.error.set('Pick the observer point on the map.');
         return this.runLayerTool('viewshed', {
           ...base,
@@ -791,8 +897,19 @@ export class RasterAnalysisComponent implements OnDestroy {
       case 'online': {
         const aoi = this.aoi();
         if (!aoi) return this.error.set(this.aoiHint());
-        if (this.onlineSource === 'sentinel2' && !this.sceneId()) return this.error.set('Search and pick a Sentinel-2 scene first.');
+        if (this.onlineSource === 'sentinel2' && this.s2Mode === 'scene' && !this.sceneId()) return this.error.set('Search and pick a Sentinel-2 scene first.');
         if (!this.outputName.trim()) return this.error.set('Enter a name for the new layer.');
+        if (this.onlineSource === 'sentinel2' && this.s2Mode === 'composite') {
+          return this.runLayerTool('online', {
+            source: 'composite',
+            ...aoi,
+            from: this.s2From,
+            to: this.s2To,
+            maxCloud: Math.max(this.s2Cloud, 40),
+            maxScenes: this.compositeScenes,
+            outputName: this.outputName.trim()
+          });
+        }
         return this.runLayerTool('online', {
           source: this.onlineSource,
           ...aoi,
@@ -801,6 +918,52 @@ export class RasterAnalysisComponent implements OnDestroy {
           outputName: this.outputName.trim()
         });
       }
+      case 'streams':
+        if (!(this.streamThreshold > 0)) return this.error.set('Enter a catchment threshold greater than zero.');
+        return this.runLayerTool('streams', { ...base, thresholdKm2: this.streamThreshold });
+      case 'series': {
+        const aoi = this.aoi();
+        if (!aoi) return this.error.set(this.aoiHint());
+        this.runJob<{ series: { date: string; mean: number; min: number; max: number }[]; first: number; last: number; change: number; observations: number }>(
+          'index-series',
+          { kind: this.seriesKind, ...aoi, from: this.seriesFrom, to: this.seriesTo },
+          (r) => {
+            this.series.set(r.series);
+            this.facts.set([
+              { label: 'Clear observations', value: fmtInt(r.observations) },
+              { label: `First → last ${this.seriesKind.toUpperCase()}`, value: `${fmt(r.first)} → ${fmt(r.last)}` },
+              { label: 'Change', value: `${r.change >= 0 ? '+' : ''}${fmt(r.change)}` }
+            ]);
+          }
+        );
+        return;
+      }
+      case 'heat': {
+        const aoi = this.aoi();
+        if (!aoi) return this.error.set(this.aoiHint());
+        if (!this.outputName.trim()) return this.error.set('Enter a name for the new layer.');
+        return this.runLayerTool('heat-island', {
+          ...aoi,
+          from: this.heatFrom,
+          to: this.heatTo,
+          maxCloud: this.heatCloud,
+          outputName: this.outputName.trim()
+        });
+      }
+      case 'supervised': {
+        const classes = this.training().filter((c) => c.polygons.length);
+        if (classes.length < 2) return this.error.set('Draw training areas for at least two classes.');
+        return this.runLayerTool('supervised-classify', {
+          layerId,
+          outputName: base.outputName,
+          method: this.supervisedMethod,
+          classes: classes.map((c) => ({ label: c.label.trim() || 'Class', color: c.color, geometry: { type: 'MultiPolygon', coordinates: c.polygons } }))
+        });
+      }
+      case 'changematrix':
+        if (!this.afterLayerId) return this.error.set('Choose the "after" raster.');
+        if (this.afterLayerId === layerId) return this.error.set('Choose two different rasters.');
+        return this.runLayerTool('change-matrix', { beforeLayerId: layerId, afterLayerId: this.afterLayerId, outputName: base.outputName });
       case 'stats':
         this.execute(this.api.statistics({ layerId: layerId!, band: this.band, bins: this.histogramBins }), (r) => {
           this.statistics.set(r);
@@ -925,6 +1088,8 @@ export class RasterAnalysisComponent implements OnDestroy {
 
   clear(): void {
     this.cancelPick();
+    this.observers.set([]);
+    if (this.tool() === 'supervised') this.training.update((list) => list.map((c) => ({ ...c, polygons: [] })));
     this.clearPreview();
     this.scenes.set(null);
     this.sceneId.set(null);
@@ -1036,6 +1201,8 @@ export class RasterAnalysisComponent implements OnDestroy {
     this.runJob<LayerResult>(tool, body, (r) => {
       this.message.set(`New layer "${r.layer.name}" added to the map.`);
       if (r.layer.layerType === 'RASTER') this.pendingInputId = r.layer.id;
+      const t = (r.result as { transitions?: { fromLabel: string; toLabel: string; areaM2: number; from: number; to: number }[] })?.transitions;
+      if (t) this.transitions.set(t.filter((x) => x.from !== x.to).slice(0, 30));
       if (this.tool() === 'online') this.clearPreview();
       this.facts.set(describe(r.result));
       this.mapService.clearAnalysisGeometry();
@@ -1114,6 +1281,8 @@ export class RasterAnalysisComponent implements OnDestroy {
     this.profile.set(null);
     this.statistics.set(null);
     this.zoneRows.set(null);
+    this.series.set(null);
+    this.transitions.set(null);
   }
 
   private fail(err: HttpErrorResponse): void {
@@ -1135,9 +1304,34 @@ export class RasterAnalysisComponent implements OnDestroy {
     return sec >= 60 ? `${Math.floor(sec / 60)} min ${sec % 60} s` : `${sec} s`;
   }
 
+  area(m2: number): string {
+    return formatArea(m2);
+  }
+
   fmtValue(v: number | null): string {
     return fmt(v);
   }
+
+  // ----- time series chart -----
+
+  readonly seriesChart = computed(() => {
+    const pts = this.series();
+    if (!pts || pts.length === 0) return null;
+    const w = 300, h = 120;
+    const t = pts.map((p) => new Date(p.date).getTime());
+    const t0 = Math.min(...t), t1 = Math.max(...t);
+    const lo = Math.min(...pts.map((p) => p.min)), hi = Math.max(...pts.map((p) => p.max));
+    const x = (v: number) => (t1 > t0 ? ((v - t0) / (t1 - t0)) * (w - 10) + 5 : w / 2);
+    const y = (v: number) => h - 8 - ((v - lo) / (hi - lo || 1)) * (h - 16);
+    const line = pts.map((p, i) => `${i ? 'L' : 'M'}${x(t[i]).toFixed(1)},${y(p.mean).toFixed(1)}`).join(' ');
+    const band =
+      pts.map((p, i) => `${i ? 'L' : 'M'}${x(t[i]).toFixed(1)},${y(p.max).toFixed(1)}`).join(' ') +
+      ' ' +
+      [...pts].reverse().map((p, i) => `L${x(t[pts.length - 1 - i]).toFixed(1)},${y(p.min).toFixed(1)}`).join(' ') +
+      ' Z';
+    const dots = pts.map((p, i) => ({ cx: x(t[i]), cy: y(p.mean), title: `${p.date}: ${fmt(p.mean)}` }));
+    return { w, h, line, band, dots, first: pts[0].date, last: pts[pts.length - 1].date, lo: fmt(lo), hi: fmt(hi) };
+  });
 
   // ----- histogram -----
 
@@ -1217,6 +1411,23 @@ const LABELS: Record<string, [string, (v: number) => string]> = {
   inputs: ['Rasters merged', fmtInt],
   tiles: ['Source tiles', fmtInt],
   maskedPct: ['Cloud / shadow masked', (v) => `${v.toFixed(1)} %`],
+  scenes: ['Scenes used', fmtInt],
+  clearCoveragePct: ['Clear coverage', (v) => `${v.toFixed(1)} %`],
+  meanClearObservations: ['Clear looks per pixel', fmt],
+  population: ['Population', fmtInt],
+  everWaterM2: ['Ever water (1984–2021)', formatArea],
+  permanentWaterM2: ['Permanent water', formatArea],
+  meanC: ['Mean surface temp.', (v) => `${v.toFixed(1)} °C`],
+  maxC: ['Hottest', (v) => `${v.toFixed(1)} °C`],
+  minC: ['Coolest', (v) => `${v.toFixed(1)} °C`],
+  hotspotM2: ['Hotspots (> mean + 2 °C)', formatArea],
+  accuracyPct: ['Training accuracy', (v) => `${v.toFixed(1)} %`],
+  trainingPixels: ['Training pixels', fmtInt],
+  changedM2: ['Changed area', formatArea],
+  changedPct: ['Changed share', (v) => `${v.toFixed(1)} %`],
+  observers: ['Observers', fmtInt],
+  multiVisibleM2: ['Seen by 2+ observers', formatArea],
+  maxOrder: ['Highest stream order', fmtInt],
   pixelSizeM: ['Pixel size', (v) => `${fmt(v)} m`]
 };
 
@@ -1238,6 +1449,10 @@ function describe(result: Record<string, unknown>): { label: string; value: stri
     if (typeof result?.[key] === 'string') facts.push({ label: key === 'source' ? 'Source' : 'Scene', value: result[key] as string });
   }
   if (typeof result?.['cloud'] === 'number') facts.push({ label: 'Cloud cover', value: `${(result['cloud'] as number).toFixed(1)} %` });
+  if (Array.isArray(result?.['dates']) && (result['dates'] as string[]).length) {
+    const d = result['dates'] as string[];
+    facts.push({ label: 'Dates', value: d.length > 1 ? `${d[0]} … ${d[d.length - 1]}` : d[0] });
+  }
   if (Array.isArray(result?.['bands'])) facts.push({ label: 'Bands', value: (result['bands'] as string[]).join(' · ') });
   if (typeof result?.['crs'] === 'string') facts.push({ label: 'Coordinate system', value: result['crs'] as string });
   if (typeof result?.['width'] === 'number') facts.push({ label: 'Size', value: `${fmtInt(result['width'] as number)} × ${fmtInt(result['height'] as number)} px` });

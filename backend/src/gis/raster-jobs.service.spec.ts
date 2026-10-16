@@ -50,7 +50,7 @@ describe('RasterJobsService', () => {
   });
 
   it('queues beyond the concurrency limit and caps jobs per user', async () => {
-    const jobs = [];
+    const jobs: Awaited<ReturnType<RasterJobsService['start']>>[] = [];
     for (let i = 0; i < 4; i++) jobs.push(await service.start(user, 'fill-sinks', body));
     expect(jobs.map((j) => j.status)).toEqual(['running', 'running', 'running', 'queued']);
     await expect(service.start(user, 'fill-sinks', body)).rejects.toBeInstanceOf(ConflictException);
