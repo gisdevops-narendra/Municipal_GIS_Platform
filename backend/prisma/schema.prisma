@@ -538,3 +538,81 @@ model UserModuleGrant {
   @@unique([userId, moduleId])
   @@map("user_module_grants")
 }
+
+/// Raster Analysis → Automatic Monitoring: a Green Cover or Encroachment
+/// check re-run on a schedule as its creator; an alert is raised when the
+/// result crosses the monitor's rule.
+model RasterMonitor {
+  id             String    @id @default(uuid())
+  municipalityId String    @map("municipality_id")
+  createdById    String    @map("created_by")
+  name           String
+  /// "green-cover" | "encroachment"
+  kind           String
+  /// Zones, filter, thresholds — the tool body minus the date ranges.
+  params         Json
+  /// "weekly" | "monthly"
+  frequency      String
+  active         Boolean   @default(true)
+  nextRunAt      DateTime  @map("next_run_at")
+  lastRunAt      DateTime? @map("last_run_at")
+  /// "running" | "done" | "failed"
+  lastStatus     String?   @map("last_status")
+  lastSummary    String?   @map("last_summary")
+  lastResult     Json?     @map("last_result")
+  alert          Boolean   @default(false)
+  alertMessage   String?   @map("alert_message")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@index([municipalityId])
+  @@index([active, nextRunAt])
+  @@map("raster_monitors")
+}
+
+/// Raster Analysis → Saved Workflows: tool steps re-run in order, each
+/// step's "$prev" input replaced by the previous step's output layer.
+model RasterWorkflow {
+  id             String   @id @default(uuid())
+  municipalityId String   @map("municipality_id")
+  createdById    String   @map("created_by")
+  name           String
+  /// [{ tool, body }] — bodies as sent to POST /gis/raster/jobs/:tool.
+  steps          Json
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([municipalityId])
+  @@map("raster_workflows")
+}
+
+/// Raster Analysis → Job History: every finished background job.
+model RasterJobHistory {
+  id             String    @id
+  municipalityId String    @map("municipality_id")
+  userId         String    @map("user_id")
+  tool           String
+  body           Json
+  status         String
+  summary        String?
+  layerId        String?   @map("layer_id")
+  layerName      String?   @map("layer_name")
+  createdAt      DateTime  @map("created_at")
+  finishedAt     DateTime  @map("finished_at")
+
+  @@index([userId, createdAt])
+  @@map("raster_job_history")
+}
+
+/// Raster Analysis → Dashboard Pins: a result number shown on the Dashboard.
+model RasterPin {
+  id             String   @id @default(uuid())
+  municipalityId String   @map("municipality_id")
+  createdById    String   @map("created_by")
+  title          String
+  value          String
+  detail         String?
+  layerId        String?  @map("layer_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([municipalityId])
+  @@map("raster_pins")
+}

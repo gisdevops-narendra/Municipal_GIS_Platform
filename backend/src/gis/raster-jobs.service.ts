@@ -11,6 +11,8 @@ import { validate } from 'class-validator';
 import { randomUUID } from 'crypto';
 import type { AppUser } from '../auth/types/app-user.type';
 import { RasterToolsService } from './raster-tools.service';
+import { PrismaService } from '../prisma/prisma.service';
+import type { Prisma } from '@prisma/client';
 import { RASTER_JOB_TOOLS } from './raster-tool-registry';
 import { rasterJobContext, type RasterJobContext } from './raster-job-context';
 
@@ -32,6 +34,8 @@ interface RasterJob {
   result: unknown;
   error: string | null;
   abort: AbortController;
+  body: unknown;
+  onFinish?: (job: ReturnType<RasterJobsService['view']>) => void;
   start: () => void;
 }
 
@@ -54,9 +58,30 @@ export class RasterJobsService {
   private readonly queue: RasterJob[] = [];
   private running = 0;
 
-  constructor(private readonly tools: RasterToolsService) {}
+  constructor(
+    private readonly tools: RasterToolsService,
+    private readonly prisma: PrismaService,
+  ) {}
 
-  async start(appUser: AppUser, tool: string, body: unknown, outputDepartmentId?: string) {
+  /** Validates a tool body without running it (e.g. a monitor's settings). */
+  async validateBody(tool: string, body: unknown): Promise<void> {
+    const def = RASTER_JOB_TOOLS[tool];
+    if (!def) throw new NotFoundException(`Unknown raster tool "${tool}".`);
+    const errors = await validate(plainToInstance(def.dto, body ?? {}), { whitelist: true, forbidNonWhitelisted: true });
+    if (errors.length) {
+      const messages = errors.flatMap((e) => Object.values(e.constraints ?? {}));
+      throw new BadRequestException(messages.length ? messages : 'Invalid request.');
+    }
+  }
+
+  /** `onFinish`: called once with the final job view (done / failed / cancelled). */
+  async start(
+    appUser: AppUser,
+    tool: string,
+    body: unknown,
+    outputDepartmentId?: string,
+    onFinish?: (job: ReturnType<RasterJobsService['view']>) => void,
+  ) {
     const def = RASTER_JOB_TOOLS[tool];
     if (!def) throw new NotFoundException(`Unknown raster tool "${tool}".`);
     const dto = plainToInstance(def.dto, body ?? {});
@@ -87,7 +112,36 @@ export class RasterJobsService {
       result: null,
       error: null,
       abort: new AbortController(),
+      body,
+      onFinish,
       start: () => void this.execute(job, () => def.run(this.tools, appUser, dto as never), body, outputDepartmentId),
+    };
+    this.jobs.set(job.id, job);
+    this.queue.push(job);
+    this.drain();
+    return this.view(job);
+  }
+
+  /** A custom task (e.g. a saved workflow) through the same queue,
+   *  limits, stages and cancel as a tool job. */
+  startTask(appUser: AppUser, tool: string, body: unknown, run: () => Promise<unknown>) {
+    this.prune();
+    const job: RasterJob = {
+      id: randomUUID(),
+      tool,
+      userId: appUser.id,
+      municipalityId: appUser.municipalityId,
+      status: 'queued',
+      stage: 'Waiting for a free processing slot',
+      cancellable: true,
+      createdAt: new Date(),
+      startedAt: null,
+      finishedAt: null,
+      result: null,
+      error: null,
+      abort: new AbortController(),
+      body,
+      start: () => void this.execute(job, run, body),
     };
     this.jobs.set(job.id, job);
     this.queue.push(job);
@@ -139,7 +193,7 @@ export class RasterJobsService {
   private async execute(
     job: RasterJob,
     run: () => Promise<unknown>,
-    body: unknown,
+    body?: unknown,
     outputDepartmentId?: string,
   ): Promise<void> {
     const context: RasterJobContext = {
@@ -178,6 +232,44 @@ export class RasterJobsService {
     job.finishedAt = new Date();
     job.stage = status === 'done' ? 'Finished' : status === 'cancelled' ? 'Cancelled' : 'Failed';
     job.cancellable = false;
+    void this.record(job);
+    try {
+      job.onFinish?.(this.view(job));
+    } catch (e) {
+      this.logger.warn(`Job ${job.id} finish hook failed: ${(e as Error).message}`);
+    }
+  }
+
+  /** Job History: every finished job, with its body for "run again". */
+  private async record(job: RasterJob): Promise<void> {
+    const layer = (job.result as { layer?: { id?: string; name?: string } } | null)?.layer;
+    const summary =
+      job.status === 'failed' ? job.error : job.status === 'cancelled' ? 'Cancelled' : layer?.name ? `Created "${layer.name}"` : 'Finished';
+    await this.prisma.rasterJobHistory
+      .create({
+        data: {
+          id: job.id,
+          municipalityId: job.municipalityId,
+          userId: job.userId,
+          tool: job.tool,
+          body: (job.body ?? {}) as Prisma.InputJsonValue,
+          status: job.status,
+          summary: summary?.slice(0, 500) ?? null,
+          layerId: layer?.id ?? null,
+          layerName: layer?.name ?? null,
+          createdAt: job.createdAt,
+          finishedAt: job.finishedAt ?? new Date(),
+        },
+      })
+      .catch((e: Error) => this.logger.warn(`Job ${job.id} not recorded in history: ${e.message}`));
+  }
+
+  history(appUser: AppUser) {
+    return this.prisma.rasterJobHistory.findMany({
+      where: { userId: appUser.id },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
   }
 
   private httpMessage(error: HttpException): string {
@@ -199,7 +291,7 @@ export class RasterJobsService {
     }
   }
 
-  private view(job: RasterJob) {
+  view(job: RasterJob) {
     const now = job.finishedAt ?? new Date();
     return {
       id: job.id,

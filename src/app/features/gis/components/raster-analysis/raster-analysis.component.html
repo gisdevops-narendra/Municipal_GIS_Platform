@@ -103,7 +103,7 @@
   <!-- ============ INPUT RASTER ============ -->
   @if (needsRasterInput()) {
     <label class="bo__field">
-      <span class="bo__label">{{ tool() === 'change' || tool() === 'changematrix' ? 'Before raster' : 'Raster layer' }}</span>
+      <span class="bo__label">{{ tool() === 'change' || tool() === 'changematrix' ? 'Before raster' : tool() === 'exposure' ? 'Hazard raster (e.g. Flood Risk, heat, flood depth)' : tool() === 'floodrisk' ? 'Elevation raster (DEM)' : tool() === 'heights' ? 'Surface model (DSM — roofs, trees)' : tool() === 'leastcost' ? 'Cost raster (e.g. slope, suitability)' : 'Raster layer' }}</span>
       <p-select
         class="bo__select"
         [options]="rasterLayers()"
@@ -129,6 +129,10 @@
       @if (i.description) {
         <p class="ra__provenance" [title]="i.description"><i class="pi pi-history"></i> {{ i.description }}</p>
       }
+      <div class="ra__share">
+        <button type="button" class="ra__export-btn" (click)="shareLayer(layerId())" title="Copy a link that opens the map on this layer"><i class="pi pi-link"></i> Copy link</button>
+        <button type="button" class="ra__export-btn" (click)="shareLayer(layerId(), 'image')" title="Copy a PNG image URL of the layer"><i class="pi pi-image"></i> Image URL</button>
+      </div>
     }
     @if (bandOptions().length > 1 && !['ndvi', 'clip', 'indices', 'classify', 'supervised', 'changematrix', 'download', 'resample'].includes(tool()) && !(tool() === 'style' && styleMode === 'rgb')) {
       <label class="bo__field">
@@ -141,7 +145,7 @@
   <!-- ============ INPUT VECTOR ============ -->
   @if (needsVectorInput() || tool() === 'zonal') {
     <label class="bo__field">
-      <span class="bo__label">{{ tool() === 'zonal' ? 'Zones (polygon layer)' : tool() === 'heatmap' || tool() === 'idw' ? 'Point layer' : 'Vector layer' }}</span>
+      <span class="bo__label">{{ tool() === 'zonal' ? 'Zones (polygon layer)' : tool() === 'heatmap' || tool() === 'idw' || tool() === 'hotspot' ? 'Point layer' : tool() === 'extract' ? 'Points / features to add values to' : 'Vector layer' }}</span>
       <p-select
         class="bo__select"
         [options]="tool() === 'zonal' ? polygonLayers() : vectorLayers()"
@@ -213,6 +217,13 @@
             </label>
           }
         </div>
+        @if (rgbPresets().length) {
+          <div class="ra__presets">
+            @for (p of rgbPresets(); track p.label) {
+              <button type="button" class="ra__export-btn" [title]="p.hint" (click)="applyPreset(p.bands)">{{ p.label }}</button>
+            }
+          </div>
+        }
         <label class="bo__field">
           <span class="bo__label">Contrast</span>
           <select class="bo__input" [(ngModel)]="rgbStretch">
@@ -267,6 +278,7 @@
           <input type="number" class="bo__input" step="0.1" [(ngModel)]="zFactor" />
         </label>
       </div>
+      <label class="bo__toggle"><input type="checkbox" [(ngModel)]="multiDirectional" /><span>Multi-directional (light from several sides — no dark shadows)</span></label>
     }
 
     @case ('slope') {
@@ -282,10 +294,15 @@
 
     @case ('cutfill') {
       <ng-container *ngTemplateOutlet="polygonInput"></ng-container>
-      <label class="bo__field">
-        <span class="bo__label">Design / base level — blank = mean ground level</span>
-        <input type="number" class="bo__input" [(ngModel)]="baseLevel" />
-      </label>
+      <label class="bo__toggle"><input type="checkbox" [(ngModel)]="stockpile" /><span>Stockpile / heap — base = ground along the outline</span></label>
+      @if (!stockpile) {
+        <label class="bo__field">
+          <span class="bo__label">Design / base level — blank = mean ground level</span>
+          <input type="number" class="bo__input" [(ngModel)]="baseLevel" />
+        </label>
+      } @else {
+        <p class="bo__hint">Draw tightly around the pile (drone DSM works best): its volume above the surrounding ground is reported as cut.</p>
+      }
     }
 
     @case ('watershed') {
@@ -739,6 +756,503 @@
       <p class="bo__hint">Both rasters must hold classes (land cover, reclassified or classification results). Class names come from their styles.</p>
     }
 
+    @case ('extract') {
+      <span class="bo__label">Rasters to sample</span>
+      <div class="ra__checklist">
+        @for (r of rasterLayers(); track r.value) {
+          <label class="bo__toggle">
+            <input type="checkbox" [ngModel]="extractRasterIds.has(r.value)" (ngModelChange)="toggleExtract(r.value, $event)" /><span>{{ r.label }}</span>
+          </label>
+        }
+      </div>
+      <p class="bo__hint">A copy of the layer is made with one new field per raster (e.g. r_dem = elevation at each tree). Lines / polygons use a point inside them.</p>
+    }
+
+    @case ('leastcost') {
+      <div class="bo__section">
+        <span class="bo__section-title">Start</span>
+        <span class="bo__operand-state">{{ pointLabel(pointA()) }}</span>
+        <div class="bo__operand-actions">
+          <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'a'" (click)="pick('a')"><i class="pi pi-map-marker"></i>Pick start</button>
+        </div>
+      </div>
+      <div class="bo__section">
+        <span class="bo__section-title">End</span>
+        <span class="bo__operand-state">{{ pointLabel(pointB()) }}</span>
+        <div class="bo__operand-actions">
+          <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'b'" (click)="pick('b')"><i class="pi pi-flag"></i>Pick end</button>
+        </div>
+      </div>
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Base cost per metre</span>
+          <input type="number" class="bo__input" min="0" step="0.5" [(ngModel)]="costBase" />
+        </label>
+      </div>
+      <label class="bo__toggle"><input type="checkbox" [(ngModel)]="costInvert" /><span>High values are cheap (e.g. a suitability raster)</span></label>
+      <p class="bo__hint">The route minimises the sum of cell costs (slope, difficulty…). Base cost keeps it from wandering on flat, zero-cost ground.</p>
+    }
+
+    @case ('hotspot') {
+      <label class="bo__field">
+        <span class="bo__label">Weight field — empty counts points</span>
+        <p-select class="bo__select" [options]="numericFields()" optionLabel="label" optionValue="value" [(ngModel)]="field" [showClear]="true" placeholder="Count of points" appendTo="body" />
+      </label>
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Cell size (m)</span>
+          <input type="number" class="bo__input" min="1" [(ngModel)]="hotCell" />
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Neighbourhood (m)</span>
+          <input type="number" class="bo__input" min="1" [(ngModel)]="hotDistance" />
+        </label>
+      </div>
+      <p class="bo__hint">Getis-Ord Gi*: red cells are clusters of many / high points that are statistically significant (not chance); blue are significant cold spots.</p>
+    }
+
+    @case ('airquality') {
+      <ng-container *ngTemplateOutlet="aoiInput"></ng-container>
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">From</span>
+          <input type="date" class="bo__input" [(ngModel)]="aqFrom" />
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">To</span>
+          <input type="date" class="bo__input" [(ngModel)]="aqTo" />
+        </label>
+      </div>
+      <label class="bo__field">
+        <span class="bo__label">Daily orbits to average (up to {{ aqOrbits }})</span>
+        <input type="range" min="3" max="40" step="1" [(ngModel)]="aqOrbits" />
+      </label>
+      <p class="bo__hint">Mean tropospheric NO₂ (traffic, industry, power) from Sentinel-5P, gridded at ~5 km — compare months or areas, not streets. Each orbit takes ~10 s.</p>
+    }
+
+    @case ('water') {
+      <ng-container *ngTemplateOutlet="aoiInput"></ng-container>
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">From</span>
+          <input type="date" class="bo__input" [(ngModel)]="seriesFrom" />
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">To</span>
+          <input type="date" class="bo__input" [(ngModel)]="seriesTo" />
+        </label>
+      </div>
+      <p class="bo__hint">Draw around the lake / pond (or pick its layer extent). The chart shows its water area (ha) on every clear Sentinel-2 date — shrinkage, filling, seasonal change.</p>
+    }
+
+    @case ('curvature') {
+      <p class="bo__hint">Blue = concave (valleys, hollows — water and silt collect), red = convex (ridges, mounds). Useful for drainage and landslide checks.</p>
+    }
+
+    @case ('fillnodata') {
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Search distance (pixels)</span>
+          <input type="number" class="bo__input" min="1" [(ngModel)]="fillDistance" />
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Smoothing passes</span>
+          <input type="number" class="bo__input" min="0" max="10" [(ngModel)]="smoothPasses" />
+        </label>
+      </div>
+      <p class="bo__hint">Gaps are filled by interpolating from the edges; smoothing (single-band only) removes noise like drone DSM speckle.</p>
+    }
+
+    @case ('heights') {
+      <label class="bo__field">
+        <span class="bo__label">Ground model (DTM)</span>
+        <p-select class="bo__select" [options]="rasterLayers()" optionLabel="label" optionValue="value" [(ngModel)]="dtmLayerId" [filter]="true" placeholder="Bare-earth elevation" appendTo="body" />
+      </label>
+      <label class="bo__field">
+        <span class="bo__label">Ignore below (m)</span>
+        <input type="number" class="bo__input" min="0" step="0.5" [(ngModel)]="minHeight" />
+      </label>
+      <p class="bo__hint">Height = DSM − DTM: buildings, trees, stockpiles. Needs a drone / LiDAR DSM; the 30 m Copernicus DEM is too coarse for single buildings.</p>
+    }
+
+    @case ('workflows') {
+      @if (workflows().length) {
+        <label class="bo__field">
+          <span class="bo__label">Input raster for workflows that need one</span>
+          <p-select class="bo__select" [options]="rasterLayers()" optionLabel="label" optionValue="value" [(ngModel)]="workflowInputId" [filter]="true" placeholder="Choose a raster" appendTo="body" />
+        </label>
+        <ul class="ra__monitors">
+          @for (wf of workflows(); track wf.id) {
+            <li class="ra__monitor">
+              <div class="ra__monitor-head">
+                <i class="pi pi-sitemap"></i>
+                <span class="ra__monitor-name">{{ wf.name }}</span>
+                <span class="ra__monitor-kind">{{ wf.steps.length }} step{{ wf.steps.length === 1 ? '' : 's' }}</span>
+              </div>
+              <p class="ra__monitor-summary">
+                @for (st of wf.steps; track $index; let last = $last) {
+                  {{ st.tool }}{{ last ? '' : ' → ' }}
+                }
+              </p>
+              <div class="ra__monitor-meta">
+                <span>{{ workflowNeedsInput(wf) ? 'Needs an input raster' : 'No input needed' }}</span>
+                <span class="ra__monitor-actions">
+                  <button type="button" class="ra__export-btn" [disabled]="running()" (click)="runWorkflow(wf)"><i class="pi pi-play"></i> Run</button>
+                  <button type="button" class="ra__export-btn" (click)="deleteWorkflow(wf)"><i class="pi pi-trash"></i></button>
+                </span>
+              </div>
+            </li>
+          }
+        </ul>
+      } @else {
+        <p class="bo__hint">No saved workflows yet.</p>
+      }
+      <div class="bo__section">
+        <span class="bo__section-title">New workflow from this session's runs</span>
+        @if (recorded().length) {
+          <div class="ra__checklist">
+            @for (st of recorded(); track $index; let i = $index) {
+              <label class="bo__toggle"><input type="checkbox" [ngModel]="pickedSteps().has(i)" (ngModelChange)="togglePick(i)" /><span>{{ st.label }}</span></label>
+            }
+          </div>
+          <input type="text" class="bo__input" maxlength="80" placeholder="e.g. DEM → drainage network" [(ngModel)]="workflowName" />
+          <button pButton type="button" label="Save workflow" icon="pi pi-save" class="p-button-sm p-button-outlined" (click)="saveWorkflow()"></button>
+          <p class="bo__hint">Steps that used a previous step's output are chained automatically; the first step's raster becomes the workflow's input.</p>
+        } @else {
+          <p class="bo__hint">Run a few tools first (e.g. Fill Sinks, then Stream Network on its result) — they appear here to save as a reusable workflow.</p>
+        }
+      </div>
+    }
+
+    @case ('history') {
+      @if (history().length) {
+        <ul class="ra__monitors">
+          @for (h of history(); track h.id) {
+            <li class="ra__monitor" [class.is-alert]="h.status === 'failed'">
+              <div class="ra__monitor-head">
+                <i class="pi" [class.pi-check-circle]="h.status === 'done'" [class.pi-times-circle]="h.status !== 'done'"></i>
+                <span class="ra__monitor-name">{{ h.tool }}</span>
+                <span class="ra__monitor-kind">{{ h.createdAt | date: 'd MMM, HH:mm' }}</span>
+              </div>
+              <p class="ra__monitor-summary">{{ h.summary }}</p>
+              <div class="ra__monitor-meta">
+                <span></span>
+                <span class="ra__monitor-actions">
+                  @if (h.layerId) {
+                    <button type="button" class="ra__export-btn" (click)="showLayer(h.layerId)"><i class="pi pi-eye"></i> Show</button>
+                  }
+                  <button type="button" class="ra__export-btn" [disabled]="running()" (click)="rerun(h)"><i class="pi pi-replay"></i> Run again</button>
+                </span>
+              </div>
+            </li>
+          }
+        </ul>
+      } @else {
+        <p class="bo__hint">No runs yet.</p>
+      }
+    }
+
+    @case ('timeslider') {
+      <span class="bo__label">Rasters in time order (tick in sequence)</span>
+      <div class="ra__checklist">
+        @for (r of rasterLayers(); track r.value) {
+          <label class="bo__toggle">
+            <input type="checkbox" [ngModel]="sliderIds().includes(r.value)" (ngModelChange)="toggleSlider(r.value, $event)" />
+            <span>{{ r.label }}@if (sliderIds().includes(r.value)) { <b> · #{{ sliderIds().indexOf(r.value) + 1 }}</b> }</span>
+          </label>
+        }
+      </div>
+      @if (sliderIds().length) {
+        <div class="ra__slider">
+          <button type="button" class="bo__chip" (click)="togglePlay()"><i class="pi" [class.pi-play]="!playing()" [class.pi-pause]="playing()"></i>{{ playing() ? 'Pause' : 'Play' }}</button>
+          <input type="range" min="0" [max]="sliderIds().length - 1" [ngModel]="sliderIndex()" (ngModelChange)="setFrame(+$event)" />
+        </div>
+        <p class="ra__frame">{{ sliderIndex() + 1 }} / {{ sliderIds().length }} — <b>{{ layerName(sliderIds()[sliderIndex()]) }}</b></p>
+      }
+    }
+
+    @case ('storage') {
+      @if (storageInfo(); as st) {
+        <ul class="bo__rings">
+          <li class="bo__ring"><span class="bo__ring-label">Raster Analysis results</span><span class="bo__ring-count">{{ bytes(st.totalBytes) }}</span></li>
+          <li class="bo__ring"><span class="bo__ring-label">Temporary files</span><span class="bo__ring-count">{{ bytes(st.tempBytes) }}</span></li>
+          <li class="bo__ring"><span class="bo__ring-label">Orphaned files (layer deleted)</span><span class="bo__ring-count">{{ bytes(st.orphanBytes) }}</span></li>
+        </ul>
+        <div class="ra__table-wrap">
+          <table class="ra__table">
+            <thead><tr><th>Department</th><th>Size</th></tr></thead>
+            <tbody>
+              @for (d of st.perDepartment; track d.department) {
+                <tr><td>{{ d.department }}</td><td>{{ bytes(d.bytes) }}</td></tr>
+              }
+            </tbody>
+          </table>
+        </div>
+        <div class="ra__table-wrap">
+          <table class="ra__table">
+            <thead><tr><th>Largest results</th><th>Type</th><th>Size</th></tr></thead>
+            <tbody>
+              @for (l of st.layers.slice(0, 30); track $index) {
+                <tr [class.ra__row-link]="l.layerId" (click)="showLayer(l.layerId)"><td [title]="l.department">{{ l.name }}</td><td style="text-align: left">{{ l.kind }}</td><td>{{ bytes(l.bytes) }}</td></tr>
+              }
+            </tbody>
+          </table>
+        </div>
+        <button pButton type="button" label="Clean temporary & orphaned files" icon="pi pi-trash" class="p-button-sm p-button-outlined" [disabled]="running()" (click)="cleanStorage()"></button>
+        <p class="bo__hint">To free more space, delete results you no longer need in GIS Layers.</p>
+      } @else {
+        <p class="bo__hint">Loading…</p>
+      }
+    }
+
+    @case ('suitability') {
+      <span class="bo__label">Criteria — each raster is scaled 0–1, weighted and added up</span>
+      <div class="ra__criteria">
+        @for (c of criteria; track $index; let i = $index) {
+          <div class="ra__criterion">
+            <p-select
+              class="bo__select"
+              [options]="rasterLayers()"
+              optionLabel="label"
+              optionValue="value"
+              [(ngModel)]="c.layerId"
+              [filter]="true"
+              placeholder="Raster (slope, distance, land cover…)"
+              appendTo="body"
+            />
+            <div class="ra__criterion-row">
+              <select class="bo__input" [(ngModel)]="c.direction" title="Which values are better">
+                <option value="lower">Lower is better</option>
+                <option value="higher">Higher is better</option>
+              </select>
+              <input type="range" min="0" max="100" step="5" [(ngModel)]="c.weight" title="Weight" />
+              <span class="ra__weight">{{ weightPct(c.weight) }}</span>
+              @if (criteria.length > 2) {
+                <button type="button" class="bo__chip bo__chip--ghost" (click)="removeCriterion(i)"><i class="pi pi-times"></i></button>
+              }
+            </div>
+          </div>
+        }
+      </div>
+      @if (criteria.length < 8) {
+        <button type="button" class="bo__cancel ra__add" (click)="addCriterion()">+ Add criterion</button>
+      }
+      <label class="bo__field">
+        <span class="bo__label">Exclude where these rasters are non-zero (water, protected land…)</span>
+        <p-multiSelect
+          class="bo__select"
+          [options]="rasterLayers()"
+          optionLabel="label"
+          optionValue="value"
+          [(ngModel)]="excludeLayerIds"
+          placeholder="Nothing excluded"
+          [selectionLimit]="5"
+          appendTo="body"
+        />
+      </label>
+      <p class="bo__hint">Example — school site: Slope (lower better, 40 %) + Proximity to roads (lower better, 40 %) + Flood Risk (higher class better, 20 %). Result: 0–100, green = best.</p>
+    }
+
+    @case ('floodrisk') {
+      <label class="bo__field">
+        <span class="bo__label">Drainage starts at catchments of (km²)</span>
+        <input type="number" class="bo__input" min="0.01" step="any" [(ngModel)]="floodThreshold" />
+      </label>
+      <div class="bo__row">
+        @for (lbl of ['Very high below', 'High below', 'Moderate below']; track lbl; let i = $index) {
+          <label class="bo__field bo__field--grow">
+            <span class="bo__label">{{ lbl }} (m)</span>
+            <input type="number" class="bo__input" min="0" step="0.5" [(ngModel)]="floodClasses[i]" />
+          </label>
+        }
+      </div>
+      <p class="bo__hint">HAND = how high each place sits above the drain / river it flows to. Low HAND = water reaches it first. Use Fill Sinks on noisy DEMs first.</p>
+    }
+
+    @case ('exposure') {
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Hazard condition</span>
+          <select class="bo__input" [(ngModel)]="hazardOperator">
+            <option value="<=">≤</option>
+            <option value="<">&lt;</option>
+            <option value=">=">≥</option>
+            <option value=">">&gt;</option>
+            <option value="==">=</option>
+            <option value="between">between</option>
+          </select>
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Value</span>
+          <input type="number" class="bo__input" step="any" [(ngModel)]="hazardThreshold" />
+        </label>
+        @if (hazardOperator === 'between') {
+          <label class="bo__field bo__field--grow">
+            <span class="bo__label">and</span>
+            <input type="number" class="bo__input" step="any" [(ngModel)]="hazardThreshold2" />
+          </label>
+        }
+      </div>
+      <p class="bo__hint">E.g. Flood Risk classes ≤ 2 (very high + high), heat ≥ 42 °C, distance to hospital &gt; 2000 m.</p>
+      <label class="bo__field">
+        <span class="bo__label">Population raster</span>
+        <p-select
+          class="bo__select"
+          [options]="rasterLayers()"
+          optionLabel="label"
+          optionValue="value"
+          [(ngModel)]="populationLayerId"
+          [filter]="true"
+          placeholder="Online Sources → Population"
+          appendTo="body"
+        />
+      </label>
+      <label class="bo__toggle"><input type="checkbox" [(ngModel)]="exposureByZone" /><span>Break down by zone</span></label>
+      @if (exposureByZone) {
+        <ng-container *ngTemplateOutlet="zonesInput; context: { filter: false }"></ng-container>
+      }
+    }
+
+    @case ('greencover') {
+      <ng-container *ngTemplateOutlet="zonesInput; context: { filter: true }"></ng-container>
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">From</span>
+          <input type="date" class="bo__input" [(ngModel)]="gcFrom" />
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">To</span>
+          <input type="date" class="bo__input" [(ngModel)]="gcTo" />
+        </label>
+      </div>
+      <label class="bo__toggle"><input type="checkbox" [(ngModel)]="gcCompare" /><span>Compare with the same dates last year</span></label>
+      <label class="bo__field">
+        <span class="bo__label">Green = NDVI above {{ gcThreshold }}</span>
+        <input type="range" min="0.15" max="0.6" step="0.05" [(ngModel)]="gcThreshold" />
+      </label>
+      <p class="bo__hint">Cloud-free Sentinel-2 composite of the period (10 m). Max 400 km² — filter to some wards for a large city.</p>
+    }
+
+    @case ('encroach') {
+      <ng-container *ngTemplateOutlet="zonesInput; context: { filter: true, title: 'Protected zones (polygon layer)' }"></ng-container>
+      <span class="bo__label">Before</span>
+      <div class="bo__row">
+        <input type="date" class="bo__input bo__field--grow" [(ngModel)]="encBeforeFrom" />
+        <input type="date" class="bo__input bo__field--grow" [(ngModel)]="encBeforeTo" />
+      </div>
+      <span class="bo__label">After</span>
+      <div class="bo__row">
+        <input type="date" class="bo__input bo__field--grow" [(ngModel)]="encAfterFrom" />
+        <input type="date" class="bo__input bo__field--grow" [(ngModel)]="encAfterTo" />
+      </div>
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Ignore patches below (m²)</span>
+          <input type="number" class="bo__input" min="50" step="50" [(ngModel)]="encMinArea" />
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Sensitivity</span>
+          <select class="bo__input" [(ngModel)]="encSensitivity">
+            <option value="low">Low — clear changes only</option>
+            <option value="medium">Medium</option>
+            <option value="high">High — more, incl. doubtful</option>
+          </select>
+        </label>
+      </div>
+      <p class="bo__hint">Finds land that turned built-up (high NDBI, low NDVI) between the two periods. Use the same season for both (e.g. Jan–Mar) to avoid crop / monsoon effects. Max 400 km².</p>
+    }
+
+    @case ('monitor') {
+      @if (monitors().length) {
+        <ul class="ra__monitors">
+          @for (m of monitors(); track m.id) {
+            <li class="ra__monitor" [class.is-alert]="m.alert">
+              <div class="ra__monitor-head">
+                <i class="pi" [class.pi-bell]="m.alert" [class.pi-check-circle]="!m.alert && m.lastStatus === 'done'" [class.pi-clock]="m.lastStatus !== 'done' && !m.alert"></i>
+                <span class="ra__monitor-name">{{ m.name }}</span>
+                <span class="ra__monitor-kind">{{ m.kind === 'green-cover' ? 'Green cover' : 'Encroachment' }} · {{ m.frequency }}</span>
+              </div>
+              <p class="ra__monitor-summary">
+                @if (m.lastStatus === 'running') {
+                  <i class="pi pi-spin pi-spinner"></i> Running now…
+                } @else {
+                  {{ m.lastSummary ?? 'Not run yet.' }}
+                }
+              </p>
+              @if (m.alert && m.alertMessage) {
+                <p class="ra__monitor-alert">{{ m.alertMessage }}</p>
+              }
+              <div class="ra__monitor-meta">
+                <span>Next: {{ m.active ? (m.nextRunAt | date: 'd MMM, HH:mm') : 'paused' }}</span>
+                <span class="ra__monitor-actions">
+                  @if (m.alert) {
+                    <button type="button" class="ra__export-btn" (click)="monitorAction(m, 'ack')">Mark seen</button>
+                  }
+                  <button type="button" class="ra__export-btn" [disabled]="m.lastStatus === 'running'" (click)="monitorAction(m, 'run')">Run now</button>
+                  <button type="button" class="ra__export-btn" (click)="monitorAction(m, m.active ? 'pause' : 'resume')">{{ m.active ? 'Pause' : 'Resume' }}</button>
+                  <button type="button" class="ra__export-btn" (click)="monitorAction(m, 'delete')" title="Delete"><i class="pi pi-trash"></i></button>
+                </span>
+              </div>
+            </li>
+          }
+        </ul>
+      } @else {
+        <p class="bo__hint">No monitors yet — create one below.</p>
+      }
+      <div class="bo__section">
+        <span class="bo__section-title">New monitor</span>
+        <input type="text" class="bo__input" maxlength="80" placeholder="e.g. Lake buffers – encroachment" [(ngModel)]="monitorName" />
+        <div class="bo__modes" role="tablist">
+          <button type="button" class="bo__mode" [class.bo__mode--active]="monitorKind === 'green-cover'" (click)="monitorKind = 'green-cover'">Green cover</button>
+          <button type="button" class="bo__mode" [class.bo__mode--active]="monitorKind === 'encroachment'" (click)="monitorKind = 'encroachment'">Encroachment</button>
+        </div>
+        <ng-container *ngTemplateOutlet="zonesInput; context: { filter: true }"></ng-container>
+        <div class="bo__row">
+          <label class="bo__field bo__field--grow">
+            <span class="bo__label">Every</span>
+            <select class="bo__input" [(ngModel)]="monitorFrequency">
+              <option value="weekly">Week</option>
+              <option value="monthly">Month</option>
+            </select>
+          </label>
+          @if (monitorKind === 'green-cover') {
+            <label class="bo__field bo__field--grow">
+              <span class="bo__label">Alert at a drop of (points)</span>
+              <input type="number" class="bo__input" min="0.5" step="0.5" [(ngModel)]="monitorDropPct" />
+            </label>
+          } @else {
+            <label class="bo__field bo__field--grow">
+              <span class="bo__label">Min. patch (m²)</span>
+              <input type="number" class="bo__input" min="50" step="50" [(ngModel)]="encMinArea" />
+            </label>
+          }
+        </div>
+        <button pButton type="button" label="Create monitor" icon="pi pi-plus" class="p-button-sm p-button-outlined" [disabled]="running()" (click)="createMonitor()"></button>
+        <p class="bo__hint">Each run compares the last 60 days with the same 60 days a year earlier and raises an alert here when something changed.</p>
+      </div>
+    }
+
+    @case ('report') {
+      <div class="bo__modes" role="tablist">
+        <button type="button" class="bo__mode" [class.bo__mode--active]="reportArea === 'layer'" (click)="reportArea = 'layer'">Ward / zone</button>
+        <button type="button" class="bo__mode" [class.bo__mode--active]="reportArea === 'draw'" (click)="reportArea = 'draw'">Draw</button>
+      </div>
+      @if (reportArea === 'layer') {
+        <ng-container *ngTemplateOutlet="zonesInput; context: { filter: true, noLabel: true }"></ng-container>
+      } @else {
+        <ng-container *ngTemplateOutlet="polygonInput"></ng-container>
+      }
+      <span class="bo__label">Include</span>
+      <div class="ra__checklist">
+        @for (r of rasterLayers(); track r.value) {
+          <label class="bo__toggle">
+            <input type="checkbox" [ngModel]="reportRasterIds.has(r.value)" (ngModelChange)="toggleReportRaster(r.value, $event)" /><span>{{ r.label }}</span>
+          </label>
+        }
+      </div>
+      <p class="bo__hint">Opens a printable page with a map and statistics for each raster (classes for land cover, min / mean / max for elevation, NDVI, heat; total for population).</p>
+    }
+
     @case ('view3d') {
       <label class="bo__field">
         <span class="bo__label">Drape (colour the surface with) — optional</span>
@@ -998,7 +1512,10 @@
     <button type="button" class="bo__cancel" (click)="cancelPick()">Cancel picking</button>
   }
 
-  @if (needsOutput()) {
+  @if (optionalOutput()) {
+    <label class="bo__toggle"><input type="checkbox" [(ngModel)]="publishResult" /><span>Also publish the result as a map layer</span></label>
+  }
+  @if (needsOutput() || (optionalOutput() && publishResult)) {
     <label class="bo__field">
       <span class="bo__label">New layer name</span>
       <input type="text" class="bo__input" maxlength="80" [(ngModel)]="outputName" />
@@ -1059,6 +1576,9 @@
         <li class="bo__ring">
           <span class="bo__ring-label">{{ f.label }}</span>
           <span class="bo__ring-count">{{ f.value }}</span>
+          <button type="button" class="ra__pin" [class.is-pinned]="pinnedLabels().has(f.label)" (click)="pinFact(f)" title="Pin to the Dashboard">
+            <i class="pi pi-thumbtack"></i>
+          </button>
         </li>
       }
     </ul>
@@ -1134,6 +1654,32 @@
       </figcaption>
     </figure>
   }
+  @if (table(); as t) {
+    <div class="ra__export">
+      <span class="ra__chart-read">{{ t.title }}{{ t.coords ? ' — click a row to zoom' : '' }}</span>
+      <button type="button" class="ra__export-btn" (click)="exportTable()"><i class="pi pi-download"></i> CSV</button>
+    </div>
+    <div class="ra__table-wrap">
+      <table class="ra__table">
+        <thead>
+          <tr>
+            @for (h of t.headers; track h) {
+              <th>{{ h }}</th>
+            }
+          </tr>
+        </thead>
+        <tbody>
+          @for (row of t.rows; track $index; let i = $index) {
+            <tr [class.ra__row-link]="t.coords" (click)="zoomToRow(i)">
+              @for (cell of row; track $index) {
+                <td>{{ cell }}</td>
+              }
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
   @if (transitions(); as tr) {
     <div class="ra__export">
       <button type="button" class="ra__export-btn" (click)="exportTransitions()"><i class="pi pi-download"></i> Change matrix CSV</button>
@@ -1175,12 +1721,12 @@
     </div>
   }
 
-  @if (tool() !== 'swipe') {
+  @if (tool() !== 'swipe' && !['workflows', 'history', 'timeslider', 'storage'].includes(tool())) {
     <div class="bo__controls">
       <button
         pButton
         type="button"
-        [label]="running() ? 'Working…' : tool() === 'upload' ? 'Upload & publish' : tool() === 'online' ? 'Download & publish' : tool() === 'style' ? 'Apply style' : tool() === 'identify' ? 'Identify' : tool() === 'download' ? 'Download' : tool() === 'stats' ? 'Compute' : tool() === 'series' ? 'Build time series' : tool() === 'supervised' ? 'Classify' : tool() === 'view3d' ? 'Open 3D view' : 'Run'"
+        [label]="running() ? 'Working…' : tool() === 'upload' ? 'Upload & publish' : tool() === 'online' ? 'Download & publish' : tool() === 'style' ? 'Apply style' : tool() === 'identify' ? 'Identify' : tool() === 'download' ? 'Download' : tool() === 'stats' ? 'Compute' : tool() === 'series' ? 'Build time series' : tool() === 'supervised' ? 'Classify' : tool() === 'view3d' ? 'Open 3D view' : tool() === 'report' ? 'Create report' : tool() === 'monitor' ? 'Refresh list' : 'Run'"
         icon="pi pi-play"
         class="p-button-sm bo__run"
         [disabled]="running()"
@@ -1273,5 +1819,44 @@
     <ng-container *ngTemplateOutlet="polygonInput"></ng-container>
   } @else {
     <p class="bo__hint">Uses whatever is visible on the map — zoom to your area first.</p>
+  }
+</ng-template>
+
+<ng-template #zonesInput let-filter="filter" let-title="title" let-noLabel="noLabel">
+  <label class="bo__field">
+    <span class="bo__label">{{ title ?? 'Zones (polygon layer)' }}</span>
+    <p-select
+      class="bo__select"
+      [options]="polygonLayers()"
+      optionLabel="label"
+      optionValue="value"
+      [ngModel]="vectorLayerId()"
+      (ngModelChange)="selectVector($event); zoneLabelField = null; zoneFilterField = null; zoneFilterValue = ''"
+      [filter]="true"
+      placeholder="e.g. ward, zone, garden_bdy"
+      appendTo="body"
+    />
+  </label>
+  @if (vectorLayerId()) {
+    <div class="bo__row">
+      @if (!noLabel) {
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Name zones by</span>
+          <p-select class="bo__select" [options]="allFields()" optionLabel="label" optionValue="value" [(ngModel)]="zoneLabelField" [showClear]="true" placeholder="Zone 1, 2…" appendTo="body" />
+        </label>
+      }
+      @if (filter) {
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Only where</span>
+          <p-select class="bo__select" [options]="allFields()" optionLabel="label" optionValue="value" [(ngModel)]="zoneFilterField" [showClear]="true" placeholder="All zones" appendTo="body" />
+        </label>
+        @if (zoneFilterField) {
+          <label class="bo__field bo__field--grow">
+            <span class="bo__label">equals</span>
+            <input type="text" class="bo__input" [(ngModel)]="zoneFilterValue" placeholder="e.g. 10" />
+          </label>
+        }
+      }
+    </div>
   }
 </ng-template>

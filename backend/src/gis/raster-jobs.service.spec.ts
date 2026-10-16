@@ -20,7 +20,7 @@ describe('RasterJobsService', () => {
           rasterJobContext.getStore()?.signal.addEventListener('abort', () => reject(new Error('killed')));
         }),
     );
-    service = new RasterJobsService({ fillSinks } as never);
+    service = new RasterJobsService({ fillSinks } as never, { rasterJobHistory: { create: jest.fn().mockResolvedValue({}) } } as never);
   });
 
   it('validates the body against the tool DTO', async () => {

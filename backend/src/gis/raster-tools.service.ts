@@ -6,6 +6,18 @@ import type { AppUser } from '../auth/types/app-user.type';
 import { RasterService, type RasterStats } from './raster.service';
 import type { RasterStyleSpec } from './raster-style';
 import type {
+  AirQualityDto,
+  ExtractValuesDto,
+  FillNoDataDto,
+  HotspotDto,
+  LeastCostDto,
+  ObjectHeightsDto,
+  AreaReportDto,
+  EncroachmentDto,
+  ExposureDto,
+  FloodRiskDto,
+  GreenCoverDto,
+  SuitabilityDto,
   ChangeDetectionDto,
   ChangeMatrixDto,
   ClassifyDto,
@@ -49,6 +61,9 @@ const CALC_FUNCTIONS = new Set([
 
 /** Yellow → red, for zonal choropleths (up to 5 classes). */
 const CHOROPLETH = ['#ffffb2', '#fecc5c', '#fd8d3c', '#f03b20', '#bd0026'];
+
+/** Light → dark green, for green-cover choropleths. */
+const GREENS = ['#f7fcb9', '#d9f0a3', '#addd8e', '#78c679', '#31a354'];
 
 /** ESA WorldCover legend colours. */
 const WORLDCOVER_COLORS: Record<number, string> = {
@@ -95,8 +110,10 @@ export class RasterToolsService {
           ? { mode: 'ramp', ramp: 'grayscale', min: 0, max: 255 }
           : dto.kind === 'aspect'
             ? { mode: 'ramp', ramp: 'aspect', min: 0, max: 360 }
-            : dto.kind === 'TPI'
+            : dto.kind === 'TPI' || dto.kind === 'curvature'
               ? { mode: 'ramp', ramp: 'diverging', min: -m, max: m }
+              : dto.kind === 'multihillshade'
+                ? { mode: 'ramp', ramp: 'grayscale', min: 0, max: 255 }
               : { mode: 'ramp', ramp: 'heat', min: 0, max: hi };
       return { style, result: { stats: r.stats } };
     });
@@ -116,7 +133,10 @@ export class RasterToolsService {
 
   async cutFill(appUser: AppUser, dto: CutFillDto) {
     const { file } = await this.rasters.resolveRaster(appUser, dto.layerId);
-    return this.rasters.runOp({ op: 'cut_fill', path: file, band: dto.band ?? 1, polygon: dto.polygon, baseLevel: dto.baseLevel });
+    return this.rasters.runOp({
+      op: 'cut_fill', path: file, band: dto.band ?? 1, polygon: dto.polygon,
+      baseLevel: dto.baseFromBoundary ? undefined : dto.baseLevel, baseFromBoundary: dto.baseFromBoundary ?? false,
+    });
   }
 
   async watershed(appUser: AppUser, dto: WatershedDto) {
@@ -588,6 +608,216 @@ export class RasterToolsService {
     return this.toVectorLayer(appUser, dto.outputName, 'LINE', (output) =>
       this.rasters.runOp({ op: 'streams', path: file, band: dto.band ?? 1, thresholdKm2: dto.thresholdKm2, output }),
     );
+  }
+
+  // ----- Decision Support -----
+
+  /** Weighted overlay: every criterion scaled 0–1 (higher or lower is
+   *  better), weighted and summed to a 0–100 suitability score. */
+  async suitability(appUser: AppUser, dto: SuitabilityDto) {
+    const criteria: { path: string; band: number; direction: string; weight: number; name: string }[] = [];
+    for (const c of dto.criteria) {
+      const { file, layer } = await this.rasters.resolveRaster(appUser, c.layerId);
+      criteria.push({ path: file, band: c.band ?? 1, direction: c.direction, weight: c.weight, name: layer.name });
+    }
+    if (!criteria.some((c) => c.weight > 0)) throw new BadRequestException('Give at least one criterion a weight above 0.');
+    const exclude: string[] = [];
+    for (const id of dto.excludeLayerIds ?? []) exclude.push((await this.rasters.resolveRaster(appUser, id)).file);
+    return this.toRasterLayer(appUser, dto.outputName, async (output) => {
+      const result = await this.rasters.runOp({ op: 'suitability', criteria, exclude, output });
+      return { style: { mode: 'ramp', ramp: 'ndvi', min: 0, max: 100, opacity: 0.85 }, result };
+    });
+  }
+
+  /** New built-up area inside protected zones between two periods. */
+  async encroachment(appUser: AppUser, dto: EncroachmentDto) {
+    const zones = await this.zonesSource(appUser, dto);
+    const request = {
+      op: 'encroachment', ...zones,
+      beforeFrom: dto.beforeFrom, beforeTo: dto.beforeTo, afterFrom: dto.afterFrom, afterTo: dto.afterTo,
+      minAreaM2: dto.minAreaM2 ?? 300, sensitivity: dto.sensitivity ?? 'medium',
+    };
+    if (!dto.outputName?.trim()) return { result: await this.rasters.runOp(request) };
+    const published = await this.toVectorLayer(appUser, dto.outputName.trim(), 'POLYGON', (output) =>
+      this.rasters.runOp({ ...request, output }),
+    );
+    await this.rasters.applyVectorStyle(published.layer.id, {
+      version: 1, geometry: 'polygon', mode: 'single',
+      symbol: { fillColor: '#d7191c', fillOpacity: 0.35, strokeColor: '#b10026', strokeWidth: 1.5 },
+    });
+    return published;
+  }
+
+  /** Green cover (% of NDVI > threshold) per zone, optionally vs. a
+   *  comparison period. */
+  async greenCover(appUser: AppUser, dto: GreenCoverDto) {
+    const zones = await this.zonesSource(appUser, dto);
+    if (!!dto.compareFrom !== !!dto.compareTo) throw new BadRequestException('Give both dates of the comparison period.');
+    const request = {
+      op: 'green_cover', ...zones, from: dto.from, to: dto.to,
+      compareFrom: dto.compareFrom, compareTo: dto.compareTo, threshold: dto.threshold ?? 0.3,
+    };
+    if (!dto.outputName?.trim()) return { result: await this.rasters.runOp(request) };
+    const published = await this.toVectorLayer(appUser, dto.outputName.trim(), 'POLYGON', (output) =>
+      this.rasters.runOp<{ breaks: number[] }>({ ...request, output }),
+    );
+    const breaks = (published.result as { breaks?: number[] }).breaks ?? [];
+    if (breaks.length >= 3) {
+      const count = breaks.length - 1;
+      await this.rasters.applyVectorStyle(published.layer.id, {
+        version: 1, geometry: 'polygon', mode: 'graduated',
+        symbol: { fillColor: '#cccccc', fillOpacity: 0.75, strokeColor: '#555555', strokeWidth: 0.6 },
+        graduate: { field: 'green_pct', method: 'quantile', classCount: count, breaks, ramp: GREENS.slice(-count) },
+      });
+    }
+    return published;
+  }
+
+  /** Flood-prone land from Height Above Nearest Drainage (HAND). */
+  async floodRisk(appUser: AppUser, dto: FloodRiskDto) {
+    const { file } = await this.rasters.resolveRaster(appUser, dto.layerId);
+    const [t1, t2, t3] = dto.classes ?? [1, 3, 6];
+    if (!(t1 < t2 && t2 < t3)) throw new BadRequestException('Class limits must increase.');
+    return this.toRasterLayer(appUser, dto.outputName, async (output) => {
+      const result = await this.rasters.runOp<{ classes: { value: number; label: string }[] }>({
+        op: 'hand', path: file, band: dto.band ?? 1, thresholdKm2: dto.thresholdKm2, classes: [t1, t2, t3], output,
+      });
+      const colors = ['#08306b', '#2171b5', '#6baed6', '#deebf7'];
+      const style: RasterStyleSpec = {
+        mode: 'values',
+        classes: result.classes.map((c, i) => ({ value: c.value, color: colors[i], label: c.label, opacity: i === 3 ? 0.25 : 0.75 })),
+      };
+      return { style, result };
+    });
+  }
+
+  /** People living where a hazard raster meets a condition. */
+  async exposure(appUser: AppUser, dto: ExposureDto) {
+    const population = await this.rasters.resolveRaster(appUser, dto.populationLayerId);
+    const hazard = await this.rasters.resolveRaster(appUser, dto.hazardLayerId);
+    if (dto.operator === 'between' && dto.threshold2 === undefined) throw new BadRequestException('Give the upper limit.');
+    let zones: Record<string, unknown> = {};
+    if (dto.zonesLayerId) {
+      const { source } = await this.rasters.resolveVector(appUser, dto.zonesLayerId);
+      await this.rasters.assertField(appUser, dto.zonesLayerId, dto.labelField, false);
+      zones = { vector: source, labelField: dto.labelField };
+    }
+    const request = {
+      op: 'exposure', population: population.file, hazard: hazard.file, hazardBand: dto.hazardBand ?? 1,
+      operator: dto.operator, threshold: dto.threshold, threshold2: dto.threshold2, ...zones,
+    };
+    if (!dto.outputName?.trim()) return { result: await this.rasters.runOp(request) };
+    return this.toRasterLayer(appUser, dto.outputName.trim(), async (output) => {
+      const result = await this.rasters.runOp({ ...request, output });
+      return { style: { mode: 'ramp', ramp: 'heat', min: 0, max: 50, opacity: 0.85 }, result };
+    });
+  }
+
+  /** Statistics of several rasters inside one area (for a printable report). */
+  async areaReport(appUser: AppUser, dto: AreaReportDto) {
+    let area: Record<string, unknown>;
+    if (dto.zonesLayerId) {
+      const { source } = await this.rasters.resolveVector(appUser, dto.zonesLayerId);
+      await this.rasters.assertField(appUser, dto.zonesLayerId, dto.filterField, false);
+      area = { vector: source, field: dto.filterField, value: dto.filterValue ?? '' };
+    } else if (dto.polygon) {
+      area = { polygon: dto.polygon };
+    } else {
+      throw new BadRequestException('Choose the area: a polygon layer (feature) or a drawn polygon.');
+    }
+    const rasters: Record<string, unknown>[] = [];
+    for (const id of dto.rasterLayerIds) {
+      const { file, layer } = await this.rasters.resolveRaster(appUser, id);
+      const spec = layer.styleSpec as RasterStyleSpec | null;
+      rasters.push({ layerId: layer.id, name: layer.name, path: file, classes: spec?.mode === 'values' ? spec.classes : undefined });
+    }
+    return { result: await this.rasters.runOp({ op: 'area_report', ...area, rasters }) };
+  }
+
+// ----- v4: analysis additions -----
+
+  async extractValues(appUser: AppUser, dto: ExtractValuesDto) {
+    const { layer, source } = await this.rasters.resolveVector(appUser, dto.vectorLayerId);
+    const rasters: { path: string; field: string }[] = [];
+    const used = new Set<string>();
+    for (const id of dto.rasterLayerIds) {
+      const r = await this.rasters.resolveRaster(appUser, id);
+      let field = `r_${r.layer.code.toLowerCase().replace(/[^a-z0-9_]/g, '_')}`.slice(0, 30);
+      while (used.has(field)) field = `${field.slice(0, 27)}_${used.size}`;
+      used.add(field);
+      rasters.push({ path: r.file, field });
+    }
+    return this.toVectorLayer(appUser, dto.outputName, layer.geometryType ?? 'POINT', (output) =>
+      this.rasters.runOp({ op: 'extract_values', vector: source, rasters, output }),
+    );
+  }
+
+  async leastCost(appUser: AppUser, dto: LeastCostDto) {
+    const { file } = await this.rasters.resolveRaster(appUser, dto.layerId);
+    return this.toVectorLayer(appUser, dto.outputName, 'LINE', (output) =>
+      this.rasters.runOp({
+        op: 'least_cost', path: file, band: dto.band ?? 1, from: dto.from, to: dto.to,
+        invert: dto.invert ?? false, baseCost: dto.baseCost ?? 0, output,
+      }),
+    );
+  }
+
+  async hotspot(appUser: AppUser, dto: HotspotDto) {
+    const { source } = await this.rasters.resolveVector(appUser, dto.vectorLayerId);
+    await this.rasters.assertField(appUser, dto.vectorLayerId, dto.weightField, true);
+    return this.toRasterLayer(appUser, dto.outputName, async (output) => {
+      const result = await this.rasters.runOp({
+        op: 'hotspot', vector: source, weightField: dto.weightField, cellSize: dto.cellSize, distance: dto.distance, output,
+      });
+      const legend: [number, string, string][] = [
+        [1, '#2c7bb6', 'Cold spot 99 %'], [2, '#6baed6', 'Cold spot 95 %'], [3, '#c6dbef', 'Cold spot 90 %'],
+        [5, '#fdae61', 'Hot spot 90 %'], [6, '#f46d43', 'Hot spot 95 %'], [7, '#d73027', 'Hot spot 99 %'],
+      ];
+      return {
+        style: { mode: 'values', classes: legend.map(([value, color, label]) => ({ value, color, label, opacity: 0.8 })) },
+        result,
+      };
+    });
+  }
+
+  async airQuality(appUser: AppUser, dto: AirQualityDto) {
+    this.assertBbox(dto.bbox);
+    return this.toRasterLayer(appUser, dto.outputName, async (output) => {
+      const { stats, ...result } = await this.rasters.runOp<Record<string, unknown> & { stats: RasterStats }>({
+        op: 'no2', bbox: dto.bbox, from: dto.from, to: dto.to, maxOrbits: dto.maxOrbits ?? 20, output,
+      });
+      const [min, max] = span(stats, [20, 120]);
+      return { style: { mode: 'ramp', ramp: 'heat', min, max, opacity: 0.7 }, result: { ...result, stats } };
+    });
+  }
+
+  async fillNoData(appUser: AppUser, dto: FillNoDataDto) {
+    const { file, layer } = await this.rasters.resolveRaster(appUser, dto.layerId);
+    return this.toRasterLayer(appUser, dto.outputName, async (output) => {
+      const result = await this.rasters.runOp({
+        op: 'fill_nodata', path: file, maxDistance: dto.maxDistance ?? 50, smoothPasses: dto.smoothPasses ?? 0, output,
+      });
+      return { style: (layer.styleSpec as RasterStyleSpec | null) ?? undefined, result };
+    });
+  }
+
+  async objectHeights(appUser: AppUser, dto: ObjectHeightsDto) {
+    const dsm = await this.rasters.resolveRaster(appUser, dto.dsmLayerId);
+    const dtm = await this.rasters.resolveRaster(appUser, dto.dtmLayerId);
+    return this.toRasterLayer(appUser, dto.outputName, async (output) => {
+      const { stats, ...result } = await this.rasters.runOp<Record<string, unknown> & { stats: RasterStats }>({
+        op: 'heights', dsm: dsm.file, dtm: dtm.file, minHeight: dto.minHeight ?? 0.5, output,
+      });
+      return { style: { mode: 'ramp', ramp: 'heat', min: 0, max: stats.p98 ?? 30, opacity: 0.85 }, result: { ...result, stats } };
+    });
+  }
+
+    private async zonesSource(appUser: AppUser, dto: { zonesLayerId: string; labelField?: string; filterField?: string; filterValue?: string }) {
+    const { layer, source } = await this.rasters.resolveVector(appUser, dto.zonesLayerId);
+    if (layer.geometryType !== 'POLYGON') throw new BadRequestException(`"${layer.name}" is not a polygon layer.`);
+    await this.rasters.assertField(appUser, dto.zonesLayerId, dto.labelField, false);
+    await this.rasters.assertField(appUser, dto.zonesLayerId, dto.filterField, false);
+    return { vector: source, labelField: dto.labelField, field: dto.filterField, value: dto.filterValue ?? '' };
   }
 
   private assertBbox(bbox: [number, number, number, number]): void {

@@ -259,3 +259,58 @@ app-site-footer {
     overflow: visible;
   }
 }
+
+/* Raster Analysis pins */
+.dashboard-card--pins {
+  grid-column: 1 / -1;
+}
+
+.dashboard-pins {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.dashboard-pin {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-line);
+  border-left: 3px solid var(--color-primary-500, #2563eb);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.dashboard-pin__value {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-ink-900);
+}
+
+.dashboard-pin__title {
+  font-size: 12.5px;
+  color: var(--color-ink-700);
+}
+
+.dashboard-pin__detail {
+  font-size: 11px;
+  color: var(--color-ink-500);
+}
+
+.dashboard-pin__actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 4px;
+  font-size: 11.5px;
+
+  button {
+    border: none;
+    background: none;
+    color: var(--color-ink-500);
+    cursor: pointer;
+  }
+}

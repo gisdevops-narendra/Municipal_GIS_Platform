@@ -1,10 +1,11 @@
 import { Component, EventEmitter, Input, OnDestroy, Output, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { NgTemplateOutlet } from '@angular/common';
+import { DatePipe, NgTemplateOutlet } from '@angular/common';
 import { HttpErrorResponse, HttpEventType } from '@angular/common/http';
 import { Observable, Subscription, switchMap, takeWhile, timer } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { SelectModule } from 'primeng/select';
+import { MultiSelectModule } from 'primeng/multiselect';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { Department } from '../../../../core/models/department.model';
 import { DepartmentService } from '../../../../core/services/department.service';
@@ -20,6 +21,10 @@ import {
   RASTER_RAMP_NAMES,
   RasterInfo,
   RasterJob,
+  RasterMonitor,
+  RasterHistoryEntry,
+  RasterStorage,
+  RasterWorkflow,
   RasterService,
   RasterStatistics,
   RasterStyleSpec,
@@ -34,6 +39,9 @@ export type RasterToolId =
   | 'profile' | 'slope' | 'aspect' | 'hillshade' | 'contour' | 'rugged' | 'cutfill' | 'fillsinks'
   | 'watershed' | 'flood' | 'los' | 'viewshed'
   | 'calc' | 'reclass' | 'clip' | 'polygonize' | 'zonal' | 'idw' | 'heatmap' | 'proximity'
+  | 'suitability' | 'encroach' | 'greencover' | 'monitor' | 'floodrisk' | 'exposure' | 'report'
+  | 'extract' | 'leastcost' | 'hotspot' | 'airquality' | 'water' | 'curvature' | 'fillnodata' | 'heights'
+  | 'workflows' | 'history' | 'timeslider' | 'storage'
   | 'streams' | 'view3d' | 'swipe' | 'change' | 'changematrix' | 'series' | 'ndvi' | 'indices' | 'heat' | 'classify' | 'supervised';
 
 interface ToolDef {
@@ -57,6 +65,7 @@ export const RASTER_TOOLS: ToolDef[] = [
   { id: 'identify', label: 'Pixel Identify', group: 'Raster Data', section: 'Inspect & Export', moduleId: 913, icon: 'pi pi-info-circle', description: 'Click the map to read pixel values from every band.' },
   { id: 'stats', label: 'Statistics & Histogram', group: 'Raster Data', section: 'Inspect & Export', moduleId: 914, icon: 'pi pi-chart-bar', description: 'Value distribution, percentiles and NoData coverage of a band.' },
   { id: 'download', label: 'Download Raster', group: 'Raster Data', section: 'Inspect & Export', moduleId: 918, icon: 'pi pi-download', description: 'Export a raster as GeoTIFF — whole layer or just the current view.' },
+  { id: 'fillnodata', label: 'Fill NoData / Smooth', group: 'Raster Data', section: 'Transform', moduleId: 986, icon: 'pi pi-pencil', description: 'Repair gaps in drone, composite or DEM rasters; optional smoothing.' },
   { id: 'mosaic', label: 'Mosaic / Merge', group: 'Raster Data', section: 'Transform', moduleId: 915, icon: 'pi pi-objects-column', description: 'Stitch several raster tiles into one seamless layer.' },
   { id: 'resample', label: 'Resample / Reproject', group: 'Raster Data', section: 'Transform', moduleId: 916, icon: 'pi pi-expand', description: 'Change the pixel size and/or coordinate system.' },
   { id: 'rasterize', label: 'Rasterize Vector', group: 'Raster Data', section: 'Transform', moduleId: 917, icon: 'pi pi-table', description: 'Burn a vector layer (or one of its fields) into a raster grid.' },
@@ -65,9 +74,11 @@ export const RASTER_TOOLS: ToolDef[] = [
   { id: 'aspect', label: 'Aspect', group: 'Terrain Analysis', section: 'Surface', moduleId: 923, icon: 'pi pi-compass', description: 'Direction each slope faces (0–360°).' },
   { id: 'hillshade', label: 'Hillshade', group: 'Terrain Analysis', section: 'Surface', moduleId: 924, icon: 'pi pi-sun', description: 'Shaded relief from a light source for 3D-looking terrain.' },
   { id: 'contour', label: 'Contour Generation', group: 'Terrain Analysis', section: 'Surface', moduleId: 925, icon: 'pi pi-wave-pulse', description: 'Generate contour lines at a fixed elevation interval.' },
+  { id: 'curvature', label: 'Curvature', group: 'Terrain Analysis', section: 'Surface', moduleId: 985, icon: 'pi pi-wave-pulse', description: 'Concave (valleys, water collects) vs. convex (ridges) ground.' },
   { id: 'rugged', label: 'Terrain Ruggedness', group: 'Terrain Analysis', section: 'Surface', moduleId: 931, icon: 'pi pi-chart-scatter', description: 'Roughness, Terrain Ruggedness Index (TRI) or Topographic Position (TPI).' },
   { id: 'fillsinks', label: 'Fill Sinks', group: 'Terrain Analysis', section: 'Hydrology & Earthwork', moduleId: 932, icon: 'pi pi-filter-fill', description: 'Remove pits from a DEM so water can drain — run before watershed.' },
   { id: 'streams', label: 'Stream Network', group: 'Terrain Analysis', section: 'Hydrology & Earthwork', moduleId: 933, icon: 'pi pi-share-alt', description: 'Extract drainage lines with Strahler order from a DEM.' },
+  { id: 'heights', label: 'Object Heights (DSM − DTM)', group: 'Terrain Analysis', section: 'Visualise', moduleId: 987, icon: 'pi pi-building', description: 'Building / tree heights from a drone or LiDAR surface and ground model.' },
   { id: 'view3d', label: '3D Terrain View', group: 'Terrain Analysis', section: 'Visualise', moduleId: 934, icon: 'pi pi-video', description: 'Rotate a DEM in 3D, draped with imagery or any layer.' },
   { id: 'cutfill', label: 'Cut & Fill / Volume', group: 'Terrain Analysis', section: 'Hydrology & Earthwork', moduleId: 926, icon: 'pi pi-box', description: 'Earthwork volumes to bring an area to a target height.' },
   { id: 'watershed', label: 'Drainage / Watershed', group: 'Terrain Analysis', section: 'Hydrology & Earthwork', moduleId: 927, icon: 'pi pi-share-alt', description: 'Flow paths and catchment area draining to a point.' },
@@ -82,6 +93,22 @@ export const RASTER_TOOLS: ToolDef[] = [
   { id: 'idw', label: 'IDW Interpolation', group: 'Raster Analytics', section: 'Spatial Statistics', moduleId: 947, icon: 'pi pi-sitemap', description: 'Continuous surface from point measurements (e.g. levels, readings).' },
   { id: 'heatmap', label: 'Heatmap (Kernel Density)', group: 'Raster Analytics', section: 'Spatial Statistics', moduleId: 948, icon: 'pi pi-map-marker', description: 'Hotspots of point features such as trees, complaints or incidents.' },
   { id: 'proximity', label: 'Proximity / Distance', group: 'Raster Analytics', section: 'Spatial Statistics', moduleId: 949, icon: 'pi pi-arrows-alt', description: 'Distance to the nearest feature — road, hospital, garden…' },
+  { id: 'suitability', label: 'Site Suitability', group: 'Decision Support', section: 'Planning', moduleId: 971, icon: 'pi pi-star', description: 'Weighted overlay of criteria (slope, distance, land cover…) → best sites, scored 0–100.' },
+  { id: 'floodrisk', label: 'Flood Risk (HAND)', group: 'Decision Support', section: 'Planning', moduleId: 975, icon: 'pi pi-cloud', description: 'Flood-prone land from height above the nearest drainage — no water level needed.' },
+  { id: 'exposure', label: 'Population Exposure', group: 'Decision Support', section: 'Planning', moduleId: 976, icon: 'pi pi-users', description: 'How many people live in flood, heat or other hazard areas — per ward.' },
+  { id: 'greencover', label: 'Green Cover Report', group: 'Decision Support', section: 'Monitoring', moduleId: 973, icon: 'pi pi-sparkles', description: 'Green cover % per ward from Sentinel-2, with year-on-year change.' },
+  { id: 'encroach', label: 'Encroachment Monitor', group: 'Decision Support', section: 'Monitoring', moduleId: 972, icon: 'pi pi-exclamation-triangle', description: 'New construction inside protected zones (green belts, lake buffers, govt. land).' },
+  { id: 'monitor', label: 'Automatic Monitoring', group: 'Decision Support', section: 'Monitoring', moduleId: 974, icon: 'pi pi-bell', description: 'Re-run green cover / encroachment checks weekly or monthly and get alerts.' },
+  { id: 'report', label: 'Area Report', group: 'Decision Support', section: 'Reports', moduleId: 977, icon: 'pi pi-file-pdf', description: 'One-page printable report of a ward or area: elevation, land cover, NDVI, heat, population…' },
+  { id: 'extract', label: 'Extract Values to Points', group: 'Raster Analytics', section: 'Sampling & Routing', moduleId: 980, icon: 'pi pi-map-marker', description: 'Add raster values (elevation, NDVI, heat…) as fields of every point or polygon.' },
+  { id: 'leastcost', label: 'Least-cost Path', group: 'Raster Analytics', section: 'Sampling & Routing', moduleId: 981, icon: 'pi pi-directions', description: 'Cheapest route across a cost surface — pipelines, drains, cables.' },
+  { id: 'hotspot', label: 'Hotspot Analysis (Gi*)', group: 'Raster Analytics', section: 'Spatial Statistics', moduleId: 982, icon: 'pi pi-bullseye', description: 'Statistically significant hot and cold spots of points (90 / 95 / 99 %).' },
+  { id: 'airquality', label: 'Air Quality (NO₂)', group: 'Imagery Analysis', section: 'Environment', moduleId: 983, icon: 'pi pi-cloud', description: 'Tropospheric NO₂ from Sentinel-5P, averaged over a period (~5 km).' },
+  { id: 'water', label: 'Water Body Monitor', group: 'Imagery Analysis', section: 'Environment', moduleId: 984, icon: 'pi pi-chart-bar', description: 'Water area of a lake or pond on every clear Sentinel-2 date.' },
+  { id: 'workflows', label: 'Saved Workflows', group: 'Workspace', section: 'Automation', moduleId: 991, icon: 'pi pi-sitemap', description: 'Chain tools you ran (e.g. DEM → Fill Sinks → Streams) and re-run them in one click.' },
+  { id: 'history', label: 'Job History', group: 'Workspace', section: 'Automation', moduleId: 992, icon: 'pi pi-history', description: 'Every past run with its settings — open the result or run it again.' },
+  { id: 'timeslider', label: 'Time Slider', group: 'Workspace', section: 'Viewing', moduleId: 993, icon: 'pi pi-play', description: 'Animate a series of rasters (e.g. NDVI by month, built-up by year).' },
+  { id: 'storage', label: 'Storage Manager', group: 'Workspace', section: 'Admin', moduleId: 994, icon: 'pi pi-server', description: 'Disk used by raster results per department; clean temporary files.' },
   { id: 'swipe', label: 'Swipe / Compare', group: 'Imagery Analysis', section: 'Compare', moduleId: 951, icon: 'pi pi-arrows-h', description: 'Slide between two layers to compare them.' },
   { id: 'change', label: 'Change Detection', group: 'Imagery Analysis', section: 'Compare', moduleId: 953, icon: 'pi pi-sync', description: 'Difference between two dates of a continuous raster.' },
   { id: 'changematrix', label: 'Land-cover Change Matrix', group: 'Imagery Analysis', section: 'Compare', moduleId: 959, icon: 'pi pi-table', description: 'From → to areas between two classified rasters (e.g. cropland → built-up).' },
@@ -98,13 +125,16 @@ export const RASTER_TOOL_MODULE_IDS = RASTER_TOOLS.map((t) => t.moduleId);
 const OUTPUT_TOOLS: RasterToolId[] = [
   'slope', 'aspect', 'hillshade', 'contour', 'rugged', 'fillsinks', 'watershed', 'flood', 'viewshed',
   'calc', 'reclass', 'clip', 'polygonize', 'ndvi', 'change', 'mosaic', 'resample', 'rasterize',
-  'idw', 'heatmap', 'proximity', 'indices', 'classify', 'online', 'streams', 'heat', 'supervised', 'changematrix'
+  'idw', 'heatmap', 'proximity', 'indices', 'classify', 'online', 'streams', 'heat', 'supervised', 'changematrix', 'suitability', 'floodrisk', 'extract', 'leastcost', 'hotspot', 'airquality', 'curvature', 'fillnodata', 'heights'
 ];
 
+/** Tools that may also publish their result (a checkbox). */
+const OPTIONAL_OUTPUT: RasterToolId[] = ['encroach', 'greencover', 'exposure'];
+
 /** Tools whose main input is a vector layer instead of a raster. */
-const VECTOR_TOOLS: RasterToolId[] = ['rasterize', 'idw', 'heatmap', 'proximity'];
+const VECTOR_TOOLS: RasterToolId[] = ['rasterize', 'idw', 'heatmap', 'proximity', 'extract', 'hotspot'];
 /** Tools that pick their own rasters (no single "input raster" picker). */
-const NO_RASTER_INPUT: RasterToolId[] = ['upload', 'online', 'series', 'heat', 'calc', 'swipe', 'mosaic', ...VECTOR_TOOLS];
+const NO_RASTER_INPUT: RasterToolId[] = ['upload', 'online', 'series', 'heat', 'suitability', 'encroach', 'greencover', 'monitor', 'report', 'airquality', 'water', 'workflows', 'history', 'timeslider', 'storage', 'calc', 'swipe', 'mosaic', ...VECTOR_TOOLS];
 
 type Slot = 'a' | 'b' | 'line' | 'polygon' | 'observer' | 'training';
 
@@ -113,7 +143,9 @@ const GROUP_META: Record<string, { short: string; icon: string }> = {
   'Raster Data': { short: 'Data', icon: 'pi pi-database' },
   'Terrain Analysis': { short: 'Terrain', icon: 'pi pi-chart-line' },
   'Raster Analytics': { short: 'Analytics', icon: 'pi pi-calculator' },
-  'Imagery Analysis': { short: 'Imagery', icon: 'pi pi-globe' }
+  'Imagery Analysis': { short: 'Imagery', icon: 'pi pi-globe' },
+  'Decision Support': { short: 'Planning', icon: 'pi pi-briefcase' },
+  Workspace: { short: 'Workspace', icon: 'pi pi-cog' }
 };
 
 /**
@@ -125,7 +157,7 @@ const GROUP_META: Record<string, { short: string; icon: string }> = {
 @Component({
   selector: 'app-raster-analysis',
   standalone: true,
-  imports: [FormsModule, NgTemplateOutlet, ButtonModule, SelectModule, Terrain3dComponent],
+  imports: [FormsModule, NgTemplateOutlet, DatePipe, ButtonModule, SelectModule, MultiSelectModule, Terrain3dComponent],
   templateUrl: './raster-analysis.component.html',
   styleUrls: ['../buffer-overlay/buffer-overlay.component.scss', './raster-analysis.component.scss']
 })
@@ -362,6 +394,91 @@ export class RasterAnalysisComponent implements OnDestroy {
   streamThreshold = 1;
   readonly observers = signal<LonLat[]>([]);
 
+  // ----- Decision Support -----
+  readonly optionalOutput = computed(() => OPTIONAL_OUTPUT.includes(this.tool()));
+  publishResult = false;
+  /** Zones (polygon layer) shared by green cover, encroachment, exposure,
+   *  monitoring and reports: label field + optional feature filter. */
+  zoneLabelField: string | null = null;
+  zoneFilterField: string | null = null;
+  zoneFilterValue = '';
+  criteria: { layerId: string | null; direction: 'higher' | 'lower'; weight: number }[] = [
+    { layerId: null, direction: 'lower', weight: 50 },
+    { layerId: null, direction: 'higher', weight: 50 }
+  ];
+  excludeLayerIds: string[] = [];
+  encBeforeFrom = `${new Date().getFullYear() - 1}-01-01`;
+  encBeforeTo = `${new Date().getFullYear() - 1}-03-31`;
+  encAfterFrom = `${new Date().getFullYear()}-01-01`;
+  encAfterTo = `${new Date().getFullYear()}-03-31`;
+  encMinArea = 300;
+  encSensitivity: 'low' | 'medium' | 'high' = 'medium';
+  gcFrom = isoDate(-60);
+  gcTo = isoDate(0);
+  gcCompare = true;
+  gcThreshold = 0.3;
+  floodThreshold = 1;
+  floodClasses: [number, number, number] = [1, 3, 6];
+  populationLayerId: string | null = null;
+  hazardOperator: '>' | '>=' | '<' | '<=' | '==' | 'between' = '<=';
+  hazardThreshold = 1;
+  hazardThreshold2: number | null = null;
+  exposureByZone = true;
+  reportArea: 'layer' | 'draw' = 'layer';
+  reportRasterIds = new Set<string>();
+  readonly monitors = signal<RasterMonitor[]>([]);
+  monitorName = '';
+  monitorKind: 'green-cover' | 'encroachment' = 'green-cover';
+  monitorFrequency: 'weekly' | 'monthly' = 'monthly';
+  monitorDropPct = 2;
+  readonly monitorAlerts = computed(() => this.monitors().filter((m) => m.alert).length);
+  /** Generic results table (zones, sites, exposure) — `coords` makes a row
+   *  clickable to zoom the map to it. */
+  readonly table = signal<{ title: string; headers: string[]; rows: string[][]; coords?: [number, number][] } | null>(null);
+
+  // ----- v4 -----
+  extractRasterIds = new Set<string>();
+  costInvert = false;
+  costBase = 1;
+  hotCell = 200;
+  hotDistance = 1000;
+  aqFrom = isoDate(-30);
+  aqTo = isoDate(0);
+  aqOrbits = 20;
+  multiDirectional = false;
+  fillDistance = 50;
+  smoothPasses = 0;
+  dtmLayerId: string | null = null;
+  minHeight = 2;
+  stockpile = false;
+  readonly rgbPresets = computed(() => {
+    const bands = this.info()?.bands ?? [];
+    const find = (re: RegExp) => bands.find((b) => re.test(bandName(b)))?.band;
+    const [bl, g, r, nir, swir] = [find(/\bblue\b/i), find(/\bgreen\b/i), find(/\bred\b/i), find(/\bnir\b|near.?infra/i), find(/\bswir\b/i)];
+    const all: { label: string; bands: (number | undefined)[]; hint: string }[] = [
+      { label: 'True colour', bands: [r, g, bl], hint: 'As the eye sees it.' },
+      { label: 'False colour (vegetation)', bands: [nir, r, g], hint: 'Healthy vegetation is bright red.' },
+      { label: 'Urban', bands: [swir, nir, r], hint: 'Built-up purple / grey, vegetation green.' },
+      { label: 'Agriculture', bands: [nir, swir, bl], hint: 'Crops bright green, bare soil brown.' },
+      { label: 'Land / water', bands: [nir, swir, r], hint: 'Water dark blue, land orange / green.' }
+    ];
+    return all.filter((p) => p.bands.every((b) => b !== undefined)) as { label: string; bands: [number, number, number]; hint: string }[];
+  });
+  // workspace
+  readonly workflows = signal<RasterWorkflow[]>([]);
+  /** Layer-producing runs of this session — building blocks for a workflow. */
+  readonly recorded = signal<{ tool: string; body: Record<string, unknown>; label: string; outputId?: string; inputId?: string }[]>([]);
+  readonly pickedSteps = signal<Set<number>>(new Set());
+  workflowName = '';
+  workflowInputId: string | null = null;
+  readonly history = signal<RasterHistoryEntry[]>([]);
+  readonly storageInfo = signal<RasterStorage | null>(null);
+  readonly sliderIds = signal<string[]>([]);
+  readonly sliderIndex = signal(0);
+  readonly playing = signal(false);
+  private playTimer: ReturnType<typeof setInterval> | null = null;
+  readonly pinnedLabels = signal<Set<string>>(new Set());
+
   // terrain / imagery extras
   ruggedKind: 'roughness' | 'TRI' | 'TPI' = 'TRI';
   indexKind: 'ndwi' | 'ndbi' | 'savi' = 'ndwi';
@@ -417,6 +534,7 @@ export class RasterAnalysisComponent implements OnDestroy {
     this.mapService.setHoverMarker(null);
     this.clearPreview();
     this.jobSub?.unsubscribe();
+    this.stopSlider();
   }
 
   // ----- selection of tool / raster -----
@@ -447,6 +565,13 @@ export class RasterAnalysisComponent implements OnDestroy {
     this.clearInputs();
     this.clearPreview();
     this.zonalPublish = false;
+    this.publishResult = false;
+    if (id === 'monitor') this.loadMonitors();
+    if (id === 'workflows') this.api.workflows().subscribe({ next: (w) => this.workflows.set(w), error: (e: HttpErrorResponse) => this.fail(e) });
+    if (id === 'history') this.loadHistory();
+    if (id === 'storage') this.loadStorage();
+    if (id !== 'timeslider') this.stopSlider();
+    if (id === 'water') this.seriesKind = 'ndwi';
     this.suggestOutputName();
   }
 
@@ -773,6 +898,356 @@ export class RasterAnalysisComponent implements OnDestroy {
     else this.mapService.clearAnalysisGeometry();
   }
 
+  // ----- Decision Support -----
+
+  /** Zones payload shared by the zone-based tools. */
+  private zonesBody(): Record<string, unknown> {
+    return {
+      zonesLayerId: this.vectorLayerId(),
+      labelField: this.zoneLabelField || undefined,
+      filterField: this.zoneFilterField || undefined,
+      filterValue: this.zoneFilterField ? this.zoneFilterValue.trim() : undefined
+    };
+  }
+
+  addCriterion(): void {
+    if (this.criteria.length < 8) this.criteria = [...this.criteria, { layerId: null, direction: 'higher', weight: 25 }];
+  }
+
+  removeCriterion(index: number): void {
+    this.criteria = this.criteria.filter((_, i) => i !== index);
+  }
+
+  weightPct(weight: number): string {
+    const total = this.criteria.reduce((a, c) => a + (c.weight || 0), 0) || 1;
+    return `${Math.round(((weight || 0) * 100) / total)} %`;
+  }
+
+  toggleReportRaster(id: string, on: boolean): void {
+    const next = new Set(this.reportRasterIds);
+    if (on) next.add(id);
+    else next.delete(id);
+    this.reportRasterIds = next;
+  }
+
+  zoomToRow(index: number): void {
+    const c = this.table()?.coords?.[index];
+    if (!c) return;
+    const d = 0.004;
+    this.mapService.zoomToExtent4326([c[0] - d, c[1] - d, c[0] + d, c[1] + d]);
+    this.mapService.setHoverMarker(c);
+  }
+
+  exportTable(): void {
+    const t = this.table();
+    if (t) downloadCsv(`${this.tool()}_${t.title.toLowerCase().replace(/\W+/g, '_')}.csv`, [t.headers, ...t.rows]);
+  }
+
+  loadMonitors(): void {
+    this.api.monitors().subscribe({ next: (list) => this.monitors.set(list), error: (err: HttpErrorResponse) => this.fail(err) });
+  }
+
+  createMonitor(): void {
+    if (!this.monitorName.trim()) return this.error.set('Give the monitor a name.');
+    if (!this.vectorLayerId()) return this.error.set('Choose the zones (polygon) layer to watch.');
+    const params: Record<string, unknown> = { ...this.zonesBody() };
+    if (this.monitorKind === 'green-cover') {
+      params['threshold'] = this.gcThreshold;
+      params['alertDropPct'] = this.monitorDropPct;
+    } else {
+      params['minAreaM2'] = this.encMinArea;
+      params['sensitivity'] = this.encSensitivity;
+    }
+    this.execute(
+      this.api.createMonitor({ name: this.monitorName.trim(), kind: this.monitorKind, frequency: this.monitorFrequency, params }),
+      (m) => {
+        this.monitors.update((list) => [m, ...list]);
+        this.message.set(`"${m.name}" created — its first run starts within 10 minutes.`);
+        this.monitorName = '';
+      }
+    );
+  }
+
+  monitorAction(m: RasterMonitor, action: 'run' | 'pause' | 'resume' | 'ack' | 'delete'): void {
+    const request =
+      action === 'run'
+        ? this.api.runMonitor(m.id)
+        : action === 'ack'
+          ? this.api.acknowledgeMonitor(m.id)
+          : action === 'delete'
+            ? this.api.deleteMonitor(m.id)
+            : this.api.setMonitorActive(m.id, action === 'resume');
+    (request as Observable<RasterMonitor | void>).subscribe({
+      next: (updated) =>
+        this.monitors.update((list) =>
+          action === 'delete' ? list.filter((x) => x.id !== m.id) : list.map((x) => (x.id === m.id ? (updated as RasterMonitor) : x))
+        ),
+      error: (err: HttpErrorResponse) => this.fail(err)
+    });
+  }
+
+  /** Opens a printable one-page report (browser "Save as PDF"). */
+  private printReport(r: AreaReport): void {
+    const layers = this.layersSignal();
+    const [minX, minY, maxX, maxY] = r.bbox;
+    const pad = Math.max(maxX - minX, maxY - minY) * 0.06;
+    const bb = [minX - pad, minY - pad, maxX + pad, maxY + pad];
+    const W = 520;
+    const H = Math.round((W * (bb[3] - bb[1])) / ((bb[2] - bb[0]) * Math.cos(((minY + maxY) / 2) * (Math.PI / 180))));
+    const outline = svgOutline(r.geometry, bb, W, H);
+    const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+    const sections = r.sections
+      .map((sec) => {
+        const layer = layers.find((l) => l.id === sec.layerId);
+        const img = layer
+          ? `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wms?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=${encodeURIComponent(
+              `${layer.geoserverWorkspace}:${layer.geoserverLayer}`
+            )}&STYLES=&SRS=EPSG:4326&BBOX=${bb.join(',')}&WIDTH=${W}&HEIGHT=${H}&FORMAT=image/png&TRANSPARENT=true`
+          : '';
+        const body = sec.empty
+          ? '<p class="muted">No data inside the area.</p>'
+          : sec.classes
+            ? `<table><tr><th>Class</th><th>Area</th><th>Share</th></tr>${sec.classes
+                .map((c) => `<tr><td>${esc(c.label)}</td><td>${formatArea(c.areaM2)}</td><td>${c.pct.toFixed(1)} %</td></tr>`)
+                .join('')}</table>`
+            : `<table><tr><th>Min</th><th>Mean</th><th>Median</th><th>Max</th></tr><tr><td>${fmt(sec.min)}</td><td>${fmt(sec.mean)}</td><td>${fmt(
+                sec.median
+              )}</td><td>${fmt(sec.max)}</td></tr></table>${/popul/i.test(sec.name) ? `<p>Total: <b>${fmtInt(sec.sum ?? 0)}</b> people</p>` : ''}`;
+        return `<section><h2>${esc(sec.name)}</h2><div class="map"><img src="${img}" alt="">${outline}</div>${body}</section>`;
+      })
+      .join('');
+    const title = this.reportTitle();
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>
+      body{font:13px/1.45 system-ui,sans-serif;color:#1f2937;margin:28px}h1{font-size:20px;margin:0 0 4px}
+      h2{font-size:14px;margin:0 0 6px}.muted{color:#6b7280}.facts{display:flex;gap:24px;margin:10px 0 18px}
+      .facts b{display:block;font-size:16px}section{break-inside:avoid;margin-bottom:22px}
+      .map{position:relative;width:${W}px;height:${H}px;border:1px solid #d1d5db;background:#f3f4f6;margin-bottom:6px}
+      .map img,.map svg{position:absolute;inset:0;width:100%;height:100%}
+      table{border-collapse:collapse;min-width:${W}px}td,th{border-bottom:1px solid #e5e7eb;padding:4px 8px;text-align:left}
+      th{font-size:11px;text-transform:uppercase;color:#6b7280}@media print{button{display:none}}
+    </style></head><body>
+      <button onclick="print()" style="float:right">Print / Save as PDF</button>
+      <h1>${esc(title)}</h1><p class="muted">Raster Analysis area report · ${new Date().toLocaleDateString()}</p>
+      <div class="facts"><div>Area<b>${formatArea(r.areaM2)}</b></div><div>Perimeter<b>${formatLength(r.perimeterM)}</b></div></div>
+      ${sections}</body></html>`;
+    const win = window.open('', '_blank');
+    if (!win) return this.error.set('Allow pop-ups for this site to open the report.');
+    win.document.write(html);
+    win.document.close();
+  }
+
+  private reportTitle(): string {
+    const layer = this.layersSignal().find((l) => l.id === this.vectorLayerId());
+    if (this.reportArea === 'layer' && layer) {
+      return this.zoneFilterField ? `${layer.name} — ${this.zoneFilterField} ${this.zoneFilterValue}` : layer.name;
+    }
+    return 'Drawn area';
+  }
+
+  // ----- v4 helpers -----
+
+  toggleExtract(id: string, on: boolean): void {
+    const next = new Set(this.extractRasterIds);
+    if (on) next.add(id);
+    else next.delete(id);
+    this.extractRasterIds = next;
+  }
+
+  applyPreset(bands: [number, number, number]): void {
+    this.rgbBands = [...bands];
+    this.rgbStretch = 'histogram';
+  }
+
+  /** Share: copy a link that opens the map on this layer. */
+  shareLayer(layerId: string | null | undefined, kind: 'link' | 'image' = 'link'): void {
+    const layer = this.layersSignal().find((l) => l.id === layerId);
+    if (!layer) return;
+    let text = `${location.origin}/gis?layer=${layer.id}`;
+    if (kind === 'image' && layer.bbox) {
+      const { minX, minY, maxX, maxY } = layer.bbox;
+      const w = 1200;
+      const h = Math.max(1, Math.round((w * (maxY - minY)) / ((maxX - minX) * Math.cos(((minY + maxY) / 2) * (Math.PI / 180)))));
+      text =
+        `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wms?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap` +
+        `&LAYERS=${encodeURIComponent(`${layer.geoserverWorkspace}:${layer.geoserverLayer}`)}&STYLES=&SRS=EPSG:4326` +
+        `&BBOX=${minX},${minY},${maxX},${maxY}&WIDTH=${w}&HEIGHT=${h}&FORMAT=image/png&TRANSPARENT=true`;
+    }
+    navigator.clipboard?.writeText(text).then(
+      () => this.message.set(kind === 'link' ? `Link to "${layer.name}" copied — it opens the map on this layer (sign-in required).` : 'Image URL copied (PNG of the whole layer).'),
+      () => this.message.set(text)
+    );
+  }
+
+  /** Dashboard Pins: show this result number on the Dashboard. */
+  pinFact(f: { label: string; value: string }): void {
+    const toolLabel = RASTER_TOOLS.find((t) => t.id === this.tool())?.label ?? 'Raster Analysis';
+    const layer = this.layersSignal().find((l) => l.id === this.layerId() || l.id === this.vectorLayerId());
+    this.api
+      .createPin({ title: `${toolLabel} · ${f.label}`.slice(0, 120), value: f.value.slice(0, 80), detail: layer ? `${layer.name} · ${new Date().toLocaleDateString()}` : new Date().toLocaleDateString(), layerId: layer?.id })
+      .subscribe({
+        next: () => {
+          this.pinnedLabels.update((s) => new Set(s).add(f.label));
+          this.message.set(`Pinned "${f.label}" to the Dashboard.`);
+        },
+        error: (e: HttpErrorResponse) => this.fail(e)
+      });
+  }
+
+  // workflows
+  togglePick(i: number): void {
+    this.pickedSteps.update((s) => {
+      const n = new Set(s);
+      if (n.has(i)) n.delete(i);
+      else n.add(i);
+      return n;
+    });
+  }
+
+  saveWorkflow(): void {
+    const picked = [...this.pickedSteps()].sort((a, b) => a - b).map((i) => this.recorded()[i]);
+    if (!picked.length) return this.error.set('Tick the steps to include.');
+    if (!this.workflowName.trim()) return this.error.set('Name the workflow.');
+    const outputs = new Set<string>();
+    const firstInput = picked[0].inputId;
+    const steps = picked.map((st) => {
+      const body = { ...st.body };
+      const input = body['layerId'] as string | undefined;
+      if (input && outputs.has(input)) body['layerId'] = '$prev';
+      else if (input && input === firstInput) body['layerId'] = '$input';
+      if (st.outputId) outputs.add(st.outputId);
+      if (typeof body['outputName'] === 'string') body['outputName'] = `${this.workflowName.trim()} · ${String(body['outputName'])}`.slice(0, 80);
+      return { tool: st.tool, body };
+    });
+    this.execute(this.api.createWorkflow(this.workflowName.trim(), steps), (wf) => {
+      this.workflows.update((list) => [wf, ...list]);
+      this.pickedSteps.set(new Set());
+      this.workflowName = '';
+      this.message.set(`Workflow "${wf.name}" saved with ${wf.steps.length} step${wf.steps.length === 1 ? '' : 's'}.`);
+    });
+  }
+
+  workflowNeedsInput(wf: RasterWorkflow): boolean {
+    return JSON.stringify(wf.steps).includes('$input');
+  }
+
+  runWorkflow(wf: RasterWorkflow): void {
+    if (this.workflowNeedsInput(wf) && !this.workflowInputId) return this.error.set('Choose the input raster.');
+    this.resetResult();
+    this.running.set(true);
+    this.jobSub?.unsubscribe();
+    this.jobSub = this.api
+      .runWorkflow(wf.id, this.workflowInputId)
+      .pipe(
+        switchMap((started) => {
+          this.job.set(started);
+          return timer(1500, 1500).pipe(
+            switchMap(() => this.api.job<LayerResult>(started.id)),
+            takeWhile((j) => j.status === 'queued' || j.status === 'running', true)
+          );
+        })
+      )
+      .subscribe({
+        next: (j) => {
+          this.job.set(j);
+          if (j.status === 'queued' || j.status === 'running') return;
+          this.running.set(false);
+          this.job.set(null);
+          if (j.status !== 'done') return void this.error.set(j.error ?? 'Cancelled.');
+          const steps = ((j.result?.result as { steps?: { step: number; tool: string; layerName?: string }[] })?.steps ?? []);
+          this.facts.set(steps.map((st) => ({ label: `Step ${st.step}: ${st.tool}`, value: st.layerName ?? 'done' })));
+          if (j.result?.layer) {
+            this.layerCreated.emit(j.result.layer);
+            this.message.set(`Workflow finished — "${j.result.layer.name}" added to the map.`);
+          }
+        },
+        error: (err: HttpErrorResponse) => this.fail(err)
+      });
+  }
+
+  deleteWorkflow(wf: RasterWorkflow): void {
+    this.api.deleteWorkflow(wf.id).subscribe({
+      next: () => this.workflows.update((list) => list.filter((w) => w.id !== wf.id)),
+      error: (e: HttpErrorResponse) => this.fail(e)
+    });
+  }
+
+  // history
+  loadHistory(): void {
+    this.api.history().subscribe({ next: (h) => this.history.set(h), error: (e: HttpErrorResponse) => this.fail(e) });
+  }
+
+  rerun(entry: RasterHistoryEntry): void {
+    if (entry.tool.startsWith('workflow')) return this.error.set('Re-run workflows from Saved Workflows.');
+    this.resetResult();
+    this.runJob<LayerResult>(entry.tool, entry.body, (r) => {
+      if (r?.layer) {
+        this.layerCreated.emit(r.layer);
+        this.message.set(`Re-run finished — "${r.layer.name}" added to the map.`);
+      } else {
+        this.message.set('Re-run finished.');
+      }
+      this.loadHistory();
+    });
+  }
+
+  showLayer(id: string | null): void {
+    const layer = this.layersSignal().find((l) => l.id === id);
+    if (!layer) return this.error.set('That layer no longer exists.');
+    this.mapService.setLayerVisibility(layer.id, true);
+    this.mapService.zoomToLayer(layer);
+  }
+
+  // storage
+  loadStorage(): void {
+    this.api.storage().subscribe({ next: (s) => this.storageInfo.set(s), error: (e: HttpErrorResponse) => this.fail(e) });
+  }
+
+  cleanStorage(): void {
+    this.execute(this.api.cleanupStorage(), (r) => {
+      this.message.set(`Removed ${r.removed} file${r.removed === 1 ? '' : 's'}, freed ${bytes(r.freedBytes)}.`);
+      this.loadStorage();
+    });
+  }
+
+  bytes(n: number): string {
+    return bytes(n);
+  }
+
+  // time slider
+  toggleSlider(id: string, on: boolean): void {
+    this.sliderIds.update((list) => (on ? [...list, id] : list.filter((x) => x !== id)));
+    this.sliderIndex.set(0);
+    this.showFrame();
+  }
+
+  setFrame(i: number): void {
+    this.sliderIndex.set(Math.min(Math.max(i, 0), Math.max(this.sliderIds().length - 1, 0)));
+    this.showFrame();
+  }
+
+  togglePlay(): void {
+    if (this.playing()) return this.stopSlider();
+    if (this.sliderIds().length < 2) return this.error.set('Tick at least two rasters.');
+    this.playing.set(true);
+    this.playTimer = setInterval(() => this.setFrame((this.sliderIndex() + 1) % this.sliderIds().length), 1500);
+  }
+
+  private stopSlider(): void {
+    if (this.playTimer) clearInterval(this.playTimer);
+    this.playTimer = null;
+    this.playing.set(false);
+  }
+
+  /** Only the current frame is visible. */
+  private showFrame(): void {
+    const ids = this.sliderIds();
+    ids.forEach((id, i) => this.mapService.setLayerVisibility(id, i === this.sliderIndex()));
+  }
+
+  layerName(id: string): string {
+    return this.layersSignal().find((l) => l.id === id)?.name ?? '—';
+  }
+
   addMosaicInput(): void {
     if (this.mosaicIds.length < 20) this.mosaicIds = [...this.mosaicIds, null];
   }
@@ -1030,7 +1505,7 @@ export class RasterAnalysisComponent implements OnDestroy {
       case 'hillshade':
         return this.runLayerTool('terrain', {
           ...base,
-          kind: tool,
+          kind: tool === 'hillshade' && this.multiDirectional ? 'multihillshade' : tool,
           zFactor: this.zFactor,
           azimuth: this.azimuth,
           altitude: this.altitude,
@@ -1043,7 +1518,7 @@ export class RasterAnalysisComponent implements OnDestroy {
         const polygon = this.polygon();
         if (!polygon) return this.error.set('Draw the area (or use selected polygons) first.');
         this.execute(
-          this.api.cutFill({ layerId, band: this.band, polygon, baseLevel: this.baseLevel ?? undefined }),
+          this.api.cutFill({ layerId, band: this.band, polygon, baseLevel: this.stockpile ? undefined : (this.baseLevel ?? undefined), baseFromBoundary: this.stockpile }),
           (r) => {
             this.mapService.setAnalysisGeometry(polygon);
             this.facts.set([
@@ -1214,6 +1689,82 @@ export class RasterAnalysisComponent implements OnDestroy {
         if (!this.afterLayerId) return this.error.set('Choose the "after" raster.');
         if (this.afterLayerId === layerId) return this.error.set('Choose two different rasters.');
         return this.runLayerTool('change-matrix', { beforeLayerId: layerId, afterLayerId: this.afterLayerId, outputName: base.outputName });
+      case 'suitability': {
+        const criteria = this.criteria.filter((c) => c.layerId);
+        if (criteria.length < 2) return this.error.set('Choose at least two criteria rasters.');
+        if (!this.outputName.trim()) return this.error.set('Enter a name for the new layer.');
+        return this.runLayerTool('suitability', {
+          criteria: criteria.map((c) => ({ layerId: c.layerId, direction: c.direction, weight: c.weight || 0 })),
+          excludeLayerIds: this.excludeLayerIds.length ? this.excludeLayerIds : undefined,
+          outputName: this.outputName.trim()
+        });
+      }
+      case 'floodrisk':
+        return this.runLayerTool('flood-risk', { ...base, thresholdKm2: this.floodThreshold, classes: this.floodClasses });
+      case 'encroach':
+      case 'greencover':
+      case 'exposure':
+      case 'report':
+        return this.runDecision(tool);
+      case 'monitor':
+        return this.loadMonitors();
+      case 'extract':
+        if (this.extractRasterIds.size === 0) return this.error.set('Tick at least one raster to sample.');
+        return this.runLayerTool('extract-values', { vectorLayerId: this.vectorLayerId(), rasterLayerIds: [...this.extractRasterIds], outputName: base.outputName });
+      case 'leastcost': {
+        const from = this.pointA();
+        const to = this.pointB();
+        if (!from || !to) return this.error.set('Pick the start and end points on the map.');
+        return this.runLayerTool('least-cost', { ...base, from, to, invert: this.costInvert, baseCost: this.costBase });
+      }
+      case 'hotspot':
+        return this.runLayerTool('hotspot', {
+          vectorLayerId: this.vectorLayerId(),
+          weightField: this.field || undefined,
+          cellSize: this.hotCell,
+          distance: this.hotDistance,
+          outputName: base.outputName
+        });
+      case 'airquality': {
+        const aoi = this.aoi();
+        if (!aoi) return this.error.set(this.aoiHint());
+        if (!this.outputName.trim()) return this.error.set('Enter a name for the new layer.');
+        return this.runLayerTool('air-quality', { bbox: aoi.bbox, from: this.aqFrom, to: this.aqTo, maxOrbits: this.aqOrbits, outputName: this.outputName.trim() });
+      }
+      case 'water': {
+        const aoi = this.aoi();
+        if (!aoi) return this.error.set(this.aoiHint());
+        this.runJob<{ series: { date: string; waterM2?: number }[]; observations: number }>(
+          'index-series',
+          { kind: 'ndwi', ...aoi, from: this.seriesFrom, to: this.seriesTo },
+          (r) => {
+            const pts = r.series.map((p) => ({ date: p.date, mean: (p.waterM2 ?? 0) / 1e4, min: (p.waterM2 ?? 0) / 1e4, max: (p.waterM2 ?? 0) / 1e4 }));
+            this.series.set(pts);
+            const first = pts[0]?.mean ?? 0;
+            const last = pts[pts.length - 1]?.mean ?? 0;
+            const peak = Math.max(...pts.map((p) => p.mean));
+            this.facts.set([
+              { label: 'Clear observations', value: fmtInt(r.observations) },
+              { label: 'Water area first → last', value: `${first.toFixed(2)} → ${last.toFixed(2)} ha` },
+              { label: 'Largest extent', value: `${peak.toFixed(2)} ha` },
+              { label: 'Change', value: `${last - first >= 0 ? '+' : ''}${(last - first).toFixed(2)} ha (${first ? (((last - first) / first) * 100).toFixed(0) : '—'} %)` }
+            ]);
+          }
+        );
+        return;
+      }
+      case 'curvature':
+        return this.runLayerTool('terrain', { ...base, kind: 'curvature' });
+      case 'fillnodata':
+        return this.runLayerTool('fill-nodata', { ...base, maxDistance: this.fillDistance, smoothPasses: this.smoothPasses });
+      case 'heights':
+        if (!this.dtmLayerId) return this.error.set('Choose the ground model (DTM).');
+        return this.runLayerTool('object-heights', { dsmLayerId: layerId, dtmLayerId: this.dtmLayerId, minHeight: this.minHeight, outputName: base.outputName });
+      case 'workflows':
+      case 'history':
+      case 'storage':
+      case 'timeslider':
+        return;
       case 'view3d':
         return this.open3d(layerId!);
       case 'stats':
@@ -1426,6 +1977,126 @@ export class RasterAnalysisComponent implements OnDestroy {
     });
   }
 
+  private runDecision(tool: 'encroach' | 'greencover' | 'exposure' | 'report'): void {
+    const publish = this.publishResult && this.optionalOutput();
+    if (publish && !this.outputName.trim()) return this.error.set('Enter a name for the new layer.');
+    const outputName = publish ? this.outputName.trim() : undefined;
+    const zoneTool = tool !== 'exposure' && !(tool === 'report' && this.reportArea === 'draw');
+    if (zoneTool && !this.vectorLayerId()) return this.error.set('Choose the zones (polygon) layer.');
+    if (this.zoneFilterField && !this.zoneFilterValue.trim() && zoneTool) return this.error.set(`Enter the ${this.zoneFilterField} value, or clear the filter.`);
+    const done = (r: { layer?: GisLayer }) => {
+      if (r.layer) {
+        this.message.set(`New layer "${r.layer.name}" added to the map.`);
+        this.layerCreated.emit(r.layer);
+      }
+    };
+    if (tool === 'encroach') {
+      return this.runJob<{ layer?: GisLayer; result: EncroachmentResult }>(
+        'encroachment',
+        { ...this.zonesBody(), beforeFrom: this.encBeforeFrom, beforeTo: this.encBeforeTo, afterFrom: this.encAfterFrom, afterTo: this.encAfterTo, minAreaM2: this.encMinArea, sensitivity: this.encSensitivity, outputName },
+        (r) => {
+          const x = r.result;
+          this.facts.set([
+            { label: 'New built-up sites', value: fmtInt(x.count) },
+            { label: 'New built-up area', value: formatArea(x.newBuiltM2) },
+            { label: 'Compared', value: `${x.beforeDates[0] ?? ''} … → ${x.afterDates[x.afterDates.length - 1] ?? ''}` }
+          ]);
+          this.table.set({
+            title: 'Sites',
+            headers: ['Zone', 'Area', 'Location'],
+            rows: x.sites.map((s) => [s.zone, formatArea(s.areaM2), `${s.lat.toFixed(5)}, ${s.lon.toFixed(5)}`]),
+            coords: x.sites.map((s) => [s.lon, s.lat])
+          });
+          if (!x.count) this.message.set('No new construction found in the protected zones.');
+          done(r);
+        }
+      );
+    }
+    if (tool === 'greencover') {
+      return this.runJob<{ layer?: GisLayer; result: GreenCoverResult }>(
+        'green-cover',
+        {
+          ...this.zonesBody(),
+          from: this.gcFrom,
+          to: this.gcTo,
+          compareFrom: this.gcCompare ? shiftYear(this.gcFrom) : undefined,
+          compareTo: this.gcCompare ? shiftYear(this.gcTo) : undefined,
+          threshold: this.gcThreshold,
+          outputName
+        },
+        (r) => {
+          const x = r.result;
+          this.facts.set([
+            { label: 'Overall green cover', value: `${x.overallGreenPct.toFixed(1)} %` },
+            { label: 'Zones', value: fmtInt(x.zones) },
+            ...(x.zonesLosingGreen !== undefined ? [{ label: 'Zones losing > 2 points', value: fmtInt(x.zonesLosingGreen) }] : [])
+          ]);
+          this.table.set({
+            title: 'Green cover by zone',
+            headers: x.rows.some((z) => z.changePct !== undefined) ? ['Zone', 'Green %', 'Last year', 'Change'] : ['Zone', 'Green %', 'NDVI'],
+            rows: x.rows.map((z) =>
+              z.changePct !== undefined
+                ? [z.zone, z.greenPct.toFixed(1), (z.prevPct ?? 0).toFixed(1), `${z.changePct >= 0 ? '+' : ''}${z.changePct.toFixed(1)}`]
+                : [z.zone, z.greenPct.toFixed(1), z.ndviMean.toFixed(2)]
+            )
+          });
+          done(r);
+        }
+      );
+    }
+    if (tool === 'exposure') {
+      if (!this.populationLayerId) return this.error.set('Choose the population raster (download it with Online Sources → Population).');
+      if (!this.layerId()) return this.error.set('Choose the hazard raster.');
+      if (this.hazardOperator === 'between' && this.hazardThreshold2 === null) return this.error.set('Enter the upper limit.');
+      return this.runJob<{ layer?: GisLayer; result: ExposureResult }>(
+        'exposure',
+        {
+          populationLayerId: this.populationLayerId,
+          hazardLayerId: this.layerId(),
+          hazardBand: this.band,
+          operator: this.hazardOperator,
+          threshold: this.hazardThreshold,
+          threshold2: this.hazardOperator === 'between' ? this.hazardThreshold2 : undefined,
+          zonesLayerId: this.exposureByZone && this.vectorLayerId() ? this.vectorLayerId() : undefined,
+          labelField: this.exposureByZone && this.zoneLabelField ? this.zoneLabelField : undefined,
+          outputName
+        },
+        (r) => {
+          const x = r.result;
+          this.facts.set([
+            { label: 'Population in the area', value: fmtInt(x.population) },
+            { label: 'People exposed', value: `${fmtInt(x.exposed)} (${x.exposedPct.toFixed(1)} %)` }
+          ]);
+          if (x.rows) {
+            this.table.set({
+              title: 'Exposure by zone',
+              headers: ['Zone', 'Population', 'Exposed', 'Share'],
+              rows: x.rows.map((z) => [z.zone, fmtInt(z.population), fmtInt(z.exposed), `${z.exposedPct.toFixed(1)} %`])
+            });
+          }
+          done(r);
+        }
+      );
+    }
+    // report
+    if (this.reportRasterIds.size === 0) return this.error.set('Tick at least one raster to include.');
+    const area =
+      this.reportArea === 'draw'
+        ? this.polygon()
+          ? { polygon: this.polygon() }
+          : null
+        : { zonesLayerId: this.vectorLayerId(), filterField: this.zoneFilterField || undefined, filterValue: this.zoneFilterField ? this.zoneFilterValue.trim() : undefined };
+    if (!area) return this.error.set('Draw the area first.');
+    return this.runJob<{ result: AreaReport }>('area-report', { ...area, rasterLayerIds: [...this.reportRasterIds] }, (r) => {
+      this.facts.set([
+        { label: 'Area', value: formatArea(r.result.areaM2) },
+        { label: 'Rasters summarised', value: fmtInt(r.result.sections.length) }
+      ]);
+      this.printReport(r.result);
+      this.message.set('Report opened in a new tab — use "Print / Save as PDF".');
+    });
+  }
+
   private runDownload(layerId: string): void {
     const bbox = this.downloadView ? (this.mapService.getViewExtent4326() ?? undefined) : undefined;
     this.execute(this.api.download(layerId, bbox), (response) => {
@@ -1482,6 +2153,12 @@ export class RasterAnalysisComponent implements OnDestroy {
   /** Long tools run as a backend job: start it, poll its stage every
    *  1.5 s, and hand the result over when it is done. */
   private runJob<T>(tool: string, body: Record<string, unknown>, onResult: (result: T) => void): void {
+    const record = (result: unknown) => {
+      const out = (result as { layer?: GisLayer })?.layer;
+      if (!out) return;
+      const label = `${RASTER_TOOLS.find((t) => t.id === this.tool())?.label ?? tool} → ${out.name}`;
+      this.recorded.update((list) => [...list.slice(-14), { tool, body, label, outputId: out.id, inputId: body['layerId'] as string | undefined }]);
+    };
     this.jobSub?.unsubscribe();
     this.running.set(true);
     this.jobSub = this.api
@@ -1501,6 +2178,7 @@ export class RasterAnalysisComponent implements OnDestroy {
           if (j.status === 'done') {
             this.running.set(false);
             this.job.set(null);
+            record(j.result);
             onResult(j.result as T);
           } else if (j.status === 'failed' || j.status === 'cancelled') {
             this.running.set(false);
@@ -1552,6 +2230,7 @@ export class RasterAnalysisComponent implements OnDestroy {
     this.zoneRows.set(null);
     this.series.set(null);
     this.transitions.set(null);
+    this.table.set(null);
   }
 
   private fail(err: HttpErrorResponse): void {
@@ -1681,6 +2360,22 @@ const LABELS: Record<string, [string, (v: number) => string]> = {
   tiles: ['Source tiles', fmtInt],
   maskedPct: ['Cloud / shadow masked', (v) => `${v.toFixed(1)} %`],
   scenes: ['Scenes used', fmtInt],
+  highlySuitableM2: ['Highly suitable (≥ 80)', formatArea],
+  lengthM: ['Route length', formatLength],
+  straightM: ['Straight-line distance', formatLength],
+  totalCost: ['Accumulated cost', fmt],
+  hotM2: ['Hot spots (≥ 90 %)', formatArea],
+  hot99M2: ['…of which 99 % confident', formatArea],
+  coldM2: ['Cold spots (≥ 90 %)', formatArea],
+  orbits: ['Satellite orbits averaged', fmtInt],
+  meanUmol: ['Mean NO₂ over the area', (v) => `${v.toFixed(1)} µmol/m²`],
+  maxUmol: ['Highest NO₂ in the region', (v) => `${v.toFixed(1)} µmol/m²`],
+  objectAreaM2: ['Area covered by objects', formatArea],
+  maxHeight: ['Tallest object', (v) => `${v.toFixed(1)} m`],
+  meanHeight: ['Mean object height', (v) => `${v.toFixed(1)} m`],
+  objectVolumeM3: ['Built / canopy volume', formatVolume],
+  suitableM2: ['Suitable (60–80)', formatArea],
+  unsuitableM2: ['Unsuitable (< 40)', formatArea],
   clearCoveragePct: ['Clear coverage', (v) => `${v.toFixed(1)} %`],
   meanClearObservations: ['Clear looks per pixel', fmt],
   population: ['Population', fmtInt],
@@ -1908,4 +2603,71 @@ function geometryBbox(geometry: GeoJsonGeometry): [number, number, number, numbe
 function bandName(b: { description?: string | null; color: string }): string {
   if (b.description) return b.description;
   return b.color && b.color !== 'Undefined' && b.color !== 'Gray' ? b.color : '';
+}
+
+interface EncroachmentResult {
+  count: number;
+  newBuiltM2: number;
+  sites: { zone: string; areaM2: number; lon: number; lat: number }[];
+  beforeDates: string[];
+  afterDates: string[];
+}
+
+interface GreenCoverResult {
+  zones: number;
+  overallGreenPct: number;
+  zonesLosingGreen?: number;
+  rows: { zone: string; greenPct: number; ndviMean: number; prevPct?: number; changePct?: number }[];
+}
+
+interface ExposureResult {
+  population: number;
+  exposed: number;
+  exposedPct: number;
+  rows?: { zone: string; population: number; exposed: number; exposedPct: number }[];
+}
+
+interface AreaReport {
+  areaM2: number;
+  perimeterM: number;
+  bbox: [number, number, number, number];
+  geometry: GeoJsonGeometry;
+  sections: {
+    layerId: string;
+    name: string;
+    empty: boolean;
+    classes?: { label: string; areaM2: number; pct: number }[];
+    min?: number;
+    mean?: number;
+    median?: number;
+    max?: number;
+    sum?: number;
+  }[];
+}
+
+/** Same calendar dates one year earlier. */
+function shiftYear(date: string): string {
+  return `${Number(date.slice(0, 4)) - 1}${date.slice(4)}`;
+}
+
+/** SVG outline of an EPSG:4326 (Multi)Polygon over the bbox, for reports. */
+function svgOutline(geometry: GeoJsonGeometry, bbox: number[], w: number, h: number): string {
+  const rings: number[][][] = [];
+  const walk = (c: unknown, depth: number): void => {
+    if (!Array.isArray(c)) return;
+    if (depth === 0) rings.push(c as number[][]);
+    else c.forEach((x) => walk(x, depth - 1));
+  };
+  walk(geometry['coordinates'], geometry['type'] === 'MultiPolygon' ? 2 : 1);
+  const x = (lon: number) => (((lon - bbox[0]) / (bbox[2] - bbox[0])) * w).toFixed(1);
+  const y = (lat: number) => (((bbox[3] - lat) / (bbox[3] - bbox[1])) * h).toFixed(1);
+  const d = rings.map((r) => 'M' + r.map((p) => `${x(p[0])},${y(p[1])}`).join('L') + 'Z').join(' ');
+  return `<svg viewBox="0 0 ${w} ${h}"><path d="${d}" fill="none" stroke="#111827" stroke-width="2"/></svg>`;
+}
+
+function bytes(n: number): string {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(2)} GB`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)} MB`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(0)} kB`;
+  return `${n} B`;
 }

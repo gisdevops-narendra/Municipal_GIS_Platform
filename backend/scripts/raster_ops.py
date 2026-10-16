@@ -350,7 +350,13 @@ def op_terrain(req):
     src = gdal.Open(req["path"])
     if is_geographic(src):
         options["scale"] = 111120
-    if kind == "hillshade":
+    if kind == "curvature":
+        return terrain_curvature(src, req)
+    if kind == "multihillshade":
+        kind = "hillshade"
+        options["multiDirectional"] = True
+        options["zFactor"] = req.get("zFactor", 1.0)
+    elif kind == "hillshade":
         options.update(
             zFactor=req.get("zFactor", 1.0),
             azimuth=req.get("azimuth", 315.0),
@@ -395,6 +401,11 @@ def op_cut_fill(req):
     area = pixel_area_m2(ds)
     z = arr[valid]
     base = req.get("baseLevel")
+    if base is None and req.get("baseFromBoundary"):
+        # Stockpile: the ground is the mean elevation along the outline.
+        inner = np.isfinite(arr)
+        edge = inner & ~(np.roll(inner, 1, 0) & np.roll(inner, -1, 0) & np.roll(inner, 1, 1) & np.roll(inner, -1, 1))
+        base = float(arr[edge].mean()) if edge.any() else float(z.min())
     if base is None:
         base = float(z.mean())
     diff = z - base
@@ -1633,8 +1644,12 @@ def op_index_series(req):
         if vals.size == 0:
             continue
         seen.add(date)
-        series.append({"date": date, "mean": float(vals.mean()), "min": float(np.percentile(vals, 10)),
-                       "max": float(np.percentile(vals, 90)), "clearPct": float(ok.sum() * 100 / total)})
+        point = {"date": date, "mean": float(vals.mean()), "min": float(np.percentile(vals, 10)),
+                 "max": float(np.percentile(vals, 90)), "clearPct": float(ok.sum() * 100 / total)}
+        if kind == "ndwi":
+            # Water area, scaled up for the cloudy share of the area.
+            point["waterM2"] = float((vals > 0).sum() * 100 * total / max(ok.sum(), 1))
+        series.append(point)
     if not series:
         raise OpError("Every scene in this period was too cloudy over the area.")
     means = [p["mean"] for p in series]
@@ -2012,6 +2027,720 @@ def op_find_raster(req):
                 stack.append(child)
     return {"path": None}
 
+# =========================================================== Decision Support
+
+def s2_median_bands(bbox, start, end, max_cloud, max_scenes, keys, srs, bounds, w, h):
+    """Cloud-masked per-pixel median of Sentinel-2 bands on a UTM grid."""
+    items = covering(stac_items(STAC_URL, "sentinel-2-l2a", bbox, start, end, max_cloud), bbox, 30)
+    items = sorted(items, key=lambda i: i["properties"].get("eo:cloud_cover", 100))[:max_scenes]
+    if not items:
+        raise OpError(f"No Sentinel-2 scenes between {start} and {end} — widen the period.")
+    masks = []
+    for item in items:
+        scl = read_on_grid(item["assets"]["scl"]["href"], srs, bounds, w, h, "near")
+        masks.append(np.isnan(scl) | np.isin(np.nan_to_num(scl, nan=0), SCL_CLOUDY))
+    out = {}
+    for key in keys:
+        stack = np.stack([np.where(m, np.nan, read_on_grid(i["assets"][key]["href"], srs, bounds, w, h))
+                          for i, m in zip(items, masks)])
+        with np.errstate(all="ignore"):
+            out[key] = np.nanmedian(stack, axis=0)
+    return out, sorted({i["properties"]["datetime"][:10] for i in items})
+
+
+def zones_on_grid(spec, srs, gt, w, h, folder, label_field=None, where=None):
+    """Polygon layer → (zone-id grid, labels by id, gpkg path). Zone ids 1..n."""
+    path, vds, layer = vector_copy(spec, srs, folder, where=where)
+    layer.CreateField(ogr.FieldDefn("zone_id", ogr.OFTInteger))
+    labels = {}
+    layer.ResetReading()
+    n = 0
+    for feature in layer:
+        n += 1
+        feature.SetField("zone_id", n)
+        layer.SetFeature(feature)
+        value = feature.GetField(label_field) if label_field else None
+        labels[n] = str(value) if value is not None else f"Zone {n}"
+    mem = gdal.GetDriverByName("MEM").Create("", w, h, 1, gdal.GDT_Int32)
+    mem.SetGeoTransform(gt)
+    mem.SetProjection(srs.ExportToWkt())
+    gdal.Rasterize(mem, vds, layers=["src"], attribute="zone_id")
+    vds = None
+    return mem.GetRasterBand(1).ReadAsArray(), labels, path
+
+
+def vector_extent_4326(spec, where=None):
+    ds = open_vector(spec)
+    layer = ds.GetLayerByName(spec["table"])
+    if where:
+        layer.SetAttributeFilter(where)
+    # From the features themselves: a PostGIS layer's GetExtent() ignores
+    # the attribute filter and returns the whole table's extent.
+    env = None
+    for f in layer:
+        g = f.GetGeometryRef()
+        if g is None:
+            continue
+        e = g.GetEnvelope()
+        env = e if env is None else (min(env[0], e[0]), max(env[1], e[1]), min(env[2], e[2]), max(env[3], e[3]))
+    if env is None:
+        raise OpError("No zones match the filter.")
+    minx, maxx, miny, maxy = env
+    srs = layer.GetSpatialRef()
+    if srs is not None and not srs.IsGeographic():
+        srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+        tr = osr.CoordinateTransformation(srs, wgs84())
+        pts = [tr.TransformPoint(x, y)[:2] for x, y in ((minx, miny), (maxx, maxy), (minx, maxy), (maxx, miny))]
+        minx, maxx = min(p[0] for p in pts), max(p[0] for p in pts)
+        miny, maxy = min(p[1] for p in pts), max(p[1] for p in pts)
+    return [minx, miny, maxx, maxy]
+
+
+def attribute_where(field, value):
+    if not field:
+        return None
+    return f"CAST(\"{field}\" AS TEXT) = '{str(value).replace(chr(39), chr(39) * 2)}'"
+
+
+# ----------------------------------------------- 1. weighted overlay
+
+def op_suitability(req):
+    criteria = req["criteria"]
+    ref = gdal.Open(criteria[0]["path"])
+    total_w = sum(max(c.get("weight", 1), 0) for c in criteria) or 1
+    score = np.zeros((ref.RasterYSize, ref.RasterXSize))
+    valid = np.ones_like(score, dtype=bool)
+    parts = []
+    for c in criteria:
+        arr = read_band(ref, c.get("band", 1)) if c["path"] == criteria[0]["path"] else aligned(ref, c["path"], c.get("band", 1))
+        finite = np.isfinite(arr)
+        valid &= finite
+        lo, hi = np.percentile(arr[finite], [2, 98]) if finite.any() else (0, 1)
+        norm = np.clip((arr - lo) / ((hi - lo) or 1), 0, 1)
+        if c.get("direction", "higher") == "lower":
+            norm = 1 - norm
+        w = max(c.get("weight", 1), 0) / total_w
+        score += np.nan_to_num(norm) * w
+        parts.append({"name": c.get("name"), "weightPct": w * 100, "low": float(lo), "high": float(hi)})
+    for path in req.get("exclude", []):
+        mask = aligned(ref, path, 1)
+        valid &= ~(np.isfinite(mask) & (mask > 0))
+    score = np.where(valid, score * 100, np.nan)
+    write_array(ref, score, req["output"])
+    area = pixel_area_m2(ref)
+    v = score[np.isfinite(score)]
+    return {
+        "criteria": parts,
+        "stats": stats_of(score),
+        "highlySuitableM2": float((v >= 80).sum() * area),
+        "suitableM2": float(((v >= 60) & (v < 80)).sum() * area),
+        "unsuitableM2": float((v < 40).sum() * area),
+    }
+
+
+# ----------------------------------------------- 2. encroachment monitor
+
+# NDBI rise / built NDBI / max NDVI per sensitivity — bare dry-season
+# fields also have NDBI > 0, so a real change must be large and lasting.
+SENSITIVITY = {"low": (0.15, 0.10, 0.15), "medium": (0.10, 0.05, 0.20), "high": (0.06, 0.0, 0.25)}
+
+
+def indices(b):
+    with np.errstate(all="ignore"):
+        ndbi = (b["swir16"] - b["nir"]) / (b["swir16"] + b["nir"])
+        ndvi = (b["nir"] - b["red"]) / (b["nir"] + b["red"])
+    return ndbi, ndvi
+
+
+def open3x3(mask):
+    """Binary opening (erode, then dilate) — drops 1–2 pixel speckle."""
+    def shift_all(m, op):
+        out = m.copy()
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                out = op(out, np.roll(np.roll(m, dr, 0), dc, 1))
+        return out
+    return shift_all(shift_all(mask, np.logical_and), np.logical_or)
+
+
+def op_encroachment(req):
+    where = attribute_where(req.get("field"), req.get("value"))
+    bbox = vector_extent_4326(req["vector"], where)
+    if aoi_area_km2(bbox) > 400:
+        raise OpError("The protected zones span more than 400 km² — filter to fewer zones.")
+    folder = tempfile.mkdtemp()
+    try:
+        srs, bounds, w, h = grid_for_bbox(bbox, 10)
+        gt = (bounds[0], 10, 0, bounds[3], 0, -10)
+        zones, labels, _ = zones_on_grid(req["vector"], srs, gt, w, h, folder, req.get("labelField"), where)
+        keys = ("red", "nir", "swir16")
+        before, d0 = s2_median_bands(bbox, req["beforeFrom"], req["beforeTo"], 40, 5, keys, srs, bounds, w, h)
+        after, d1 = s2_median_bands(bbox, req["afterFrom"], req["afterTo"], 40, 5, keys, srs, bounds, w, h)
+        rise, built_ndbi, max_ndvi = SENSITIVITY.get(req.get("sensitivity", "medium"), SENSITIVITY["medium"])
+        ndbi0, ndvi0 = indices(before)
+        ndbi1, ndvi1 = indices(after)
+        with np.errstate(invalid="ignore"):
+            built_after = (ndbi1 > built_ndbi) & (ndvi1 < max_ndvi)
+            built_before = (ndbi0 > built_ndbi) & (ndvi0 < max_ndvi)
+            new_built = built_after & ~built_before & ((ndbi1 - ndbi0) >= rise)
+        new_built = open3x3(np.nan_to_num(new_built).astype(bool)) & (zones > 0)
+        mem = gdal.GetDriverByName("MEM").Create("", w, h, 1, gdal.GDT_Byte)
+        mem.SetGeoTransform(gt)
+        mem.SetProjection(srs.ExportToWkt())
+        mem.GetRasterBand(1).WriteArray(new_built.astype(np.uint8))
+        mem.GetRasterBand(1).SetNoDataValue(0)
+        tmp = os.path.join(folder, "patches.gpkg")
+        polygonize(mem, tmp)
+        min_area = float(req.get("minAreaM2", 300))
+        src = ogr.Open(tmp)
+        lyr = src.GetLayer(0)
+        driver = ogr.GetDriverByName("GPKG")
+        out_path = req.get("output") or os.path.join(folder, "out.gpkg")
+        vds = driver.CreateDataSource(out_path)
+        out = vds.CreateLayer("result", srs, ogr.wkbPolygon)
+        for name, kind in (("zone", ogr.OFTString), ("area_m2", ogr.OFTReal), ("lon", ogr.OFTReal), ("lat", ogr.OFTReal)):
+            out.CreateField(ogr.FieldDefn(name, kind))
+        to_ll = osr.CoordinateTransformation(srs, wgs84())
+        rows, per_zone = [], {}
+        for f in lyr:
+            g = f.GetGeometryRef()
+            a = g.GetArea()
+            if a < min_area:
+                continue
+            c = g.Centroid()
+            col = int((c.GetX() - bounds[0]) / 10)
+            row = int((bounds[3] - c.GetY()) / 10)
+            zid = int(zones[min(max(row, 0), h - 1), min(max(col, 0), w - 1)])
+            label = labels.get(zid, "—")
+            lon, lat, _ = to_ll.TransformPoint(c.GetX(), c.GetY())
+            nf = ogr.Feature(out.GetLayerDefn())
+            nf.SetField("zone", label)
+            nf.SetField("area_m2", a)
+            nf.SetField("lon", lon)
+            nf.SetField("lat", lat)
+            nf.SetGeometry(g)
+            out.CreateFeature(nf)
+            rows.append({"zone": label, "areaM2": a, "lon": lon, "lat": lat})
+            z = per_zone.setdefault(label, {"zone": label, "count": 0, "areaM2": 0.0})
+            z["count"] += 1
+            z["areaM2"] += a
+        vds = None
+        rows.sort(key=lambda r: -r["areaM2"])
+        return {
+            "count": len(rows),
+            "newBuiltM2": float(sum(r["areaM2"] for r in rows)),
+            "sites": rows[:200],
+            "byZone": sorted(per_zone.values(), key=lambda z: -z["areaM2"]),
+            "beforeDates": d0, "afterDates": d1,
+        }
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+# ----------------------------------------------- 3. green cover per ward
+
+def op_green_cover(req):
+    where = attribute_where(req.get("field"), req.get("value"))
+    bbox = vector_extent_4326(req["vector"], where)
+    if aoi_area_km2(bbox) > 400:
+        raise OpError("The zones span more than 400 km² — filter to fewer zones.")
+    folder = tempfile.mkdtemp()
+    try:
+        srs, bounds, w, h = grid_for_bbox(bbox, 10)
+        gt = (bounds[0], 10, 0, bounds[3], 0, -10)
+        zones, labels, gpkg = zones_on_grid(req["vector"], srs, gt, w, h, folder, req.get("labelField"), where)
+        threshold = float(req.get("threshold", 0.3))
+
+        def per_zone(start, end):
+            b, dates = s2_median_bands(bbox, start, end, 60, 8, ("red", "nir"), srs, bounds, w, h)
+            with np.errstate(all="ignore"):
+                ndvi = (b["nir"] - b["red"]) / (b["nir"] + b["red"])
+            ok = (zones > 0) & np.isfinite(ndvi)
+            n = len(labels) + 1
+            z = zones[ok]
+            v = ndvi[ok]
+            count = np.bincount(z, minlength=n)
+            green = np.bincount(z, weights=(v > threshold).astype(float), minlength=n)
+            total = np.bincount(z, weights=v, minlength=n)
+            with np.errstate(all="ignore"):
+                return green / count * 100, total / count, count, dates
+
+        pct, mean, count, dates = per_zone(req["from"], req["to"])
+        prev = per_zone(req["compareFrom"], req["compareTo"]) if req.get("compareFrom") else None
+        ds = ogr.Open(gpkg, 1)
+        layer = ds.GetLayer(0)
+        for name in ("green_pct", "ndvi_mean", "green_m2") + (("prev_pct", "change_pct") if prev else ()):
+            layer.CreateField(ogr.FieldDefn(name, ogr.OFTReal))
+        rows = []
+        layer.ResetReading()
+        for f in layer:
+            i = f.GetField("zone_id")
+            if count[i] == 0:
+                continue
+            row = {"zone": labels[i], "greenPct": float(pct[i]), "ndviMean": float(mean[i]),
+                   "greenM2": float(pct[i] / 100 * count[i] * 100)}
+            f.SetField("green_pct", row["greenPct"])
+            f.SetField("ndvi_mean", row["ndviMean"])
+            f.SetField("green_m2", row["greenM2"])
+            if prev and prev[2][i]:
+                row["prevPct"] = float(prev[0][i])
+                row["changePct"] = row["greenPct"] - row["prevPct"]
+                f.SetField("prev_pct", row["prevPct"])
+                f.SetField("change_pct", row["changePct"])
+            layer.SetFeature(f)
+            rows.append(row)
+        ds = None
+        if req.get("output"):
+            gdal.VectorTranslate(req["output"], gpkg, format="GPKG", layerName="result")
+        rows.sort(key=lambda r: r["greenPct"])
+        overall = float(np.nansum([r["greenM2"] for r in rows]) / max(sum(int(c) for c in count[1:]) * 100, 1) * 100)
+        result = {"zones": len(rows), "rows": rows, "overallGreenPct": overall, "dates": dates,
+                  "breaks": sorted({float(v) for v in np.quantile([r["greenPct"] for r in rows], np.linspace(0, 1, 6))}) if len(rows) >= 5 else []}
+        if prev:
+            changes = [r["changePct"] for r in rows if "changePct" in r]
+            result["zonesLosingGreen"] = sum(1 for c in changes if c < -2)
+            result["compareDates"] = prev[3]
+        return result
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+# ----------------------------------------------- 5. flood risk (HAND)
+
+def op_hand(req):
+    src = gdal.Open(req["path"])
+    ds = src
+    cells = src.RasterXSize * src.RasterYSize
+    if cells > MAX_WATERSHED_CELLS:
+        f = math.sqrt(MAX_WATERSHED_CELLS / cells)
+        ds = gdal.Warp("", src, format="MEM", width=max(int(src.RasterXSize * f), 1),
+                       height=max(int(src.RasterYSize * f), 1), resampleAlg="average", outputType=gdal.GDT_Float64)
+    z = read_band(ds, req.get("band", 1))
+    h, w = z.shape
+    order, down = priority_flood(z)
+    acc = np.zeros(h * w)
+    acc[order] = 1.0
+    for i in order[::-1]:
+        d = down[i]
+        if d >= 0:
+            acc[d] += acc[i]
+    area = pixel_area_m2(ds)
+    flat = z.ravel()
+    stream = (acc * area / 1e6 >= req.get("thresholdKm2", 1.0)) & np.isfinite(flat)
+    # Elevation of the stream cell each cell drains to; outlets are their own base.
+    base = np.where(np.isfinite(flat), flat, np.nan)
+    for i in order:
+        d = down[i]
+        if not stream[i] and d >= 0:
+            base[i] = base[d]
+    hand = np.clip(flat - base, 0, None).reshape(h, w)
+    hand[~np.isfinite(z)] = np.nan
+    t1, t2, t3 = req.get("classes", [1.0, 3.0, 6.0])
+    risk = np.zeros((h, w), dtype=np.uint8)
+    finite = np.isfinite(hand)
+    risk[finite & (hand < t1)] = 1
+    risk[finite & (hand >= t1) & (hand < t2)] = 2
+    risk[finite & (hand >= t2) & (hand < t3)] = 3
+    risk[finite & (hand >= t3)] = 4
+    out = gdal.GetDriverByName("GTiff").Create(req["output"], w, h, 1, gdal.GDT_Byte, GTIFF_OPTIONS)
+    out.SetGeoTransform(ds.GetGeoTransform())
+    out.SetProjection(ds.GetProjection())
+    out.GetRasterBand(1).SetNoDataValue(0)
+    out.GetRasterBand(1).WriteArray(risk)
+    out = None
+    counts = np.bincount(risk.ravel(), minlength=5)
+    names = ["", f"Very high (< {t1:g} m)", f"High ({t1:g}–{t2:g} m)", f"Moderate ({t2:g}–{t3:g} m)", f"Low (> {t3:g} m)"]
+    return {"classes": [{"value": v, "label": names[v], "areaM2": float(counts[v] * area),
+                         "pct": float(counts[v] * 100 / max(counts[1:].sum(), 1))} for v in range(1, 5)],
+            "resampled": ds is not src}
+
+
+# ----------------------------------------------- 6. population exposure
+
+OPERATORS = {">": np.greater, ">=": np.greater_equal, "<": np.less, "<=": np.less_equal, "==": np.equal}
+
+
+def op_exposure(req):
+    pop_ds = gdal.Open(req["population"])
+    pop = read_band(pop_ds, 1)
+    hazard = aligned(pop_ds, req["hazard"], req.get("hazardBand", 1))
+    if req["operator"] == "between":
+        lo, hi = req["threshold"], req["threshold2"]
+        hit = (hazard >= lo) & (hazard <= hi)
+    else:
+        hit = OPERATORS[req["operator"]](hazard, req["threshold"])
+    hit &= np.isfinite(hazard)
+    people = np.nan_to_num(pop)
+    exposed = np.where(hit, people, 0.0)
+    total = float(people.sum())
+    result = {"population": total, "exposed": float(exposed.sum()),
+              "exposedPct": float(exposed.sum() * 100 / total) if total else 0.0}
+    if req.get("vector"):
+        folder = tempfile.mkdtemp()
+        try:
+            zones, labels, _ = zones_on_grid(req["vector"], ds_srs(pop_ds), pop_ds.GetGeoTransform(),
+                                             pop_ds.RasterXSize, pop_ds.RasterYSize, folder, req.get("labelField"))
+            n = len(labels) + 1
+            ztot = np.bincount(zones.ravel(), weights=people.ravel(), minlength=n)
+            zexp = np.bincount(zones.ravel(), weights=exposed.ravel(), minlength=n)
+            result["rows"] = sorted(
+                [{"zone": labels[i], "population": float(ztot[i]), "exposed": float(zexp[i]),
+                  "exposedPct": float(zexp[i] * 100 / ztot[i]) if ztot[i] else 0.0} for i in range(1, n)],
+                key=lambda r: -r["exposed"])
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+    if req.get("output"):
+        write_array(pop_ds, np.where(hit & (people > 0), people, np.nan), req["output"])
+    return result
+
+
+# ----------------------------------------------- 7. area report
+
+def op_area_report(req):
+    folder = tempfile.mkdtemp()
+    try:
+        if req.get("vector"):
+            where = attribute_where(req.get("field"), req.get("value"))
+            path, vds, layer = vector_copy(req["vector"], wgs84(), folder, where=where)
+            union = None
+            for f in layer:
+                g = f.GetGeometryRef().Clone()
+                union = g if union is None else union.Union(g)
+            geometry = json.loads(union.ExportToJson())
+            vds = None
+        else:
+            geometry = req["polygon"]
+        g = ogr.CreateGeometryFromJson(json.dumps(geometry))
+        minx, maxx, miny, maxy = g.GetEnvelope()
+        utm = utm_for_bbox([minx, miny, maxx, maxy])
+        gm = g.Clone()
+        gm.Transform(osr.CoordinateTransformation(wgs84(), utm))
+        sections = []
+        for r in req["rasters"]:
+            try:
+                ds, arr = cut_to_polygon(r["path"], geometry, r.get("band", 1))
+            except RuntimeError:
+                continue
+            finite = np.isfinite(arr)
+            if not finite.any():
+                sections.append({"layerId": r["layerId"], "name": r["name"], "empty": True})
+                continue
+            area = pixel_area_m2(ds)
+            v = arr[finite]
+            sec = {"layerId": r["layerId"], "name": r["name"], "empty": False}
+            if r.get("classes"):
+                labels = {int(c["value"]): c.get("label") or str(c["value"]) for c in r["classes"]}
+                vals, counts = np.unique(v.astype(np.int64), return_counts=True)
+                sec["classes"] = sorted(
+                    [{"label": labels.get(int(k), str(int(k))), "areaM2": float(c * area), "pct": float(c * 100 / v.size)}
+                     for k, c in zip(vals, counts)], key=lambda x: -x["pct"])[:12]
+            else:
+                p = np.percentile(v, [10, 50, 90])
+                sec.update({"min": float(v.min()), "mean": float(v.mean()), "max": float(v.max()),
+                            "p10": float(p[0]), "median": float(p[1]), "p90": float(p[2]), "sum": float(v.sum())})
+            sections.append(sec)
+        return {"areaM2": gm.GetArea(), "perimeterM": gm.Boundary().Length(), "bbox": [minx, miny, maxx, maxy],
+                "geometry": geometry, "sections": sections}
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+# =========================================================== v4 additions
+
+def terrain_curvature(src, req):
+    """Profile curvature-like measure from the Laplacian of the DEM (1/100 m):
+    negative = concave (valleys, water collects), positive = convex (ridges)."""
+    z = read_band(src, req.get("band", 1))
+    gt = src.GetGeoTransform()
+    dx = abs(gt[1]) * (111320 * math.cos(math.radians(gt[3])) if is_geographic(src) else 1)
+    dy = abs(gt[5]) * (110540 if is_geographic(src) else 1)
+    zf = np.where(np.isfinite(z), z, np.nanmean(z))
+    lap = ((np.roll(zf, 1, 1) - 2 * zf + np.roll(zf, -1, 1)) / (dx * dx)
+           + (np.roll(zf, 1, 0) - 2 * zf + np.roll(zf, -1, 0)) / (dy * dy)) * -100
+    lap[~np.isfinite(z)] = np.nan
+    lap[[0, -1], :] = np.nan
+    lap[:, [0, -1]] = np.nan
+    write_array(src, lap, req["output"])
+    return {"stats": stats_of(lap)}
+
+
+# ----------------------------------------------- 8. extract values to points
+
+def op_extract_values(req):
+    folder = tempfile.mkdtemp()
+    try:
+        path, vds, layer = vector_copy(req["vector"], wgs84(), folder)
+        rasters = []
+        for r in req["rasters"]:
+            ds = gdal.Open(r["path"])
+            tr = osr.CoordinateTransformation(wgs84(), ds_srs(ds))
+            field = r["field"]
+            layer.CreateField(ogr.FieldDefn(field, ogr.OFTReal))
+            band = ds.GetRasterBand(r.get("band", 1))
+            rasters.append((ds, tr, field, band, band.GetNoDataValue()))
+        preview, filled = [], {r[2]: 0 for r in rasters}
+        layer.ResetReading()
+        n = 0
+        for f in layer:
+            g = f.GetGeometryRef()
+            if g is None:
+                continue
+            p = g if g.GetGeometryName() == "POINT" else g.PointOnSurface() if "POLYGON" in g.GetGeometryName() else g.Centroid()
+            if p.GetGeometryName() == "MULTIPOINT":
+                p = p.GetGeometryRef(0)
+            row = {}
+            for ds, tr, field, band, nd in rasters:
+                x, y, _ = tr.TransformPoint(p.GetX(), p.GetY())
+                col, r_ = to_pixel(ds, x, y)
+                if 0 <= col < ds.RasterXSize and 0 <= r_ < ds.RasterYSize:
+                    v = float(band.ReadAsArray(col, r_, 1, 1)[0][0])
+                    if nd is None or v != nd:
+                        f.SetField(field, v)
+                        row[field] = v
+                        filled[field] += 1
+            layer.SetFeature(f)
+            n += 1
+            if len(preview) < 100:
+                preview.append(row)
+        vds = None
+        gdal.VectorTranslate(req["output"], path, format="GPKG", layerName="result")
+        return {"count": n, "fields": [r[2] for r in rasters], "filled": filled, "preview": preview}
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+# ----------------------------------------------- 9. least-cost path
+
+def op_least_cost(req):
+    src = gdal.Open(req["path"])
+    ds = src
+    cells = src.RasterXSize * src.RasterYSize
+    if cells > 1_500_000:
+        f = math.sqrt(1_500_000 / cells)
+        ds = gdal.Warp("", src, format="MEM", width=max(int(src.RasterXSize * f), 2),
+                       height=max(int(src.RasterYSize * f), 2), resampleAlg="average", outputType=gdal.GDT_Float64)
+    cost = read_band(ds, req.get("band", 1))
+    if req.get("invert"):
+        cost = np.nanmax(cost) - cost
+    cost = np.where(np.isfinite(cost), np.maximum(cost, 0) + float(req.get("baseCost", 0.0)), np.inf)
+    h, w = cost.shape
+    size = pixel_size_m(ds)
+
+    def cell(lonlat):
+        x, y = to_raster_xy(ds, *lonlat)
+        c, r = to_pixel(ds, x, y)
+        if not (0 <= c < w and 0 <= r < h):
+            raise OpError("Start and end must both be on the cost raster.")
+        return r * w + c
+
+    start, end = cell(req["from"]), cell(req["to"])
+    flat = cost.ravel()
+    dist = np.full(h * w, np.inf)
+    prev = np.full(h * w, -1, dtype=np.int64)
+    dist[start] = 0.0
+    heap = [(0.0, start)]
+    steps = [(-1, -1, 1.4142), (-1, 0, 1.0), (-1, 1, 1.4142), (0, -1, 1.0), (0, 1, 1.0), (1, -1, 1.4142), (1, 0, 1.0), (1, 1, 1.4142)]
+    while heap:
+        d, i = heapq.heappop(heap)
+        if i == end:
+            break
+        if d > dist[i]:
+            continue
+        r, c = divmod(i, w)
+        for dr, dc, k in steps:
+            rr, cc = r + dr, c + dc
+            if 0 <= rr < h and 0 <= cc < w:
+                j = rr * w + cc
+                nd = d + k * size * (flat[i] + flat[j]) / 2
+                if nd < dist[j]:
+                    dist[j] = nd
+                    prev[j] = i
+                    heapq.heappush(heap, (nd, j))
+    if not np.isfinite(dist[end]):
+        raise OpError("No route between the two points (blocked by NoData).")
+    gt = ds.GetGeoTransform()
+    to_ll = osr.CoordinateTransformation(ds_srs(ds), wgs84())
+    line = ogr.Geometry(ogr.wkbLineString)
+    coords = []
+    i = end
+    while i >= 0:
+        r, c = divmod(i, w)
+        x, y = gt[0] + (c + 0.5) * gt[1], gt[3] + (r + 0.5) * gt[5]
+        lon, lat, _ = to_ll.TransformPoint(x, y)
+        coords.append([lon, lat])
+        line.AddPoint_2D(lon, lat)
+        i = prev[i] if i != start else -1
+    coords.reverse()
+    length = sum(haversine(coords[k - 1], coords[k]) for k in range(1, len(coords)))
+    if req.get("output"):
+        driver = ogr.GetDriverByName("GPKG")
+        vds = driver.CreateDataSource(req["output"])
+        layer = vds.CreateLayer("result", wgs84(), ogr.wkbLineString)
+        for name in ("length_m", "total_cost"):
+            layer.CreateField(ogr.FieldDefn(name, ogr.OFTReal))
+        feat = ogr.Feature(layer.GetLayerDefn())
+        feat.SetField("length_m", length)
+        feat.SetField("total_cost", float(dist[end]))
+        feat.SetGeometry(line)
+        layer.CreateFeature(feat)
+        vds = None
+    return {"lengthM": length, "totalCost": float(dist[end]), "straightM": haversine(req["from"], req["to"]),
+            "path": {"type": "LineString", "coordinates": coords}, "resampled": ds is not src}
+
+
+# ----------------------------------------------- 10. hotspots (Getis-Ord Gi*)
+
+def op_hotspot(req):
+    folder = tempfile.mkdtemp()
+    try:
+        srs = utm_srs(open_vector(req["vector"]), req["vector"]["table"])
+        _, vds, layer = vector_copy(req["vector"], srs, folder)
+        xs, ys, ws = point_values(layer, req.get("weightField"))
+        cell = float(req["cellSize"])
+        band = float(req["distance"])
+        w, h, gt = make_grid((xs.min(), xs.max(), ys.min(), ys.max()), cell, band)
+        cols = np.clip(((xs - gt[0]) / cell).astype(int), 0, w - 1)
+        rows = np.clip(((gt[3] - ys) / cell).astype(int), 0, h - 1)
+        x = np.zeros((h, w))
+        np.add.at(x, (rows, cols), ws)
+        k = max(int(math.ceil(band / cell)), 1)
+        yy, xx = np.mgrid[-k:k + 1, -k:k + 1]
+        kernel = ((xx * xx + yy * yy) * cell * cell <= band * band).astype(float)
+        fh, fw = h + 2 * k, w + 2 * k
+        conv = lambda a: np.fft.irfft2(np.fft.rfft2(a, (fh, fw)) * np.fft.rfft2(kernel, (fh, fw)), (fh, fw))[k:k + h, k:k + w]
+        local = conv(x)
+        nbrs = conv(np.ones_like(x))
+        n = x.size
+        mean = x.mean()
+        sd = math.sqrt(max((x * x).mean() - mean * mean, 1e-12))
+        with np.errstate(all="ignore"):
+            z = (local - mean * nbrs) / (sd * np.sqrt((n * nbrs - nbrs * nbrs) / (n - 1)))
+        cls = np.full((h, w), 4, dtype=np.uint8)            # 4 = not significant
+        for v, lo in ((7, 2.576), (6, 1.96), (5, 1.645)):
+            cls[(z >= lo) & (cls == 4)] = v
+        for v, hi in ((1, -2.576), (2, -1.96), (3, -1.645)):
+            cls[(z <= hi) & (cls == 4)] = v
+        out = new_raster(req["output"], w, h, gt, srs, gdal.GDT_Byte, 4)
+        out.GetRasterBand(1).WriteArray(cls)
+        out = None
+        area = cell * cell
+        counts = np.bincount(cls.ravel(), minlength=8)
+        return {"points": int(xs.size), "hotM2": float(counts[5:8].sum() * area), "coldM2": float(counts[1:4].sum() * area),
+                "hot99M2": float(counts[7] * area)}
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+# ----------------------------------------------- 11. air quality (Sentinel-5P NO2)
+
+def op_no2(req):
+    minx, miny, maxx, maxy = req["bbox"]
+    cx, cy = (minx + maxx) / 2, (miny + maxy) / 2
+    half = max(maxx - minx, maxy - miny, 0.5) / 2          # at least ~55 km: the sensor is ~5 km
+    bbox = [cx - half, cy - half, cx + half, cy + half]
+    body = {"collections": ["sentinel-5p-l2-netcdf"], "bbox": bbox,
+            "datetime": f"{req['from']}T00:00:00Z/{req['to']}T23:59:59Z", "limit": 60,
+            "query": {"s5p:product_name": {"eq": "no2"}, "s5p:processing_mode": {"eq": "OFFL"}}}
+    items = http_json(f"{PC_STAC_URL}/search", body).get("features", [])
+    if not items:
+        body["query"]["s5p:processing_mode"] = {"eq": "NRTI"}
+        items = http_json(f"{PC_STAC_URL}/search", body).get("features", [])
+    if not items:
+        raise OpError("No Sentinel-5P NO₂ data for this period.")
+    items = items[: int(req.get("maxOrbits", 20))]
+    token = http_json(PC_TOKEN_URL.format(collection="sentinel-5p-l2-netcdf"))["token"]
+    res = 0.05
+    gw, gh = int(round((bbox[2] - bbox[0]) / res)), int(round((bbox[3] - bbox[1]) / res))
+    total = np.zeros((gh, gw))
+    count = np.zeros((gh, gw))
+    used = []
+    gdal.SetConfigOption("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif,.TIF,.vrt,.nc")
+    for item in items:
+        href = "/vsicurl/" + pc_sign(item["assets"]["no2"]["href"], token)
+        try:
+            lat_ds = gdal.Open(f'HDF5:"{href}"://PRODUCT/latitude')
+            lat = lat_ds.ReadAsArray()
+            rows = np.where(((lat >= bbox[1]) & (lat <= bbox[3])).any(axis=1))[0]
+            if rows.size == 0:
+                continue
+            r0, r1 = int(rows.min()), int(rows.max()) + 1
+            read = lambda name: gdal.Open(f'HDF5:"{href}"://PRODUCT/{name}').ReadAsArray(0, r0, lat.shape[1], r1 - r0)
+            lon = read("longitude")
+            no2 = read("nitrogendioxide_tropospheric_column")
+            qa = read("qa_value")
+        except RuntimeError:
+            continue
+        la = lat[r0:r1]
+        good = (qa >= 75 if qa.max() > 1 else qa >= 0.75) & (no2 < 1e30) & (lon >= bbox[0]) & (lon < bbox[2]) & (la >= bbox[1]) & (la < bbox[3])
+        if not good.any():
+            continue
+        gx = ((lon[good] - bbox[0]) / res).astype(int).clip(0, gw - 1)
+        gy = ((bbox[3] - la[good]) / res).astype(int).clip(0, gh - 1)
+        np.add.at(total, (gy, gx), no2[good] * 1e6)          # mol/m² → µmol/m²
+        np.add.at(count, (gy, gx), 1)
+        used.append(item["properties"]["datetime"][:10])
+    if not used:
+        raise OpError("Every orbit was cloudy or low-quality over the area.")
+    with np.errstate(all="ignore"):
+        mean = np.where(count > 0, total / count, np.nan)
+    srs = wgs84()
+    ds = gdal.GetDriverByName("GTiff").Create(req["output"], gw, gh, 1, gdal.GDT_Float32, GTIFF_OPTIONS)
+    ds.SetGeoTransform((bbox[0], res, 0, bbox[3], 0, -res))
+    ds.SetProjection(srs.ExportToWkt())
+    ds.GetRasterBand(1).SetNoDataValue(FLOAT_NODATA)
+    ds.GetRasterBand(1).WriteArray(np.where(np.isfinite(mean), mean, FLOAT_NODATA))
+    ds = None
+    inner = mean[int((bbox[3] - maxy) / res):int((bbox[3] - miny) / res) + 1, int((minx - bbox[0]) / res):int((maxx - bbox[0]) / res) + 1]
+    v = inner[np.isfinite(inner)]
+    return {"source": "Sentinel-5P TROPOMI tropospheric NO₂ (~5 km)", "orbits": len(used),
+            "dates": sorted(set(used)), "meanUmol": float(v.mean()) if v.size else None,
+            "maxUmol": float(np.nanmax(mean)), "stats": stats_of(mean)}
+
+
+# ----------------------------------------------- 14. fill NoData / smooth
+
+def op_fill_nodata(req):
+    src = gdal.Open(req["path"])
+    gdal.Translate(req["output"], src, format="GTiff", creationOptions=GTIFF_OPTIONS)
+    out = gdal.Open(req["output"], 1)
+    filled = 0
+    for i in range(1, out.RasterCount + 1):
+        band = out.GetRasterBand(i)
+        before = band.ReadAsArray()
+        nd = band.GetNoDataValue()
+        missing = int((before == nd).sum()) if nd is not None else 0
+        gdal.FillNodata(band, None, float(req.get("maxDistance", 50)), int(req.get("smoothing", 0)))
+        if req.get("smoothPasses", 0) and out.RasterCount == 1:
+            arr = band.ReadAsArray().astype(np.float64)
+            valid = arr != nd if nd is not None else np.ones_like(arr, dtype=bool)
+            for _ in range(int(req["smoothPasses"])):
+                a = np.where(valid, arr, np.nan)
+                stack = np.stack([np.roll(np.roll(a, dr, 0), dc, 1) for dr in (-1, 0, 1) for dc in (-1, 0, 1)])
+                with np.errstate(all="ignore"):
+                    arr = np.where(valid, np.nanmean(stack, axis=0), arr)
+            band.WriteArray(arr)
+        after = band.ReadAsArray()
+        filled += missing - (int((after == nd).sum()) if nd is not None else 0)
+    out = None
+    return {"filledCells": filled, "stats": stats_of(read_band(gdal.Open(req["output"])))}
+
+
+# ----------------------------------------------- 19. drone: object heights
+
+def op_heights(req):
+    dsm = gdal.Open(req["dsm"])
+    top = read_band(dsm, 1)
+    ground = aligned(dsm, req["dtm"], 1)
+    h = top - ground
+    h[h < float(req.get("minHeight", 0.5))] = np.nan
+    write_array(dsm, h, req["output"])
+    area = pixel_area_m2(dsm)
+    v = h[np.isfinite(h)]
+    return {"objectAreaM2": float(v.size * area), "maxHeight": float(v.max()) if v.size else 0.0,
+            "meanHeight": float(v.mean()) if v.size else 0.0,
+            "objectVolumeM3": float(v.sum() * area), "stats": stats_of(h)}
+
+
 OPS = {
     "info": op_info, "identify": op_identify, "profile": op_profile,
     "line_of_sight": op_line_of_sight, "terrain": op_terrain, "contour": op_contour,
@@ -2029,6 +2758,10 @@ OPS = {
     "online_population": op_online_population, "online_water": op_online_water,
     "viewshed_multi": op_viewshed_multi, "find_raster": op_find_raster,
     "mesh": op_mesh,
+    "suitability": op_suitability, "encroachment": op_encroachment, "green_cover": op_green_cover,
+    "hand": op_hand, "exposure": op_exposure, "area_report": op_area_report,
+    "extract_values": op_extract_values, "least_cost": op_least_cost, "hotspot": op_hotspot,
+    "no2": op_no2, "fill_nodata": op_fill_nodata, "heights": op_heights,
 }
 
 

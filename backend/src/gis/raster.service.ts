@@ -72,6 +72,18 @@ const OP_STAGES: Record<string, string> = {
   streams: 'Tracing the stream network',
   online_population: 'Downloading population data',
   online_water: 'Downloading surface-water data',
+  suitability: 'Combining the criteria',
+  extract_values: 'Sampling the rasters at every feature',
+  least_cost: 'Searching the cheapest route',
+  hotspot: 'Computing Getis-Ord Gi* statistics',
+  no2: 'Downloading Sentinel-5P orbits and averaging NO₂',
+  fill_nodata: 'Filling gaps',
+  heights: 'Subtracting ground from surface',
+  encroachment: 'Building before / after composites and comparing built-up land',
+  green_cover: 'Building Sentinel-2 composites and measuring green cover',
+  hand: 'Computing height above nearest drainage',
+  exposure: 'Overlaying population and hazard',
+  area_report: 'Summarising each raster inside the area',
   viewshed_multi: 'Computing each observer\'s viewshed',
 };
 
@@ -316,7 +328,10 @@ export class RasterService {
     if (job?.signal.aborted) throw new BadRequestException('Cancelled.');
     job?.setStage(OP_STAGES[String(request.op)] ?? 'Processing');
     return new Promise<T>((resolve, reject) => {
-      const child = spawn('python3', [this.script], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const child = spawn('python3', [this.script], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env, HDF5_DISABLE_VERSION_CHECK: '1' },
+      });
       const onAbort = () => child.kill('SIGKILL');
       job?.signal.addEventListener('abort', onAbort, { once: true });
       let stdout = '';

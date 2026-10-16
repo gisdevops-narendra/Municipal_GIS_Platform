@@ -101,6 +101,30 @@
             </div>
           }
         </section>
+
+        @if (pins().length) {
+          <section class="dashboard-card survey-panel dashboard-card--pins">
+            <span class="eyebrow">Raster Analysis</span>
+            <h2 class="dashboard-card__heading">Highlights</h2>
+            <div class="dashboard-pins">
+              @for (pin of pins(); track pin.id) {
+                <div class="dashboard-pin">
+                  <span class="dashboard-pin__value">{{ pin.value }}</span>
+                  <span class="dashboard-pin__title">{{ pin.title }}</span>
+                  @if (pin.detail) {
+                    <span class="dashboard-pin__detail">{{ pin.detail }}</span>
+                  }
+                  <span class="dashboard-pin__actions">
+                    @if (pin.layerId) {
+                      <a [routerLink]="['/gis']" [queryParams]="{ layer: pin.layerId }">Show on map</a>
+                    }
+                    <button type="button" (click)="removePin(pin)" title="Remove from the dashboard"><i class="pi pi-times"></i></button>
+                  </span>
+                </div>
+              }
+            </div>
+          </section>
+        }
       </div>
     } @else {
       <div class="dashboard-card survey-panel dashboard-card--state">

@@ -165,6 +165,58 @@ export interface TerrainMeshData {
   max: number;
 }
 
+export interface RasterMonitor {
+  id: string;
+  name: string;
+  kind: 'green-cover' | 'encroachment';
+  frequency: 'weekly' | 'monthly';
+  params: Record<string, unknown>;
+  active: boolean;
+  nextRunAt: string;
+  lastRunAt: string | null;
+  lastStatus: 'running' | 'done' | 'failed' | null;
+  lastSummary: string | null;
+  alert: boolean;
+  alertMessage: string | null;
+}
+
+export interface RasterWorkflow {
+  id: string;
+  name: string;
+  steps: { tool: string; body: Record<string, unknown> }[];
+  createdById: string;
+  createdAt: string;
+}
+
+export interface RasterHistoryEntry {
+  id: string;
+  tool: string;
+  body: Record<string, unknown>;
+  status: string;
+  summary: string | null;
+  layerId: string | null;
+  layerName: string | null;
+  createdAt: string;
+  finishedAt: string;
+}
+
+export interface RasterStorage {
+  totalBytes: number;
+  tempBytes: number;
+  orphanBytes: number;
+  perDepartment: { department: string; bytes: number }[];
+  layers: { layerId: string | null; name: string; department: string; kind: string; bytes: number; createdAt: string | null }[];
+}
+
+export interface RasterPin {
+  id: string;
+  title: string;
+  value: string;
+  detail: string | null;
+  layerId: string | null;
+  createdAt: string;
+}
+
 /** A tool that published its output as a new layer. */
 export interface LayerResult {
   layer: GisLayer;
@@ -250,6 +302,70 @@ export class RasterService {
   startJob<T = LayerResult>(tool: string, body: Record<string, unknown>, departmentId?: string | null): Observable<RasterJob<T>> {
     const params: Record<string, string> = departmentId ? { departmentId } : {};
     return this.http.post<RasterJob<T>>(`${this.baseUrl}/jobs/${tool}`, body, { params });
+  }
+
+  workflows(): Observable<RasterWorkflow[]> {
+    return this.http.get<RasterWorkflow[]>(`${this.baseUrl}/workflows`);
+  }
+
+  createWorkflow(name: string, steps: { tool: string; body: Record<string, unknown> }[]): Observable<RasterWorkflow> {
+    return this.http.post<RasterWorkflow>(`${this.baseUrl}/workflows`, { name, steps });
+  }
+
+  deleteWorkflow(id: string): Observable<void> {
+    return this.http.delete<void>(`${this.baseUrl}/workflows/${id}`);
+  }
+
+  runWorkflow(id: string, inputLayerId: string | null): Observable<RasterJob<LayerResult>> {
+    return this.http.post<RasterJob<LayerResult>>(`${this.baseUrl}/workflows/${id}/run`, inputLayerId ? { inputLayerId } : {});
+  }
+
+  history(): Observable<RasterHistoryEntry[]> {
+    return this.http.get<RasterHistoryEntry[]>(`${this.baseUrl}/history`);
+  }
+
+  storage(): Observable<RasterStorage> {
+    return this.http.get<RasterStorage>(`${this.baseUrl}/storage`);
+  }
+
+  cleanupStorage(): Observable<{ removed: number; freedBytes: number }> {
+    return this.http.post<{ removed: number; freedBytes: number }>(`${this.baseUrl}/storage/cleanup`, {});
+  }
+
+  pins(): Observable<RasterPin[]> {
+    return this.http.get<RasterPin[]>(`${this.baseUrl}/pins`);
+  }
+
+  createPin(body: { title: string; value: string; detail?: string; layerId?: string }): Observable<RasterPin> {
+    return this.http.post<RasterPin>(`${this.baseUrl}/pins`, body);
+  }
+
+  deletePin(id: string): Observable<void> {
+    return this.http.delete<void>(`${this.baseUrl}/pins/${id}`);
+  }
+
+  monitors(): Observable<RasterMonitor[]> {
+    return this.http.get<RasterMonitor[]>(`${this.baseUrl}/monitors`);
+  }
+
+  createMonitor(body: { name: string; kind: string; frequency: string; params: Record<string, unknown> }): Observable<RasterMonitor> {
+    return this.http.post<RasterMonitor>(`${this.baseUrl}/monitors`, body);
+  }
+
+  deleteMonitor(id: string): Observable<void> {
+    return this.http.delete<void>(`${this.baseUrl}/monitors/${id}`);
+  }
+
+  setMonitorActive(id: string, active: boolean): Observable<RasterMonitor> {
+    return this.http.put<RasterMonitor>(`${this.baseUrl}/monitors/${id}/active`, { active });
+  }
+
+  runMonitor(id: string): Observable<RasterMonitor> {
+    return this.http.post<RasterMonitor>(`${this.baseUrl}/monitors/${id}/run`, {});
+  }
+
+  acknowledgeMonitor(id: string): Observable<RasterMonitor> {
+    return this.http.post<RasterMonitor>(`${this.baseUrl}/monitors/${id}/acknowledge`, {});
   }
 
   mesh(layerId: string, band: number, size = 140): Observable<TerrainMeshData> {

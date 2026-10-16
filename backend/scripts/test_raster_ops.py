@@ -195,6 +195,80 @@ class RasterOpsTest(unittest.TestCase):
         self.assertTrue(r["path"].endswith("data/dem.tif"))
         self.ok({"op": "info", "path": r["path"]})
 
+    def test_suitability(self):
+        slope = self.out("slope_s.tif")
+        self.ok({"op": "terrain", "kind": "slope", "path": self.dem, "output": slope})
+        r = self.ok({"op": "suitability", "output": self.out("suit.tif"), "exclude": [],
+                     "criteria": [{"path": self.dem, "direction": "lower", "weight": 1, "name": "dem"},
+                                  {"path": slope, "direction": "lower", "weight": 1, "name": "slope"}]})
+        self.assertAlmostEqual(sum(c["weightPct"] for c in r["criteria"]), 100, delta=0.01)
+        self.assertLessEqual(r["stats"]["max"], 100)
+        self.assertGreater(r["highlySuitableM2"], 0)
+
+    def test_flood_risk_hand(self):
+        r = self.ok({"op": "hand", "path": self.dem, "thresholdKm2": 0.05, "classes": [1, 3, 6], "output": self.out("hand.tif")})
+        self.assertEqual([c["value"] for c in r["classes"]], [1, 2, 3, 4])
+        self.assertAlmostEqual(sum(c["pct"] for c in r["classes"]), 100, delta=0.1)
+
+    def test_area_report_for_drawn_polygon(self):
+        lon, lat = LONLAT_INSIDE
+        poly = {"type": "Polygon", "coordinates": [[[lon - 0.004, lat - 0.004], [lon + 0.004, lat - 0.004],
+                                                     [lon + 0.004, lat + 0.004], [lon - 0.004, lat + 0.004], [lon - 0.004, lat - 0.004]]]}
+        r = self.ok({"op": "area_report", "polygon": poly,
+                     "rasters": [{"path": self.dem, "name": "DEM", "layerId": "a"},
+                                 {"path": self.out("lc_a.tif") if os.path.exists(self.out("lc_a.tif")) else self.dem,
+                                  "name": "Classes", "layerId": "b", "classes": [{"value": 1, "label": "One"}]}]})
+        self.assertGreater(r["areaM2"], 500_000)
+        self.assertIn("mean", r["sections"][0])
+
+    def test_exposure(self):
+        pop = write(self.out("pop.tif"), [np.full((200, 200), 2.0)])
+        r = self.ok({"op": "exposure", "population": pop, "hazard": self.dem, "operator": "<=", "threshold": 120})
+        self.assertAlmostEqual(r["population"], 80000, delta=1)
+        self.assertGreater(r["exposed"], 0)
+        self.assertLess(r["exposed"], r["population"])
+
+    def test_least_cost_path(self):
+        lon, lat = LONLAT_INSIDE
+        r = self.ok({"op": "least_cost", "path": self.dem, "from": [lon - 0.008, lat - 0.008], "to": [lon + 0.008, lat + 0.008],
+                     "baseCost": 1, "output": self.out("lcp.gpkg")})
+        self.assertGreaterEqual(r["lengthM"], r["straightM"] * 0.99)
+        self.assertEqual(r["path"]["type"], "LineString")
+
+    def test_fill_nodata(self):
+        arr = np.full((50, 50), 10.0)
+        arr[20:25, 20:25] = -9999
+        holey = write(self.out("holey.tif"), [arr], nodata=-9999)
+        r = self.ok({"op": "fill_nodata", "path": holey, "maxDistance": 20, "smoothPasses": 1, "output": self.out("filled2.tif")})
+        self.assertEqual(r["filledCells"], 25)
+
+    def test_object_heights(self):
+        y, x = np.mgrid[0:200, 0:200]
+        dsm = 100 + 0.2 * (200 - x) + 0.1 * (200 - y)
+        dsm[50:60, 50:60] += 12
+        top = write(self.out("dsm.tif"), [dsm])
+        ground = write(self.out("dtm.tif"), [100 + 0.2 * (200 - x) + 0.1 * (200 - y)])
+        r = self.ok({"op": "heights", "dsm": top, "dtm": ground, "minHeight": 2, "output": self.out("ndsm.tif")})
+        self.assertAlmostEqual(r["maxHeight"], 12, delta=0.1)
+        self.assertAlmostEqual(r["objectAreaM2"], 100 * 100, delta=1)
+
+    def test_curvature_and_multihillshade(self):
+        c = self.ok({"op": "terrain", "kind": "curvature", "path": self.dem, "output": self.out("curv.tif")})
+        self.assertLess(c["stats"]["min"], 0)
+        self.ok({"op": "terrain", "kind": "multihillshade", "path": self.dem, "output": self.out("mhs.tif")})
+
+    def test_stockpile_volume(self):
+        lon, lat = LONLAT_INSIDE
+        y, x = np.mgrid[0:200, 0:200]
+        heap = np.full((200, 200), 50.0)
+        heap[90:110, 90:110] += 5
+        pile = write(self.out("pile.tif"), [heap])
+        poly = {"type": "Polygon", "coordinates": [[[lon - 0.0015, lat - 0.0015], [lon + 0.0015, lat - 0.0015],
+                                                     [lon + 0.0015, lat + 0.0015], [lon - 0.0015, lat + 0.0015], [lon - 0.0015, lat - 0.0015]]]}
+        r = self.ok({"op": "cut_fill", "path": pile, "polygon": poly, "baseFromBoundary": True})
+        self.assertAlmostEqual(r["baseLevel"], 50, delta=0.01)
+        self.assertAlmostEqual(r["cutM3"], 20 * 20 * 100 * 5, delta=1)
+
     def test_errors_are_reported_as_json(self):
         code, body = run({"op": "contour", "path": self.dem, "interval": 100000, "output": self.out("ct.gpkg")})
         self.assertEqual(code, 1)

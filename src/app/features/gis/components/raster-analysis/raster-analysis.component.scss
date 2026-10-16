@@ -734,3 +734,169 @@
 .ra__auto {
   align-items: center;
 }
+
+/* ---------- decision support ---------- */
+.ra__criteria {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ra__criterion {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+
+.ra__criterion-row {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 40px auto;
+  gap: 6px;
+  align-items: center;
+
+  .bo__input {
+    min-width: 0;
+  }
+}
+
+.ra__weight {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: right;
+  color: var(--color-ink-700);
+}
+
+.ra__checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.ra__row-link {
+  cursor: pointer;
+}
+
+.ra__monitors {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ra__monitor {
+  padding: 8px 10px;
+  border: 1px solid var(--color-line);
+  border-left: 3px solid var(--color-primary-500, #2563eb);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+
+  &.is-alert {
+    border-left-color: #d7191c;
+  }
+}
+
+.ra__monitor-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  i {
+    font-size: 12px;
+  }
+}
+
+.ra__monitor.is-alert .ra__monitor-head i {
+  color: #d7191c;
+}
+
+.ra__monitor-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--color-ink-900);
+}
+
+.ra__monitor-kind {
+  font-size: 10.5px;
+  color: var(--color-ink-500);
+}
+
+.ra__monitor-summary,
+.ra__monitor-alert {
+  margin: 4px 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--color-ink-700);
+}
+
+.ra__monitor-alert {
+  color: #d7191c;
+  font-weight: 600;
+}
+
+.ra__monitor-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--color-ink-500);
+}
+
+.ra__monitor-actions {
+  display: flex;
+  gap: 4px;
+}
+
+/* ---------- v4: share, presets, pins, slider ---------- */
+.ra__share,
+.ra__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ra__pin {
+  margin-left: 4px;
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: var(--color-ink-500);
+  opacity: 0.45;
+  cursor: pointer;
+
+  i {
+    font-size: 10px;
+  }
+
+  &:hover,
+  &.is-pinned {
+    color: var(--color-primary-600, #2563eb);
+    opacity: 1;
+  }
+}
+
+.ra__slider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  input {
+    flex: 1;
+  }
+}
+
+.ra__frame {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-ink-700);
+}

@@ -8,6 +8,7 @@ import { CurrentUserService } from '../../core/services/current-user.service';
 import { DepartmentService } from '../../core/services/department.service';
 import { UserManagementService } from '../../core/services/user-management.service';
 import { GisDashboardService } from '../../core/services/gis-dashboard.service';
+import { RasterPin, RasterService } from '../gis/services/raster.service';
 import { CurrentUser } from '../../core/models/current-user.model';
 import { GisDashboardSummary, GisDepartmentSummary } from '../../core/models/gis-dashboard.model';
 
@@ -29,6 +30,11 @@ export class DashboardPlaceholderComponent {
   private readonly departmentService = inject(DepartmentService);
   private readonly userManagementService = inject(UserManagementService);
   private readonly gisDashboardService = inject(GisDashboardService);
+  private readonly rasterService = inject(RasterService);
+
+  /** Raster Analysis → Dashboard Pins: result numbers people pinned from
+   *  the map. Empty (card hidden) when there are none or on any error. */
+  readonly pins = signal<RasterPin[]>([]);
 
   /** Populated from GET /api/me — the authenticated application user and
    *  their municipality, resolved server-side from the Keycloak token.
@@ -67,7 +73,14 @@ export class DashboardPlaceholderComponent {
     Math.max(1, ...this.departmentSummaries().map((d) => d.layerCount))
   );
 
+  removePin(pin: RasterPin): void {
+    this.rasterService.deletePin(pin.id).subscribe({
+      next: () => this.pins.update((list) => list.filter((p) => p.id !== pin.id))
+    });
+  }
+
   constructor() {
+    this.rasterService.pins().subscribe({ next: (list) => this.pins.set(list), error: () => this.pins.set([]) });
     this.currentUserService.getMe().subscribe({
       next: (user) => {
         this.currentUser.set(user);

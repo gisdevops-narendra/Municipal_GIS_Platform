@@ -25,6 +25,8 @@ import { RasterController } from './raster.controller';
 import { RasterService } from './raster.service';
 import { RasterToolsService } from './raster-tools.service';
 import { RasterJobsService } from './raster-jobs.service';
+import { RasterMonitorService } from './raster-monitor.service';
+import { RasterWorkspaceService } from './raster-workspace.service';
 import { RasterModuleGuard } from './raster-module.guard';
 
 @Module({
@@ -56,6 +58,8 @@ import { RasterModuleGuard } from './raster-module.guard';
     RasterService,
     RasterToolsService,
     RasterJobsService,
+    RasterMonitorService,
+    RasterWorkspaceService,
     RasterModuleGuard,
   ],
   exports: [

@@ -138,8 +138,8 @@ class RasterOutputDto extends RasterInputDto {
 }
 
 export class TerrainDto extends RasterOutputDto {
-  @IsIn(['slope', 'aspect', 'hillshade', 'roughness', 'TRI', 'TPI'])
-  kind!: 'slope' | 'aspect' | 'hillshade' | 'roughness' | 'TRI' | 'TPI';
+  @IsIn(['slope', 'aspect', 'hillshade', 'multihillshade', 'curvature', 'roughness', 'TRI', 'TPI'])
+  kind!: 'slope' | 'aspect' | 'hillshade' | 'multihillshade' | 'curvature' | 'roughness' | 'TRI' | 'TPI';
 
   @IsOptional()
   @IsNumber()
@@ -195,6 +195,11 @@ export class CutFillDto extends RasterInputDto {
   @IsOptional()
   @IsNumber()
   baseLevel?: number;
+
+  /** Stockpile mode: the base is the mean elevation along the outline. */
+  @IsOptional()
+  @IsBoolean()
+  baseFromBoundary?: boolean;
 }
 
 export class WatershedDto extends RasterOutputDto {
@@ -744,4 +749,399 @@ export class StreamNetworkDto extends RasterOutputDto {
   @Min(0.001)
   @Max(100000)
   thresholdKm2!: number;
+}
+
+// ----- Decision Support -----
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+class SuitabilityCriterionDto {
+  @IsUUID()
+  layerId!: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  band?: number;
+
+  @IsIn(['higher', 'lower'])
+  direction!: 'higher' | 'lower';
+
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  weight!: number;
+}
+
+export class SuitabilityDto {
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(8)
+  @ValidateNested({ each: true })
+  @Type(() => SuitabilityCriterionDto)
+  criteria!: SuitabilityCriterionDto[];
+
+  /** Rasters whose non-zero pixels are excluded (water, protected land…). */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(5)
+  @IsUUID('all', { each: true })
+  excludeLayerIds?: string[];
+
+  @IsString()
+  @Length(1, 80)
+  outputName!: string;
+}
+
+/** A polygon layer of zones, optionally only features where field = value. */
+class ZonesDto {
+  @IsUUID()
+  zonesLayerId!: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 63)
+  labelField?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 63)
+  filterField?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(0, 200)
+  filterValue?: string;
+}
+
+export class EncroachmentDto extends ZonesDto {
+  @Matches(ISO_DATE)
+  beforeFrom!: string;
+
+  @Matches(ISO_DATE)
+  beforeTo!: string;
+
+  @Matches(ISO_DATE)
+  afterFrom!: string;
+
+  @Matches(ISO_DATE)
+  afterTo!: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(50)
+  @Max(100000)
+  minAreaM2?: number;
+
+  /** low = only clear, large changes; high = catch more (more false alarms). */
+  @IsOptional()
+  @IsIn(['low', 'medium', 'high'])
+  sensitivity?: 'low' | 'medium' | 'high';
+
+  /** When set, the new built-up sites are published as a layer. */
+  @IsOptional()
+  @IsString()
+  @Length(1, 80)
+  outputName?: string;
+}
+
+export class GreenCoverDto extends ZonesDto {
+  @Matches(ISO_DATE)
+  from!: string;
+
+  @Matches(ISO_DATE)
+  to!: string;
+
+  @IsOptional()
+  @Matches(ISO_DATE)
+  compareFrom?: string;
+
+  @IsOptional()
+  @Matches(ISO_DATE)
+  compareTo?: string;
+
+  /** NDVI above this counts as green (default 0.3). */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  threshold?: number;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 80)
+  outputName?: string;
+}
+
+export class FloodRiskDto extends RasterOutputDto {
+  @IsNumber()
+  @Min(0.01)
+  @Max(10000)
+  thresholdKm2!: number;
+
+  /** HAND class limits in metres: very high | high | moderate | low. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(3)
+  @ArrayMaxSize(3)
+  @IsNumber({}, { each: true })
+  classes?: [number, number, number];
+}
+
+export class ExposureDto {
+  @IsUUID()
+  populationLayerId!: string;
+
+  @IsUUID()
+  hazardLayerId!: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  hazardBand?: number;
+
+  @IsIn(['>', '>=', '<', '<=', '==', 'between'])
+  operator!: '>' | '>=' | '<' | '<=' | '==' | 'between';
+
+  @IsNumber()
+  threshold!: number;
+
+  @IsOptional()
+  @IsNumber()
+  threshold2?: number;
+
+  @IsOptional()
+  @IsUUID()
+  zonesLayerId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 63)
+  labelField?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 80)
+  outputName?: string;
+}
+
+export class AreaReportDto {
+  @IsOptional()
+  @IsObject()
+  polygon?: GeoJsonPolygon;
+
+  @IsOptional()
+  @IsUUID()
+  zonesLayerId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 63)
+  filterField?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(0, 200)
+  filterValue?: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(8)
+  @IsUUID('all', { each: true })
+  rasterLayerIds!: string[];
+}
+
+export class CreateMonitorDto {
+  @IsString()
+  @Length(1, 80)
+  name!: string;
+
+  @IsIn(['green-cover', 'encroachment'])
+  kind!: 'green-cover' | 'encroachment';
+
+  @IsIn(['weekly', 'monthly'])
+  frequency!: 'weekly' | 'monthly';
+
+  /** zonesLayerId, labelField, filterField, filterValue, threshold /
+   *  minAreaM2, alertDropPct — checked against the tool's DTO. */
+  @IsObject()
+  params!: Record<string, unknown>;
+}
+
+export class MonitorActiveDto {
+  @IsBoolean()
+  active!: boolean;
+}
+
+// ----- v4: analysis additions -----
+
+export class ExtractValuesDto {
+  @IsUUID()
+  vectorLayerId!: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(10)
+  @IsUUID('all', { each: true })
+  rasterLayerIds!: string[];
+
+  @IsString()
+  @Length(1, 80)
+  outputName!: string;
+}
+
+export class LeastCostDto extends RasterOutputDto {
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(2)
+  @IsNumber({}, { each: true })
+  from!: LonLat;
+
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(2)
+  @IsNumber({}, { each: true })
+  to!: LonLat;
+
+  /** Cheaper where the raster is HIGH (e.g. suitability) instead of low. */
+  @IsOptional()
+  @IsBoolean()
+  invert?: boolean;
+
+  /** Added to every cell so flat / zero-cost ground still has a length cost. */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  baseCost?: number;
+}
+
+export class HotspotDto {
+  @IsUUID()
+  vectorLayerId!: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 63)
+  weightField?: string;
+
+  @IsNumber()
+  @Min(1)
+  @Max(5000)
+  cellSize!: number;
+
+  /** Neighbourhood distance band (m). */
+  @IsNumber()
+  @Min(1)
+  @Max(50000)
+  distance!: number;
+
+  @IsString()
+  @Length(1, 80)
+  outputName!: string;
+}
+
+export class AirQualityDto {
+  @IsArray()
+  @ArrayMinSize(4)
+  @ArrayMaxSize(4)
+  @IsNumber({}, { each: true })
+  bbox!: [number, number, number, number];
+
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  from!: string;
+
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  to!: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(40)
+  maxOrbits?: number;
+
+  @IsString()
+  @Length(1, 80)
+  outputName!: string;
+}
+
+export class FillNoDataDto extends RasterOutputDto {
+  /** Search distance in pixels. */
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(1000)
+  maxDistance?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10)
+  smoothPasses?: number;
+}
+
+export class ObjectHeightsDto {
+  @IsUUID()
+  dsmLayerId!: string;
+
+  @IsUUID()
+  dtmLayerId!: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  minHeight?: number;
+
+  @IsString()
+  @Length(1, 80)
+  outputName!: string;
+}
+
+// ----- Workspace -----
+
+class WorkflowStepDto {
+  @IsString()
+  @Length(1, 40)
+  tool!: string;
+
+  @IsObject()
+  body!: Record<string, unknown>;
+}
+
+export class CreateWorkflowDto {
+  @IsString()
+  @Length(1, 80)
+  name!: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(15)
+  @ValidateNested({ each: true })
+  @Type(() => WorkflowStepDto)
+  steps!: WorkflowStepDto[];
+}
+
+export class RunWorkflowDto {
+  @IsOptional()
+  @IsUUID()
+  inputLayerId?: string;
+}
+
+export class CreatePinDto {
+  @IsString()
+  @Length(1, 120)
+  title!: string;
+
+  @IsString()
+  @Length(1, 80)
+  value!: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(0, 300)
+  detail?: string;
+
+  @IsOptional()
+  @IsUUID()
+  layerId?: string;
 }

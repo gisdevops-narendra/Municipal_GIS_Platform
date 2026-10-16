@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
 import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { CurrentAppUser } from '../auth/decorators/current-app-user.decorator';
@@ -9,11 +9,18 @@ import { mkdirSync } from 'fs';
 import { extname } from 'path';
 import { RasterService } from './raster.service';
 import { RasterJobsService } from './raster-jobs.service';
+import { RasterMonitorService } from './raster-monitor.service';
+import { RasterWorkspaceService } from './raster-workspace.service';
 import { RequireRasterModule } from './raster-module.guard';
 import { ANY_RASTER_MODULE, RASTER_MODULES, terrainModules } from './raster-tool-registry';
 import { RasterToolsService } from './raster-tools.service';
 import {
   ChangeDetectionDto,
+  CreateMonitorDto,
+  CreatePinDto,
+  CreateWorkflowDto,
+  RunWorkflowDto,
+  MonitorActiveDto,
   ClassifyDto,
   ClipDto,
   FillSinksDto,
@@ -57,7 +64,116 @@ export class RasterController {
     private readonly rasters: RasterService,
     private readonly tools: RasterToolsService,
     private readonly jobs: RasterJobsService,
+    private readonly monitors: RasterMonitorService,
+    private readonly workspace: RasterWorkspaceService,
   ) {}
+
+  // ----- Workspace: workflows, history, storage, pins -----
+
+  @RequireRasterModule([RASTER_MODULES.workflows])
+  @Get('workflows')
+  listWorkflows(@CurrentAppUser() appUser: AppUser) {
+    return this.workspace.listWorkflows(appUser);
+  }
+
+  @RequireRasterModule([RASTER_MODULES.workflows])
+  @Post('workflows')
+  createWorkflow(@CurrentAppUser() appUser: AppUser, @Body() dto: CreateWorkflowDto) {
+    return this.workspace.createWorkflow(appUser, dto.name, dto.steps);
+  }
+
+  @RequireRasterModule([RASTER_MODULES.workflows])
+  @Delete('workflows/:id')
+  @HttpCode(204)
+  async deleteWorkflow(@CurrentAppUser() appUser: AppUser, @Param('id', ParseUUIDPipe) id: string) {
+    await this.workspace.deleteWorkflow(appUser, id);
+  }
+
+  @RequireRasterModule([RASTER_MODULES.workflows])
+  @Post('workflows/:id/run')
+  runWorkflow(@CurrentAppUser() appUser: AppUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: RunWorkflowDto) {
+    return this.workspace.runWorkflow(appUser, id, dto.inputLayerId);
+  }
+
+  @RequireRasterModule([RASTER_MODULES.history])
+  @Get('history')
+  history(@CurrentAppUser() appUser: AppUser) {
+    return this.jobs.history(appUser);
+  }
+
+  @RequireRasterModule([RASTER_MODULES.storage])
+  @Get('storage')
+  storage(@CurrentAppUser() appUser: AppUser) {
+    return this.workspace.storage(appUser);
+  }
+
+  @RequireRasterModule([RASTER_MODULES.storage])
+  @Post('storage/cleanup')
+  @HttpCode(200)
+  cleanupStorage(@CurrentAppUser() appUser: AppUser) {
+    return this.workspace.cleanup(appUser);
+  }
+
+  /** Dashboard pins are read by every member (the Dashboard shows them). */
+  @RequireRasterModule(ANY_RASTER_MODULE)
+  @Get('pins')
+  listPins(@CurrentAppUser() appUser: AppUser) {
+    return this.workspace.listPins(appUser);
+  }
+
+  @RequireRasterModule([RASTER_MODULES.dashboardPins])
+  @Post('pins')
+  createPin(@CurrentAppUser() appUser: AppUser, @Body() dto: CreatePinDto) {
+    return this.workspace.createPin(appUser, dto);
+  }
+
+  @RequireRasterModule([RASTER_MODULES.dashboardPins])
+  @Delete('pins/:id')
+  @HttpCode(204)
+  async deletePin(@CurrentAppUser() appUser: AppUser, @Param('id', ParseUUIDPipe) id: string) {
+    await this.workspace.deletePin(appUser, id);
+  }
+
+  // ----- Automatic Monitoring -----
+
+  @RequireRasterModule([RASTER_MODULES.monitoring])
+  @Get('monitors')
+  listMonitors(@CurrentAppUser() appUser: AppUser) {
+    return this.monitors.list(appUser);
+  }
+
+  @RequireRasterModule([RASTER_MODULES.monitoring])
+  @Post('monitors')
+  createMonitor(@CurrentAppUser() appUser: AppUser, @Body() dto: CreateMonitorDto) {
+    return this.monitors.create(appUser, dto);
+  }
+
+  @RequireRasterModule([RASTER_MODULES.monitoring])
+  @Delete('monitors/:id')
+  @HttpCode(204)
+  async deleteMonitor(@CurrentAppUser() appUser: AppUser, @Param('id', ParseUUIDPipe) id: string) {
+    await this.monitors.remove(appUser, id);
+  }
+
+  @RequireRasterModule([RASTER_MODULES.monitoring])
+  @Put('monitors/:id/active')
+  setMonitorActive(@CurrentAppUser() appUser: AppUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: MonitorActiveDto) {
+    return this.monitors.setActive(appUser, id, dto.active);
+  }
+
+  @RequireRasterModule([RASTER_MODULES.monitoring])
+  @Post('monitors/:id/run')
+  @HttpCode(200)
+  runMonitor(@CurrentAppUser() appUser: AppUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.monitors.runNow(appUser, id);
+  }
+
+  @RequireRasterModule([RASTER_MODULES.monitoring])
+  @Post('monitors/:id/acknowledge')
+  @HttpCode(200)
+  acknowledgeMonitor(@CurrentAppUser() appUser: AppUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.monitors.acknowledge(appUser, id);
+  }
 
   // ----- Background jobs (tools that publish a layer) -----
 
