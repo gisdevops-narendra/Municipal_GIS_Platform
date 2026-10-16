@@ -444,6 +444,14 @@ export class GisLayersService {
         layer.geoserverWorkspace,
         layer.geoserverLayer,
       );
+      // Raster Analysis gives every raster its own style — drop it too.
+      if (layer.styleName) {
+        await this.geoServer
+          .deleteStyle(layer.geoserverWorkspace, layer.styleName)
+          .catch((error: Error) =>
+            this.logger.warn(`Deleted raster ${layer.id} but not its style: ${error.message}`),
+          );
+      }
     } else {
       await this.geoServer.deleteFeatureType(
         layer.geoserverWorkspace,

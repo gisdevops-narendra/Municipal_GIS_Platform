@@ -250,6 +250,7 @@ def op_info(req):
             "nodata": b.GetNoDataValue(),
             "min": mn, "max": mx, "mean": mean, "std": std,
             "color": gdal.GetColorInterpretationName(b.GetColorInterpretation()),
+            "description": b.GetDescription() or None,
         })
     gt = ds.GetGeoTransform()
     return {
@@ -1383,6 +1384,24 @@ def op_stac_fetch(req):
                         targetAlignedPixels=True, resampleAlg="bilinear", srcNodata=0, dstNodata=0,
                         outputType=gdal.GDT_UInt16)
             parts.append(part)
+        masked_pct = None
+        if req.get("maskClouds") and "scl" in assets:
+            # Scene Classification: 3 cloud shadow, 8/9 cloud, 10 cirrus.
+            scl_path = os.path.join(folder, "scl.tif")
+            warp_to_aoi(["/vsicurl/" + assets["scl"]["href"]], scl_path, req, dstSRS=srs, xRes=10, yRes=10,
+                        targetAlignedPixels=True, resampleAlg="near", dstNodata=0)
+            scl = gdal.Open(scl_path).GetRasterBand(1).ReadAsArray()
+            cloudy = np.isin(scl, (3, 8, 9, 10))
+            valid = scl > 0
+            masked_pct = float(cloudy.sum() * 100 / max(valid.sum(), 1))
+            for part in parts:
+                ds = gdal.Open(part, 1)
+                band = ds.GetRasterBand(1)
+                arr = band.ReadAsArray()
+                if arr.shape == cloudy.shape:
+                    arr[cloudy] = 0
+                    band.WriteArray(arr)
+                ds = None
         vrt = gdal.BuildVRT(os.path.join(folder, "stack.vrt"), parts, separate=True)
         out = gdal.Translate(req["output"], vrt, format="GTiff", creationOptions=GTIFF_OPTIONS, noData=0)
         for i, (_, label) in enumerate(S2_BANDS, start=1):
@@ -1397,6 +1416,7 @@ def op_stac_fetch(req):
     props = item.get("properties", {})
     return {"source": "Sentinel-2 L2A", "sceneId": item["id"], "date": props.get("datetime"),
             "cloud": props.get("eo:cloud_cover"), "bands": [label for _, label in S2_BANDS],
+            "maskedPct": masked_pct,
             "width": width, "height": height}
 
 

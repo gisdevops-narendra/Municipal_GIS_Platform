@@ -532,3 +532,32 @@
   color: var(--color-primary-600, #2563eb);
   font-weight: 600;
 }
+
+/* ---------- upload progress ---------- */
+.ra__progress {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--color-line);
+}
+
+.ra__progress-bar {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--color-primary-500, #2563eb);
+  transition: width 0.2s ease;
+
+  &.is-indeterminate {
+    width: 40% !important;
+    animation: ra-indeterminate 1.2s ease-in-out infinite;
+  }
+}
+
+@keyframes ra-indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}

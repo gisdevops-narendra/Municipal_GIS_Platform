@@ -24,6 +24,8 @@ export interface RasterStyleSpec {
   invert?: boolean;
   classes?: { value: number; color: string; label?: string; opacity?: number }[];
   bands?: [number, number, number];
+  /** RGB contrast: min–max (normalize) or histogram equalisation. */
+  stretch?: 'normalize' | 'histogram';
   opacity?: number;
 }
 
@@ -52,7 +54,7 @@ export function rasterYsld(name: string, spec: RasterStyleSpec): string {
         `          ${channel}:`,
         `            name: '${Math.trunc(band)}'`,
         '            contrast-enhancement:',
-        '              mode: normalize',
+        `              mode: ${spec.stretch === 'histogram' ? 'histogram' : 'normalize'}`,
       );
     }
     return lines.join('\n') + '\n';

@@ -423,7 +423,7 @@ export class RasterToolsService {
     if (dto.source === 'sentinel2' && !dto.sceneId) {
       throw new BadRequestException('Search and pick a Sentinel-2 scene first.');
     }
-    const request = { bbox: dto.bbox, polygon: dto.polygon, sceneId: dto.sceneId };
+    const request = { bbox: dto.bbox, polygon: dto.polygon, sceneId: dto.sceneId, maskClouds: dto.maskClouds ?? true };
     return this.toRasterLayer(appUser, dto.outputName, async (output) => {
       if (dto.source === 'dem') {
         const r = await this.rasters.runOp<{ stats: RasterStats }>({ op: 'online_dem', ...request, output });
@@ -439,7 +439,7 @@ export class RasterToolsService {
         return { style, result: r };
       }
       const r = await this.rasters.runOp({ op: 'stac_fetch', ...request, output });
-      return { style: { mode: 'rgb', bands: [3, 2, 1] }, result: r };
+      return { style: { mode: 'rgb', bands: [3, 2, 1], stretch: 'histogram' }, result: r };
     });
   }
 

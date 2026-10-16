@@ -34,6 +34,7 @@ export interface RasterBandInfo {
   max: number | null;
   mean: number | null;
   color: string;
+  description: string | null;
 }
 
 export interface RasterInfo {

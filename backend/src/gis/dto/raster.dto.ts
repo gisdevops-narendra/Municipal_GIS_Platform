@@ -109,6 +109,10 @@ export class RasterStyleDto {
   bands?: [number, number, number];
 
   @IsOptional()
+  @IsIn(['normalize', 'histogram'])
+  stretch?: 'normalize' | 'histogram';
+
+  @IsOptional()
   @IsNumber()
   @Min(0)
   @Max(1)
@@ -588,6 +592,11 @@ export class OnlineRasterDto extends AoiDto {
   @IsOptional()
   @Matches(/^S2[A-D]_[A-Z0-9_]{10,80}$/)
   sceneId?: string;
+
+  /** Sentinel-2: blank out cloud / shadow pixels (scene classification). */
+  @IsOptional()
+  @IsBoolean()
+  maskClouds?: boolean;
 
   @IsString()
   @Length(1, 80)

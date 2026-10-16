@@ -89,6 +89,14 @@
         />
       </label>
     }
+    @if (uploadProgress() !== null || (running() && tool() === 'upload')) {
+      <div class="ra__progress" role="progressbar" [attr.aria-valuenow]="uploadProgress()">
+        <div class="ra__progress-bar" [class.is-indeterminate]="uploadProgress() === null || uploadProgress() === 100" [style.width.%]="uploadProgress() ?? 100"></div>
+      </div>
+      <p class="bo__hint">
+        {{ uploadProgress() !== null && uploadProgress()! < 100 ? 'Uploading… ' + uploadProgress() + ' %' : 'Optimising and publishing…' }}
+      </p>
+    }
     <p class="bo__hint">DEMs, satellite / drone imagery or any georeferenced GeoTIFF. It is optimised (COG) and published to the map.</p>
   }
 
@@ -171,6 +179,9 @@
             <input type="number" class="bo__input" [(ngModel)]="styleMax" />
           </label>
         </div>
+        <button type="button" class="bo__cancel ra__add" [disabled]="running()" (click)="autoStretch()">
+          <i class="pi pi-sliders-v"></i> Auto range (1–99 %)
+        </button>
         <label class="bo__toggle"><input type="checkbox" [(ngModel)]="styleInvert" /><span>Invert ramp</span></label>
       } @else {
         <div class="bo__row">
@@ -181,6 +192,13 @@
             </label>
           }
         </div>
+        <label class="bo__field">
+          <span class="bo__label">Contrast</span>
+          <select class="bo__input" [(ngModel)]="rgbStretch">
+            <option value="histogram">Histogram equalise (best for satellite imagery)</option>
+            <option value="normalize">Min – max</option>
+          </select>
+        </label>
       }
       <label class="bo__field">
         <span class="bo__label">Opacity {{ (styleOpacity * 100).toFixed(0) }} %</span>
@@ -197,6 +215,7 @@
             <i class="pi pi-map-marker" aria-hidden="true"></i>Click a pixel
           </button>
         </div>
+        <p class="bo__hint">Stays active — every map click reads a new pixel until you press Clear.</p>
       </div>
     }
 
@@ -477,6 +496,7 @@
           <span class="bo__label">Max cloud cover {{ s2Cloud }} %</span>
           <input type="range" min="0" max="100" step="5" [(ngModel)]="s2Cloud" />
         </label>
+        <label class="bo__toggle"><input type="checkbox" [(ngModel)]="maskClouds" /><span>Mask clouds &amp; shadows</span></label>
         <button pButton type="button" [label]="searching() ? 'Searching…' : 'Search scenes'" icon="pi pi-search" class="p-button-sm p-button-outlined" [disabled]="searching()" (click)="searchScenes()"></button>
         @if (scenes(); as list) {
           @if (list.length) {

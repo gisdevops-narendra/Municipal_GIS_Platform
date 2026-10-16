@@ -1,4 +1,4 @@
-import { HttpClient, HttpResponse } from '@angular/common/http';
+import { HttpClient, HttpEvent, HttpResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../environments/environment';
@@ -16,6 +16,8 @@ export interface RasterBandInfo {
   max: number | null;
   mean: number | null;
   color: string;
+  /** e.g. "Red (B4)" for downloaded Sentinel-2 bands. */
+  description?: string | null;
 }
 
 export interface RasterInfo {
@@ -37,6 +39,7 @@ export interface RasterStyleSpec {
   max?: number;
   invert?: boolean;
   bands?: [number, number, number];
+  stretch?: 'normalize' | 'histogram';
   opacity?: number;
 }
 
@@ -141,13 +144,14 @@ export class RasterService {
   private readonly http = inject(HttpClient);
   private readonly baseUrl = `${environment.apiUrl}/gis/raster`;
 
-  upload(file: File, name: string, departmentId: string | null, description?: string): Observable<GisLayer> {
+  /** Emits HttpEvents so the panel can show upload progress. */
+  upload(file: File, name: string, departmentId: string | null, description?: string): Observable<HttpEvent<GisLayer>> {
     const form = new FormData();
     form.append('file', file);
     form.append('name', name);
     if (departmentId) form.append('departmentId', departmentId);
     if (description) form.append('description', description);
-    return this.http.post<GisLayer>(`${this.baseUrl}/upload`, form);
+    return this.http.post<GisLayer>(`${this.baseUrl}/upload`, form, { reportProgress: true, observe: 'events' });
   }
 
   info(layerId: string): Observable<RasterInfo> {

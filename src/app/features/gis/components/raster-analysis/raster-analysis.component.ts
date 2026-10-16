@@ -1,7 +1,7 @@
 import { Component, EventEmitter, Input, OnDestroy, Output, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { NgTemplateOutlet } from '@angular/common';
-import { HttpErrorResponse } from '@angular/common/http';
+import { HttpErrorResponse, HttpEventType } from '@angular/common/http';
 import { Observable, Subscription } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { SelectModule } from 'primeng/select';
@@ -125,7 +125,20 @@ export class RasterAnalysisComponent implements OnDestroy {
 
   @Input() set layers(value: GisLayer[]) {
     this.layersSignal.set(value ?? []);
+    const rasters = this.layersSignal().filter((l) => l.layerType === 'RASTER');
+    // A raster this panel just created becomes the input of the next tool;
+    // otherwise start with the newest raster so tools are ready to run.
+    const pending = this.pendingInputId;
+    if (pending && rasters.some((l) => l.id === pending)) {
+      this.pendingInputId = null;
+      this.selectLayer(pending, true);
+    } else if (!this.layerId() && rasters.length) {
+      this.selectLayer(rasters.reduce((a, b) => (b.displayOrder > a.displayOrder ? b : a)).id, true);
+    } else if (this.layerId() && !rasters.some((l) => l.id === this.layerId())) {
+      this.selectLayer(null, true);
+    }
   }
+  private pendingInputId: string | null = null;
   private readonly layersSignal = signal<GisLayer[]>([]);
 
   @Input() set allowedModuleIds(value: ReadonlySet<number>) {
@@ -213,7 +226,7 @@ export class RasterAnalysisComponent implements OnDestroy {
   band = 1;
   outputName = '';
   readonly bandOptions = computed(() =>
-    (this.info()?.bands ?? []).map((b) => ({ label: `Band ${b.band}${b.color && b.color !== 'Undefined' ? ` (${b.color})` : ''}`, value: b.band }))
+    (this.info()?.bands ?? []).map((b) => ({ label: `Band ${b.band}${bandName(b) ? ` · ${bandName(b)}` : ''}`, value: b.band }))
   );
 
   // ----- map input -----
@@ -236,6 +249,7 @@ export class RasterAnalysisComponent implements OnDestroy {
   styleInvert = false;
   styleOpacity = 1;
   rgbBands: [number, number, number] = [1, 2, 3];
+  rgbStretch: 'normalize' | 'histogram' = 'histogram';
 
   zFactor = 1;
   azimuth = 315;
@@ -293,6 +307,7 @@ export class RasterAnalysisComponent implements OnDestroy {
   s2From = isoDate(-90);
   s2To = isoDate(0);
   s2Cloud = 20;
+  maskClouds = true;
   readonly scenes = signal<SentinelScene[] | null>(null);
   readonly sceneId = signal<string | null>(null);
   readonly searching = signal(false);
@@ -314,6 +329,8 @@ export class RasterAnalysisComponent implements OnDestroy {
 
   // ----- results -----
   readonly running = signal(false);
+  /** Upload: 0–100 while the file is sent, then null while it is processed. */
+  readonly uploadProgress = signal<number | null>(null);
   readonly error = signal<string | null>(null);
   readonly message = signal<string | null>(null);
   readonly facts = signal<{ label: string; value: string }[]>([]);
@@ -346,6 +363,7 @@ export class RasterAnalysisComponent implements OnDestroy {
 
   selectTool(id: RasterToolId): void {
     if (this.tool() === 'swipe' && id !== 'swipe') this.mapService.setSwipe(null);
+    if (this.picking()) this.cancelPick();
     this.tool.set(id);
     const group = RASTER_TOOLS.find((t) => t.id === id)?.group;
     if (group) this.activeGroup.set(group);
@@ -356,11 +374,13 @@ export class RasterAnalysisComponent implements OnDestroy {
     this.suggestOutputName();
   }
 
-  selectLayer(id: string | null): void {
+  /** `keepResult`: an automatic selection must not wipe the message of
+   *  the run that just finished. */
+  selectLayer(id: string | null, keepResult = false): void {
     this.layerId.set(id);
     this.info.set(null);
     this.band = 1;
-    this.resetResult();
+    if (!keepResult) this.resetResult();
     if (this.calcInputs.length === 1 && !this.calcInputs[0].layerId) this.calcInputs[0].layerId = id;
     this.suggestOutputName();
     if (!id) return;
@@ -389,10 +409,16 @@ export class RasterAnalysisComponent implements OnDestroy {
   /** Sensible band defaults per index for 4+ band imagery (B, G, R, NIR…). */
   setIndexKind(kind: 'ndwi' | 'ndbi' | 'savi'): void {
     this.indexKind = kind;
-    const count = this.info()?.bandCount ?? 4;
-    const nir = Math.min(4, count);
-    this.indexB = nir;
-    this.indexA = kind === 'ndwi' ? Math.min(2, count) : kind === 'ndbi' ? Math.min(5, count) : Math.min(3, count);
+    const info = this.info();
+    const count = info?.bandCount ?? 4;
+    const named = (re: RegExp) => info?.bands.find((b) => re.test(bandName(b)))?.band;
+    this.indexB = named(/\bnir\b|near.?infra/i) ?? Math.min(4, count);
+    this.indexA =
+      kind === 'ndwi'
+        ? (named(/\bgreen\b/i) ?? Math.min(2, count))
+        : kind === 'ndbi'
+          ? (named(/\bswir\b/i) ?? Math.min(5, count))
+          : (named(/\bred\b/i) ?? Math.min(3, count));
     this.suggestOutputName();
   }
 
@@ -412,7 +438,6 @@ export class RasterAnalysisComponent implements OnDestroy {
       value: i + 1,
       label: ['Low', 'Medium', 'High'][i]
     }));
-    this.setIndexKind(this.indexKind);
     this.classCount = Math.min(Math.max(this.classCount, 2), 12);
     if (info.bandCount >= 4) {
       this.redBand = 3;
@@ -421,6 +446,13 @@ export class RasterAnalysisComponent implements OnDestroy {
       this.redBand = 1;
       this.nirBand = Math.min(2, info.bandCount);
     }
+    // Named bands (e.g. downloaded Sentinel-2) win over positional guesses.
+    const named = (re: RegExp) => info.bands.find((b) => re.test(bandName(b)))?.band;
+    this.redBand = named(/\bred\b|\bB0?4\b/i) ?? this.redBand;
+    this.nirBand = named(/\bnir\b|near.?infra|\bB0?8\b/i) ?? this.nirBand;
+    const r = named(/\bred\b/i), g = named(/\bgreen\b/i), bl = named(/\bblue\b/i);
+    this.rgbBands = r && g && bl ? [r, g, bl] : info.bandCount >= 3 ? [1, 2, 3] : [1, 1, 1];
+    this.setIndexKind(this.indexKind);
   }
 
   private suggestOutputName(): void {
@@ -451,7 +483,13 @@ export class RasterAnalysisComponent implements OnDestroy {
         else if (slot === 'line') this.line.set((coords as number[][]).map((c) => [c[0], c[1]] as LonLat));
         else this.polygon.set(geometry);
         this.picking.set(null);
-        if (slot === 'a' && this.tool() === 'identify') this.runIdentify();
+        if (slot === 'a' && this.tool() === 'identify') {
+          this.runIdentify();
+          // Stay in identify mode: every further map click reads a pixel.
+          setTimeout(() => {
+            if (this.tool() === 'identify' && !this.picking()) this.pick('a');
+          });
+        }
       },
       complete: () => this.picking.set(null)
     });
@@ -753,6 +791,7 @@ export class RasterAnalysisComponent implements OnDestroy {
           source: this.onlineSource,
           ...aoi,
           sceneId: this.onlineSource === 'sentinel2' ? this.sceneId() : undefined,
+          maskClouds: this.onlineSource === 'sentinel2' ? this.maskClouds : undefined,
           outputName: this.outputName.trim()
         });
       }
@@ -902,18 +941,34 @@ export class RasterAnalysisComponent implements OnDestroy {
   private runUpload(): void {
     if (!this.uploadFile) return this.error.set('Choose a GeoTIFF file.');
     if (!this.uploadName.trim()) return this.error.set('Enter a layer name.');
-    this.execute(this.api.upload(this.uploadFile, this.uploadName.trim(), this.uploadDepartmentId), (layer) => {
-      this.message.set(`"${layer.name}" was published as a raster layer.`);
-      this.layerCreated.emit(layer);
-      this.uploadFile = null;
-      this.uploadName = '';
+    this.running.set(true);
+    this.uploadProgress.set(0);
+    this.api.upload(this.uploadFile, this.uploadName.trim(), this.uploadDepartmentId).subscribe({
+      next: (event) => {
+        if (event.type === HttpEventType.UploadProgress) {
+          this.uploadProgress.set(event.total ? Math.round((event.loaded * 100) / event.total) : null);
+        } else if (event.type === HttpEventType.Response && event.body) {
+          const layer = event.body;
+          this.running.set(false);
+          this.uploadProgress.set(null);
+          this.message.set(`"${layer.name}" was published as a raster layer — it is now the input for the other tools.`);
+          this.pendingInputId = layer.id;
+          this.layerCreated.emit(layer);
+          this.uploadFile = null;
+          this.uploadName = '';
+        }
+      },
+      error: (err: HttpErrorResponse) => {
+        this.uploadProgress.set(null);
+        this.fail(err);
+      }
     });
   }
 
   private runStyle(layerId: string): void {
     const spec: RasterStyleSpec =
       this.styleMode === 'rgb'
-        ? { mode: 'rgb', bands: this.rgbBands, opacity: this.styleOpacity }
+        ? { mode: 'rgb', bands: this.rgbBands, stretch: this.rgbStretch, opacity: this.styleOpacity }
         : {
             mode: 'ramp',
             band: this.band,
@@ -944,6 +999,18 @@ export class RasterAnalysisComponent implements OnDestroy {
     });
   }
 
+  /** Styling: stretch the ramp over the 1st–99th percentile of the band,
+   *  so a few extreme pixels don't flatten the colours. */
+  autoStretch(): void {
+    const layerId = this.layerId();
+    if (!layerId) return this.error.set('Choose a raster layer first.');
+    this.execute(this.api.statistics({ layerId, band: this.band, bins: 10 }), (r) => {
+      this.styleMin = round(r.p1);
+      this.styleMax = round(r.p99);
+      this.message.set(`Range set to the 1–99 % values: ${fmt(r.p1)} – ${fmt(r.p99)}.`);
+    });
+  }
+
   private runIdentify(): void {
     const layerId = this.layerId();
     const point = this.pointA();
@@ -961,6 +1028,7 @@ export class RasterAnalysisComponent implements OnDestroy {
   private runLayerTool(tool: string, body: Record<string, unknown>): void {
     this.execute(this.api.run(tool, body), (r: LayerResult) => {
       this.message.set(`New layer "${r.layer.name}" added to the map.`);
+      if (r.layer.layerType === 'RASTER') this.pendingInputId = r.layer.id;
       if (this.tool() === 'online') this.clearPreview();
       this.facts.set(describe(r.result));
       this.mapService.clearAnalysisGeometry();
@@ -1083,6 +1151,7 @@ const LABELS: Record<string, [string, (v: number) => string]> = {
   withinM2: ['Area within distance', formatArea],
   inputs: ['Rasters merged', fmtInt],
   tiles: ['Source tiles', fmtInt],
+  maskedPct: ['Cloud / shadow masked', (v) => `${v.toFixed(1)} %`],
   pixelSizeM: ['Pixel size', (v) => `${fmt(v)} m`]
 };
 
@@ -1160,4 +1229,10 @@ function geometryBbox(geometry: GeoJsonGeometry): [number, number, number, numbe
   };
   walk(geometry['coordinates']);
   return [minX, minY, maxX, maxY];
+}
+
+/** A band's human name: its description (e.g. "Red (B4)") or colour role. */
+function bandName(b: { description?: string | null; color: string }): string {
+  if (b.description) return b.description;
+  return b.color && b.color !== 'Undefined' && b.color !== 'Gray' ? b.color : '';
 }
