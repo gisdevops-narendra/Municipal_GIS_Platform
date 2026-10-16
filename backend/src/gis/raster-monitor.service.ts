@@ -12,6 +12,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import type { AppUser } from '../auth/types/app-user.type';
 import { ModuleAccessService } from '../module-access/module-access.service';
 import { RasterJobsService } from './raster-jobs.service';
+import { RasterMailService } from './raster-mail.service';
 import { RASTER_MODULES } from './raster-tool-registry';
 
 export type MonitorKind = 'green-cover' | 'encroachment';
@@ -47,10 +48,11 @@ export class RasterMonitorService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly jobs: RasterJobsService,
     private readonly moduleAccess: ModuleAccessService,
+    private readonly mail: RasterMailService,
   ) {}
 
   onModuleInit(): void {
-    if (process.env.NODE_ENV === 'test') return;
+    if (process.env.NODE_ENV === 'test' || process.env.RASTER_MONITOR_SCHEDULER === '0') return;
     this.timer = setInterval(() => void this.tick(), TICK_MS);
     setTimeout(() => void this.tick(), 60 * 1000);
   }
@@ -184,6 +186,7 @@ export class RasterMonitorService implements OnModuleInit, OnModuleDestroy {
       if (alert) {
         data.alert = true;
         data.alertMessage = `${new Date().toISOString().slice(0, 10)}: ${summary}`;
+        void this.email(monitor, summary);
       }
     }
     await this.prisma.rasterMonitor.update({ where: { id: monitor.id }, data }).catch(() => undefined);
@@ -211,6 +214,29 @@ export class RasterMonitorService implements OnModuleInit, OnModuleDestroy {
         ? `${losing.length} zone${losing.length === 1 ? '' : 's'} lost ≥ ${dropPct} points of green cover (worst: ${losing[0].zone}, ${losing[0].changePct?.toFixed(1)}). Overall ${overall} % green.`
         : `Green cover stable — overall ${overall} % green.`,
     };
+  }
+
+  /** Alert email to the monitor's creator (best effort). */
+  private async email(monitor: RasterMonitor, summary: string): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { id: monitor.createdById } });
+    if (!user?.email) return;
+    const sent = await this.mail.send(
+      user.email,
+      `GIS alert: ${monitor.name}`,
+      [
+        `Hello ${user.fullName},`,
+        '',
+        `Your Raster Analysis monitor "${monitor.name}" found a change:`,
+        '',
+        `  ${summary}`,
+        '',
+        `Open the map → Raster Analysis → Planning → Automatic Monitoring to review it:`,
+        `${this.mail.appUrl}/gis`,
+        '',
+        '— Municipal GIS Platform',
+      ].join('\n'),
+    );
+    if (sent) this.logger.log(`Alert email for monitor ${monitor.id} sent to ${user.email}`);
   }
 
   // ----- helpers -----

@@ -595,8 +595,11 @@ model RasterJobHistory {
   summary        String?
   layerId        String?   @map("layer_id")
   layerName      String?   @map("layer_name")
+  /// Owner's chosen output department — needed to resume after a restart.
+  outputDepartmentId String? @map("output_department_id")
   createdAt      DateTime  @map("created_at")
-  finishedAt     DateTime  @map("finished_at")
+  /// Null while the job is queued / running.
+  finishedAt     DateTime? @map("finished_at")
 
   @@index([userId, createdAt])
   @@map("raster_job_history")

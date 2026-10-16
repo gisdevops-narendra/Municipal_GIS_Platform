@@ -199,7 +199,7 @@ export class RasterController {
   @RequireRasterModule(ANY_RASTER_MODULE)
   @Get('jobs/:id')
   getJob(@CurrentAppUser() appUser: AppUser, @Param('id', ParseUUIDPipe) id: string) {
-    return this.jobs.get(appUser, id);
+    return this.jobs.getOrRecord(appUser, id);
   }
 
   @RequireRasterModule(ANY_RASTER_MODULE)

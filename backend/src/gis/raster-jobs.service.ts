@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  OnModuleInit,
   ConflictException,
   HttpException,
   Injectable,
@@ -52,7 +53,7 @@ const KEEP_FINISHED_MS = 60 * 60 * 1000;
  * memory: a backend restart drops them (the panel reports that as failed).
  */
 @Injectable()
-export class RasterJobsService {
+export class RasterJobsService implements OnModuleInit {
   private readonly logger = new Logger(RasterJobsService.name);
   private readonly jobs = new Map<string, RasterJob>();
   private readonly queue: RasterJob[] = [];
@@ -81,6 +82,7 @@ export class RasterJobsService {
     body: unknown,
     outputDepartmentId?: string,
     onFinish?: (job: ReturnType<RasterJobsService['view']>) => void,
+    resumeId?: string,
   ) {
     const def = RASTER_JOB_TOOLS[tool];
     if (!def) throw new NotFoundException(`Unknown raster tool "${tool}".`);
@@ -99,7 +101,7 @@ export class RasterJobsService {
     }
 
     const job: RasterJob = {
-      id: randomUUID(),
+      id: resumeId ?? randomUUID(),
       tool,
       userId: appUser.id,
       municipalityId: appUser.municipalityId,
@@ -118,6 +120,7 @@ export class RasterJobsService {
     };
     this.jobs.set(job.id, job);
     this.queue.push(job);
+    void this.persist(job, outputDepartmentId);
     this.drain();
     return this.view(job);
   }
@@ -145,12 +148,28 @@ export class RasterJobsService {
     };
     this.jobs.set(job.id, job);
     this.queue.push(job);
+    void this.persist(job);
     this.drain();
     return this.view(job);
   }
 
   get(appUser: AppUser, id: string) {
     return this.view(this.owned(appUser, id));
+  }
+
+  /** Like `get`, but a job no longer in memory (pruned, or lost before a
+   *  restart finished) is answered from Job History. */
+  async getOrRecord(appUser: AppUser, id: string) {
+    if (this.jobs.get(id)?.userId === appUser.id) return this.get(appUser, id);
+    const row = await this.prisma.rasterJobHistory.findUnique({ where: { id } });
+    if (!row || row.userId !== appUser.id) throw new NotFoundException('Job not found.');
+    const layer = row.layerId ? await this.prisma.gISLayer.findUnique({ where: { id: row.layerId } }) : null;
+    return {
+      id: row.id, tool: row.tool, status: row.status as RasterJobStatus, stage: row.status,
+      cancellable: false, queuePosition: null, createdAt: row.createdAt, elapsedMs: 0,
+      result: layer ? { layer, result: {} } : null,
+      error: row.status === 'failed' ? row.summary : null,
+    };
   }
 
   list(appUser: AppUser) {
@@ -185,6 +204,7 @@ export class RasterJobsService {
       this.running++;
       job.status = 'running';
       job.startedAt = new Date();
+      void this.prisma.rasterJobHistory.update({ where: { id: job.id }, data: { status: 'running' } }).catch(() => undefined);
       job.stage = 'Starting';
       job.start();
     }
@@ -245,9 +265,18 @@ export class RasterJobsService {
     const layer = (job.result as { layer?: { id?: string; name?: string } } | null)?.layer;
     const summary =
       job.status === 'failed' ? job.error : job.status === 'cancelled' ? 'Cancelled' : layer?.name ? `Created "${layer.name}"` : 'Finished';
+    const data = {
+      status: job.status,
+      summary: summary?.slice(0, 500) ?? null,
+      layerId: layer?.id ?? null,
+      layerName: layer?.name ?? null,
+      finishedAt: job.finishedAt ?? new Date(),
+    };
     await this.prisma.rasterJobHistory
-      .create({
-        data: {
+      .upsert({
+        where: { id: job.id },
+        update: data,
+        create: {
           id: job.id,
           municipalityId: job.municipalityId,
           userId: job.userId,
@@ -262,6 +291,56 @@ export class RasterJobsService {
         },
       })
       .catch((e: Error) => this.logger.warn(`Job ${job.id} not recorded in history: ${e.message}`));
+  }
+
+  /** Saved as soon as it is queued, so a restart can resume it. */
+  private async persist(job: RasterJob, outputDepartmentId?: string): Promise<void> {
+    await this.prisma.rasterJobHistory
+      .create({
+        data: {
+          id: job.id,
+          municipalityId: job.municipalityId,
+          userId: job.userId,
+          tool: job.tool,
+          body: (job.body ?? {}) as Prisma.InputJsonValue,
+          status: 'queued',
+          outputDepartmentId: outputDepartmentId ?? null,
+          createdAt: job.createdAt,
+        },
+      })
+      .catch((e: Error) => this.logger.warn(`Job ${job.id} not persisted: ${e.message}`));
+  }
+
+  /** After a restart: re-queue tool jobs that were queued or running (same
+   *  id, so an open panel keeps polling); a workflow cannot be resumed
+   *  mid-chain and is marked failed. Disabled with RASTER_JOBS_RESUME=0
+   *  (e.g. for scripts that boot a second application context). */
+  async onModuleInit(): Promise<void> {
+    if (process.env.RASTER_JOBS_RESUME === '0' || process.env.NODE_ENV === 'test') return;
+    const unfinished = await this.prisma.rasterJobHistory
+      .findMany({ where: { status: { in: ['queued', 'running'] } }, orderBy: { createdAt: 'asc' } })
+      .catch(() => []);
+    for (const row of unfinished) {
+      const user = await this.prisma.user.findUnique({ where: { id: row.userId } });
+      if (!RASTER_JOB_TOOLS[row.tool] || !user || user.status !== 'ACTIVE') {
+        await this.prisma.rasterJobHistory.update({
+          where: { id: row.id },
+          data: { status: 'failed', summary: 'Interrupted by a server restart — please run it again.', finishedAt: new Date() },
+        });
+        continue;
+      }
+      const appUser: AppUser = {
+        id: user.id, keycloakUserId: user.keycloakUserId, municipalityId: user.municipalityId,
+        departmentId: user.departmentId, systemRole: user.systemRole, status: user.status,
+      };
+      try {
+        await this.prisma.rasterJobHistory.delete({ where: { id: row.id } });
+        await this.start(appUser, row.tool, row.body, row.outputDepartmentId ?? undefined, undefined, row.id);
+        this.logger.log(`Resumed raster job ${row.id} (${row.tool}) after restart`);
+      } catch (e) {
+        this.logger.warn(`Could not resume raster job ${row.id}: ${(e as Error).message}`);
+      }
+    }
   }
 
   history(appUser: AppUser) {

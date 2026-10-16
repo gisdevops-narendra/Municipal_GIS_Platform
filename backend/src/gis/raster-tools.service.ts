@@ -62,6 +62,13 @@ const CALC_FUNCTIONS = new Set([
 /** Yellow → red, for zonal choropleths (up to 5 classes). */
 const CHOROPLETH = ['#ffffb2', '#fecc5c', '#fd8d3c', '#f03b20', '#bd0026'];
 
+/** Default look of a published vector result, per geometry. */
+const DEFAULT_SYMBOL: Record<'point' | 'line' | 'polygon', Record<string, unknown>> = {
+  point: { markShape: 'circle', markSize: 8, fillColor: '#f59e0b', fillOpacity: 1, strokeColor: '#ffffff', strokeWidth: 1.5 },
+  line: { strokeColor: '#2563eb', strokeWidth: 2 },
+  polygon: { fillColor: '#2563eb', fillOpacity: 0.25, strokeColor: '#1e40af', strokeWidth: 1.2 },
+};
+
 /** Light → dark green, for green-cover choropleths. */
 const GREENS = ['#f7fcb9', '#d9f0a3', '#addd8e', '#78c679', '#31a354'];
 
@@ -123,6 +130,7 @@ export class RasterToolsService {
     const { file } = await this.rasters.resolveRaster(appUser, dto.layerId);
     return this.toVectorLayer(appUser, dto.outputName, 'LINE', (output) =>
       this.rasters.runOp({ op: 'contour', path: file, output, band: dto.band ?? 1, interval: dto.interval, base: dto.base ?? 0 }),
+      { strokeColor: '#8c510a', strokeWidth: 1 },
     );
   }
 
@@ -145,7 +153,8 @@ export class RasterToolsService {
       if (!dto.point) throw new BadRequestException('Pick the pour point (outlet) on the map.');
       return this.toVectorLayer(appUser, dto.outputName, 'POLYGON', (output) =>
         this.rasters.runOp({ op: 'watershed', mode: 'watershed', path: file, band: dto.band ?? 1, point: dto.point, output }),
-      );
+      { fillColor: '#6baed6', fillOpacity: 0.3, strokeColor: '#08519c', strokeWidth: 1.5 },
+    );
     }
     return this.toRasterLayer(appUser, dto.outputName, async (output) => {
       const r = await this.rasters.runOp<{ stats: RasterStats; maxUpstreamKm2: number; resampled: boolean }>({
@@ -607,6 +616,7 @@ export class RasterToolsService {
     const { file } = await this.rasters.resolveRaster(appUser, dto.layerId);
     return this.toVectorLayer(appUser, dto.outputName, 'LINE', (output) =>
       this.rasters.runOp({ op: 'streams', path: file, band: dto.band ?? 1, thresholdKm2: dto.thresholdKm2, output }),
+      { strokeColor: '#2171b5', strokeWidth: 1.8 },
     );
   }
 
@@ -759,6 +769,7 @@ export class RasterToolsService {
         op: 'least_cost', path: file, band: dto.band ?? 1, from: dto.from, to: dto.to,
         invert: dto.invert ?? false, baseCost: dto.baseCost ?? 0, output,
       }),
+      { strokeColor: '#d6336c', strokeWidth: 3.5 },
     );
   }
 
@@ -845,17 +856,27 @@ export class RasterToolsService {
     }
   }
 
+  /** Publishes a GeoPackage result as a vector layer, styled with
+   *  `symbol` (or a clear default for its geometry) — never GeoServer's
+   *  generic grey default. Tools with a richer style (choropleths) apply it
+   *  afterwards. */
   private async toVectorLayer(
     appUser: AppUser,
     name: string,
     geometryType: GisGeometryType,
     run: (output: string) => Promise<unknown>,
+    symbol?: Record<string, unknown>,
   ) {
     const output = this.rasters.tempPath(appUser.municipalityId, '.gpkg');
     await this.ensureDir(output);
     try {
       const result = await run(output);
-      const layer = await this.rasters.createVectorLayer(appUser, { name, sourcePath: output, geometryType });
+      const created = await this.rasters.createVectorLayer(appUser, { name, sourcePath: output, geometryType });
+      const geometry = geometryType === 'POINT' ? 'point' : geometryType === 'LINE' ? 'line' : 'polygon';
+      await this.rasters.applyVectorStyle(created.id, {
+        version: 1, geometry, mode: 'single', symbol: symbol ?? DEFAULT_SYMBOL[geometry],
+      });
+      const layer = await this.rasters.layerResponse(appUser, created.id);
       return { layer, result };
     } finally {
       await this.rasters.removeTemp(output);

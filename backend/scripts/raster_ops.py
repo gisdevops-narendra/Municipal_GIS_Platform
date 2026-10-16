@@ -971,10 +971,12 @@ def op_zonal(req):
         layer.CreateField(ogr.FieldDefn("zone_id", ogr.OFTInteger))
         layer.ResetReading()
         n = 0
+        layer.StartTransaction()
         for feature in layer:
             n += 1
             feature.SetField("zone_id", n)
             layer.SetFeature(feature)
+        layer.CommitTransaction()
         mem = gdal.GetDriverByName("MEM").Create("", ds.RasterXSize, ds.RasterYSize, 1, gdal.GDT_Int32)
         mem.SetGeoTransform(ds.GetGeoTransform())
         mem.SetProjection(ds.GetProjection())
@@ -994,6 +996,7 @@ def op_zonal(req):
         rows = []
         label_field = req.get("labelField")
         layer.ResetReading()
+        layer.StartTransaction()
         for feature in layer:
             i = feature.GetField("zone_id")
             c = int(count[i])
@@ -1015,6 +1018,7 @@ def op_zonal(req):
             layer.SetFeature(feature)
             label = feature.GetField(label_field) if label_field else None
             rows.append({"zone": str(label) if label is not None else f"Zone {i}", **stats})
+        layer.CommitTransaction()
         covered = sum(1 for r in rows if r["count"])
         vds = None
         if req.get("output"):
@@ -2055,12 +2059,14 @@ def zones_on_grid(spec, srs, gt, w, h, folder, label_field=None, where=None):
     labels = {}
     layer.ResetReading()
     n = 0
+    layer.StartTransaction()
     for feature in layer:
         n += 1
         feature.SetField("zone_id", n)
         layer.SetFeature(feature)
         value = feature.GetField(label_field) if label_field else None
         labels[n] = str(value) if value is not None else f"Zone {n}"
+    layer.CommitTransaction()
     mem = gdal.GetDriverByName("MEM").Create("", w, h, 1, gdal.GDT_Int32)
     mem.SetGeoTransform(gt)
     mem.SetProjection(srs.ExportToWkt())
@@ -2273,6 +2279,7 @@ def op_green_cover(req):
             layer.CreateField(ogr.FieldDefn(name, ogr.OFTReal))
         rows = []
         layer.ResetReading()
+        layer.StartTransaction()
         for f in layer:
             i = f.GetField("zone_id")
             if count[i] == 0:
@@ -2289,6 +2296,7 @@ def op_green_cover(req):
                 f.SetField("change_pct", row["changePct"])
             layer.SetFeature(f)
             rows.append(row)
+        layer.CommitTransaction()
         ds = None
         if req.get("output"):
             gdal.VectorTranslate(req["output"], gpkg, format="GPKG", layerName="result")
@@ -2470,41 +2478,51 @@ def op_extract_values(req):
     folder = tempfile.mkdtemp()
     try:
         path, vds, layer = vector_copy(req["vector"], wgs84(), folder)
-        rasters = []
-        for r in req["rasters"]:
-            ds = gdal.Open(r["path"])
-            tr = osr.CoordinateTransformation(wgs84(), ds_srs(ds))
-            field = r["field"]
-            layer.CreateField(ogr.FieldDefn(field, ogr.OFTReal))
-            band = ds.GetRasterBand(r.get("band", 1))
-            rasters.append((ds, tr, field, band, band.GetNoDataValue()))
-        preview, filled = [], {r[2]: 0 for r in rasters}
+        # One sample point per feature (points as-is, polygons a point inside).
+        fids, lons, lats = [], [], []
         layer.ResetReading()
-        n = 0
         for f in layer:
             g = f.GetGeometryRef()
-            if g is None:
+            if g is None or g.IsEmpty():
                 continue
-            p = g if g.GetGeometryName() == "POINT" else g.PointOnSurface() if "POLYGON" in g.GetGeometryName() else g.Centroid()
-            if p.GetGeometryName() == "MULTIPOINT":
-                p = p.GetGeometryRef(0)
+            name = g.GetGeometryName()
+            p = g.GetGeometryRef(0) if name == "MULTIPOINT" else g if name == "POINT" else g.PointOnSurface() if "POLYGON" in name else g.Centroid()
+            fids.append(f.GetFID())
+            lons.append(p.GetX())
+            lats.append(p.GetY())
+        values = {}
+        for r in req["rasters"]:
+            ds = gdal.Open(r["path"])
+            layer.CreateField(ogr.FieldDefn(r["field"], ogr.OFTReal))
+            # Whole band read once, all points transformed and sampled at once.
+            arr = read_band(ds, r.get("band", 1))
+            pts = osr.CoordinateTransformation(wgs84(), ds_srs(ds)).TransformPoints(list(zip(lons, lats))) if lons else []
+            inv = gdal.InvGeoTransform(ds.GetGeoTransform())
+            xs = np.array([q[0] for q in pts]); ys = np.array([q[1] for q in pts])
+            cols = np.floor(inv[0] + inv[1] * xs + inv[2] * ys).astype(np.int64) if len(pts) else np.array([], dtype=np.int64)
+            rows = np.floor(inv[3] + inv[4] * xs + inv[5] * ys).astype(np.int64) if len(pts) else np.array([], dtype=np.int64)
+            inside = (cols >= 0) & (cols < ds.RasterXSize) & (rows >= 0) & (rows < ds.RasterYSize)
+            v = np.full(len(pts), np.nan)
+            v[inside] = arr[rows[inside], cols[inside]]
+            values[r["field"]] = v
+        filled = {k: int(np.isfinite(v).sum()) for k, v in values.items()}
+        preview = []
+        # One transaction: per-feature commits make GeoPackage writes ~100× slower.
+        layer.StartTransaction()
+        for i, fid in enumerate(fids):
+            f = layer.GetFeature(fid)
             row = {}
-            for ds, tr, field, band, nd in rasters:
-                x, y, _ = tr.TransformPoint(p.GetX(), p.GetY())
-                col, r_ = to_pixel(ds, x, y)
-                if 0 <= col < ds.RasterXSize and 0 <= r_ < ds.RasterYSize:
-                    v = float(band.ReadAsArray(col, r_, 1, 1)[0][0])
-                    if nd is None or v != nd:
-                        f.SetField(field, v)
-                        row[field] = v
-                        filled[field] += 1
+            for field, v in values.items():
+                if np.isfinite(v[i]):
+                    f.SetField(field, float(v[i]))
+                    row[field] = float(v[i])
             layer.SetFeature(f)
-            n += 1
             if len(preview) < 100:
                 preview.append(row)
+        layer.CommitTransaction()
         vds = None
         gdal.VectorTranslate(req["output"], path, format="GPKG", layerName="result")
-        return {"count": n, "fields": [r[2] for r in rasters], "filled": filled, "preview": preview}
+        return {"count": len(fids), "fields": list(values), "filled": filled, "preview": preview}
     finally:
         shutil.rmtree(folder, ignore_errors=True)
 

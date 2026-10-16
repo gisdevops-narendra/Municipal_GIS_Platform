@@ -26,6 +26,7 @@ import { RasterService } from './raster.service';
 import { RasterToolsService } from './raster-tools.service';
 import { RasterJobsService } from './raster-jobs.service';
 import { RasterMonitorService } from './raster-monitor.service';
+import { RasterMailService } from './raster-mail.service';
 import { RasterWorkspaceService } from './raster-workspace.service';
 import { RasterModuleGuard } from './raster-module.guard';
 
@@ -59,6 +60,7 @@ import { RasterModuleGuard } from './raster-module.guard';
     RasterToolsService,
     RasterJobsService,
     RasterMonitorService,
+    RasterMailService,
     RasterWorkspaceService,
     RasterModuleGuard,
   ],

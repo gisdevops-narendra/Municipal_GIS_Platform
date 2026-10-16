@@ -444,6 +444,11 @@ export class RasterService {
     }
   }
 
+  /** The layer as the API returns it (after a style was applied). */
+  layerResponse(appUser: AppUser, layerId: string) {
+    return this.gisLayers.getById(appUser, layerId);
+  }
+
   /** Styles a layer this service just created (e.g. the Zonal Statistics
    *  choropleth) — best effort, the layer stays usable unstyled. */
   async applyVectorStyle(layerId: string, spec: Record<string, unknown>): Promise<void> {
