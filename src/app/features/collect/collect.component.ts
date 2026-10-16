@@ -232,7 +232,7 @@ export class CollectComponent implements OnInit, OnDestroy {
     this.busy.set(false);
     if (result === 'ok') {
       this.message.set({ kind: 'ok', text: 'Saved to the layer.' });
-    } else if (result === 'offline') {
+    } else if (result === 'offline' || result === 'signed-out') {
       await collectQueue.add(item);
       await this.refreshQueue();
       this.message.set({ kind: 'info', text: 'No connection — saved on this device and will sync when you are back online.' });
@@ -243,8 +243,10 @@ export class CollectComponent implements OnInit, OnDestroy {
     this.resetForm();
   }
 
-  /** 'ok', 'offline' (keep queued) or an error text (rejected by the server). */
-  private async send(item: QueuedSubmission): Promise<'ok' | 'offline' | string> {
+  /** 'ok', 'offline' / 'signed-out' (keep queued) or an error text (rejected
+   *  by the server). A crew offline for hours comes back with an expired
+   *  session — that must not discard their queued work. */
+  private async send(item: QueuedSubmission): Promise<'ok' | 'offline' | 'signed-out' | string> {
     try {
       const feature = await firstValueFrom(this.vectorTools.createFeature(item.layerId, item.geometry, item.properties));
       if (item.photo && this.photosAllowed()) {
@@ -255,7 +257,8 @@ export class CollectComponent implements OnInit, OnDestroy {
       return 'ok';
     } catch (err) {
       const e = err as HttpErrorResponse;
-      return e.status === 0 || e.status >= 500 ? 'offline' : this.errorText(e);
+      if (e.status === 401) return 'signed-out';
+      return e.status === 0 || e.status === 408 || e.status === 429 || e.status >= 500 ? 'offline' : this.errorText(e);
     }
   }
 
@@ -267,6 +270,12 @@ export class CollectComponent implements OnInit, OnDestroy {
     for (const item of await collectQueue.list()) {
       const result = await this.send(item);
       if (result === 'offline') break;
+      if (result === 'signed-out') {
+        this.busy.set(false);
+        await this.refreshQueue();
+        this.message.set({ kind: 'error', text: 'Your session has expired — sign in again, then sync. Queued submissions are kept.' });
+        return;
+      }
       await collectQueue.remove(item.id);
       if (result === 'ok') sent++;
       else failed.push(`${item.layerName}: ${result}`);

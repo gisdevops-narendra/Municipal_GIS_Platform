@@ -39,6 +39,8 @@ export interface ChangeSet {
 export interface SnapshotComparison {
   snapshot: { id: string; name: string; createdAt: string };
   key: string;
+  /** Columns added / dropped since the snapshot (not compared per feature). */
+  fields: { added: string[]; removed: string[] };
   added: ChangeSet;
   removed: ChangeSet;
   modified: ChangeSet;

@@ -81,6 +81,7 @@ describe('GisLayersService', () => {
         findMany: jest.fn().mockResolvedValue([]),
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
+      gISLayerSnapshot: { findMany: jest.fn().mockResolvedValue([]) },
       department: { findMany: jest.fn().mockResolvedValue([]) },
       $executeRawUnsafe: jest.fn().mockResolvedValue(0),
       $transaction: jest.fn((ops: unknown[]) => Promise.all(ops)),

@@ -264,7 +264,7 @@ export class DataToolsService {
                                    'Overlap of ' || round(ST_Area(ST_Transform(ST_Intersection(a.geom, b.geom), 4326)::geography)::numeric, 2) || ' m²' AS detail,
                                    ${gj('ST_Intersection(a.geom, b.geom)')} AS geometry
                               FROM ${t} a JOIN ${t} b ON a.ogc_fid < b.ogc_fid AND a.geom && b.geom
-                             WHERE ST_IsValid(a.geom) AND ST_IsValid(b.geom) AND a.geom <> b.geom
+                             WHERE ST_IsValid(a.geom) AND ST_IsValid(b.geom) AND NOT (a.geom = b.geom)
                                AND ST_Relate(a.geom, b.geom, '2********')`);
       await add('gap', `SELECT ARRAY[]::int[] AS ids,
                                'Gap of ' || round(ST_Area(ST_Transform(h.g, 4326)::geography)::numeric, 2) || ' m²' AS detail,
@@ -418,7 +418,18 @@ export class DataToolsService {
       key = keyField;
     }
     const k = q(key);
-    const props = (alias: string) => `(to_jsonb(${alias}) - 'geom' - 'ogc_fid')`;
+    // Attributes are compared on the columns both versions have — a field
+    // added (Field Calculator, Table Join) or dropped since the snapshot
+    // would otherwise mark every feature as modified.
+    const oldNames = new Set(old.map((c) => c.name));
+    const curNames = new Set(current.map((c) => c.name));
+    const addedFields = current.filter((c) => !oldNames.has(c.name)).map((c) => c.name);
+    const removedFields = old.filter((c) => !curNames.has(c.name)).map((c) => c.name);
+    const textArray = (names: string[]) => `ARRAY[${names.map((n) => this.literal(n)).join(', ')}]::text[]`;
+    const props = (alias: string) => {
+      const extra = alias === 's' ? removedFields : addedFields;
+      return `(to_jsonb(${alias}) - 'geom' - 'ogc_fid'${extra.length ? ` - ${textArray(extra)}` : ''})`;
+    };
     const cur = `"${source.table}"`;
     const prev = `"${snap.postgisTable}"`;
     const gj = (expr: string) => `ST_AsGeoJSON(ST_Transform(${expr}, 4326), 7)::json`;
@@ -428,7 +439,11 @@ export class DataToolsService {
       modified: `FROM ${cur} c JOIN ${prev} s ON s.${k} = c.${k}
                  WHERE c.geom IS DISTINCT FROM s.geom OR ${props('c')} IS DISTINCT FROM ${props('s')}`,
     };
-    const result: Record<string, unknown> = { snapshot: { id: snap.id, name: snap.name, createdAt: snap.createdAt }, key };
+    const result: Record<string, unknown> = {
+      snapshot: { id: snap.id, name: snap.name, createdAt: snap.createdAt },
+      key,
+      fields: { added: addedFields, removed: removedFields },
+    };
     for (const [kind, from] of Object.entries(queries)) {
       const alias = kind === 'removed' ? 's' : 'c';
       const [{ n }] = await this.prisma.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n ${from}`);

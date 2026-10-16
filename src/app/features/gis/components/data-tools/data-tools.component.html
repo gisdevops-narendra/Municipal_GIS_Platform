@@ -291,6 +291,12 @@
             <span class="dt__removed">{{ c.removed.count }} removed</span>,
             <span class="dt__modified">{{ c.modified.count }} modified</span>.
           </p>
+          @if (c.fields.added.length || c.fields.removed.length) {
+            <p class="bo__hint">
+              @if (c.fields.added.length) { New fields: {{ c.fields.added.join(', ') }}. }
+              @if (c.fields.removed.length) { Dropped fields: {{ c.fields.removed.join(', ') }}. }
+            </p>
+          }
           <ul class="dt__list dt__list--issues">
             @for (f of c.added.features; track $index) {
               <li><button type="button" class="dt__issue" (click)="zoomToChange(f.geometry)"><span class="dt__dot" style="background: #16a34a"></span>Added <span class="dt__muted">{{ f.key }}</span></button></li>
