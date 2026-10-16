@@ -61,7 +61,7 @@ export interface CreateModuleRequest {
  *  "Developed" in the Module Access list; keep in sync as tools ship. */
 export const DEVELOPED_MODULE_IDS: ReadonlySet<number> = new Set([
   1, 2, 3, 4, 6, 11, 12, 15, 16, 17, 18, 19, 20, 21, 30, 32, 50, 57, 58, 59, 73,
-  186, 187, 226, 227, 228, 229, 230, 251, 900, 901, 960, 961, 962, 963
+  186, 187, 226, 227, 228, 229, 230, 231, 251, 900, 901, 960, 961, 962, 963
 ]);
 
 export type ModuleDevStatus = 'developed' | 'partial' | 'not-developed';

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ModuleAccessModule } from '../module-access/module-access.module';
 import { AuthModule } from '../auth/auth.module';
 import { GisWorkspaceController } from './gis-workspace.controller';
 import { GisWorkspaceService } from './gis-workspace.service';
@@ -20,7 +21,7 @@ import { LayerReportService } from './layer-report.service';
 import { YsldGenerator } from './ysld-generator';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, ModuleAccessModule],
   controllers: [
     GisWorkspaceController,
     GisLayersController,

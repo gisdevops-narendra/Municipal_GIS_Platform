@@ -19,6 +19,7 @@ import type {
   ClassificationMethod,
   LayerStyleSpecDto,
 } from './dto/layer-style.dto';
+import { ModuleAccessService } from '../module-access/module-access.service';
 
 type LayerWithDepartment = GISLayer & {
   department?: { id: string; name: string } | null;
@@ -38,6 +39,16 @@ export const LAYER_EXPORT_FORMATS = {
 >;
 
 export type LayerExportFormat = keyof typeof LAYER_EXPORT_FORMATS;
+
+/** Module Access catalog ids gating layer export: Export Data itself plus
+ *  one child module per format (seed-modules.ts). */
+export const EXPORT_DATA_MODULE_ID = 226;
+export const LAYER_EXPORT_FORMAT_MODULE_IDS: Record<LayerExportFormat, number> = {
+  geojson: 231,
+  csv: 227,
+  shapefile: 228,
+  kml: 230,
+};
 
 interface DemoLayerDefinition {
   code: string;
@@ -103,6 +114,7 @@ export class GisLayersService {
     private readonly storage: StorageService,
     private readonly styleService: StyleService,
     private readonly fieldStats: FieldStatsService,
+    private readonly moduleAccess: ModuleAccessService,
   ) {}
 
   /**
@@ -258,6 +270,16 @@ export class GisLayersService {
     if (!(await this.gisAuth.canExport(appUser, layer))) {
       throw new ForbiddenException(
         'You do not have permission to export this layer.',
+      );
+    }
+    const modules =
+      await this.moduleAccess.getEffectiveModuleIdsForAppUser(appUser);
+    if (
+      !modules.has(EXPORT_DATA_MODULE_ID) ||
+      !modules.has(LAYER_EXPORT_FORMAT_MODULE_IDS[format])
+    ) {
+      throw new ForbiddenException(
+        `Your module access does not include ${format} export.`,
       );
     }
     const base = layer.code.toLowerCase();
