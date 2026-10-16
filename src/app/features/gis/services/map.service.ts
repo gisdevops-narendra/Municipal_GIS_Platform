@@ -29,6 +29,8 @@ import { fromLonLat, getPointResolution, transform, transformExtent } from 'ol/p
 import { createEmpty, extend as extendExtent, isEmpty as isEmptyExtent } from 'ol/extent';
 import type Geometry from 'ol/geom/Geometry';
 import { forkJoin, map as rxMap, Observable, of } from 'rxjs';
+import type { EventsKey } from 'ol/events';
+import { unByKey } from 'ol/Observable';
 import { environment } from '../../../../environments/environment';
 import { GisLayer } from '../../../core/models/gis-layer.model';
 import { Sketch } from '../models/sketch.model';
@@ -1087,6 +1089,72 @@ export class MapService {
     if (!entry) return;
     entry.olLayer.setVisible(visible);
     this.layerVisibility.update((current) => ({ ...current, [layerId]: visible }));
+  }
+
+  // ----- Raster Analysis: Swipe / Compare -----
+
+  private swipe: { layerId: string; fraction: number; keys: EventsKey[] } | null = null;
+
+  /** Shows only the left `fraction` (0..1) of a layer, revealing whatever
+   *  is drawn below it; `null` turns the swipe off. */
+  setSwipe(layerId: string | null, fraction = 0.5): void {
+    if (this.swipe && this.swipe.layerId !== layerId) {
+      unByKey(this.swipe.keys);
+      this.swipe = null;
+    }
+    const olLayer = layerId ? this.managedLayers.get(layerId)?.olLayer : undefined;
+    if (!layerId || !olLayer) {
+      this.map?.render();
+      return;
+    }
+    if (!this.swipe) {
+      const state = { layerId, fraction, keys: [] as EventsKey[] };
+      state.keys = [
+        olLayer.on('prerender', (event) => {
+          const ctx = event.context as CanvasRenderingContext2D;
+          const x = ctx.canvas.width * state.fraction;
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(0, 0, x, ctx.canvas.height);
+          ctx.clip();
+        }),
+        olLayer.on('postrender', (event) => {
+          const ctx = event.context as CanvasRenderingContext2D;
+          ctx.restore();
+          const x = ctx.canvas.width * state.fraction;
+          ctx.save();
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, ctx.canvas.height);
+          ctx.stroke();
+          ctx.restore();
+        })
+      ];
+      this.swipe = state;
+    }
+    this.swipe.fraction = Math.min(Math.max(fraction, 0), 1);
+    this.map?.render();
+  }
+
+  /** Analysis overlay with one colour per geometry (e.g. line of sight:
+   *  visible green, hidden red). Replaces whatever was there. */
+  setAnalysisColoredGeometries(items: { geometry: Record<string, unknown>; color: string }[]): void {
+    const source = this.ensureAnalysisSource();
+    source.clear();
+    for (const { geometry, color } of items) {
+      const feature = this.toMapFeature(geometry);
+      if (!feature) continue;
+      feature.setStyle(
+        new Style({
+          stroke: new Stroke({ color, width: 4 }),
+          fill: new Fill({ color: `${color}33` }),
+          image: new CircleStyle({ radius: 6, fill: new Fill({ color }), stroke: new Stroke({ color: '#fff', width: 2 }) })
+        })
+      );
+      source.addFeature(feature);
+    }
   }
 
   zoomIn(): void {

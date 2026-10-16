@@ -620,6 +620,67 @@ export class GeoServerService {
     }
   }
 
+  // ---------------------------------------------------------------------
+  // Raster layers (Raster Analysis). Each raster is its own GeoTIFF
+  // coverage store, uploaded through REST into GeoServer's data dir, so
+  // the backend and GeoServer need no shared volume.
+  // ---------------------------------------------------------------------
+
+  /** Uploads a GeoTIFF as coverage store `store` with one coverage named
+   *  `coverage`; returns its EPSG:4326 bounding box. */
+  async publishGeoTiff(
+    workspace: string,
+    store: string,
+    coverage: string,
+    bytes: Buffer,
+  ): Promise<LonLatBoundingBox | null> {
+    const ws = encodeURIComponent(workspace);
+    const cs = encodeURIComponent(store);
+    const response = await this.request(
+      `/rest/workspaces/${ws}/coveragestores/${cs}/file.geotiff?configure=first&coverageName=${encodeURIComponent(coverage)}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'image/tiff' },
+        body: new Uint8Array(bytes),
+      },
+      10 * 60 * 1000,
+    );
+    if (!response.ok) {
+      throw await this.toError('publishing raster', response);
+    }
+    const info = await this.request(
+      `/rest/workspaces/${ws}/coveragestores/${cs}/coverages/${encodeURIComponent(coverage)}.json`,
+      { method: 'GET' },
+    );
+    if (!info.ok) return null;
+    const body = (await info.json()) as {
+      coverage?: {
+        latLonBoundingBox?: Record<'minx' | 'miny' | 'maxx' | 'maxy', number | string>;
+      };
+    };
+    const bbox = body.coverage?.latLonBoundingBox;
+    if (!bbox) return null;
+    const box = {
+      minX: Number(bbox.minx),
+      minY: Number(bbox.miny),
+      maxX: Number(bbox.maxx),
+      maxY: Number(bbox.maxy),
+    };
+    return Object.values(box).every(Number.isFinite) ? box : null;
+  }
+
+  /** Removes a raster's coverage store, its layer and its uploaded file. */
+  async deleteCoverageStore(workspace: string, store: string): Promise<void> {
+    const response = await this.request(
+      `/rest/workspaces/${encodeURIComponent(workspace)}/coveragestores/${encodeURIComponent(store)}?recurse=true&purge=all`,
+      { method: 'DELETE' },
+      60000,
+    );
+    if (!response.ok && response.status !== 404) {
+      throw await this.toError('deleting raster', response);
+    }
+  }
+
   private firstLine(text: string): string {
     return (
       text

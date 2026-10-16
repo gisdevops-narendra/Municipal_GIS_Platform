@@ -151,6 +151,17 @@
           />
         }
 
+        @if (openedLeftTools().has('raster') && layersReady()) {
+          <app-raster-analysis
+            [class.gis-ws__panel--hidden]="leftTool() !== 'raster'"
+            [active]="leftTool() === 'raster'"
+            [layers]="layers()"
+            [allowedModuleIds]="myModuleIds()"
+            [isOwner]="isOwner()"
+            (layerCreated)="onLayerCreated($event)"
+          />
+        }
+
         @if (openedLeftTools().has('assistant') && layersReady()) {
           <app-ai-chat
             [class.gis-ws__panel--hidden]="leftTool() !== 'assistant'"

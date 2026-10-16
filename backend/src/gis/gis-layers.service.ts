@@ -14,6 +14,9 @@ import { StorageService } from './storage.service';
 import { StyleService, type UploadedIcon } from './style.service';
 import { FieldStatsService } from './field-stats.service';
 import { isSafeGeneratedTableName } from './layer-naming.util';
+import { rasterFilePath } from './raster-paths.util';
+import * as path from 'path';
+import { rm } from 'fs/promises';
 import type { AppUser } from '../auth/types/app-user.type';
 import type {
   ClassificationMethod,
@@ -436,11 +439,18 @@ export class GisLayersService {
     // already-absent feature type, which deleteFeatureType treats as
     // success), abort before touching the database so the delete stays
     // retryable rather than leaving an orphaned published layer.
-    await this.geoServer.deleteFeatureType(
-      layer.geoserverWorkspace,
-      `${layer.geoserverWorkspace}_postgis`,
-      layer.geoserverLayer,
-    );
+    if (layer.layerType === 'RASTER') {
+      await this.geoServer.deleteCoverageStore(
+        layer.geoserverWorkspace,
+        layer.geoserverLayer,
+      );
+    } else {
+      await this.geoServer.deleteFeatureType(
+        layer.geoserverWorkspace,
+        `${layer.geoserverWorkspace}_postgis`,
+        layer.geoserverLayer,
+      );
+    }
 
     await this.prisma.$transaction([
       this.prisma.gISLayerUpload.deleteMany({ where: { layerId: layer.id } }),
@@ -462,6 +472,14 @@ export class GisLayersService {
             `Deleted layer ${layer.id} but failed to drop table "${table}": ${error.message}`,
           ),
         );
+    }
+    if (layer.layerType === 'RASTER') {
+      const root = path.resolve(
+        this.config.get<string>('GIS_UPLOAD_STORAGE_DIR', './storage/uploads'),
+      );
+      const file = rasterFilePath(root, appUser.municipalityId, layer.id);
+      await rm(file, { force: true }).catch(() => undefined);
+      await rm(`${file}.aux.xml`, { force: true }).catch(() => undefined);
     }
     for (const upload of uploads) {
       await this.storage

@@ -21,6 +21,9 @@ import { LayerReportService } from './layer-report.service';
 import { YsldGenerator } from './ysld-generator';
 import { NetworkController } from './network.controller';
 import { NetworkService } from './network.service';
+import { RasterController } from './raster.controller';
+import { RasterService } from './raster.service';
+import { RasterToolsService } from './raster-tools.service';
 
 @Module({
   imports: [AuthModule, ModuleAccessModule],
@@ -31,6 +34,7 @@ import { NetworkService } from './network.service';
     GisDashboardController,
     PrintController,
     NetworkController,
+    RasterController,
   ],
   providers: [
     GisWorkspaceService,
@@ -47,6 +51,8 @@ import { NetworkService } from './network.service';
     LayerReportService,
     YsldGenerator,
     NetworkService,
+    RasterService,
+    RasterToolsService,
   ],
   exports: [
     GisWorkspaceService,

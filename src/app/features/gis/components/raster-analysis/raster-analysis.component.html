@@ -1,0 +1,473 @@
+<div class="bo">
+  <label class="bo__field">
+    <span class="bo__label">Tool</span>
+    <p-select
+      class="bo__select"
+      [options]="toolGroups()"
+      [group]="true"
+      optionLabel="label"
+      optionValue="value"
+      optionGroupLabel="label"
+      optionGroupChildren="items"
+      [ngModel]="tool()"
+      (ngModelChange)="selectTool($event)"
+      appendTo="body"
+    />
+  </label>
+
+  <!-- ============ UPLOAD ============ -->
+  @if (tool() === 'upload') {
+    <label class="bo__field">
+      <span class="bo__label">GeoTIFF file (.tif)</span>
+      <input type="file" class="ra__file" accept=".tif,.tiff" (change)="onFile($event)" />
+    </label>
+    <label class="bo__field">
+      <span class="bo__label">Layer name</span>
+      <input type="text" class="bo__input" maxlength="80" [(ngModel)]="uploadName" />
+    </label>
+    @if (isOwner) {
+      <label class="bo__field">
+        <span class="bo__label">Department</span>
+        <p-select
+          class="bo__select"
+          [options]="departments()"
+          optionLabel="label"
+          optionValue="value"
+          [(ngModel)]="uploadDepartmentId"
+          [showClear]="true"
+          placeholder="Municipality-wide (no department)"
+          appendTo="body"
+        />
+      </label>
+    }
+    <p class="bo__hint">DEMs, satellite / drone imagery or any georeferenced GeoTIFF. It is optimised (COG) and published to the map.</p>
+  }
+
+  <!-- ============ INPUT RASTER ============ -->
+  @if (tool() !== 'upload' && tool() !== 'calc' && tool() !== 'swipe') {
+    <label class="bo__field">
+      <span class="bo__label">{{ tool() === 'change' ? 'Before raster' : 'Raster layer' }}</span>
+      <p-select
+        class="bo__select"
+        [options]="rasterLayers()"
+        optionLabel="label"
+        optionValue="value"
+        [ngModel]="layerId()"
+        (ngModelChange)="selectLayer($event)"
+        placeholder="Choose a raster layer"
+        appendTo="body"
+      />
+    </label>
+    @if (rasterLayers().length === 0) {
+      <p class="bo__hint">No raster layers yet — upload a GeoTIFF with Raster Upload &amp; Publish.</p>
+    }
+    @if (info(); as i) {
+      <p class="bo__hint">
+        {{ i.width }} × {{ i.height }} px · {{ i.bandCount }} band{{ i.bandCount === 1 ? '' : 's' }} · {{ i.crs }} ·
+        {{ i.pixelSizeM.toFixed(2) }} m pixels
+        @if (i.bands[0]; as b) {
+          · range {{ b.min?.toFixed(2) }} – {{ b.max?.toFixed(2) }}
+        }
+      </p>
+    }
+    @if (bandOptions().length > 1 && tool() !== 'ndvi' && tool() !== 'clip' && !(tool() === 'style' && styleMode === 'rgb')) {
+      <label class="bo__field">
+        <span class="bo__label">Band</span>
+        <p-select class="bo__select" [options]="bandOptions()" optionLabel="label" optionValue="value" [(ngModel)]="band" appendTo="body" />
+      </label>
+    }
+  }
+
+  <!-- ============ TOOL PARAMETERS ============ -->
+  @switch (tool()) {
+    @case ('style') {
+      <div class="bo__modes" role="tablist">
+        <button type="button" class="bo__mode" [class.bo__mode--active]="styleMode === 'ramp'" (click)="styleMode = 'ramp'">Colour ramp</button>
+        <button type="button" class="bo__mode" [class.bo__mode--active]="styleMode === 'rgb'" (click)="styleMode = 'rgb'">RGB imagery</button>
+      </div>
+      @if (styleMode === 'ramp') {
+        <label class="bo__field">
+          <span class="bo__label">Ramp</span>
+          <select class="bo__input" [(ngModel)]="styleRamp">
+            @for (r of ramps; track r) {
+              <option [value]="r">{{ r }}</option>
+            }
+          </select>
+        </label>
+        <div class="bo__row">
+          <label class="bo__field bo__field--grow">
+            <span class="bo__label">Min</span>
+            <input type="number" class="bo__input" [(ngModel)]="styleMin" />
+          </label>
+          <label class="bo__field bo__field--grow">
+            <span class="bo__label">Max</span>
+            <input type="number" class="bo__input" [(ngModel)]="styleMax" />
+          </label>
+        </div>
+        <label class="bo__toggle"><input type="checkbox" [(ngModel)]="styleInvert" /><span>Invert ramp</span></label>
+      } @else {
+        <div class="bo__row">
+          @for (c of ['Red', 'Green', 'Blue']; track c; let i = $index) {
+            <label class="bo__field bo__field--grow">
+              <span class="bo__label">{{ c }} band</span>
+              <input type="number" class="bo__input" min="1" [max]="info()?.bandCount ?? 3" [(ngModel)]="rgbBands[i]" />
+            </label>
+          }
+        </div>
+      }
+      <label class="bo__field">
+        <span class="bo__label">Opacity {{ (styleOpacity * 100).toFixed(0) }} %</span>
+        <input type="range" min="0" max="1" step="0.05" [(ngModel)]="styleOpacity" />
+      </label>
+    }
+
+    @case ('identify') {
+      <div class="bo__section">
+        <span class="bo__section-title">Location</span>
+        <span class="bo__operand-state">{{ pointLabel(pointA()) }}</span>
+        <div class="bo__operand-actions">
+          <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'a'" (click)="pick('a')">
+            <i class="pi pi-map-marker" aria-hidden="true"></i>Click a pixel
+          </button>
+        </div>
+      </div>
+    }
+
+    @case ('profile') {
+      <div class="bo__section">
+        <span class="bo__section-title">Profile line</span>
+        <span class="bo__operand-state">{{ line() ? line()!.length + ' vertices' : 'not set' }}</span>
+        <div class="bo__operand-actions">
+          <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'line'" (click)="pick('line')">
+            <i class="pi pi-pencil" aria-hidden="true"></i>Draw line
+          </button>
+        </div>
+      </div>
+    }
+
+    @case ('hillshade') {
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Sun azimuth °</span>
+          <input type="number" class="bo__input" min="0" max="360" [(ngModel)]="azimuth" />
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Sun altitude °</span>
+          <input type="number" class="bo__input" min="0" max="90" [(ngModel)]="altitude" />
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Z factor</span>
+          <input type="number" class="bo__input" step="0.1" [(ngModel)]="zFactor" />
+        </label>
+      </div>
+    }
+
+    @case ('slope') {
+      <label class="bo__toggle"><input type="checkbox" [(ngModel)]="slopePercent" /><span>Percent rise (instead of degrees)</span></label>
+    }
+
+    @case ('contour') {
+      <label class="bo__field">
+        <span class="bo__label">Interval (raster units)</span>
+        <input type="number" class="bo__input" min="0.01" [(ngModel)]="contourInterval" />
+      </label>
+    }
+
+    @case ('cutfill') {
+      <ng-container *ngTemplateOutlet="polygonInput"></ng-container>
+      <label class="bo__field">
+        <span class="bo__label">Design / base level — blank = mean ground level</span>
+        <input type="number" class="bo__input" [(ngModel)]="baseLevel" />
+      </label>
+    }
+
+    @case ('watershed') {
+      <div class="bo__modes" role="tablist">
+        <button type="button" class="bo__mode" [class.bo__mode--active]="watershedMode === 'watershed'" (click)="watershedMode = 'watershed'">Watershed</button>
+        <button type="button" class="bo__mode" [class.bo__mode--active]="watershedMode === 'accumulation'" (click)="watershedMode = 'accumulation'">Drainage network</button>
+      </div>
+      @if (watershedMode === 'watershed') {
+        <div class="bo__section">
+          <span class="bo__section-title">Pour point (outlet)</span>
+          <span class="bo__operand-state">{{ pointLabel(pointA()) }}</span>
+          <div class="bo__operand-actions">
+            <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'a'" (click)="pick('a')">
+              <i class="pi pi-map-marker" aria-hidden="true"></i>Pick on map
+            </button>
+          </div>
+        </div>
+        <p class="bo__hint">Creates a polygon layer of the whole area that drains to this point.</p>
+      } @else {
+        <p class="bo__hint">Creates a flow-accumulation raster (upstream area, km²) — bright lines are the drainage channels.</p>
+      }
+    }
+
+    @case ('flood') {
+      <label class="bo__field">
+        <span class="bo__label">Water level (elevation)</span>
+        <input type="number" class="bo__input" [(ngModel)]="floodLevel" />
+      </label>
+      <label class="bo__toggle">
+        <input type="checkbox" [(ngModel)]="floodConnected" /><span>Only the area connected to a point</span>
+      </label>
+      @if (floodConnected) {
+        <div class="bo__section">
+          <span class="bo__section-title">Point in the water body</span>
+          <span class="bo__operand-state">{{ pointLabel(pointA()) }}</span>
+          <div class="bo__operand-actions">
+            <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'a'" (click)="pick('a')">
+              <i class="pi pi-map-marker" aria-hidden="true"></i>Pick on map
+            </button>
+          </div>
+        </div>
+      }
+    }
+
+    @case ('los') {
+      <div class="bo__section">
+        <span class="bo__section-title">Observer</span>
+        <span class="bo__operand-state">{{ pointLabel(pointA()) }}</span>
+        <div class="bo__operand-actions">
+          <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'a'" (click)="pick('a')">
+            <i class="pi pi-eye" aria-hidden="true"></i>Pick on map
+          </button>
+        </div>
+      </div>
+      <div class="bo__section">
+        <span class="bo__section-title">Target</span>
+        <span class="bo__operand-state">{{ pointLabel(pointB()) }}</span>
+        <div class="bo__operand-actions">
+          <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'b'" (click)="pick('b')">
+            <i class="pi pi-flag" aria-hidden="true"></i>Pick on map
+          </button>
+        </div>
+      </div>
+      <ng-container *ngTemplateOutlet="heights"></ng-container>
+    }
+
+    @case ('viewshed') {
+      <div class="bo__section">
+        <span class="bo__section-title">Observer</span>
+        <span class="bo__operand-state">{{ pointLabel(pointA()) }}</span>
+        <div class="bo__operand-actions">
+          <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'a'" (click)="pick('a')">
+            <i class="pi pi-eye" aria-hidden="true"></i>Pick on map
+          </button>
+        </div>
+      </div>
+      <ng-container *ngTemplateOutlet="heights"></ng-container>
+      <label class="bo__field">
+        <span class="bo__label">Max distance (m) — optional</span>
+        <input type="number" class="bo__input" min="1" placeholder="Whole raster" [(ngModel)]="maxDistance" />
+      </label>
+    }
+
+    @case ('calc') {
+      @for (input of calcInputs; track $index; let i = $index) {
+        <div class="bo__row">
+          <span class="ra__letter">{{ calcLetter(i) }}</span>
+          <label class="bo__field bo__field--grow">
+            <p-select
+              class="bo__select"
+              [options]="rasterLayers()"
+              optionLabel="label"
+              optionValue="value"
+              [(ngModel)]="input.layerId"
+              placeholder="Raster"
+              appendTo="body"
+            />
+          </label>
+          <input type="number" class="bo__input ra__band" min="1" title="Band" [(ngModel)]="input.band" />
+          @if (calcInputs.length > 1) {
+            <button type="button" class="bo__chip bo__chip--ghost" (click)="removeCalcInput(i)"><i class="pi pi-times"></i></button>
+          }
+        </div>
+      }
+      @if (calcInputs.length < 4) {
+        <button type="button" class="bo__cancel ra__add" (click)="addCalcInput()">+ Add input</button>
+      }
+      <label class="bo__field">
+        <span class="bo__label">Expression</span>
+        <input type="text" class="bo__input" [(ngModel)]="expression" placeholder="(B - A) / (B + A)" />
+      </label>
+      <p class="bo__hint">Use A–D, numbers, + − * / ** &lt; &gt; == &amp; | and where(), sqrt(), log(), abs(), minimum(), maximum(). Inputs are aligned to A's grid.</p>
+    }
+
+    @case ('reclass') {
+      <div class="ra__rules">
+        <div class="ra__rule ra__rule--head"><span>From ≥</span><span>To &lt;</span><span>Value</span><span>Label</span><span></span></div>
+        @for (rule of reclassRules; track $index; let i = $index) {
+          <div class="ra__rule">
+            <input type="number" class="bo__input" [(ngModel)]="rule.min" />
+            <input type="number" class="bo__input" [(ngModel)]="rule.max" />
+            <input type="number" class="bo__input" [(ngModel)]="rule.value" />
+            <input type="text" class="bo__input" [(ngModel)]="rule.label" />
+            <button type="button" class="bo__chip bo__chip--ghost" (click)="removeRule(i)"><i class="pi pi-times"></i></button>
+          </div>
+        }
+      </div>
+      <button type="button" class="bo__cancel ra__add" (click)="addRule()">+ Add range</button>
+    }
+
+    @case ('clip') {
+      <ng-container *ngTemplateOutlet="polygonInput"></ng-container>
+    }
+
+    @case ('polygonize') {
+      <p class="bo__hint">Turns each class of a whole-number raster (e.g. a reclassified one) into polygons with a "value" field.</p>
+    }
+
+    @case ('swipe') {
+      <label class="bo__field">
+        <span class="bo__label">Layer to swipe (shown on the left)</span>
+        <p-select
+          class="bo__select"
+          [options]="rasterLayers()"
+          optionLabel="label"
+          optionValue="value"
+          [ngModel]="swipeLayerId()"
+          (ngModelChange)="swipeLayerId.set($event); onSwipe()"
+          placeholder="Choose a layer"
+          appendTo="body"
+        />
+      </label>
+      <label class="bo__field">
+        <span class="bo__label">Position {{ swipeFraction }} %</span>
+        <input type="range" min="0" max="100" [(ngModel)]="swipeFraction" (input)="onSwipe()" />
+      </label>
+      <p class="bo__hint">Turn on the layer to compare it with (for example the older image) — it shows to the right of the line.</p>
+    }
+
+    @case ('ndvi') {
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Red band</span>
+          <input type="number" class="bo__input" min="1" [(ngModel)]="redBand" />
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Near-infrared band</span>
+          <input type="number" class="bo__input" min="1" [(ngModel)]="nirBand" />
+        </label>
+      </div>
+      <p class="bo__hint">NDVI = (NIR − Red) / (NIR + Red). Sentinel-2: Red = 4, NIR = 8 · Landsat 8/9: Red = 4, NIR = 5.</p>
+    }
+
+    @case ('change') {
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">After raster</span>
+          <p-select
+            class="bo__select"
+            [options]="rasterLayers()"
+            optionLabel="label"
+            optionValue="value"
+            [(ngModel)]="afterLayerId"
+            placeholder="Choose a raster"
+            appendTo="body"
+          />
+        </label>
+        <label class="bo__field">
+          <span class="bo__label">Band</span>
+          <input type="number" class="bo__input ra__band" min="1" [(ngModel)]="afterBand" />
+        </label>
+      </div>
+      <label class="bo__field">
+        <span class="bo__label">"No change" threshold (±)</span>
+        <input type="number" class="bo__input" min="0" [(ngModel)]="changeThreshold" />
+      </label>
+      <p class="bo__hint">Creates an after − before difference raster: red = increase, blue = decrease.</p>
+    }
+  }
+
+  @if (picking()) {
+    <button type="button" class="bo__cancel" (click)="cancelPick()">Cancel picking</button>
+  }
+
+  @if (needsOutput()) {
+    <label class="bo__field">
+      <span class="bo__label">New layer name</span>
+      <input type="text" class="bo__input" maxlength="80" [(ngModel)]="outputName" />
+    </label>
+  }
+
+  <!-- ============ RESULTS ============ -->
+  @if (running()) {
+    <p class="bo__result">Processing… large rasters can take a minute.</p>
+  }
+  @if (error(); as e) {
+    <p class="bo__result bo__result--empty">{{ e }}</p>
+  }
+  @if (message(); as m) {
+    <p class="bo__result">{{ m }}</p>
+  }
+  @if (facts().length > 0) {
+    <ul class="bo__rings">
+      @for (f of facts(); track f.label) {
+        <li class="bo__ring">
+          <span class="bo__ring-label">{{ f.label }}</span>
+          <span class="bo__ring-count">{{ f.value }}</span>
+        </li>
+      }
+    </ul>
+  }
+  @if (chart(); as c) {
+    <figure class="ra__chart">
+      <svg [attr.viewBox]="'0 0 ' + c.w + ' ' + c.h" preserveAspectRatio="none" role="img" aria-label="Elevation profile">
+        <path [attr.d]="c.path" fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke" />
+        @for (p of c.hidden; track $index) {
+          <circle [attr.cx]="p.cx" [attr.cy]="p.cy" r="1.5" class="ra__hidden" />
+        }
+      </svg>
+      <figcaption>
+        <span>{{ c.min }} – {{ c.max }}</span><span>{{ c.length }}</span>
+      </figcaption>
+    </figure>
+  }
+
+  @if (tool() !== 'swipe') {
+    <div class="bo__controls">
+      <button
+        pButton
+        type="button"
+        [label]="running() ? 'Working…' : tool() === 'upload' ? 'Upload & publish' : tool() === 'style' ? 'Apply style' : tool() === 'identify' ? 'Identify' : 'Run'"
+        icon="pi pi-play"
+        class="p-button-sm bo__run"
+        [disabled]="running()"
+        (click)="run()"
+      ></button>
+      <button pButton type="button" label="Clear" icon="pi pi-eraser" class="p-button-sm p-button-text" [disabled]="running()" (click)="clear()"></button>
+    </div>
+  } @else {
+    <div class="bo__controls">
+      <button pButton type="button" label="Stop swipe" icon="pi pi-times" class="p-button-sm p-button-text" (click)="clear()"></button>
+    </div>
+  }
+</div>
+
+<ng-template #polygonInput>
+  <div class="bo__section">
+    <span class="bo__section-title">Area / boundary</span>
+    <span class="bo__operand-state">{{ polygon() ? polygon()!['type'] : 'not set' }}</span>
+    <div class="bo__operand-actions">
+      <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'polygon'" (click)="pick('polygon')">
+        <i class="pi pi-pencil" aria-hidden="true"></i>Draw polygon
+      </button>
+      <button type="button" class="bo__chip" (click)="usePolygonSelection()">
+        <i class="pi pi-check-square" aria-hidden="true"></i>Selection ({{ selection().length }})
+      </button>
+    </div>
+  </div>
+</ng-template>
+
+<ng-template #heights>
+  <div class="bo__row">
+    <label class="bo__field bo__field--grow">
+      <span class="bo__label">Observer height (m)</span>
+      <input type="number" class="bo__input" min="0" step="0.1" [(ngModel)]="observerHeight" />
+    </label>
+    <label class="bo__field bo__field--grow">
+      <span class="bo__label">Target height (m)</span>
+      <input type="number" class="bo__input" min="0" step="0.1" [(ngModel)]="targetHeight" />
+    </label>
+  </div>
+</ng-template>
