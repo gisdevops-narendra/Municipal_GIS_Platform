@@ -48,6 +48,9 @@ LLM_FORMAT_MODE: str = os.environ.get("GIS_AI_LLM_FORMAT", "json").strip().lower
 # Pull the model automatically on startup if it isn't present yet.
 LLM_AUTO_PULL: bool = os.environ.get("GIS_AI_LLM_AUTO_PULL", "true").lower() == "true"
 
+# Cap on the narrated answer / raster explanation (2-4 sentences).
+NARRATE_MAX_TOKENS: int = int(os.environ.get("GIS_AI_NARRATE_MAX_TOKENS", "160"))
+
 # --- Embedding model (local, offline — no external embedding API) -----------
 EMBEDDING_MODEL: str = os.environ.get(
     "GIS_AI_EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5"

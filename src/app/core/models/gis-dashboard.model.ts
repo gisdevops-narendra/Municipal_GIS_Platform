@@ -22,6 +22,10 @@ export interface GisSearchLayerMatch {
   code: string;
   ownershipType: 'CANONICAL' | 'DEPARTMENT';
   departmentName: string | null;
+  /** `semantic`: related by meaning ("drainage" → Storm Water Lines), not
+   *  by name — found through the AI assistant's index. */
+  match?: 'name' | 'semantic';
+  matchedField?: string | null;
 }
 
 export interface GisSearchFeatureMatch {

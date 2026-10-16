@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ModuleAccessModule } from '../module-access/module-access.module';
 import { AuthModule } from '../auth/auth.module';
+import { AiClientModule } from '../gis-ai/ai-client.module';
 import { GisWorkspaceController } from './gis-workspace.controller';
 import { GisWorkspaceService } from './gis-workspace.service';
 import { GisLayersController } from './gis-layers.controller';
@@ -35,7 +36,7 @@ import { DataToolsController } from './data-tools.controller';
 import { DataToolsService } from './data-tools.service';
 
 @Module({
-  imports: [AuthModule, ModuleAccessModule],
+  imports: [AuthModule, ModuleAccessModule, AiClientModule],
   controllers: [
     GisWorkspaceController,
     GisLayersController,
@@ -77,6 +78,7 @@ import { DataToolsService } from './data-tools.service';
     GisLayersService,
     GisAuthorizationService,
     GeoServerService,
+    NetworkService,
   ],
 })
 export class GisModule {}

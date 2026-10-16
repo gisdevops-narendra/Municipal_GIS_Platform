@@ -33,6 +33,10 @@ export const VERSIONS_MODULE_ID = 1016;
 
 const NEW_FIELD_TYPES = ['text', 'double precision', 'integer', 'date', 'boolean'] as const;
 const NUMERIC_TYPES = new Set(['integer', 'bigint', 'smallint', 'numeric', 'double precision', 'real']);
+/** Numeric fields that are codes, not measurements — outliers there mean
+ *  nothing (ward_no 37 is not "unusually high"). */
+const IDENTIFIER_FIELD = /(^|_)(id|fid|gid|code|no|num|number|year|yr|zip|pin|pincode|phone|mobile|lat|lon|lng|latitude|longitude|x|y|srid|seq|sr|index|idx)$/i;
+const MAX_OUTLIER_FIELDS = 12;
 const MAX_CSV_ROWS = 20_000;
 const MAX_JOIN_COLUMNS = 50;
 const ISSUE_LIMIT = 500;
@@ -41,7 +45,7 @@ const CHANGE_LIMIT = 1000;
 const q = (ident: string) => `"${ident.replace(/"/g, '""')}"`;
 
 export interface TopologyIssue {
-  check: 'invalid' | 'empty' | 'duplicate' | 'overlap' | 'gap' | 'dangle' | 'rule';
+  check: 'invalid' | 'empty' | 'duplicate' | 'overlap' | 'gap' | 'dangle' | 'rule' | 'outlier';
   featureIds: number[];
   detail: string;
   /** GeoJSON, EPSG:4326 — where to look. */
@@ -312,9 +316,104 @@ export class DataToolsService {
                            FROM ${t} a WHERE ${conditions.join(' OR ')}`, ...params);
     }
 
+    // Statistical outliers — values far from what is typical for the layer
+    // (or for their group, e.g. their ward): typos, unit mix-ups, slivers.
+    if (dto.outliers !== false) {
+      const group = dto.outlierGroupField ? columns.find((c) => c.name === dto.outlierGroupField) : undefined;
+      if (dto.outlierGroupField && !group) throw new BadRequestException(`Unknown field "${dto.outlierGroupField}".`);
+      const threshold = dto.outlierThreshold ?? 3.5;
+      const measures = columns
+        .filter((c) => NUMERIC_TYPES.has(c.dataType) && !IDENTIFIER_FIELD.test(c.name) && c.name !== group?.name)
+        .map((c) => ({ expr: `a.${q(c.name)}`, label: c.name }));
+      if (type === 'POLYGON') {
+        measures.push({ expr: metric ? 'ST_Area(a.geom)' : 'ST_Area(ST_Transform(a.geom, 4326)::geography)', label: 'Area (m²)' });
+      }
+      if (type === 'LINE') {
+        measures.push({ expr: metric ? 'ST_Length(a.geom)' : 'ST_Length(ST_Transform(a.geom, 4326)::geography)', label: 'Length (m)' });
+      }
+      for (const m of measures.slice(0, MAX_OUTLIER_FIELDS)) {
+        await add('outlier', this.outlierSql(t, m.expr, m.label, group ? `a.${q(group.name)}` : null, group?.name ?? null, gj), threshold);
+        await add('outlier', this.nonPositiveSql(t, m.expr, m.label, gj));
+      }
+    }
+
     const counts: Record<string, number> = {};
     issues.forEach((i) => (counts[i.check] = (counts[i.check] ?? 0) + 1));
     return { issues, counts, truncated: Object.values(counts).some((n) => n >= ISSUE_LIMIT) };
+  }
+
+  /**
+   * Robust outliers of one numeric expression: the modified z-score
+   * 0.6745·(x − median) / MAD (Iglewicz & Hoaglin; flagged above $1,
+   * default 3.5), falling back to the mean absolute deviation when over
+   * half the values are identical. Strongly skewed positive values (areas,
+   * lengths, costs) are scored on a log scale, so big-but-plausible
+   * features are not all flagged. With a group field each value is judged
+   * against its own group (e.g. its ward); groups need ≥ 12 values and
+   * the layer ≥ 20. Only continuous fields (≥ 20 distinct values) are
+   * scored: on a coded field such as a pipe diameter (100, 150, 200 …)
+   * the MAD collapses to 0 and every larger standard size would be
+   * "unusual". At most 50 per measure, most extreme first.
+   */
+  private outlierSql(
+    t: string,
+    expr: string,
+    label: string,
+    groupExpr: string | null,
+    groupName: string | null,
+    gj: (expr: string) => string,
+  ): string {
+    const g = groupExpr ? `coalesce(${groupExpr}::text, '')` : `''`;
+    return `WITH v AS (
+              SELECT a.ogc_fid AS id, (${expr})::float8 AS x, ${g} AS g, a.geom
+                FROM ${t} a WHERE (${expr}) IS NOT NULL AND a.geom IS NOT NULL),
+            shape AS (
+              SELECT count(*) >= 20 AND count(DISTINCT x) >= 20 AS enough,
+                     min(x) > 0 AND percentile_cont(0.9) WITHIN GROUP (ORDER BY x)
+                       > 10 * percentile_cont(0.1) WITHIN GROUP (ORDER BY x) AS use_log
+                FROM v),
+            y AS (
+              SELECT v.*, CASE WHEN shape.use_log THEN ln(v.x) ELSE v.x END AS y FROM v, shape WHERE shape.enough),
+            s AS (
+              SELECT g, count(*) AS n, percentile_cont(0.5) WITHIN GROUP (ORDER BY y) AS med FROM y GROUP BY g),
+            d AS (
+              SELECT y.g, percentile_cont(0.5) WITHIN GROUP (ORDER BY abs(y.y - s.med)) AS mad,
+                     avg(abs(y.y - s.med)) AS meanad
+                FROM y JOIN s ON s.g = y.g GROUP BY y.g),
+            z AS (
+              SELECT y.*, s.med,
+                     CASE WHEN d.mad > 0 THEN 0.6745 * (y.y - s.med) / d.mad
+                          WHEN d.meanad > 0 THEN (y.y - s.med) / (1.2533 * d.meanad) END AS z
+                FROM y JOIN s ON s.g = y.g JOIN d ON d.g = y.g
+               WHERE s.n >= ${groupExpr ? 12 : 20}),
+            hit AS (
+              SELECT z.*, (SELECT use_log FROM shape) AS use_log FROM z WHERE abs(z.z) > $1 ORDER BY abs(z.z) DESC LIMIT 50)
+            SELECT ARRAY[hit.id] AS ids,
+                   ${this.literal(label + ' ')} || round(hit.x::numeric, 2) || ' is unusually '
+                     || CASE WHEN hit.z > 0 THEN 'high' ELSE 'low' END
+                     || ${groupName ? `${this.literal(` (typical for ${groupName} = `)} || hit.g || ': '` : `' (typical: '`}
+                     || round((CASE WHEN hit.use_log THEN exp(hit.med) ELSE hit.med END)::numeric, 2)
+                     || ', score ' || round(abs(hit.z)::numeric, 1) || ')' AS detail,
+                   ${gj('ST_PointOnSurface(hit.geom)')} AS geometry
+              FROM hit`;
+  }
+
+  /** Zero / negative values in a field that is otherwise positive (≥ 90 %
+   *  of ≥ 20 values above 0) — a pipe of diameter 0, a plot of area −5:
+   *  almost always "unknown" typed as 0, or a sign error. Applies to coded
+   *  fields too. At most 50. */
+  private nonPositiveSql(t: string, expr: string, label: string, gj: (expr: string) => string): string {
+    return `WITH v AS (
+              SELECT a.ogc_fid AS id, (${expr})::float8 AS x, a.geom
+                FROM ${t} a WHERE (${expr}) IS NOT NULL AND a.geom IS NOT NULL),
+            s AS (SELECT count(*) AS n, count(*) FILTER (WHERE x > 0) AS pos FROM v)
+            SELECT * FROM (SELECT ARRAY[v.id] AS ids,
+                   ${this.literal(label + ' is ')} || round(v.x::numeric, 2)
+                     || ', but ' || round(100.0 * s.pos / s.n) || ' % of values are above 0' AS detail,
+                   ${gj('ST_PointOnSurface(v.geom)')} AS geometry
+              FROM v, s
+             WHERE s.n >= 20 AND s.pos >= 0.9 * s.n AND v.x <= 0
+             ORDER BY v.id LIMIT 50) np`;
   }
 
   /** One-click repairs (edit permission), recorded in the edit history. */

@@ -21,7 +21,8 @@ Output: a single JSON object, no prose, no markdown fences. Keys:
   clarification: string or null
   used_context: array of CONTEXT titles you used
   operation: null, or {
-    kind: "select",
+    kind: one of "select" "aggregate" "nearest" "buffer" "route"
+      "service_area" (see KINDS),
     target_layer: <a code or name from AVAILABLE LAYERS>,
     attribute_filters: [ {field:<real column>, op:<one of
       = != > >= < <= in not_in like ilike between is_null is_not_null>,
@@ -29,7 +30,26 @@ Output: a single JSON object, no prose, no markdown fences. Keys:
     spatial_filter: null, or {relation:<one of within_distance intersects
       within contains disjoint>, reference_layer:<code/name>,
       distance_meters:<number, for within_distance>, reference_filters:[]},
-    limit: integer or null }
+    limit: integer or null,
+    ...plus the extra keys of its kind (omit or null the others) }
+
+KINDS (target_layer + attribute_filters + spatial_filter pick the features):
+- select: show / find / list features.
+- aggregate: "how many", "count", "total", "average", "per ward".
+  metric: count|sum|avg|min|max, metric_field: numeric column (null for
+  count), group_by: a column of target_layer to group by, OR
+  group_by_layer + group_by_layer_field: a polygon layer and its label
+  column to count features falling inside each polygon ("per ward").
+- nearest: "nearest / closest N X to Y". target_layer = X,
+  reference_layer + reference_filters = Y, count = N (default 1).
+- buffer: "buffer / zone of N m around X". target_layer = X,
+  distance_meters = N.
+- route: "route / path / road distance from A to B". target_layer +
+  attribute_filters = A, to_layer + to_filters = B, network_layer = a
+  road (LINE) layer or null.
+- service_area: "area reachable within N m of X" on the road network.
+  target_layer + attribute_filters = X, distance_meters = N,
+  network_layer = a road (LINE) layer or null.
 
 The examples below show the OUTPUT FORMAT only. Their layer names
 (BUILDINGS, PLOTS, ROADS, PARCELS, ...) are NOT real — never copy a layer
@@ -45,8 +65,8 @@ Rules:
   user actually stated in words. If the user gave no attribute condition,
   attribute_filters MUST be []. Never invent a filter, a value, a number,
   or a field. A distance ("within 150 m") is NOT an attribute filter.
-- "show / find / list / which X ... where/with/above/under/larger than ..."
-  is a gis_operation, not an "answer". Only use "answer" for a question
+- "show / find / list / which / how many X ..." is a gis_operation, not
+  an "answer". Only use "answer" for a question
   about the data itself ("what layers do I have", "what does this field
   mean").
 - "within N m/km of X" -> spatial_filter within_distance (distance_meters).
@@ -125,27 +145,62 @@ FEWSHOT = [
             '1000,"reference_filters":[]},"limit":null}}'
         ),
     },
-    {"role": "user", "content": "Which parcels have an area over 500 sq m?"},
+    {"role": "user", "content": "How many street lights are there in each ward?"},
     {
         "role": "assistant",
         "content": (
-            '{"answer_kind":"gis_operation","explanation":"Parcels with an area '
-            'greater than 500 sq m.","clarification":null,"used_context":[],'
-            '"operation":{"kind":"select","target_layer":"PARCELS",'
-            '"attribute_filters":[{"field":"area_sqm","op":">","value":500}],'
-            '"spatial_filter":null,"limit":null}}'
+            '{"answer_kind":"gis_operation","explanation":"Count of street '
+            'lights inside each ward.","clarification":null,"used_context":[],'
+            '"operation":{"kind":"aggregate","target_layer":"STREET_LIGHTS",'
+            '"attribute_filters":[],"spatial_filter":null,"metric":"count",'
+            '"metric_field":null,"group_by":null,"group_by_layer":"WARDS",'
+            '"group_by_layer_field":"ward_name","limit":null}}'
         ),
     },
-    {"role": "user", "content": "Show all street lights in zone 3."},
+    {"role": "user", "content": "Total plot area by land use."},
     {
         "role": "assistant",
         "content": (
-            '{"answer_kind":"gis_operation","explanation":"Street lights that '
-            'fall inside zone 3.","clarification":null,"used_context":[],'
-            '"operation":{"kind":"select","target_layer":"STREET_LIGHTS",'
-            '"attribute_filters":[],"spatial_filter":{"relation":"within",'
-            '"reference_layer":"ZONES","reference_filters":[{"field":"zone_no",'
-            '"op":"=","value":3}]},"limit":null}}'
+            '{"answer_kind":"gis_operation","explanation":"Sum of plot area '
+            'grouped by land use.","clarification":null,"used_context":[],'
+            '"operation":{"kind":"aggregate","target_layer":"PLOTS",'
+            '"attribute_filters":[],"spatial_filter":null,"metric":"sum",'
+            '"metric_field":"area_sqm","group_by":"land_use","limit":null}}'
+        ),
+    },
+    {"role": "user", "content": "Nearest 3 hospitals to the school named Vidya Niketan."},
+    {
+        "role": "assistant",
+        "content": (
+            '{"answer_kind":"gis_operation","explanation":"The 3 hospitals '
+            'closest to Vidya Niketan school.","clarification":null,'
+            '"used_context":[],"operation":{"kind":"nearest","target_layer":'
+            '"HOSPITALS","attribute_filters":[],"spatial_filter":null,'
+            '"reference_layer":"SCHOOLS","reference_filters":[{"field":"name",'
+            '"op":"ilike","value":"Vidya Niketan"}],"count":3}}'
+        ),
+    },
+    {"role": "user", "content": "Make a 200 m buffer around the lakes."},
+    {
+        "role": "assistant",
+        "content": (
+            '{"answer_kind":"gis_operation","explanation":"A 200 m zone around '
+            'every lake.","clarification":null,"used_context":[],"operation":'
+            '{"kind":"buffer","target_layer":"LAKES","attribute_filters":[],'
+            '"spatial_filter":null,"distance_meters":200}}'
+        ),
+    },
+    {"role": "user", "content": "Route from fire station 2 to ward office 7."},
+    {
+        "role": "assistant",
+        "content": (
+            '{"answer_kind":"gis_operation","explanation":"Shortest road route '
+            'from fire station 2 to ward office 7.","clarification":null,'
+            '"used_context":[],"operation":{"kind":"route","target_layer":'
+            '"FIRE_STATIONS","attribute_filters":[{"field":"station_no","op":'
+            '"=","value":2}],"spatial_filter":null,"to_layer":"WARD_OFFICES",'
+            '"to_filters":[{"field":"ward_no","op":"=","value":7}],'
+            '"network_layer":null}}'
         ),
     },
 ]
@@ -163,3 +218,33 @@ def build_user_message(
         parts.append(ctx)
     parts.append(f"REQUEST: {message}")
     return "\n\n".join(parts)
+
+
+# --------------------------------------------------------------------------
+# Narration: verified facts -> 1-3 plain sentences. The facts are computed
+# by the backend; the model only rephrases them.
+
+NARRATE_SYSTEM = """You write a short answer for a municipal officer from VERIFIED FACTS.
+Rules:
+- 1 to 3 plain sentences, no markdown, no lists, no headings.
+- Use ONLY the numbers and names that appear in FACTS. Never estimate,
+  round differently, add, or invent a number, place, cause or recommendation.
+- Lead with the direct answer to the question, then the most notable
+  detail (largest group, nearest item, biggest change).
+- If FACTS show zero results, say so plainly.
+"""
+
+RASTER_SYSTEM = """You explain a raster / remote-sensing analysis result to a municipal
+officer who is not a GIS expert, from VERIFIED FACTS.
+Rules:
+- 2 to 4 plain sentences, no markdown, no lists.
+- Say what the analysis measured, what the key numbers mean in everyday
+  terms, and which zone / area stands out, if any.
+- Use ONLY numbers and names that appear in FACTS. Never invent a number,
+  place, date or cause. Do not give advice beyond "worth a field check"
+  when FACTS show a notable change.
+"""
+
+
+def build_narrate_message(question: str, facts_json: str) -> str:
+    return f"QUESTION: {question}\n\nFACTS (JSON):\n{facts_json}"

@@ -10,7 +10,10 @@ them, not a new engine.
 ## operation.kind = "select"
 
 Selects features of one `target_layer` that satisfy attribute and/or
-spatial conditions. This covers every supported request today.
+spatial conditions ("show / find / list / which ...").
+
+Every other kind below starts from the same selection: `target_layer` +
+`attribute_filters` + `spatial_filter` pick the features it works on.
 
 ### attribute_filters[]  (like the Query Builder)
 
@@ -48,6 +51,45 @@ Relations:
 Optional integer cap on returned features. The backend also enforces a
 hard maximum.
 
+## operation.kind = "aggregate"
+
+"How many", "count", "total", "average", "per ward / zone / type".
+- `metric`: `count` | `sum` | `avg` | `min` | `max`.
+- `metric_field`: a numeric column for sum/avg/min/max (null for count).
+  For "total road / pipe length" or "total plot area" on a layer without
+  such a column, use `length` (line layers) or `area` (polygon layers):
+  the backend measures the geometry in metres / square metres.
+- Group by a column of the target layer: `group_by` (e.g. `valve_type`).
+- Group by area: `group_by_layer` (a polygon layer such as wards or zones)
+  + `group_by_layer_field` (its name/number column). Each feature counts
+  once, in the polygon containing it; polygons with none show 0.
+
+## operation.kind = "nearest"
+
+"Nearest / closest N X to Y". `target_layer` = X (what to rank),
+`reference_layer` + `reference_filters` = Y (where to measure from),
+`count` = N (default 1, max 50). Straight-line distance.
+
+## operation.kind = "buffer"
+
+"Buffer / zone / area of N m around X". `target_layer` = X,
+`distance_meters` = N (max 10 km). Returns one dissolved buffer polygon
+and its area. To *select features inside* a buffer, use `select` with a
+`within_distance` spatial_filter instead.
+
+## operation.kind = "route"
+
+"Route / path / road distance from A to B". `target_layer` +
+`attribute_filters` = A, `to_layer` + `to_filters` = B, `network_layer` =
+the road (line) layer, or null to use the municipality's road layer.
+The first feature matching each side is used.
+
+## operation.kind = "service_area"
+
+"Area reachable within N m by road from X". `target_layer` +
+`attribute_filters` = X, `distance_meters` = N, `network_layer` as for
+route.
+
 ## When NOT to produce an operation
 
 - The request needs a layer the municipality doesn't have → `unsupported`,
@@ -56,5 +98,6 @@ hard maximum.
   this field mean?") → `answer` with a direct textual answer.
 - The mapping is ambiguous (which field is "vacant"? which layer is
   "buildings"?) → `clarification` with a specific question.
-- Anything requiring editing, writing, aggregation you can't express as a
-  select, routing, or multi-hop chained analysis → `unsupported`.
+- Anything requiring editing or writing data, styling layers, raster
+  analysis, or multi-step chained analysis ("buffer, then intersect, then
+  export") → `unsupported`.

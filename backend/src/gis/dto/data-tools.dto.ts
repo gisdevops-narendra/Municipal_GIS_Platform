@@ -89,6 +89,24 @@ export class ValidateLayerDto {
   @Min(0)
   @Max(1_000_000)
   maxGapArea?: number;
+
+  /** Report statistical outliers of the numeric fields (default on). */
+  @IsOptional()
+  @IsBoolean()
+  outliers?: boolean;
+
+  /** Judge each value against its own group, e.g. its ward. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(63)
+  outlierGroupField?: string;
+
+  /** Modified z-score above which a value is reported (default 3.5). */
+  @IsOptional()
+  @IsNumber()
+  @Min(2)
+  @Max(10)
+  outlierThreshold?: number;
 }
 
 export class FixLayerDto {

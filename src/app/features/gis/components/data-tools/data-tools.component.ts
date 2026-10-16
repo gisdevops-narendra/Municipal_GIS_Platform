@@ -46,7 +46,8 @@ const CHECK_LABELS: Record<TopologyIssue['check'], string> = {
   overlap: 'Overlap',
   gap: 'Gap',
   dangle: 'Dangle',
-  rule: 'Field rule'
+  rule: 'Field rule',
+  outlier: 'Unusual value'
 };
 const CHECK_COLORS: Record<TopologyIssue['check'], string> = {
   invalid: '#dc2626',
@@ -55,7 +56,8 @@ const CHECK_COLORS: Record<TopologyIssue['check'], string> = {
   overlap: '#ea580c',
   gap: '#0891b2',
   dangle: '#ca8a04',
-  rule: '#2563eb'
+  rule: '#2563eb',
+  outlier: '#db2777'
 };
 
 /**
@@ -148,6 +150,10 @@ export class DataToolsComponent {
 
   // validate
   maxGapArea = 100;
+  /** Statistical outliers of the numeric fields (robust z-score), each
+   *  value judged against the whole layer or against its group. */
+  findOutliers = true;
+  outlierGroupField: string | null = null;
   readonly issues = signal<TopologyIssue[] | null>(null);
   readonly issueCounts = signal<{ check: TopologyIssue['check']; label: string; count: number; color: string }[]>([]);
 
@@ -172,6 +178,7 @@ export class DataToolsComponent {
   selectLayer(layerId: string | null): void {
     this.layerId.set(layerId);
     this.fields.set([]);
+    this.outlierGroupField = null;
     this.issues.set(null);
     this.comparison.set(null);
     this.snapshots.set(null);
@@ -334,7 +341,7 @@ export class DataToolsComponent {
   runValidate(prefix = ''): void {
     const layerId = this.layerId();
     if (!layerId) return;
-    this.run(this.api.validate(layerId, this.maxGapArea), (r) => {
+    this.run(this.api.validate(layerId, this.maxGapArea, { enabled: this.findOutliers, groupField: this.outlierGroupField }), (r) => {
       this.issues.set(r.issues);
       this.issueCounts.set(
         (Object.keys(CHECK_LABELS) as TopologyIssue['check'][])

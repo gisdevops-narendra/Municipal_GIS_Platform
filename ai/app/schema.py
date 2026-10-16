@@ -42,12 +42,38 @@ class SpatialFilter(BaseModel):
     reference_filters: List[AttributeFilter] = Field(default_factory=list)
 
 
+OperationKind = Literal[
+    "select", "aggregate", "nearest", "buffer", "route", "service_area"
+]
+
+Metric = Literal["count", "sum", "avg", "min", "max"]
+
+
 class GisOperation(BaseModel):
-    kind: Literal["select"] = "select"
+    """One flat shape for every kind (easier for a small model than a
+    discriminated union); each kind reads only the fields it needs."""
+
+    kind: OperationKind = "select"
     target_layer: str
     attribute_filters: List[AttributeFilter] = Field(default_factory=list)
     spatial_filter: Optional[SpatialFilter] = None
     limit: Optional[int] = None
+    # aggregate
+    metric: Optional[Metric] = None
+    metric_field: Optional[str] = None
+    group_by: Optional[str] = None
+    group_by_layer: Optional[str] = None
+    group_by_layer_field: Optional[str] = None
+    # nearest
+    reference_layer: Optional[str] = None
+    reference_filters: List[AttributeFilter] = Field(default_factory=list)
+    count: Optional[int] = None
+    # buffer / service_area
+    distance_meters: Optional[float] = None
+    # route
+    to_layer: Optional[str] = None
+    to_filters: List[AttributeFilter] = Field(default_factory=list)
+    network_layer: Optional[str] = None
 
 
 class PlanResult(BaseModel):
@@ -95,6 +121,36 @@ class ReindexRequest(BaseModel):
     municipality_id: str
 
 
+class NarrateRequest(BaseModel):
+    """Verified facts (computed by the backend, never by the LLM) to be
+    rewritten as a short plain-language answer."""
+
+    kind: Literal["query", "raster"] = "query"
+    question: str = Field(max_length=2000)
+    facts: dict
+    municipality_name: Optional[str] = None
+
+
+class NarrateResult(BaseModel):
+    text: str
+    # False when the model's text was rejected (e.g. it introduced a number
+    # that is not in the facts) and the caller should keep its own sentence.
+    grounded: bool
+
+
+class SearchRequest(BaseModel):
+    query: str = Field(max_length=200)
+    municipality_id: str
+    top_k: int = 12
+
+
+class SearchHit(BaseModel):
+    layer_id: str
+    field: Optional[str] = None
+    title: str
+    score: float
+
+
 # ---- JSON schema handed to the LLM (output_config.format) ----------------
 
 _ATTR_FILTER_SCHEMA = {
@@ -131,9 +187,27 @@ PLAN_JSON_SCHEMA = {
             "type": ["object", "null"],
             "additionalProperties": False,
             "properties": {
-                "kind": {"type": "string", "enum": ["select"]},
+                "kind": {
+                    "type": "string",
+                    "enum": list(OperationKind.__args__),  # type: ignore[attr-defined]
+                },
                 "target_layer": {"type": "string"},
                 "limit": {"type": ["integer", "null"]},
+                "metric": {
+                    "type": ["string", "null"],
+                    "enum": [*Metric.__args__, None],  # type: ignore[attr-defined]
+                },
+                "metric_field": {"type": ["string", "null"]},
+                "group_by": {"type": ["string", "null"]},
+                "group_by_layer": {"type": ["string", "null"]},
+                "group_by_layer_field": {"type": ["string", "null"]},
+                "reference_layer": {"type": ["string", "null"]},
+                "reference_filters": {"type": "array", "items": _ATTR_FILTER_SCHEMA},
+                "count": {"type": ["integer", "null"]},
+                "distance_meters": {"type": ["number", "null"]},
+                "to_layer": {"type": ["string", "null"]},
+                "to_filters": {"type": "array", "items": _ATTR_FILTER_SCHEMA},
+                "network_layer": {"type": ["string", "null"]},
                 "attribute_filters": {
                     "type": "array",
                     "items": _ATTR_FILTER_SCHEMA,

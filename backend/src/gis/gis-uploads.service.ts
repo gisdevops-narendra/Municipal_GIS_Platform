@@ -4,8 +4,10 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { AiClientService } from '../gis-ai/ai-client.service';
 import * as path from 'path';
 import {
   GISLayerUpload,
@@ -93,6 +95,8 @@ export class GisUploadsService {
     private readonly gisAuth: GisAuthorizationService,
     private readonly styleService: StyleService,
     private readonly fieldStats: FieldStatsService,
+    /** Optional so unit tests need not stub it. */
+    @Optional() private readonly ai?: AiClientService,
   ) {}
 
   async create(
@@ -596,6 +600,11 @@ export class GisUploadsService {
           );
         }
       }
+
+      // Refresh the AI index (chat assistant + semantic search) so the new
+      // layer is findable at once. Fire-and-forget: embedding a large
+      // catalog takes a while and the AI service may be down.
+      void this.ai?.reindex(appUser.municipalityId).catch(() => undefined);
 
       // Best-effort cleanup, never allowed to fail the publish itself
       // (the layer is already live at this point).

@@ -49,12 +49,44 @@ export interface AiSpatialFilter {
   reference_filters?: AiAttributeFilter[];
 }
 
+export type OperationKind =
+  | 'select'
+  | 'aggregate'
+  | 'nearest'
+  | 'buffer'
+  | 'route'
+  | 'service_area';
+
+export type AggregateMetric = 'count' | 'sum' | 'avg' | 'min' | 'max';
+
+/**
+ * One flat shape for every kind (a small model fills a flat object far more
+ * reliably than a discriminated union); each kind reads only its fields.
+ * `target_layer` + `attribute_filters` + `spatial_filter` always pick the
+ * features the operation starts from.
+ */
 export interface AiGisOperation {
-  kind: 'select';
+  kind: OperationKind;
   target_layer: string;
   attribute_filters?: AiAttributeFilter[];
   spatial_filter?: AiSpatialFilter | null;
   limit?: number | null;
+  // aggregate
+  metric?: AggregateMetric | null;
+  metric_field?: string | null;
+  group_by?: string | null;
+  group_by_layer?: string | null;
+  group_by_layer_field?: string | null;
+  // nearest
+  reference_layer?: string | null;
+  reference_filters?: AiAttributeFilter[];
+  count?: number | null;
+  // buffer / service_area
+  distance_meters?: number | null;
+  // route
+  to_layer?: string | null;
+  to_filters?: AiAttributeFilter[];
+  network_layer?: string | null;
 }
 
 export interface AiPlanResult {

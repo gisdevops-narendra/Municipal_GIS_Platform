@@ -1569,8 +1569,14 @@
   }
   @if (facts().length > 0) {
     <div class="ra__export">
+      <button type="button" class="ra__export-btn" (click)="explainResult()" [disabled]="explaining()" title="Explain this result in plain language (local AI model)"><i class="pi" [class.pi-sparkles]="!explaining()" [class.pi-spin]="explaining()" [class.pi-spinner]="explaining()"></i> Explain</button>
       <button type="button" class="ra__export-btn" (click)="exportFacts()" title="Download these results as CSV"><i class="pi pi-download"></i> CSV</button>
     </div>
+    @if (explaining()) {
+      <p class="ra__explain ra__explain--pending">Reading the result… (the local AI model can take up to a minute)</p>
+    } @else if (explanation()) {
+      <p class="ra__explain"><i class="pi pi-sparkles" aria-hidden="true"></i> {{ explanation() }}</p>
+    }
     <ul class="bo__rings">
       @for (f of facts(); track f.label) {
         <li class="bo__ring">

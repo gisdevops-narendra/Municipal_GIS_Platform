@@ -1,15 +1,39 @@
-import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import {
+  ForbiddenException,
+  HttpException,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AppUser } from '../auth/types/app-user.type';
+import { NetworkService } from '../gis/network.service';
 import { AiClientService } from './ai-client.service';
 import { LayerCatalogService } from './layer-catalog.service';
 import {
   GisQueryCompilerService,
   PlanValidationError,
 } from './gis-query-compiler.service';
-import type { AiGisOperation } from './ai-plan.types';
-import type { GisChatDto } from './dto/chat.dto';
+import type { AggregateMetric, AiGisOperation } from './ai-plan.types';
+import type { GisChatDto, GisExplainDto, GisNarrateDto } from './dto/chat.dto';
+
+type Catalog = Awaited<ReturnType<LayerCatalogService['buildForUser']>>;
+type Geo = Record<string, unknown>;
+
+export interface GisChatSelection {
+  layerId: string;
+  layerCode: string;
+  layerName: string;
+  geometryType: string | null;
+  matched: number;
+  truncated: boolean;
+  /** ECQL filter for the Attribute Table + WMS render (Query Builder
+   *  shape). Null when nothing matched. */
+  cql: string | null;
+  /** Matched geometries (EPSG:4326 GeoJSON), capped, for the map
+   *  highlight overlay. */
+  geometries: Geo[];
+}
 
 export interface GisChatResponse {
   answerKind: 'gis_operation' | 'clarification' | 'answer' | 'unsupported';
@@ -22,21 +46,57 @@ export interface GisChatResponse {
    *  user so it is obvious the LLM did not author it. */
   compiledSql?: string;
   compiledSummary?: string;
-  result?: {
-    layerId: string;
-    layerCode: string;
-    layerName: string;
-    geometryType: string | null;
-    matched: number;
+  /** The answer in a sentence, built from the computed numbers (never by
+   *  the LLM) — correct by construction and instant. */
+  answer?: string;
+  /** The verified numbers behind `answer`; the client may send them to
+   *  `/narrate` for a friendlier LLM wording. */
+  facts?: Record<string, unknown>;
+  /** The features the operation selected (map highlight + Attribute Table). */
+  result?: GisChatSelection;
+  aggregate?: {
+    metric: AggregateMetric;
+    metricLabel: string | null;
+    groupLabel: string | null;
+    rows: { group: string | null; value: number | null; count: number }[];
     truncated: boolean;
-    /** ECQL filter for the Attribute Table + WMS render (Query Builder
-     *  shape). Null when nothing matched. */
-    cql: string | null;
-    /** Matched geometries (EPSG:4326 GeoJSON), capped, for the map
-     *  highlight overlay. */
-    geometries: Record<string, unknown>[];
   };
+  nearest?: {
+    referenceLayer: string;
+    referenceLabel: string | null;
+    referenceCount: number;
+    items: { id: number | string; label: string | null; distanceM: number }[];
+  };
+  buffer?: { distanceM: number; sources: number; areaM2: number | null };
+  route?: {
+    networkLayer: string;
+    from: { label: string; layer: string; matches: number };
+    to: { label: string; layer: string; matches: number };
+    lengthM: number;
+  };
+  serviceArea?: {
+    networkLayer: string;
+    origin: { label: string; layer: string; matches: number };
+    distanceM: number;
+    roadLengthM: number;
+  };
+  /** Extra shapes to draw (buffer, route path, service area, reference). */
+  overlays?: Geo[];
 }
+
+const nf = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 });
+const fmt = (n: number | null | undefined) => (n == null ? '—' : nf.format(n));
+const fmtDist = (m: number) =>
+  m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(2)} km`;
+const fmtArea = (m2: number) =>
+  m2 < 10000 ? `${Math.round(m2)} m²` : `${(m2 / 10000).toFixed(2)} ha`;
+const METRIC_WORD: Record<AggregateMetric, string> = {
+  count: 'number',
+  sum: 'total',
+  avg: 'average',
+  min: 'minimum',
+  max: 'maximum',
+};
 
 @Injectable()
 export class GisAiService {
@@ -47,6 +107,7 @@ export class GisAiService {
     private readonly ai: AiClientService,
     private readonly catalog: LayerCatalogService,
     private readonly compiler: GisQueryCompilerService,
+    private readonly network: NetworkService,
     private readonly config: ConfigService,
   ) {}
 
@@ -102,6 +163,7 @@ export class GisAiService {
     }
 
     return this.runOperation(
+      appUser,
       plan.operation,
       catalogEntries,
       workspace.id,
@@ -135,6 +197,7 @@ export class GisAiService {
     }
     const catalogEntries = await this.catalog.buildForUser(appUser);
     return this.runOperation(
+      appUser,
       operation,
       catalogEntries,
       workspace.id,
@@ -143,60 +206,363 @@ export class GisAiService {
     );
   }
 
+  /**
+   * LLM wording for a chat answer the backend already computed. Optional
+   * and slow (one more local-model call), so the panel shows `answer` at
+   * once and swaps this in when it arrives; `text` is null when the model
+   * failed or introduced a number that is not in the facts.
+   */
+  async narrate(appUser: AppUser, dto: GisNarrateDto): Promise<{ text: string | null }> {
+    return this.narrateFacts(appUser, 'query', dto.question, dto.facts);
+  }
+
+  /** Plain-language explanation of a finished Raster Analysis result, from
+   *  the facts the panel shows (and its zone/site table, if any). */
+  async explain(appUser: AppUser, dto: GisExplainDto): Promise<{ text: string | null }> {
+    const facts: Record<string, unknown> = {
+      analysis: dto.title,
+      results: Object.fromEntries(dto.facts.map((f) => [f.label, f.value])),
+    };
+    if (dto.rows?.length) facts['table'] = dto.rows.slice(0, 25);
+    return this.narrateFacts(
+      appUser,
+      'raster',
+      `Explain this ${dto.title} result in plain language.`,
+      facts,
+    );
+  }
+
+  private async narrateFacts(
+    appUser: AppUser,
+    kind: 'query' | 'raster',
+    question: string,
+    facts: Record<string, unknown>,
+  ): Promise<{ text: string | null }> {
+    const municipality = await this.prisma.municipality.findUnique({
+      where: { id: appUser.municipalityId },
+      select: { name: true },
+    });
+    const result = await this.ai.narrate({
+      kind,
+      question,
+      facts,
+      municipality_name: municipality?.name,
+    });
+    return { text: result.grounded && result.text.trim() ? result.text.trim() : null };
+  }
+
+  // ------------------------------------------------------------------
+
   private async runOperation(
+    appUser: AppUser,
     operation: AiGisOperation,
-    catalogEntries: Awaited<ReturnType<LayerCatalogService['buildForUser']>>,
+    catalogEntries: Catalog,
     workspaceId: string,
     explanation: string,
     usedContext: string[],
   ): Promise<GisChatResponse> {
+    const base = { answerKind: 'gis_operation' as const, explanation, operation, usedContext };
     try {
-      const compiled = this.compiler.compile(
-        operation,
-        catalogEntries,
-        workspaceId,
-      );
-      const execution = await this.compiler.execute(compiled);
-      const cql = this.compiler.buildCql(compiled.target, execution.ids);
-
-      return {
-        answerKind: 'gis_operation',
-        explanation,
-        operation,
-        usedContext,
-        compiledSql: compiled.sql,
-        compiledSummary: compiled.summary,
-        result: {
-          layerId: compiled.target.layerId,
-          layerCode: compiled.target.code,
-          layerName: compiled.target.name,
-          geometryType: compiled.target.geometryType,
-          matched: execution.matched,
-          truncated: execution.truncated,
-          cql,
-          geometries: execution.geometries,
-        },
-      };
+      switch (operation.kind ?? 'select') {
+        case 'select':
+          return { ...base, ...(await this.runSelect(operation, catalogEntries, workspaceId)) };
+        case 'aggregate':
+          return { ...base, ...(await this.runAggregate(operation, catalogEntries, workspaceId)) };
+        case 'nearest':
+          return { ...base, ...(await this.runNearest(operation, catalogEntries, workspaceId)) };
+        case 'buffer':
+          return { ...base, ...(await this.runBuffer(operation, catalogEntries, workspaceId)) };
+        case 'route':
+          return { ...base, ...(await this.runRoute(appUser, operation, catalogEntries, workspaceId)) };
+        case 'service_area':
+          return { ...base, ...(await this.runServiceArea(appUser, operation, catalogEntries, workspaceId)) };
+        default:
+          throw new PlanValidationError(
+            `I can't run a "${String(operation.kind)}" operation.`,
+          );
+      }
     } catch (error) {
       if (error instanceof PlanValidationError) {
-        return {
-          answerKind: 'clarification',
-          explanation,
-          clarification: error.message,
-          usedContext,
-          operation,
-        };
+        return { ...base, answerKind: 'clarification', clarification: error.message };
+      }
+      if (error instanceof HttpException && error.getStatus() < 500) {
+        // e.g. the network tools: "not connected", no module access, ...
+        const body = error.getResponse() as { message?: string | string[] } | string;
+        const message =
+          typeof body === 'string'
+            ? body
+            : Array.isArray(body.message)
+              ? body.message.join(' ')
+              : body.message ?? error.message;
+        return { ...base, answerKind: 'clarification', clarification: message };
       }
       this.logger.error(
-        `GIS AI query execution failed: ${(error as Error).message}`,
+        `GIS AI ${operation.kind} execution failed: ${(error as Error).message}`,
       );
       return {
+        ...base,
         answerKind: 'unsupported',
         explanation:
           'I understood the request but the query failed to run. Try narrowing it or rephrasing.',
-        usedContext,
-        operation,
       };
     }
+  }
+
+  /** The operation's starting features as a map/table selection. */
+  private async selection(
+    operation: AiGisOperation,
+    catalogEntries: Catalog,
+    workspaceId: string,
+  ) {
+    const compiled = this.compiler.compile(operation, catalogEntries, workspaceId);
+    const execution = await this.compiler.execute(compiled);
+    const result: GisChatSelection = {
+      layerId: compiled.target.layerId,
+      layerCode: compiled.target.code,
+      layerName: compiled.target.name,
+      geometryType: compiled.target.geometryType,
+      matched: execution.matched,
+      truncated: execution.truncated,
+      cql: this.compiler.buildCql(compiled.target, execution.ids),
+      geometries: execution.geometries,
+    };
+    return { compiled, result };
+  }
+
+  private async runSelect(op: AiGisOperation, catalogEntries: Catalog, ws: string) {
+    const { compiled, result } = await this.selection(op, catalogEntries, ws);
+    const answer =
+      result.matched === 0
+        ? `No ${result.layerName} features match.`
+        : `Found ${fmt(result.matched)} ${result.layerName} feature${result.matched === 1 ? '' : 's'}` +
+          (result.truncated ? ` (the first ${fmt(result.geometries.length)} are shown on the map).` : '.');
+    return {
+      compiledSql: compiled.sql,
+      compiledSummary: compiled.summary,
+      result,
+      answer,
+      facts: { operation: 'select', layer: result.layerName, matched: result.matched },
+    };
+  }
+
+  private async runAggregate(op: AiGisOperation, catalogEntries: Catalog, ws: string) {
+    const compiled = this.compiler.compileAggregate(op, catalogEntries, ws);
+    const { rows, truncated } = await this.compiler.runAggregate(compiled);
+    const { result } = await this.selection(op, catalogEntries, ws);
+    const layer = compiled.target.name;
+    const metric = compiled.metric;
+    const what =
+      metric === 'count'
+        ? `${layer} features`
+        : `${METRIC_WORD[metric]} ${compiled.metricLabel} of ${layer}`;
+
+    let answer: string;
+    const facts: Record<string, unknown> = {
+      operation: 'aggregate',
+      layer,
+      statistic: metric,
+      field: compiled.metricLabel,
+      groupedBy: compiled.groupLabel,
+    };
+    if (!compiled.groupLabel) {
+      const v = rows[0]?.value ?? null;
+      const n = rows[0]?.count ?? 0;
+      answer =
+        metric === 'count'
+          ? `There ${n === 1 ? 'is' : 'are'} ${fmt(n)} ${layer} feature${n === 1 ? '' : 's'} matching the request.`
+          : n === 0
+            ? `No ${layer} features match, so there is no ${METRIC_WORD[metric]}.`
+            : `The ${what} is ${fmt(v)} (over ${fmt(n)} feature${n === 1 ? '' : 's'}).`;
+      Object.assign(facts, { value: v, features: n });
+    } else {
+      const total = rows.reduce((s, r) => s + r.count, 0);
+      const valued = rows.filter((r) => r.value != null);
+      const top = valued[0];
+      const bottom = valued[valued.length - 1];
+      const zeroes = rows.filter((r) => r.count === 0).length;
+      const groupName = compiled.groupLabel;
+      answer =
+        `${metric === 'count' ? 'Counted' : `Computed the ${METRIC_WORD[metric]} ${compiled.metricLabel} for`} ` +
+        `${fmt(total)} ${layer} feature${total === 1 ? '' : 's'} across ${fmt(rows.length)}${truncated ? '+' : ''} group${rows.length === 1 ? '' : 's'} of ${groupName}.` +
+        (top ? ` Highest: ${top.group ?? '(blank)'} (${fmt(top.value)}).` : '') +
+        (bottom && bottom !== top ? ` Lowest: ${bottom.group ?? '(blank)'} (${fmt(bottom.value)}).` : '') +
+        (zeroes ? ` ${fmt(zeroes)} group${zeroes === 1 ? ' has' : 's have'} none.` : '');
+      Object.assign(facts, {
+        totalFeatures: total,
+        groups: rows.length,
+        groupsWithNone: zeroes,
+        highest: valued.slice(0, 5).map((r) => ({ group: r.group, value: r.value })),
+        lowest: valued.slice(-3).map((r) => ({ group: r.group, value: r.value })),
+      });
+    }
+
+    return {
+      compiledSql: compiled.sql,
+      compiledSummary: compiled.summary,
+      result,
+      answer,
+      facts,
+      aggregate: {
+        metric,
+        metricLabel: compiled.metricLabel,
+        groupLabel: compiled.groupLabel,
+        rows,
+        truncated,
+      },
+    };
+  }
+
+  private async runNearest(op: AiGisOperation, catalogEntries: Catalog, ws: string) {
+    const compiled = this.compiler.compileNearest(op, catalogEntries, ws);
+    const { reference, rows } = await this.compiler.runNearest(compiled);
+    const layer = compiled.target.name;
+    const refName = reference.count === 1 && reference.label
+      ? `"${reference.label}" (${compiled.reference.name})`
+      : `the ${fmt(reference.count)} selected ${compiled.reference.name} features`;
+    const items = rows.map((r) => ({ id: r.id, label: r.label, distanceM: r.distanceM }));
+    const answer = rows.length
+      ? `Nearest ${layer} to ${refName}, straight-line: ` +
+        rows.map((r) => `${r.label ?? `#${r.id}`} — ${fmtDist(r.distanceM)}`).join('; ') + '.'
+      : `No ${layer} features match, so none could be ranked.`;
+    const geometries = rows.map((r) => r.geometry).filter((g): g is Geo => g !== null);
+    const result: GisChatSelection = {
+      layerId: compiled.target.layerId,
+      layerCode: compiled.target.code,
+      layerName: layer,
+      geometryType: compiled.target.geometryType,
+      matched: rows.length,
+      truncated: false,
+      cql: this.compiler.buildCql(compiled.target, rows.map((r) => r.id)),
+      geometries,
+    };
+    return {
+      compiledSql: compiled.sql,
+      compiledSummary: compiled.summary,
+      result,
+      answer,
+      facts: {
+        operation: 'nearest',
+        layer,
+        from: refName,
+        results: rows.map((r) => ({ name: r.label ?? `#${r.id}`, distance: fmtDist(r.distanceM) })),
+      },
+      nearest: {
+        referenceLayer: compiled.reference.name,
+        referenceLabel: reference.label,
+        referenceCount: reference.count,
+        items,
+      },
+      overlays: reference.geometry ? [reference.geometry] : [],
+    };
+  }
+
+  private async runBuffer(op: AiGisOperation, catalogEntries: Catalog, ws: string) {
+    const compiled = this.compiler.compileBuffer(op, catalogEntries, ws);
+    const buffer = await this.compiler.runBuffer(compiled);
+    const { result } = await this.selection(op, catalogEntries, ws);
+    const layer = compiled.target.name;
+    const answer = buffer.sources
+      ? `A ${fmtDist(compiled.distanceM)} buffer around ${fmt(buffer.sources)} ${layer} feature${buffer.sources === 1 ? '' : 's'} covers ${fmtArea(buffer.areaM2 ?? 0)}.`
+      : `No ${layer} features match, so there is nothing to buffer.`;
+    return {
+      compiledSql: compiled.sql,
+      compiledSummary: compiled.summary,
+      result,
+      answer,
+      facts: {
+        operation: 'buffer',
+        layer,
+        distance: fmtDist(compiled.distanceM),
+        features: buffer.sources,
+        area: buffer.areaM2 == null ? null : fmtArea(buffer.areaM2),
+      },
+      buffer: { distanceM: compiled.distanceM, sources: buffer.sources, areaM2: buffer.areaM2 },
+      overlays: buffer.geometry ? [buffer.geometry] : [],
+    };
+  }
+
+  private async runRoute(appUser: AppUser, op: AiGisOperation, catalogEntries: Catalog, ws: string) {
+    if (!op.to_layer) {
+      throw new PlanValidationError('Route to where? Name the destination.');
+    }
+    const networkLayer = this.compiler.resolveNetwork(catalogEntries, op.network_layer);
+    const from = await this.compiler.resolvePoint(catalogEntries, op.target_layer, op.attribute_filters, ws);
+    const to = await this.compiler.resolvePoint(catalogEntries, op.to_layer, op.to_filters, ws);
+    const route = await this.network.route(appUser, {
+      layerId: networkLayer.layerId,
+      from: [from.lon, from.lat],
+      to: [to.lon, to.lat],
+    });
+    const note = (p: typeof from, end: string) =>
+      p.matches > 1 ? ` ${fmt(p.matches)} features matched the ${end}; the first was used.` : '';
+    const answer =
+      (route.lengthM < 1
+        ? `"${from.label}" (${from.layer.name}) and "${to.label}" (${to.layer.name}) meet ${networkLayer.name} at the same point, so there is no route between them to measure.`
+        : `The shortest route along ${networkLayer.name} from "${from.label}" (${from.layer.name}) ` +
+          `to "${to.label}" (${to.layer.name}) is ${fmtDist(route.lengthM)}.`) +
+      note(from, 'start') + note(to, 'destination');
+    const endpoints: Geo = {
+      type: 'MultiPoint',
+      coordinates: [[from.lon, from.lat], [to.lon, to.lat]],
+    };
+    return {
+      compiledSummary: `Shortest path on ${networkLayer.name}.`,
+      answer,
+      facts: {
+        operation: 'route',
+        from: from.label,
+        to: to.label,
+        network: networkLayer.name,
+        length: fmtDist(route.lengthM),
+      },
+      route: {
+        networkLayer: networkLayer.name,
+        from: { label: from.label, layer: from.layer.name, matches: from.matches },
+        to: { label: to.label, layer: to.layer.name, matches: to.matches },
+        lengthM: route.lengthM,
+      },
+      overlays: [route.path as unknown as Geo, endpoints],
+    };
+  }
+
+  private async runServiceArea(appUser: AppUser, op: AiGisOperation, catalogEntries: Catalog, ws: string) {
+    const d = Number(op.distance_meters);
+    if (!Number.isFinite(d) || d <= 0) {
+      throw new PlanValidationError('How far along the roads? Give a distance in metres.');
+    }
+    const networkLayer = this.compiler.resolveNetwork(catalogEntries, op.network_layer);
+    const origin = await this.compiler.resolvePoint(catalogEntries, op.target_layer, op.attribute_filters, ws);
+    const response = await this.network.serviceArea(appUser, {
+      layerId: networkLayer.layerId,
+      at: [origin.lon, origin.lat],
+      breaks: [d],
+    });
+    const area = response.areas[0];
+    const answer =
+      `Within ${fmtDist(d)} by road from "${origin.label}" (${origin.layer.name}), ` +
+      `${fmtDist(area?.lengthM ?? 0)} of ${networkLayer.name} can be reached.` +
+      (origin.matches > 1 ? ` ${fmt(origin.matches)} features matched the start; the first was used.` : '');
+    const overlays = [
+      area?.area as Geo | null,
+      { type: 'Point', coordinates: [origin.lon, origin.lat] } as Geo,
+    ].filter((g): g is Geo => !!g);
+    return {
+      compiledSummary: `Service area on ${networkLayer.name}.`,
+      answer,
+      facts: {
+        operation: 'service_area',
+        from: origin.label,
+        network: networkLayer.name,
+        distance: fmtDist(d),
+        reachableRoads: fmtDist(area?.lengthM ?? 0),
+      },
+      serviceArea: {
+        networkLayer: networkLayer.name,
+        origin: { label: origin.label, layer: origin.layer.name, matches: origin.matches },
+        distanceM: d,
+        roadLengthM: area?.lengthM ?? 0,
+      },
+      overlays,
+    };
   }
 }

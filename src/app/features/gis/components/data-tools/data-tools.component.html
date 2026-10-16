@@ -175,6 +175,16 @@
           <span class="bo__label">Report polygon gaps up to (m²)</span>
           <input type="number" class="bo__input" min="0" [(ngModel)]="maxGapArea" />
         </label>
+        <label class="bo__toggle">
+          <input type="checkbox" [(ngModel)]="findOutliers" />
+          <span>Find unusual values — numbers far from what is typical (typos, wrong units, slivers)</span>
+        </label>
+        @if (findOutliers) {
+          <label class="bo__field">
+            <span class="bo__label">Compare each value within its group (optional)</span>
+            <p-select class="bo__select" [options]="fieldOptions()" optionLabel="label" optionValue="value" [(ngModel)]="outlierGroupField" [showClear]="true" [filter]="true" placeholder="Whole layer — or a field such as ward" appendTo="body" />
+          </label>
+        }
         <div class="bo__controls">
           <button pButton type="button" label="Check layer" icon="pi pi-verified" class="p-button-sm bo__run" [loading]="running()" (click)="runValidate()"></button>
         </div>

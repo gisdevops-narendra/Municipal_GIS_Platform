@@ -29,6 +29,28 @@ export interface AiPlanRequest {
   history: { role: 'user' | 'assistant'; content: string }[];
 }
 
+export interface AiNarrateRequest {
+  kind: 'query' | 'raster';
+  question: string;
+  /** Backend-computed, verified numbers — the model only rephrases them. */
+  facts: Record<string, unknown>;
+  municipality_name?: string;
+}
+
+export interface AiNarrateResult {
+  text: string;
+  /** False when the model's text was rejected (it introduced a number not
+   *  in the facts) — the caller keeps its own deterministic sentence. */
+  grounded: boolean;
+}
+
+export interface AiSearchHit {
+  layer_id: string;
+  field: string | null;
+  title: string;
+  score: number;
+}
+
 /**
  * Thin HTTP client for the Python AI/RAG service (`ai/`). The Node backend
  * is the only caller — the browser never talks to it directly.
@@ -55,6 +77,30 @@ export class AiClientService {
     return raw as unknown as AiPlanResult;
   }
 
+  /** One extra local-LLM call (~10-60 s on CPU) — always optional for the
+   *  caller, which already holds a correct deterministic sentence. */
+  async narrate(body: AiNarrateRequest, timeoutMs = 150000): Promise<AiNarrateResult> {
+    const raw = await this.request('POST', '/narrate', body, timeoutMs);
+    return raw as unknown as AiNarrateResult;
+  }
+
+  /** Semantic layer search over this municipality's RAG layer/field docs.
+   *  Embedding only (no LLM), so it is fast; `[]` on any failure. */
+  async searchLayers(municipalityId: string, query: string, timeoutMs = 4000): Promise<AiSearchHit[]> {
+    try {
+      const raw = await this.request(
+        'POST',
+        '/search',
+        { municipality_id: municipalityId, query, top_k: 12 },
+        timeoutMs,
+        true,
+      );
+      return Array.isArray(raw) ? (raw as unknown as AiSearchHit[]) : [];
+    } catch {
+      return [];
+    }
+  }
+
   async reindex(municipalityId: string): Promise<Record<string, unknown>> {
     return this.request(
       'POST',
@@ -69,6 +115,7 @@ export class AiClientService {
     path: string,
     body: unknown,
     timeoutMs: number,
+    quiet = false,
   ): Promise<Record<string, unknown>> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -92,7 +139,7 @@ export class AiClientService {
       if (error instanceof ServiceUnavailableException) {
         throw error;
       }
-      this.logger.error(
+      if (!quiet) this.logger.error(
         `AI service call ${method} ${path} failed: ${(error as Error).message}`,
       );
       throw new ServiceUnavailableException(

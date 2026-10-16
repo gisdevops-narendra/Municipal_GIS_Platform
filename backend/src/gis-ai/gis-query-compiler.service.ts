@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import type {
+  AggregateMetric,
   AiAttributeFilter,
   AiGisOperation,
   AttrOp,
@@ -25,6 +26,18 @@ const DEFAULT_ROWS = 2000;
 // Table exactly.
 const MAX_RENDERED = 450;
 const MAX_DISTANCE_M = 50000;
+const MAX_BUFFER_M = 10000;
+const MAX_BUFFER_SOURCES = 5000;
+const MAX_GROUPS = 200;
+const MAX_NEAREST = 50;
+/** metric_field names a small model uses for "road length" / "plot area"
+ *  when the layer has no such column — computed from the geometry. */
+const GEOMETRY_LENGTH = /^(shape_)?(length|len)(_m|_km|_metres|_meters)?$/i;
+const GEOMETRY_AREA = /^(shape_)?area(_m2|_sqm|_sq_m|_ha)?$/i;
+const LABEL_COLUMN = /^(name|.*_name|name_.*|title|label)$/i;
+/** Text identifiers ("valve_id", "gisid") — the fallback label when a
+ *  feature's name columns are empty. */
+const ID_COLUMN = /(^|_)(id|gisid|code|no)$/i;
 
 const COMPARISON: Partial<Record<AttrOp, string>> = {
   '=': '=',
@@ -43,6 +56,47 @@ export interface CompiledQuery {
   summary: string;
 }
 
+export interface CompiledAggregate extends CompiledQuery {
+  metric: AggregateMetric;
+  /** Column (or "length (m)" / "area (m²)") the metric is computed on. */
+  metricLabel: string | null;
+  /** What the rows are grouped by, e.g. "Wards.ward_name". */
+  groupLabel: string | null;
+}
+
+export interface AggregateRow {
+  group: string | null;
+  value: number | null;
+  count: number;
+}
+
+export interface CompiledNearest extends CompiledQuery {
+  /** Reference set on its own — count, first label, geometry. */
+  refSql: string;
+  refParams: unknown[];
+  reference: LayerCatalogEntry;
+}
+
+export interface NearestRow {
+  id: number | string;
+  label: string | null;
+  distanceM: number;
+  geometry: Record<string, unknown> | null;
+}
+
+export interface CompiledBuffer extends CompiledQuery {
+  distanceM: number;
+}
+
+export interface ResolvedPoint {
+  layer: LayerCatalogEntry;
+  lon: number;
+  lat: number;
+  label: string;
+  /** How many features matched the filters (the first one is used). */
+  matches: number;
+}
+
 export interface ExecutionResult {
   matched: number;
   truncated: boolean;
@@ -52,31 +106,524 @@ export interface ExecutionResult {
   geometries: Record<string, unknown>[];
 }
 
+type Bind = (value: unknown) => string;
+
 @Injectable()
 export class GisQueryCompilerService {
   private readonly logger = new Logger(GisQueryCompilerService.name);
 
   constructor(private readonly prisma: PrismaService) {}
 
+  /** The features an operation starts from, as a selection query. Every
+   *  kind uses it: `select` returns it, the others also highlight it. */
   compile(
     operation: AiGisOperation,
     catalog: LayerCatalogEntry[],
     workspaceId: string,
   ): CompiledQuery {
-    if (operation.kind !== 'select') {
+    const target = this.resolveLayer(catalog, operation.target_layer);
+    const { params, bind } = this.binder();
+    const t = 'tgt';
+    const { where, summaryBits } = this.selectionWhere(
+      t,
+      target,
+      operation,
+      catalog,
+      workspaceId,
+      bind,
+    );
+
+    const limit = this.clampLimit(operation.limit);
+    const sql =
+      `SELECT ${t}."${target.pkColumn}" AS __id, ` +
+      `ST_AsGeoJSON(ST_Transform(${t}."${target.geomColumn}", 4326), 6) AS __geojson ` +
+      `FROM "${target.table}" ${t} ` +
+      (where.length ? `WHERE ${where.join(' AND ')} ` : '') +
+      `LIMIT ${limit}`;
+
+    return {
+      sql,
+      params,
+      target,
+      summary: `Select from ${target.name}${
+        summaryBits.length ? ' where ' + summaryBits.join(' and ') : ''
+      }.`,
+    };
+  }
+
+  /**
+   * count / sum / avg / min / max over the selected features — optionally
+   * grouped by one of their columns, or by the polygons of another layer
+   * ("street lights per ward"). Zone grouping assigns each feature to the
+   * zone containing its point-on-surface, so a feature is never counted
+   * twice, and lists zones with no features as 0.
+   */
+  compileAggregate(
+    operation: AiGisOperation,
+    catalog: LayerCatalogEntry[],
+    workspaceId: string,
+  ): CompiledAggregate {
+    const target = this.resolveLayer(catalog, operation.target_layer);
+    const { params, bind } = this.binder();
+    const t = 'tgt';
+    const { where, summaryBits } = this.selectionWhere(
+      t,
+      target,
+      operation,
+      catalog,
+      workspaceId,
+      bind,
+    );
+
+    const metric: AggregateMetric = operation.metric ?? 'count';
+    if (!['count', 'sum', 'avg', 'min', 'max'].includes(metric)) {
+      throw new PlanValidationError(`Unsupported statistic "${metric}".`);
+    }
+    let valueExpr = `count(${t}."${target.pkColumn}")`;
+    let metricLabel: string | null = null;
+    if (metric !== 'count') {
+      if (!operation.metric_field) {
+        throw new PlanValidationError(
+          `Which numeric field of "${target.name}" should I ${metric}? Numeric fields: ${this.numericNames(target)}.`,
+        );
+      }
+      const measured = this.measureExpr(t, target, operation.metric_field);
+      valueExpr = `${metric}(${measured.expr})`;
+      metricLabel = measured.label;
+    }
+    const value = `(${valueExpr})::float8`;
+    const n = `count(${t}."${target.pkColumn}")::int`;
+
+    let sql: string;
+    let groupLabel: string | null = null;
+    if (operation.group_by_layer) {
+      const zones = this.resolveLayer(catalog, operation.group_by_layer);
+      if (zones.geometryType && zones.geometryType !== 'POLYGON') {
+        throw new PlanValidationError(
+          `"${zones.name}" is not a polygon layer, so it cannot group features by area.`,
+        );
+      }
+      const labelCol = operation.group_by_layer_field
+        ? this.findColumn(zones, operation.group_by_layer_field)
+        : this.labelColumn(zones);
+      const z = 'zn';
+      const zGeom =
+        zones.srid === target.srid
+          ? `${z}."${zones.geomColumn}"`
+          : `ST_Transform(${z}."${zones.geomColumn}", ${target.srid})`;
+      const tGeom = `${t}."${target.geomColumn}"`;
+      const on = [
+        `${tGeom} && ${zGeom}`,
+        `ST_Intersects(${zGeom}, ST_PointOnSurface(${tGeom}))`,
+        ...where,
+      ];
+      const zWhere = zones.isDemo
+        ? `WHERE ${z}."gis_workspace_id" = ${bind(workspaceId)} `
+        : '';
+      const grp = labelCol
+        ? `${z}."${labelCol.name}"::text`
+        : `${z}."${zones.pkColumn}"::text`;
+      sql =
+        `SELECT ${grp} AS grp, ${value} AS val, ${n} AS n ` +
+        `FROM "${zones.table}" ${z} LEFT JOIN "${target.table}" ${t} ON ${on.join(' AND ')} ` +
+        zWhere +
+        `GROUP BY 1 ORDER BY 2 DESC NULLS LAST, 1 LIMIT ${MAX_GROUPS + 1}`;
+      groupLabel = `${zones.name}${labelCol ? '.' + labelCol.name : ''}`;
+    } else if (operation.group_by) {
+      const col = this.findColumn(target, operation.group_by);
+      sql =
+        `SELECT ${t}."${col.name}"::text AS grp, ${value} AS val, ${n} AS n ` +
+        `FROM "${target.table}" ${t} ` +
+        (where.length ? `WHERE ${where.join(' AND ')} ` : '') +
+        `GROUP BY 1 ORDER BY 2 DESC NULLS LAST, 1 LIMIT ${MAX_GROUPS + 1}`;
+      groupLabel = col.name;
+    } else {
+      sql =
+        `SELECT NULL::text AS grp, ${value} AS val, ${n} AS n ` +
+        `FROM "${target.table}" ${t} ` +
+        (where.length ? `WHERE ${where.join(' AND ')} ` : '');
+    }
+
+    return {
+      sql,
+      params,
+      target,
+      metric,
+      metricLabel,
+      groupLabel,
+      summary: `${metric}${metricLabel ? ' of ' + metricLabel : ''} of ${target.name}${
+        groupLabel ? ' per ' + groupLabel : ''
+      }${summaryBits.length ? ' where ' + summaryBits.join(' and ') : ''}.`,
+    };
+  }
+
+  /** The N selected features closest (straight line) to the reference
+   *  features — e.g. the 3 hospitals nearest a named school. */
+  compileNearest(
+    operation: AiGisOperation,
+    catalog: LayerCatalogEntry[],
+    workspaceId: string,
+  ): CompiledNearest {
+    if (!operation.reference_layer) {
       throw new PlanValidationError(
-        'Only feature-selection queries are supported right now.',
+        'Nearest to what? Name the place or layer to measure from.',
       );
     }
     const target = this.resolveLayer(catalog, operation.target_layer);
-    const params: unknown[] = [];
-    const bind = (value: unknown): string => {
-      params.push(value);
-      return `$${params.length}`;
-    };
+    const reference = this.resolveLayer(catalog, operation.reference_layer);
+    const k = Math.min(
+      Math.max(1, Math.trunc(Number(operation.count ?? 1)) || 1),
+      MAX_NEAREST,
+    );
+    const r = 'ref';
+
+    // The reference set on its own, to report "not found" / what it was.
+    const refQ = this.binder();
+    const refWhere = this.referenceWhere(r, reference, operation, workspaceId, refQ.bind);
+    const refLabelExpr = `coalesce(${this.labelExpr(r, reference)}, ${r}."${reference.pkColumn}"::text)`;
+    const refSql =
+      `SELECT count(*)::int AS n, ` +
+      `(array_agg(${refLabelExpr} ORDER BY ${r}."${reference.pkColumn}"))[1] AS label, ` +
+      `ST_AsGeoJSON(ST_Transform(ST_Collect(${r}."${reference.geomColumn}"), 4326), 6) AS geojson ` +
+      `FROM "${reference.table}" ${r}` +
+      (refWhere.length ? ` WHERE ${refWhere.join(' AND ')}` : '');
+
+    // Main query: the same reference filters re-bound, collected into one
+    // geometry in the target CRS (an InitPlan, so the KNN index applies).
+    const { params, bind } = this.binder();
+    const refWhere2 = this.referenceWhere(r, reference, operation, workspaceId, bind);
+    const refGeom =
+      reference.srid === target.srid
+        ? `${r}."${reference.geomColumn}"`
+        : `ST_Transform(${r}."${reference.geomColumn}", ${target.srid})`;
+    const refCollect =
+      `(SELECT ST_Collect(${refGeom}) FROM "${reference.table}" ${r}` +
+      (refWhere2.length ? ` WHERE ${refWhere2.join(' AND ')}` : '') +
+      ')';
 
     const t = 'tgt';
+    const { where, summaryBits } = this.selectionWhere(
+      t,
+      target,
+      operation,
+      catalog,
+      workspaceId,
+      bind,
+    );
+    const tGeom = `${t}."${target.geomColumn}"`;
+    if (target.table === reference.table) {
+      // "the nearest school to school X" must not answer X itself.
+      where.push(`NOT ST_Intersects(${tGeom}, ${refCollect})`);
+    }
+    const dist =
+      target.srid !== 4326
+        ? `ST_Distance(${tGeom}, ${refCollect})`
+        : `ST_Distance(${tGeom}::geography, ${refCollect}::geography)`;
+    const sql =
+      `SELECT ${t}."${target.pkColumn}" AS __id, ` +
+      `ST_AsGeoJSON(ST_Transform(${tGeom}, 4326), 6) AS __geojson, ` +
+      `${this.labelExpr(t, target)} AS __label, ` +
+      `${dist}::float8 AS __dist ` +
+      `FROM "${target.table}" ${t} ` +
+      `WHERE ${[`${refCollect} IS NOT NULL`, ...where].join(' AND ')} ` +
+      `ORDER BY ${tGeom} <-> ${refCollect} LIMIT ${k}`;
+
+    return {
+      sql,
+      params,
+      refSql,
+      refParams: refQ.params,
+      target,
+      reference,
+      summary: `${k} nearest ${target.name} to ${reference.name}${
+        summaryBits.length ? ' where ' + summaryBits.join(' and ') : ''
+      }.`,
+    };
+  }
+
+  /** One dissolved buffer polygon of `distance_meters` around the selected
+   *  features, plus its area. */
+  compileBuffer(
+    operation: AiGisOperation,
+    catalog: LayerCatalogEntry[],
+    workspaceId: string,
+  ): CompiledBuffer {
+    const target = this.resolveLayer(catalog, operation.target_layer);
+    const d = Number(operation.distance_meters);
+    if (!Number.isFinite(d) || d <= 0) {
+      throw new PlanValidationError(
+        'How wide should the buffer be? Give a distance in metres.',
+      );
+    }
+    if (d > MAX_BUFFER_M) {
+      throw new PlanValidationError(
+        `That buffer is too wide (maximum ${MAX_BUFFER_M} m).`,
+      );
+    }
+    const { params, bind } = this.binder();
+    const t = 'tgt';
+    const { where, summaryBits } = this.selectionWhere(
+      t,
+      target,
+      operation,
+      catalog,
+      workspaceId,
+      bind,
+    );
+    const metric = target.srid !== 4326;
+    const dist = bind(d);
+    const buffered = metric
+      ? `ST_Buffer(src.g, ${dist}, 'quad_segs=8')`
+      : `ST_Buffer(src.g::geography, ${dist}, 'quad_segs=8')::geometry`;
+    const area = metric ? 'ST_Area(u.g)' : 'ST_Area(u.g::geography)';
+    // Simplify the dissolved outline to ~2 % of the width: plenty for
+    // display, and keeps the GeoJSON small.
+    const tol = metric ? d / 50 : d / 50 / 111320;
+    const sql =
+      `WITH src AS (SELECT ${t}."${target.geomColumn}" AS g FROM "${target.table}" ${t} ` +
+      (where.length ? `WHERE ${where.join(' AND ')} ` : '') +
+      `LIMIT ${MAX_BUFFER_SOURCES + 1}), ` +
+      `cnt AS (SELECT count(*)::int AS n FROM src), ` +
+      `u AS (SELECT ST_Union(${buffered}) AS g FROM src ` +
+      `WHERE (SELECT n FROM cnt) <= ${MAX_BUFFER_SOURCES}) ` +
+      `SELECT (SELECT n FROM cnt) AS n, ${area}::float8 AS area, ` +
+      `ST_AsGeoJSON(ST_Transform(ST_SimplifyPreserveTopology(u.g, ${tol}), 4326), 6) AS geojson FROM u`;
+
+    return {
+      sql,
+      params,
+      target,
+      distanceM: d,
+      summary: `${d} m buffer around ${target.name}${
+        summaryBits.length ? ' where ' + summaryBits.join(' and ') : ''
+      }.`,
+    };
+  }
+
+  async execute(compiled: CompiledQuery): Promise<ExecutionResult> {
+    const rows = await this.readOnly<{ __id: number | string; __geojson: string }>(
+      compiled.sql,
+      compiled.params,
+    );
+
+    const matched = rows.length;
+    const rendered = rows.slice(0, MAX_RENDERED);
+    const truncated = matched >= HARD_MAX_ROWS || rendered.length < matched;
+    const ids = rendered.map((row) => row.__id);
+    const geometries = rendered
+      .map((row) => this.parseGeo(row.__geojson))
+      .filter((g): g is Record<string, unknown> => g !== null);
+
+    return { matched, truncated, ids, geometries };
+  }
+
+  async runAggregate(
+    compiled: CompiledAggregate,
+  ): Promise<{ rows: AggregateRow[]; truncated: boolean }> {
+    const rows = await this.readOnly<{
+      grp: string | null;
+      val: number | null;
+      n: number;
+    }>(compiled.sql, compiled.params);
+    return {
+      rows: rows.slice(0, MAX_GROUPS).map((r) => ({
+        group: r.grp,
+        value: r.val == null ? null : Number(r.val),
+        count: Number(r.n),
+      })),
+      truncated: rows.length > MAX_GROUPS,
+    };
+  }
+
+  async runNearest(compiled: CompiledNearest): Promise<{
+    reference: {
+      count: number;
+      label: string | null;
+      geometry: Record<string, unknown> | null;
+    };
+    rows: NearestRow[];
+  }> {
+    const [ref] = await this.readOnly<{
+      n: number;
+      label: string | null;
+      geojson: string | null;
+    }>(compiled.refSql, compiled.refParams);
+    if (!ref || Number(ref.n) === 0) {
+      throw new PlanValidationError(
+        `No feature in "${compiled.reference.name}" matches those conditions, so there is nothing to measure from.`,
+      );
+    }
+    const rows = await this.readOnly<{
+      __id: number | string;
+      __geojson: string;
+      __label: string | null;
+      __dist: number;
+    }>(compiled.sql, compiled.params);
+    return {
+      reference: {
+        count: Number(ref.n),
+        label: ref.label,
+        geometry: this.parseGeo(ref.geojson),
+      },
+      rows: rows.map((r) => ({
+        id: r.__id,
+        label: r.__label,
+        distanceM: Number(r.__dist),
+        geometry: this.parseGeo(r.__geojson),
+      })),
+    };
+  }
+
+  async runBuffer(compiled: CompiledBuffer): Promise<{
+    sources: number;
+    areaM2: number | null;
+    geometry: Record<string, unknown> | null;
+  }> {
+    const [row] = await this.readOnly<{
+      n: number;
+      area: number | null;
+      geojson: string | null;
+    }>(compiled.sql, compiled.params);
+    const sources = Number(row?.n ?? 0);
+    if (sources > MAX_BUFFER_SOURCES) {
+      throw new PlanValidationError(
+        `That would buffer more than ${MAX_BUFFER_SOURCES} features — narrow it down with a condition.`,
+      );
+    }
+    return {
+      sources,
+      areaM2: row?.area == null ? null : Number(row.area),
+      geometry: this.parseGeo(row?.geojson ?? null),
+    };
+  }
+
+  /** A single location for route / service-area ends: the point-on-surface
+   *  of the first feature matching the filters. */
+  async resolvePoint(
+    catalog: LayerCatalogEntry[],
+    layerRef: string,
+    filters: AiAttributeFilter[] | undefined,
+    workspaceId: string,
+  ): Promise<ResolvedPoint> {
+    const layer = this.resolveLayer(catalog, layerRef);
+    const { params, bind } = this.binder();
+    const a = 'pt';
+    const where = (filters ?? []).map((f) => this.attrClause(a, layer, f, bind));
+    if (layer.isDemo) where.push(`${a}."gis_workspace_id" = ${bind(workspaceId)}`);
+    where.push(`${a}."${layer.geomColumn}" IS NOT NULL`);
+    const p = `ST_Transform(ST_PointOnSurface(${a}."${layer.geomColumn}"), 4326)`;
+    const sql =
+      `SELECT ST_X(${p})::float8 AS lon, ST_Y(${p})::float8 AS lat, ` +
+      `coalesce(${this.labelExpr(a, layer)}, ${a}."${layer.pkColumn}"::text) AS label, ` +
+      `count(*) OVER ()::int AS total ` +
+      `FROM "${layer.table}" ${a} WHERE ${where.join(' AND ')} ` +
+      `ORDER BY ${a}."${layer.pkColumn}" LIMIT 1`;
+    const [row] = await this.readOnly<{
+      lon: number;
+      lat: number;
+      label: string | null;
+      total: number;
+    }>(sql, params);
+    if (!row) {
+      throw new PlanValidationError(
+        `No feature in "${layer.name}" matches ${
+          (filters ?? []).length ? 'those conditions' : 'the request'
+        }.`,
+      );
+    }
+    return {
+      layer,
+      lon: Number(row.lon),
+      lat: Number(row.lat),
+      label: row.label ?? layer.name,
+      matches: Number(row.total),
+    };
+  }
+
+  /** The road layer for route / service area: the one named in the plan,
+   *  else the only line layer, else the line layer that looks like roads. */
+  resolveNetwork(
+    catalog: LayerCatalogEntry[],
+    ref: string | null | undefined,
+  ): LayerCatalogEntry {
+    if (ref) {
+      const layer = this.resolveLayer(catalog, ref);
+      if (layer.geometryType && layer.geometryType !== 'LINE') {
+        throw new PlanValidationError(
+          `"${layer.name}" is not a line layer, so it cannot be routed on.`,
+        );
+      }
+      return layer;
+    }
+    const lines = catalog.filter((l) => l.geometryType === 'LINE');
+    if (lines.length === 1) return lines[0];
+    const roads = lines.filter((l) =>
+      /road|street|network|highway/i.test(`${l.name} ${l.code}`),
+    );
+    if (roads.length >= 1) return roads[0];
+    throw new PlanValidationError(
+      lines.length
+        ? `Which road layer should I route on? Line layers: ${lines
+            .map((l) => l.name)
+            .join(', ')}.`
+        : 'There is no road (line) layer to route on.',
+    );
+  }
+
+  /** ECQL feature filter for the Attribute Table + WMS render — GeoServer's
+   *  `IN ('<layer>.<fid>', ...)` feature-id form (the PK is consumed as the
+   *  feature id and is not exposed as a queryable attribute). `null` when
+   *  nothing matched. */
+  buildCql(target: LayerCatalogEntry, ids: (number | string)[]): string | null {
+    if (ids.length === 0) return null;
+    const list = ids
+      .map(
+        (id) =>
+          `'${target.geoserverLayer}.${String(id).replace(/'/g, "''")}'`,
+      )
+      .join(',');
+    return `IN (${list})`;
+  }
+
+  // --------------------------------------------------------------------
+
+  /** Every compiled statement runs here: one read-only transaction with a
+   *  statement timeout, parameters bound — never interpolated. */
+  private async readOnly<T>(sql: string, params: unknown[]): Promise<T[]> {
+    return this.prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRawUnsafe('SET TRANSACTION READ ONLY');
+        await tx.$executeRawUnsafe("SET LOCAL statement_timeout = '20s'");
+        return tx.$queryRawUnsafe<T[]>(sql, ...params);
+      },
+      { timeout: 25000, maxWait: 5000 },
+    );
+  }
+
+  private binder(): { params: unknown[]; bind: Bind } {
+    const params: unknown[] = [];
+    return {
+      params,
+      bind: (value: unknown) => {
+        params.push(value);
+        return `$${params.length}`;
+      },
+    };
+  }
+
+  /** WHERE clauses selecting the operation's starting features: its
+   *  attribute filters, its optional spatial filter (EXISTS subquery) and
+   *  the workspace scope of the shared demo tables. */
+  private selectionWhere(
+    t: string,
+    target: LayerCatalogEntry,
+    operation: AiGisOperation,
+    catalog: LayerCatalogEntry[],
+    workspaceId: string,
+    bind: Bind,
+  ): { where: string[]; summaryBits: string[] } {
     const where: string[] = [];
+    const summaryBits: string[] = [];
 
     for (const filter of operation.attribute_filters ?? []) {
       where.push(this.attrClause(t, target, filter, bind));
@@ -84,8 +631,6 @@ export class GisQueryCompilerService {
     if (target.isDemo) {
       where.push(`${t}."gis_workspace_id" = ${bind(workspaceId)}`);
     }
-
-    const summaryBits: string[] = [];
     if ((operation.attribute_filters ?? []).length > 0) {
       summaryBits.push(
         `${operation.attribute_filters!.length} attribute condition(s)`,
@@ -117,71 +662,111 @@ export class GisQueryCompilerService {
         } of ${ref.name}`,
       );
     }
-
-    const limit = this.clampLimit(operation.limit);
-    const sql =
-      `SELECT ${t}."${target.pkColumn}" AS __id, ` +
-      `ST_AsGeoJSON(ST_Transform(${t}."${target.geomColumn}", 4326), 6) AS __geojson ` +
-      `FROM "${target.table}" ${t} ` +
-      (where.length ? `WHERE ${where.join(' AND ')} ` : '') +
-      `LIMIT ${limit}`;
-
-    return {
-      sql,
-      params,
-      target,
-      summary: `Select from ${target.name}${
-        summaryBits.length ? ' where ' + summaryBits.join(' and ') : ''
-      }.`,
-    };
+    return { where, summaryBits };
   }
 
-  async execute(compiled: CompiledQuery): Promise<ExecutionResult> {
-    const rows = await this.prisma.$transaction(
-      async (tx) => {
-        await tx.$executeRawUnsafe('SET TRANSACTION READ ONLY');
-        await tx.$executeRawUnsafe("SET LOCAL statement_timeout = '20s'");
-        return tx.$queryRawUnsafe<{ __id: number | string; __geojson: string }[]>(
-          compiled.sql,
-          ...compiled.params,
-        );
-      },
-      { timeout: 25000, maxWait: 5000 },
+  private referenceWhere(
+    r: string,
+    reference: LayerCatalogEntry,
+    operation: AiGisOperation,
+    workspaceId: string,
+    bind: Bind,
+  ): string[] {
+    const where = (operation.reference_filters ?? []).map((f) =>
+      this.attrClause(r, reference, f, bind),
     );
-
-    const matched = rows.length;
-    const rendered = rows.slice(0, MAX_RENDERED);
-    const truncated = matched >= HARD_MAX_ROWS || rendered.length < matched;
-    const ids = rendered.map((row) => row.__id);
-    const geometries = rendered
-      .map((row) => {
-        try {
-          return JSON.parse(row.__geojson) as Record<string, unknown>;
-        } catch {
-          return null;
-        }
-      })
-      .filter((g): g is Record<string, unknown> => g !== null);
-
-    return { matched, truncated, ids, geometries };
+    if (reference.isDemo) {
+      where.push(`${r}."gis_workspace_id" = ${bind(workspaceId)}`);
+    }
+    return where;
   }
 
-  /** ECQL feature filter for the Attribute Table + WMS render — GeoServer's
-   *  `IN ('<layer>.<fid>', ...)` feature-id form (the PK is consumed as the
-   *  feature id and is not exposed as a queryable attribute). `null` when
-   *  nothing matched. */
-  buildCql(target: LayerCatalogEntry, ids: (number | string)[]): string | null {
-    if (ids.length === 0) return null;
-    const list = ids
-      .map(
-        (id) =>
-          `'${target.geoserverLayer}.${String(id).replace(/'/g, "''")}'`,
+  /** A numeric column, or the geometry's length / area in metres when the
+   *  plan names one the layer does not have ("total road length"). */
+  private measureExpr(
+    t: string,
+    layer: LayerCatalogEntry,
+    field: string,
+  ): { expr: string; label: string } {
+    const needle = field.trim().toLowerCase();
+    const col =
+      layer.columns.find((c) => c.name.toLowerCase() === needle) ??
+      layer.columns.find(
+        (c) => c.name.toLowerCase().replace(/_/g, '') === needle.replace(/_/g, ''),
+      );
+    if (col) {
+      if (col.kind !== 'integer' && col.kind !== 'number') {
+        throw new PlanValidationError(
+          `"${col.name}" is not numeric. Numeric fields of "${layer.name}": ${this.numericNames(layer)}.`,
+        );
+      }
+      return { expr: `${t}."${col.name}"`, label: col.name };
+    }
+    const g = `${t}."${layer.geomColumn}"`;
+    const metric = layer.srid !== 4326;
+    if (GEOMETRY_LENGTH.test(needle) && layer.geometryType === 'LINE') {
+      return {
+        expr: metric ? `ST_Length(${g})` : `ST_Length(${g}::geography)`,
+        label: 'length (m)',
+      };
+    }
+    if (GEOMETRY_AREA.test(needle) && layer.geometryType === 'POLYGON') {
+      return {
+        expr: metric ? `ST_Area(${g})` : `ST_Area(${g}::geography)`,
+        label: 'area (m²)',
+      };
+    }
+    throw new PlanValidationError(
+      `Layer "${layer.name}" has no numeric field "${field}". Numeric fields: ${this.numericNames(layer)}.`,
+    );
+  }
+
+  private numericNames(layer: LayerCatalogEntry): string {
+    const names = layer.columns
+      .filter(
+        (c) =>
+          (c.kind === 'integer' || c.kind === 'number') &&
+          c.name !== 'ogc_fid' &&
+          c.name !== 'id',
       )
-      .join(',');
-    return `IN (${list})`;
+      .map((c) => c.name);
+    if (layer.geometryType === 'LINE') names.push('length');
+    if (layer.geometryType === 'POLYGON') names.push('area');
+    return names.length ? names.join(', ') : 'none';
   }
 
-  // --------------------------------------------------------------------
+  /** The column that names a feature ("name", "ward_name", ...), if any. */
+  private labelColumn(layer: LayerCatalogEntry): CatalogColumn | null {
+    const text = layer.columns.filter(
+      (c) => c.kind === 'text' && c.name !== 'gis_workspace_id',
+    );
+    return text.find((c) => LABEL_COLUMN.test(c.name)) ?? text[0] ?? null;
+  }
+
+  /** SQL naming one feature for a person: its first non-empty name-like
+   *  column, else a text identifier (valve_id, gisid), else null. */
+  private labelExpr(alias: string, layer: LayerCatalogEntry): string {
+    const text = layer.columns.filter(
+      (c) => c.kind === 'text' && c.name !== 'gis_workspace_id',
+    );
+    const picks = [
+      ...text.filter((c) => LABEL_COLUMN.test(c.name)),
+      ...text.filter((c) => ID_COLUMN.test(c.name)),
+    ].slice(0, 4);
+    if (picks.length === 0) return 'NULL::text';
+    return `coalesce(${picks
+      .map((c) => `nullif(trim(${alias}."${c.name}"::text), '')`)
+      .join(', ')})`;
+  }
+
+  private parseGeo(text: string | null): Record<string, unknown> | null {
+    if (!text) return null;
+    try {
+      return JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
 
   private resolveLayer(
     catalog: LayerCatalogEntry[],
@@ -250,7 +835,7 @@ export class GisQueryCompilerService {
     alias: string,
     layer: LayerCatalogEntry,
     filter: AiAttributeFilter,
-    bind: (v: unknown) => string,
+    bind: Bind,
   ): string {
     const col = this.findColumn(layer, filter.field);
     const ref = `${alias}."${col.name}"`;
@@ -318,7 +903,7 @@ export class GisQueryCompilerService {
     rAlias: string,
     ref: LayerCatalogEntry,
     sf: NonNullable<AiGisOperation['spatial_filter']>,
-    bind: (v: unknown) => string,
+    bind: Bind,
   ): string {
     const tGeom = `${tAlias}."${target.geomColumn}"`;
     const rGeomRaw = `${rAlias}."${ref.geomColumn}"`;

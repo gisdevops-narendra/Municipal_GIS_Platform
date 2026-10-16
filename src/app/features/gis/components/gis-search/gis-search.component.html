@@ -35,7 +35,12 @@
             <span class="gis-search__group-title">Layers</span>
             @for (match of result().layers; track match.id) {
               <button type="button" class="gis-search__result" (click)="selectLayer(match)">
-                <span class="gis-search__result-title">{{ match.name }}</span>
+                <span class="gis-search__result-title">
+                  {{ match.name }}
+                  @if (match.match === 'semantic') {
+                    <span class="gis-search__related" [title]="match.matchedField ? 'Related by meaning, via its field ' + match.matchedField : 'Related by meaning'">Related</span>
+                  }
+                </span>
                 <span class="gis-search__result-meta">{{ match.departmentName ?? 'Canonical' }}</span>
               </button>
             }

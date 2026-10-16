@@ -1,7 +1,9 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsIn,
+  IsObject,
   IsOptional,
   IsString,
   MaxLength,
@@ -34,4 +36,47 @@ export class GisChatDto {
   @ValidateNested({ each: true })
   @Type(() => ChatTurnDto)
   history?: ChatTurnDto[];
+}
+
+/** `POST /gis/ai/narrate` — the question plus the `facts` a chat answer
+ *  came back with. */
+export class GisNarrateDto {
+  @IsString()
+  @MinLength(2)
+  @MaxLength(2000)
+  question!: string;
+
+  @IsObject()
+  facts!: Record<string, unknown>;
+}
+
+export class ExplainFactDto {
+  @IsString()
+  @MaxLength(120)
+  label!: string;
+
+  @IsString()
+  @MaxLength(300)
+  value!: string;
+}
+
+/** `POST /gis/ai/explain` — a finished Raster Analysis result as the panel
+ *  shows it: its title, the label/value facts and, optionally, its table. */
+export class GisExplainDto {
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  title!: string;
+
+  @IsArray()
+  @ArrayMaxSize(40)
+  @ValidateNested({ each: true })
+  @Type(() => ExplainFactDto)
+  facts!: ExplainFactDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsObject({ each: true })
+  rows?: Record<string, unknown>[];
 }

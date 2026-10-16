@@ -20,9 +20,12 @@ import { ChatMessage, GisChatResponse } from '../../models/gis-ai.model';
 
 const EXAMPLES = [
   'Show buildings within 50m of roads.',
-  'Find vacant properties larger than 2000 sq ft in Ward 5.',
-  'Find schools within 1 km of hospitals.',
+  'How many signals are there in each zone?',
+  'Nearest 3 hospitals to ward 5.',
+  'Make a 200 m buffer around the lakes.',
 ];
+
+const nf = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 });
 
 /**
  * AI Assistant — natural-language GIS queries, living in the workspace left
@@ -66,7 +69,13 @@ export class AiChatComponent {
   private history(): { role: 'user' | 'assistant'; content: string }[] {
     return this.messages()
       .filter((m) => !m.pending && !m.error)
-      .map((m) => ({ role: m.role, content: m.content }));
+      .map((m) => ({ role: m.role, content: m.response?.answer ?? m.content }));
+  }
+
+  /** The assistant's main text: the LLM wording once it arrives, else the
+   *  computed answer, else the plan's explanation. */
+  mainText(msg: ChatMessage): string {
+    return msg.narration ?? msg.response?.answer ?? msg.content;
   }
 
   useExample(text: string): void {
@@ -92,12 +101,15 @@ export class AiChatComponent {
     this.aiService.chat(text, priorHistory, this.activeLayerId).subscribe({
       next: (response) => {
         this.sending.set(false);
-        this.applyAssistant({
+        const wantsWording = !!response.answer && !!response.facts;
+        const index = this.applyAssistant({
           role: 'assistant',
           content: response.explanation,
           response,
+          narrating: wantsWording,
         });
         this.applyResultToMap(response);
+        if (wantsWording) this.narrate(index, text, response.facts!);
       },
       error: (err: HttpErrorResponse) => {
         this.sending.set(false);
@@ -116,31 +128,53 @@ export class AiChatComponent {
     });
   }
 
-  private applyAssistant(message: ChatMessage): void {
+  /** Returns the index the message landed at. */
+  private applyAssistant(message: ChatMessage): number {
+    let index = -1;
     this.messages.update((list) => {
       const next = [...list];
-      const idx = next.findIndex((m) => m.pending);
-      if (idx >= 0) next[idx] = message;
-      else next.push(message);
+      index = next.findIndex((m) => m.pending);
+      if (index >= 0) next[index] = message;
+      else index = next.push(message) - 1;
       return next;
+    });
+    return index;
+  }
+
+  /** Friendlier LLM wording of the computed answer — one more local-model
+   *  call, so it fills in after the answer is already on screen. The
+   *  backend drops any wording that strays from the numbers (null). */
+  private narrate(index: number, question: string, facts: Record<string, unknown>): void {
+    const settle = (narration?: string) =>
+      this.messages.update((list) => {
+        const msg = list[index];
+        if (!msg?.narrating) return list;
+        const next = [...list];
+        next[index] = { ...msg, narrating: false, ...(narration && { narration }) };
+        return next;
+      });
+    this.aiService.narrate(question, facts).subscribe({
+      next: ({ text }) => settle(text ?? undefined),
+      error: () => settle(),
     });
   }
 
   private applyResultToMap(response: GisChatResponse): void {
     const result = response.result;
-    if (!result) return;
+    const overlays = response.overlays ?? [];
+    const features = result?.geometries ?? [];
+    const shapes = [...overlays, ...features];
 
-    if (result.matched === 0) {
+    if (shapes.length === 0) {
       this.mapService.clearQueryHighlight();
       return;
     }
-
-    this.mapService.setLayerVisibility(result.layerId, true);
-    this.mapService.setQueryHighlight(result.geometries);
-    if (result.geometries.length > 0) {
-      this.mapService.zoomToGeometries(result.geometries);
+    if (result && result.matched > 0) {
+      this.mapService.setLayerVisibility(result.layerId, true);
     }
-    if (result.cql) {
+    this.mapService.setQueryHighlight(shapes);
+    this.mapService.zoomToGeometries(shapes);
+    if (result?.cql) {
       this.queryRun.emit({
         layerId: result.layerId,
         cql: result.cql,
@@ -160,10 +194,36 @@ export class AiChatComponent {
     this.clearResults();
   }
 
+  num(n: number | null | undefined): string {
+    return n == null ? '—' : nf.format(n);
+  }
+
+  dist(m: number): string {
+    return m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(2)} km`;
+  }
+
+  area(m2: number | null): string {
+    if (m2 == null) return '—';
+    return m2 < 10000 ? `${Math.round(m2)} m²` : `${(m2 / 10000).toFixed(2)} ha`;
+  }
+
+  /** Bar width (%) of an aggregate row relative to the largest value. */
+  barWidth(response: GisChatResponse, value: number | null): number {
+    const max = Math.max(0, ...(response.aggregate?.rows ?? []).map((r) => r.value ?? 0));
+    return max > 0 && value != null && value > 0 ? Math.max(2, (value / max) * 100) : 0;
+  }
+
+  metricTitle(response: GisChatResponse): string {
+    const a = response.aggregate;
+    if (!a) return '';
+    const word = { count: 'Count', sum: 'Total', avg: 'Average', min: 'Minimum', max: 'Maximum' }[a.metric];
+    return a.metricLabel ? `${word} ${a.metricLabel}` : word;
+  }
+
   operationSummary(response: GisChatResponse): string[] {
     const op = response.operation;
     if (!op) return [];
-    const bits: string[] = [`target layer: ${op.target_layer}`];
+    const bits: string[] = [`operation: ${op.kind ?? 'select'}`, `target layer: ${op.target_layer}`];
     for (const f of op.attribute_filters ?? []) {
       const v =
         f.values?.join(', ') ??
@@ -176,6 +236,21 @@ export class AiChatComponent {
         `${s.relation}${s.distance_meters ? ` ${s.distance_meters} m` : ''} of ${s.reference_layer}`,
       );
     }
+    if (op.kind === 'aggregate') {
+      bits.push(`${op.metric ?? 'count'}${op.metric_field ? ` of ${op.metric_field}` : ''}`);
+      if (op.group_by) bits.push(`grouped by ${op.group_by}`);
+      if (op.group_by_layer) bits.push(`grouped by ${op.group_by_layer}${op.group_by_layer_field ? `.${op.group_by_layer_field}` : ''}`);
+    }
+    if (op.kind === 'nearest' && op.reference_layer) {
+      bits.push(`nearest ${op.count ?? 1} to ${op.reference_layer}`);
+      for (const f of op.reference_filters ?? []) bits.push(`${op.reference_layer}: ${f.field} ${f.op} ${f.value ?? f.values?.join(', ') ?? ''}`);
+    }
+    if ((op.kind === 'buffer' || op.kind === 'service_area') && op.distance_meters) bits.push(`distance ${op.distance_meters} m`);
+    if (op.kind === 'route' && op.to_layer) {
+      bits.push(`to ${op.to_layer}`);
+      for (const f of op.to_filters ?? []) bits.push(`${op.to_layer}: ${f.field} ${f.op} ${f.value ?? f.values?.join(', ') ?? ''}`);
+    }
+    if (op.network_layer) bits.push(`network: ${op.network_layer}`);
     if (op.limit) bits.push(`limit ${op.limit}`);
     return bits;
   }

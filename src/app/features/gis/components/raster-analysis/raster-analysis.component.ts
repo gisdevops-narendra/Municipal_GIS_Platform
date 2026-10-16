@@ -10,6 +10,7 @@ import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { Department } from '../../../../core/models/department.model';
 import { DepartmentService } from '../../../../core/services/department.service';
 import { MapService } from '../../services/map.service';
+import { GisAiService } from '../../services/gis-ai.service';
 import { SettingsService } from '../../../../core/services/settings.service';
 import { environment } from '../../../../../environments/environment';
 import { Terrain3dComponent, TerrainMesh } from './terrain-3d.component';
@@ -164,6 +165,7 @@ const GROUP_META: Record<string, { short: string; icon: string }> = {
 export class RasterAnalysisComponent implements OnDestroy {
   private readonly mapService = inject(MapService);
   private readonly api = inject(RasterService);
+  private readonly gisAi = inject(GisAiService);
   private readonly departmentService = inject(DepartmentService);
   private readonly settings = inject(SettingsService);
 
@@ -520,6 +522,11 @@ export class RasterAnalysisComponent implements OnDestroy {
   readonly error = signal<string | null>(null);
   readonly message = signal<string | null>(null);
   readonly facts = signal<{ label: string; value: string }[]>([]);
+  /** "Explain" — the local AI model's plain-language reading of the facts
+   *  (and the zone / site table) of the current result. */
+  readonly explanation = signal<string | null>(null);
+  readonly explaining = signal(false);
+  private explainSub?: Subscription;
   readonly profile = signal<ProfilePoint[] | null>(null);
   readonly statistics = signal<RasterStatistics | null>(null);
   readonly zoneRows = signal<ZoneRow[] | null>(null);
@@ -1378,6 +1385,30 @@ export class RasterAnalysisComponent implements OnDestroy {
 
   // ----- export -----
 
+  explainResult(): void {
+    if (this.explaining() || this.facts().length === 0) return;
+    const title = RASTER_TOOLS.find((t) => t.id === this.tool())?.label ?? this.tool();
+    const table = this.table();
+    const rows: Record<string, unknown>[] | undefined = table
+      ? table.rows.slice(0, 25).map((r) => Object.fromEntries(table.headers.map((h, i) => [h, r[i]])))
+      : (this.zoneRows() as unknown as Record<string, unknown>[] | null)?.slice(0, 25) ??
+        this.transitions()?.slice(0, 25).map((t) => ({ from: t.fromLabel, to: t.toLabel, area: formatArea(t.areaM2) }));
+    this.explaining.set(true);
+    this.explanation.set(null);
+    this.explainSub = this.gisAi.explain(title, this.facts(), rows).subscribe({
+      next: ({ text }) => {
+        this.explaining.set(false);
+        this.explanation.set(
+          text ?? 'The AI model could not explain this result reliably — the numbers above are the result.'
+        );
+      },
+      error: (err: HttpErrorResponse) => {
+        this.explaining.set(false);
+        this.explanation.set(err.error?.message ?? 'The AI assistant is unavailable right now.');
+      }
+    });
+  }
+
   exportFacts(): void {
     downloadCsv(`${this.tool()}_results.csv`, [['Measure', 'Value'], ...this.facts().map((f) => [f.label, f.value])]);
   }
@@ -2222,6 +2253,9 @@ export class RasterAnalysisComponent implements OnDestroy {
   }
 
   private resetResult(): void {
+    this.explainSub?.unsubscribe();
+    this.explaining.set(false);
+    this.explanation.set(null);
     this.error.set(null);
     this.message.set(null);
     this.facts.set([]);

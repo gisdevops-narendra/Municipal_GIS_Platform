@@ -110,3 +110,27 @@ async def count(municipality_id: Optional[str]) -> int:
             """,
             municipality_id,
         )
+
+
+async def search_layer_docs(
+    query_embedding: List[float],
+    municipality_id: str,
+    top_k: int,
+) -> List[tuple[str, str, float]]:
+    """Layer + field docs of ONE municipality only (never global knowledge),
+    nearest first, as (ref_key, title, score)."""
+    async with db.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT ref_key, title, 1 - (embedding <=> $1) AS score
+            FROM rag_documents
+            WHERE municipality_id = $2
+              AND doc_type IN ('layer', 'field')
+            ORDER BY embedding <=> $1
+            LIMIT $3
+            """,
+            query_embedding,
+            municipality_id,
+            top_k,
+        )
+    return [(r["ref_key"], r["title"], float(r["score"])) for r in rows]

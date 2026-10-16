@@ -102,3 +102,14 @@
   font-size: 11px;
   color: var(--color-ink-500);
 }
+
+.gis-search__related {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--color-primary-100);
+  color: var(--color-primary-700);
+  font-size: 0.68rem;
+  font-weight: 600;
+  vertical-align: middle;
+}

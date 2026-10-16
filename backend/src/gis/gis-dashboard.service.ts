@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { GeoServerService } from './geoserver.service';
 import { GisAuthorizationService } from './gis-authorization.service';
+import { AiClientService } from '../gis-ai/ai-client.service';
 import type { AppUser } from '../auth/types/app-user.type';
 
 export interface DashboardSummary {
@@ -24,6 +25,12 @@ export interface SearchLayerMatch {
   code: string;
   ownershipType: string;
   departmentName: string | null;
+  /** `name`: the query is in the layer name/code. `semantic`: the layer is
+   *  about the query by meaning ("drainage" → storm_water_lines), found
+   *  through the AI service's embedding index. */
+  match: 'name' | 'semantic';
+  /** For a semantic hit through one attribute field, that field. */
+  matchedField?: string | null;
 }
 
 export interface SearchFeatureMatch {
@@ -42,6 +49,9 @@ const MAX_LAYERS_SEARCHED_FOR_FEATURES = 12;
 const MAX_FEATURES_FETCHED_PER_LAYER = 50;
 const MAX_FEATURE_MATCHES_RETURNED = 25;
 const SEARCH_TIMEOUT_MS = 5000;
+/** Shorter queries embed to noise ("ro", "wa"). */
+const MIN_SEMANTIC_QUERY = 3;
+const MAX_LAYER_MATCHES = 15;
 
 /**
  * Task 9: view/analysis endpoints only — dashboard summary counts,
@@ -60,6 +70,7 @@ export class GisDashboardService {
     private readonly prisma: PrismaService,
     private readonly geoServer: GeoServerService,
     private readonly gisAuth: GisAuthorizationService,
+    private readonly ai: AiClientService,
   ) {}
 
   /**
@@ -231,26 +242,48 @@ export class GisDashboardService {
     });
     const viewable = await this.gisAuth.filterViewable(appUser, allLayers);
 
+    const toMatch = (
+      l: (typeof viewable)[number],
+      match: SearchLayerMatch['match'],
+      matchedField?: string | null,
+    ): SearchLayerMatch => ({
+      id: l.id,
+      name: l.name,
+      code: l.code,
+      ownershipType: l.ownershipType,
+      departmentName: l.department?.name ?? null,
+      match,
+      ...(matchedField !== undefined && { matchedField }),
+    });
     const layerMatches: SearchLayerMatch[] = viewable
       .filter(
         (l) =>
           l.name.toLowerCase().includes(q) || l.code.toLowerCase().includes(q),
       )
-      .map((l) => ({
-        id: l.id,
-        name: l.name,
-        code: l.code,
-        ownershipType: l.ownershipType,
-        departmentName: l.department?.name ?? null,
-      }));
+      .map((l) => toMatch(l, 'name'));
 
     const searchableLayers = viewable
       .filter((l) => l.layerType === 'VECTOR')
       .slice(0, MAX_LAYERS_SEARCHED_FOR_FEATURES);
 
-    const featureResults = await Promise.all(
-      searchableLayers.map((layer) => this.searchLayerFeatures(layer, q)),
-    );
+    // Semantic hits run alongside the feature search; the AI service being
+    // down just means name matches only (searchLayers never throws).
+    const [featureResults, semanticHits] = await Promise.all([
+      Promise.all(
+        searchableLayers.map((layer) => this.searchLayerFeatures(layer, q)),
+      ),
+      q.length >= MIN_SEMANTIC_QUERY
+        ? this.ai.searchLayers(appUser.municipalityId, query.trim())
+        : Promise.resolve([]),
+    ]);
+    // Only layers this caller may view — the index covers every layer.
+    const byId = new Map(viewable.map((l) => [l.id, l]));
+    for (const hit of semanticHits) {
+      const layer = byId.get(hit.layer_id);
+      if (!layer || layerMatches.some((m) => m.id === layer.id)) continue;
+      if (layerMatches.length >= MAX_LAYER_MATCHES) break;
+      layerMatches.push(toMatch(layer, 'semantic', hit.field));
+    }
 
     const features = featureResults
       .flat()

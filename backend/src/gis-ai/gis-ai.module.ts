@@ -3,7 +3,7 @@ import { AuthModule } from '../auth/auth.module';
 import { GisModule } from '../gis/gis.module';
 import { GisAiController } from './gis-ai.controller';
 import { GisAiService } from './gis-ai.service';
-import { AiClientService } from './ai-client.service';
+import { AiClientModule } from './ai-client.module';
 import { LayerCatalogService } from './layer-catalog.service';
 import { GisQueryCompilerService } from './gis-query-compiler.service';
 
@@ -14,11 +14,10 @@ import { GisQueryCompilerService } from './gis-query-compiler.service';
  * compiler, not a parallel GIS stack.
  */
 @Module({
-  imports: [AuthModule, GisModule],
+  imports: [AuthModule, GisModule, AiClientModule],
   controllers: [GisAiController],
   providers: [
     GisAiService,
-    AiClientService,
     LayerCatalogService,
     GisQueryCompilerService,
   ],

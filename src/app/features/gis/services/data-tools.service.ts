@@ -18,7 +18,7 @@ export const DATA_TOOL_MODULE_IDS = [1011, 1012, 1013, 1014, 1015, 1016];
 export type NewFieldType = 'text' | 'double precision' | 'integer' | 'date' | 'boolean';
 
 export interface TopologyIssue {
-  check: 'invalid' | 'empty' | 'duplicate' | 'overlap' | 'gap' | 'dangle' | 'rule';
+  check: 'invalid' | 'empty' | 'duplicate' | 'overlap' | 'gap' | 'dangle' | 'rule' | 'outlier';
   featureIds: number[];
   detail: string;
   geometry: Record<string, unknown> | null;
@@ -97,10 +97,14 @@ export class DataToolsService {
     return this.http.post<GeocodeResult>(`${this.baseUrl}/geocode`, form);
   }
 
-  validate(layerId: string, maxGapArea: number): Observable<{ issues: TopologyIssue[]; counts: Record<string, number>; truncated: boolean }> {
+  validate(
+    layerId: string,
+    maxGapArea: number,
+    outliers: { enabled: boolean; groupField: string | null } = { enabled: true, groupField: null }
+  ): Observable<{ issues: TopologyIssue[]; counts: Record<string, number>; truncated: boolean }> {
     return this.http.post<{ issues: TopologyIssue[]; counts: Record<string, number>; truncated: boolean }>(
       `${this.baseUrl}/layers/${layerId}/validate`,
-      { maxGapArea }
+      { maxGapArea, outliers: outliers.enabled, outlierGroupField: outliers.groupField ?? undefined }
     );
   }
 

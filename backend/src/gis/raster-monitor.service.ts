@@ -13,6 +13,7 @@ import type { AppUser } from '../auth/types/app-user.type';
 import { ModuleAccessService } from '../module-access/module-access.service';
 import { RasterJobsService } from './raster-jobs.service';
 import { RasterMailService } from './raster-mail.service';
+import { AiClientService } from '../gis-ai/ai-client.service';
 import { RASTER_MODULES } from './raster-tool-registry';
 
 export type MonitorKind = 'green-cover' | 'encroachment';
@@ -49,6 +50,7 @@ export class RasterMonitorService implements OnModuleInit, OnModuleDestroy {
     private readonly jobs: RasterJobsService,
     private readonly moduleAccess: ModuleAccessService,
     private readonly mail: RasterMailService,
+    private readonly ai: AiClientService,
   ) {}
 
   onModuleInit(): void {
@@ -186,7 +188,7 @@ export class RasterMonitorService implements OnModuleInit, OnModuleDestroy {
       if (alert) {
         data.alert = true;
         data.alertMessage = `${new Date().toISOString().slice(0, 10)}: ${summary}`;
-        void this.email(monitor, summary);
+        void this.email(monitor, summary, r);
       }
     }
     await this.prisma.rasterMonitor.update({ where: { id: monitor.id }, data }).catch(() => undefined);
@@ -216,10 +218,12 @@ export class RasterMonitorService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  /** Alert email to the monitor's creator (best effort). */
-  private async email(monitor: RasterMonitor, summary: string): Promise<void> {
+  /** Alert email to the monitor's creator (best effort), with a plain-
+   *  language AI explanation when the local model is up. */
+  private async email(monitor: RasterMonitor, summary: string, result: Record<string, unknown>): Promise<void> {
     const user = await this.prisma.user.findUnique({ where: { id: monitor.createdById } });
     if (!user?.email) return;
+    const explanation = await this.explain(monitor, summary, result);
     const sent = await this.mail.send(
       user.email,
       `GIS alert: ${monitor.name}`,
@@ -230,6 +234,7 @@ export class RasterMonitorService implements OnModuleInit, OnModuleDestroy {
         '',
         `  ${summary}`,
         '',
+        ...(explanation ? ['In plain words (AI summary of the numbers above):', '', `  ${explanation}`, ''] : []),
         `Open the map → Raster Analysis → Planning → Automatic Monitoring to review it:`,
         `${this.mail.appUrl}/gis`,
         '',
@@ -237,6 +242,32 @@ export class RasterMonitorService implements OnModuleInit, OnModuleDestroy {
       ].join('\n'),
     );
     if (sent) this.logger.log(`Alert email for monitor ${monitor.id} sent to ${user.email}`);
+  }
+
+  /** Null when the AI service is down, slow, or its text strays from the
+   *  numbers — the email then goes out with the rule-based summary only. */
+  private async explain(monitor: RasterMonitor, summary: string, result: Record<string, unknown>): Promise<string | null> {
+    const rows = Array.isArray(result.rows) ? (result.rows as unknown[]).slice(0, 20) : undefined;
+    const { rows: _rows, ...scalars } = result;
+    try {
+      const out = await this.ai.narrate(
+        {
+          kind: 'raster',
+          question: `Explain this ${monitor.kind === 'encroachment' ? 'encroachment (new construction)' : 'green cover'} monitoring alert in plain language.`,
+          facts: {
+            monitor: monitor.name,
+            alert: summary,
+            comparison: 'last 60 days vs the same 60 days a year earlier',
+            results: Object.fromEntries(Object.entries(scalars).filter(([, v]) => typeof v !== 'object')),
+            ...(rows ? { zones: rows } : {}),
+          },
+        },
+        120000,
+      );
+      return out.grounded && out.text.trim() ? out.text.trim() : null;
+    } catch {
+      return null;
+    }
   }
 
   // ----- helpers -----

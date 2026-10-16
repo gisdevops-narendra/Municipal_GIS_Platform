@@ -27,6 +27,21 @@ export class GisAiService {
     });
   }
 
+  /** LLM wording of an answer the backend already computed; `text` is
+   *  null when the model failed or strayed from the numbers. */
+  narrate(question: string, facts: Record<string, unknown>): Observable<{ text: string | null }> {
+    return this.http.post<{ text: string | null }>(`${this.baseUrl}/narrate`, { question, facts });
+  }
+
+  /** Plain-language explanation of a Raster Analysis result. */
+  explain(
+    title: string,
+    facts: { label: string; value: string }[],
+    rows?: Record<string, unknown>[],
+  ): Observable<{ text: string | null }> {
+    return this.http.post<{ text: string | null }>(`${this.baseUrl}/explain`, { title, facts, rows });
+  }
+
   health(): Observable<GisAiHealth> {
     return this.http.get<GisAiHealth>(`${this.baseUrl}/health`);
   }

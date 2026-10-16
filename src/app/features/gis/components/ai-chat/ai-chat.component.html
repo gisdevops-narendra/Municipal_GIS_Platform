@@ -1,7 +1,8 @@
 <div class="aic">
   <p class="aic__lede">
-    Ask a question about your GIS data in plain language. Results appear on the
-    map and in the Attribute Table, exactly like the Query Builder.
+    Ask a question about your GIS data in plain language — find features,
+    count or total them per ward, find the nearest, buffer, or route. Results
+    appear on the map and in the Attribute Table.
   </p>
 
   @if (messages().length === 0) {
@@ -19,10 +20,70 @@
         @if (msg.pending) {
           <span class="aic__typing"><i class="pi pi-spin pi-spinner"></i> Thinking…</span>
         } @else {
-          <p class="aic__msg-text">{{ msg.content }}</p>
+          <p class="aic__msg-text">{{ msg.role === 'assistant' ? mainText(msg) : msg.content }}</p>
+          @if (msg.narrating) {
+            <span class="aic__wording"><i class="pi pi-spin pi-spinner"></i> Writing a summary…</span>
+          } @else if (msg.narration) {
+            <span class="aic__wording" title="Worded by the local AI model from the computed numbers; every number was checked against them.">
+              <i class="pi pi-sparkles"></i> AI-worded from the computed result
+            </span>
+          }
 
           @if (msg.response?.answerKind === 'clarification' && msg.response?.clarification) {
             <p-message severity="warn" [text]="msg.response!.clarification!" styleClass="w-full" />
+          }
+
+          @if (msg.response?.aggregate; as agg) {
+            <div class="aic__agg">
+              <div class="aic__agg-head">
+                <span>{{ agg.groupLabel ?? 'All features' }}</span>
+                <span>{{ metricTitle(msg.response!) }}</span>
+              </div>
+              @for (row of agg.rows.slice(0, 15); track $index) {
+                <div class="aic__agg-row">
+                  <span class="aic__agg-label" [title]="row.group ?? '(blank)'">{{ agg.groupLabel ? (row.group ?? '(blank)') : 'Total' }}</span>
+                  <span class="aic__agg-bar"><span [style.width.%]="barWidth(msg.response!, row.value)"></span></span>
+                  <span class="aic__agg-value">{{ num(row.value) }}</span>
+                </div>
+              }
+              @if (agg.rows.length > 15 || agg.truncated) {
+                <span class="aic__trunc">+ {{ agg.rows.length - 15 > 0 ? agg.rows.length - 15 : '' }} more group(s)</span>
+              }
+            </div>
+          }
+
+          @if (msg.response?.nearest; as near) {
+            <ol class="aic__list">
+              @for (item of near.items; track item.id) {
+                <li><span>{{ item.label ?? '#' + item.id }}</span><strong>{{ dist(item.distanceM) }}</strong></li>
+              }
+            </ol>
+            <span class="aic__trunc">Straight-line distance from {{ near.referenceLabel && near.referenceCount === 1 ? near.referenceLabel : num(near.referenceCount) + ' ' + near.referenceLayer + ' features' }}</span>
+          }
+
+          @if (msg.response?.buffer; as buf) {
+            <ul class="aic__stats">
+              <li><span>Buffer width</span><strong>{{ dist(buf.distanceM) }}</strong></li>
+              <li><span>Features buffered</span><strong>{{ num(buf.sources) }}</strong></li>
+              <li><span>Area covered</span><strong>{{ area(buf.areaM2) }}</strong></li>
+            </ul>
+          }
+
+          @if (msg.response?.route; as rt) {
+            <ul class="aic__stats">
+              <li><span>From</span><strong>{{ rt.from.label }}</strong></li>
+              <li><span>To</span><strong>{{ rt.to.label }}</strong></li>
+              <li><span>Road distance</span><strong>{{ dist(rt.lengthM) }}</strong></li>
+              <li><span>Network</span><strong>{{ rt.networkLayer }}</strong></li>
+            </ul>
+          }
+
+          @if (msg.response?.serviceArea; as sa) {
+            <ul class="aic__stats">
+              <li><span>From</span><strong>{{ sa.origin.label }}</strong></li>
+              <li><span>Reach</span><strong>{{ dist(sa.distanceM) }} by road</strong></li>
+              <li><span>Roads reachable</span><strong>{{ dist(sa.roadLengthM) }}</strong></li>
+            </ul>
           }
 
           @if (msg.response?.result; as result) {
@@ -46,6 +107,9 @@
           @if (msg.response?.operation) {
             <details class="aic__detail">
               <summary>How this was interpreted</summary>
+              @if (msg.response?.answer && msg.response?.explanation) {
+                <p class="aic__ctx">Plan: {{ msg.response!.explanation }}</p>
+              }
               <ul class="aic__op">
                 @for (bit of operationSummary(msg.response!); track bit) {
                   <li>{{ bit }}</li>

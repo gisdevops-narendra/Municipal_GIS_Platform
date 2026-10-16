@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import List, Optional
+import re
+from typing import Any, List, Optional, Tuple
 
 import httpx
 
@@ -191,3 +192,76 @@ def _parse_json(text: str) -> Optional[dict]:
 def _slice_braces(text: str) -> str:
     start, end = text.find("{"), text.rfind("}")
     return text[start : end + 1] if 0 <= start < end else ""
+
+
+# --------------------------------------------------------------------------
+# Narration — verified facts -> a short plain-language answer.
+
+_NUMBER = re.compile(r"(?<![\w.])-?\d[\d,]*(?:\.\d+)?")
+
+
+def _numbers_in(text: str) -> List[str]:
+    return [m.group(0).replace(",", "") for m in _NUMBER.finditer(text)]
+
+
+def _fact_numbers(value: Any, out: List[float]) -> None:
+    if isinstance(value, bool):
+        return
+    if isinstance(value, (int, float)):
+        out.append(float(value))
+    elif isinstance(value, str):
+        out.extend(float(n) for n in _numbers_in(value))
+    elif isinstance(value, dict):
+        for v in value.values():
+            _fact_numbers(v, out)
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            _fact_numbers(v, out)
+
+
+def _grounded(text: str, allowed: List[float]) -> bool:
+    """Every number in `text` must be a fact number or a rounding of one —
+    a 1.5b model will otherwise happily invent totals and percentages."""
+    for raw in _numbers_in(text):
+        n = float(raw)
+        decimals = len(raw.split(".")[1]) if "." in raw else 0
+        tol = 0.5 * 10 ** (-decimals) + 1e-9
+        if not any(abs(n - a) <= tol or abs(abs(n) - abs(a)) <= tol for a in allowed):
+            return False
+    return True
+
+
+def narrate(kind: str, question: str, facts: dict) -> Tuple[str, bool]:
+    if not available():
+        raise LLMUnavailable(f"The local model '{config.LLM_MODEL}' is not ready yet.")
+    facts_json = json.dumps(facts, ensure_ascii=False, default=str)[:6000]
+    system = prompts.RASTER_SYSTEM if kind == "raster" else prompts.NARRATE_SYSTEM
+    payload = {
+        "model": config.LLM_MODEL,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompts.build_narrate_message(question, facts_json)},
+        ],
+        "stream": False,
+        "keep_alive": -1,
+        "options": {
+            "temperature": 0,
+            "num_ctx": config.LLM_NUM_CTX,
+            "num_predict": config.NARRATE_MAX_TOKENS,
+        },
+    }
+    try:
+        resp = _http().post("/api/chat", json=payload)
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise LLMUnavailable(f"Local LLM request failed: {exc}") from exc
+    text = ((resp.json().get("message", {}) or {}).get("content", "") or "").strip()
+    text = re.sub(r"^[#>*\-\s]+", "", text).replace("**", "").strip()
+
+    allowed: List[float] = []
+    _fact_numbers(facts, allowed)
+    _fact_numbers(question, allowed)
+    if not text or not _grounded(text, allowed):
+        log.info("narration rejected (ungrounded or empty): %r", text[:200])
+        return text, False
+    return text, True

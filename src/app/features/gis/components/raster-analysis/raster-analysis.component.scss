@@ -240,7 +240,7 @@
   margin-bottom: 14px;
   padding: 10px 12px;
   border: 1px solid var(--color-line);
-  border-left: 3px solid var(--color-primary-500, #2563eb);
+  border-left: 3px solid var(--color-primary-500);
   border-radius: var(--radius-md);
   background: var(--color-surface-alt);
 }
@@ -649,7 +649,29 @@
 .ra__export {
   display: flex;
   justify-content: flex-end;
+  gap: 4px;
   margin-bottom: -8px;
+}
+
+.ra__explain {
+  margin: 12px 0 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--color-primary-500);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-100);
+  color: var(--color-ink-700);
+  font-size: 0.8rem;
+  line-height: 1.45;
+
+  .pi {
+    margin-right: 4px;
+    font-size: 0.75rem;
+  }
+}
+
+.ra__explain--pending {
+  color: var(--color-ink-500);
+  font-style: italic;
 }
 
 .ra__export-btn {
@@ -793,7 +815,7 @@
 .ra__monitor {
   padding: 8px 10px;
   border: 1px solid var(--color-line);
-  border-left: 3px solid var(--color-primary-500, #2563eb);
+  border-left: 3px solid var(--color-primary-500);
   border-radius: var(--radius-md);
   background: var(--color-surface);
 
