@@ -49,6 +49,8 @@ export class MunicipalMapComponent implements AfterViewInit, OnChanges, OnDestro
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['layers'] && !this.initialized) {
       this.tryInit();
+    } else if (changes['layers'] && this.initialized) {
+      this.mapService.syncLayers(this.layers);
     }
   }
 

@@ -1527,7 +1527,36 @@ export class MapService {
     });
   }
 
-  private addWmsLayer(layer: GisLayer): void {
+  /** Brings the map in line with a reloaded layer list after init: layers
+   *  published since (e.g. Raster Analysis output) are added and shown,
+   *  deleted ones removed — no page refresh needed. */
+  syncLayers(layers: GisLayer[]): void {
+    if (!this.map) return;
+    const ids = new Set(layers.map((layer) => layer.id));
+    for (const [id, entry] of [...this.managedLayers]) {
+      if (ids.has(id)) continue;
+      this.map.removeLayer(entry.olLayer);
+      this.managedLayers.delete(id);
+    }
+    const added: Record<string, boolean> = {};
+    for (const layer of [...layers].sort((a, b) => a.displayOrder - b.displayOrder)) {
+      const existing = this.managedLayers.get(layer.id);
+      if (existing) {
+        existing.layer = layer;
+        continue;
+      }
+      this.addWmsLayer(layer, this.managedLayers.size + 1);
+      this.managedLayers.get(layer.id)?.olLayer.setVisible(true);
+      added[layer.id] = true;
+    }
+    this.layerVisibility.update((current) => {
+      const next: Record<string, boolean> = { ...added };
+      for (const id of Object.keys(current)) if (ids.has(id)) next[id] = current[id];
+      return next;
+    });
+  }
+
+  private addWmsLayer(layer: GisLayer, insertAt?: number): void {
     if (!this.map) return;
     const qualifiedLayer = `${layer.geoserverWorkspace}:${layer.geoserverLayer}`;
     const source = new ImageWMS({
@@ -1537,7 +1566,10 @@ export class MapService {
       ratio: 1
     });
     const olLayer = new ImageLayer({ source, visible: layer.visibleByDefault, properties: { gisLayerId: layer.id } });
-    this.map.addLayer(olLayer);
+    // Later additions go just above the existing data layers, below any
+    // analysis / sketch overlays drawn on top.
+    if (insertAt !== undefined) this.map.getLayers().insertAt(Math.min(insertAt, this.map.getLayers().getLength()), olLayer);
+    else this.map.addLayer(olLayer);
     this.managedLayers.set(layer.id, { layer, olLayer });
   }
 

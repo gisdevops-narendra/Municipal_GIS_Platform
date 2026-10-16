@@ -61,6 +61,11 @@ export class LayerPanelComponent {
     this.mapService.setBasemap(id);
   }
 
+  onZoom(layer: GisLayer, event: Event): void {
+    event.stopPropagation();
+    this.mapService.zoomToLayer(layer);
+  }
+
   get canonicalLayers(): GisLayer[] {
     return this.layers.filter((layer) => layer.ownershipType === 'CANONICAL');
   }

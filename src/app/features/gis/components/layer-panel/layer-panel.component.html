@@ -15,6 +15,18 @@
                 (onChange)="onToggle(layer.id, $event)"
               ></p-checkbox>
               <label [for]="'layer-' + layer.id" class="layer-panel__label">{{ layer.name }}</label>
+              @if (layer.bbox) {
+                <button
+                  type="button"
+                  class="layer-panel__style"
+                  pTooltip="Zoom to layer"
+                  tooltipPosition="left"
+                  aria-label="Zoom to layer"
+                  (click)="onZoom(layer, $event)"
+                >
+                  <i class="pi pi-search-plus" aria-hidden="true"></i>
+                </button>
+              }
               @if (canStyle) {
                 <button
                   type="button"
@@ -58,6 +70,18 @@
                     (onChange)="onToggle(layer.id, $event)"
                   ></p-checkbox>
                   <label [for]="'layer-' + layer.id" class="layer-panel__label">{{ layer.name }}</label>
+                  @if (layer.bbox) {
+                    <button
+                      type="button"
+                      class="layer-panel__style"
+                      pTooltip="Zoom to layer"
+                      tooltipPosition="left"
+                      aria-label="Zoom to layer"
+                      (click)="onZoom(layer, $event)"
+                    >
+                      <i class="pi pi-search-plus" aria-hidden="true"></i>
+                    </button>
+                  }
                   @if (canStyle) {
                     <button
                       type="button"
