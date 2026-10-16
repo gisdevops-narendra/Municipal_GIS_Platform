@@ -51,7 +51,7 @@
     @if (!showCatalog()) {
     <button type="button" class="ra__back" (click)="showCatalog.set(true)">
       <i class="pi pi-arrow-left" aria-hidden="true"></i>
-      {{ activeToolGroup()?.label }}
+      {{ activeToolGroup().label }}
     </button>
     @if (activeToolDef(); as def) {
       <div class="ra__head">
@@ -93,7 +93,7 @@
   }
 
   <!-- ============ INPUT RASTER ============ -->
-  @if (tool() !== 'upload' && tool() !== 'calc' && tool() !== 'swipe') {
+  @if (needsRasterInput()) {
     <label class="bo__field">
       <span class="bo__label">{{ tool() === 'change' ? 'Before raster' : 'Raster layer' }}</span>
       <p-select
@@ -119,12 +119,30 @@
         }
       </p>
     }
-    @if (bandOptions().length > 1 && tool() !== 'ndvi' && tool() !== 'clip' && !(tool() === 'style' && styleMode === 'rgb')) {
+    @if (bandOptions().length > 1 && !['ndvi', 'clip', 'indices', 'classify', 'download', 'resample'].includes(tool()) && !(tool() === 'style' && styleMode === 'rgb')) {
       <label class="bo__field">
         <span class="bo__label">Band</span>
         <p-select class="bo__select" [options]="bandOptions()" optionLabel="label" optionValue="value" [(ngModel)]="band" appendTo="body" />
       </label>
     }
+  }
+
+  <!-- ============ INPUT VECTOR ============ -->
+  @if (needsVectorInput() || tool() === 'zonal') {
+    <label class="bo__field">
+      <span class="bo__label">{{ tool() === 'zonal' ? 'Zones (polygon layer)' : tool() === 'heatmap' || tool() === 'idw' ? 'Point layer' : 'Vector layer' }}</span>
+      <p-select
+        class="bo__select"
+        [options]="tool() === 'zonal' ? polygonLayers() : vectorLayers()"
+        optionLabel="label"
+        optionValue="value"
+        [ngModel]="vectorLayerId()"
+        (ngModelChange)="selectVector($event)"
+        [filter]="true"
+        placeholder="Choose a vector layer"
+        appendTo="body"
+      />
+    </label>
   }
 
   <!-- ============ TOOL PARAMETERS ============ -->
@@ -401,6 +419,212 @@
       <p class="bo__hint">NDVI = (NIR − Red) / (NIR + Red). Sentinel-2: Red = 4, NIR = 8 · Landsat 8/9: Red = 4, NIR = 5.</p>
     }
 
+    @case ('stats') {
+      <label class="bo__field">
+        <span class="bo__label">Histogram bins</span>
+        <input type="number" class="bo__input" min="5" max="100" [(ngModel)]="histogramBins" />
+      </label>
+    }
+
+    @case ('download') {
+      <label class="bo__toggle">
+        <input type="checkbox" [(ngModel)]="downloadView" /><span>Only the part inside the current map view</span>
+      </label>
+      <p class="bo__hint">Saves a compressed GeoTIFF. Needs the layer's Export permission.</p>
+    }
+
+    @case ('mosaic') {
+      <span class="bo__label">Rasters to merge</span>
+      @for (id of mosaicIds; track $index; let i = $index) {
+        <div class="bo__row">
+          <p-select
+            class="bo__select bo__field--grow"
+            [options]="rasterLayers()"
+            optionLabel="label"
+            optionValue="value"
+            [(ngModel)]="mosaicIds[i]"
+            [placeholder]="'Raster ' + (i + 1)"
+            appendTo="body"
+          />
+          @if (mosaicIds.length > 2) {
+            <button type="button" class="bo__chip bo__chip--ghost" (click)="removeMosaicInput(i)"><i class="pi pi-times"></i></button>
+          }
+        </div>
+      }
+      @if (mosaicIds.length < 20) {
+        <button type="button" class="bo__cancel ra__add" (click)="addMosaicInput()">+ Add raster</button>
+      }
+      <label class="bo__field">
+        <span class="bo__label">Resampling</span>
+        <select class="bo__input" [(ngModel)]="resampling">
+          <option value="nearest">Nearest (classes / categories)</option>
+          <option value="bilinear">Bilinear (elevation, continuous)</option>
+          <option value="cubic">Cubic (smooth imagery)</option>
+        </select>
+      </label>
+      <p class="bo__hint">All rasters need the same number of bands. Overlaps take the later raster's pixels.</p>
+    }
+
+    @case ('resample') {
+      <label class="bo__field">
+        <span class="bo__label">New pixel size (m) — empty keeps it</span>
+        <input type="number" class="bo__input" min="0.01" step="any" [(ngModel)]="resamplePixel" />
+      </label>
+      <label class="bo__field">
+        <span class="bo__label">Coordinate system</span>
+        <select class="bo__input" [(ngModel)]="resampleCrs">
+          <option value="same">Keep current</option>
+          <option value="UTM">UTM (auto zone, metres)</option>
+          <option value="EPSG:4326">WGS 84 (EPSG:4326)</option>
+          <option value="EPSG:3857">Web Mercator (EPSG:3857)</option>
+          <option value="custom">Other EPSG code…</option>
+        </select>
+      </label>
+      @if (resampleCrs === 'custom') {
+        <label class="bo__field">
+          <span class="bo__label">EPSG code</span>
+          <input type="text" class="bo__input" placeholder="32643" [(ngModel)]="resampleEpsg" />
+        </label>
+      }
+      <label class="bo__field">
+        <span class="bo__label">Resampling</span>
+        <select class="bo__input" [(ngModel)]="resampling">
+          <option value="nearest">Nearest (classes / categories)</option>
+          <option value="bilinear">Bilinear (continuous)</option>
+          <option value="cubic">Cubic (smooth imagery)</option>
+          <option value="average">Average (downsampling)</option>
+          <option value="mode">Majority (downsampling classes)</option>
+        </select>
+      </label>
+    }
+
+    @case ('rasterize') {
+      <label class="bo__field">
+        <span class="bo__label">Value field — empty burns 1</span>
+        <p-select class="bo__select" [options]="numericFields()" optionLabel="label" optionValue="value" [(ngModel)]="field" [showClear]="true" placeholder="Presence (1)" appendTo="body" />
+      </label>
+      <ng-container *ngTemplateOutlet="gridInput"></ng-container>
+      <label class="bo__toggle">
+        <input type="checkbox" [(ngModel)]="allTouched" /><span>Include every pixel a feature touches</span>
+      </label>
+    }
+
+    @case ('rugged') {
+      <div class="bo__modes" role="tablist">
+        <button type="button" class="bo__mode" [class.bo__mode--active]="ruggedKind === 'TRI'" (click)="ruggedKind = 'TRI'">TRI</button>
+        <button type="button" class="bo__mode" [class.bo__mode--active]="ruggedKind === 'roughness'" (click)="ruggedKind = 'roughness'">Roughness</button>
+        <button type="button" class="bo__mode" [class.bo__mode--active]="ruggedKind === 'TPI'" (click)="ruggedKind = 'TPI'">TPI</button>
+      </div>
+      <p class="bo__hint">
+        @switch (ruggedKind) {
+          @case ('TRI') { Mean elevation difference to the 8 neighbours — how rugged each cell is. }
+          @case ('roughness') { Largest elevation difference within the 3 × 3 window. }
+          @case ('TPI') { Cell minus its neighbours' mean: positive = ridges / hilltops, negative = valleys. }
+        }
+      </p>
+    }
+
+    @case ('fillsinks') {
+      <p class="bo__hint">Raises every closed depression to its spill level so flow can reach the edge. Use the result as the input for Drainage / Watershed and flood tools.</p>
+    }
+
+    @case ('zonal') {
+      <label class="bo__field">
+        <span class="bo__label">Zone name field</span>
+        <p-select class="bo__select" [options]="allFields()" optionLabel="label" optionValue="value" [(ngModel)]="field" [showClear]="true" placeholder="Zone 1, Zone 2…" appendTo="body" />
+      </label>
+      <label class="bo__toggle">
+        <input type="checkbox" [(ngModel)]="allTouched" /><span>Count every pixel a zone touches (small zones)</span>
+      </label>
+      <label class="bo__toggle">
+        <input type="checkbox" [(ngModel)]="zonalPublish" /><span>Also publish the zones with their statistics as a layer</span>
+      </label>
+    }
+
+    @case ('idw') {
+      <label class="bo__field">
+        <span class="bo__label">Value field</span>
+        <p-select class="bo__select" [options]="numericFields()" optionLabel="label" optionValue="value" [(ngModel)]="field" placeholder="Choose a numeric field" appendTo="body" />
+      </label>
+      <ng-container *ngTemplateOutlet="gridInput"></ng-container>
+      <label class="bo__field">
+        <span class="bo__label">Power — higher = more local ({{ idwPower }})</span>
+        <input type="range" min="1" max="4" step="0.5" [(ngModel)]="idwPower" />
+      </label>
+      <p class="bo__hint">Each pixel is the distance-weighted average of its 12 nearest points. Lines / polygons use their centroids.</p>
+    }
+
+    @case ('heatmap') {
+      <label class="bo__field">
+        <span class="bo__label">Weight field — empty counts each point once</span>
+        <p-select class="bo__select" [options]="numericFields()" optionLabel="label" optionValue="value" [(ngModel)]="field" [showClear]="true" placeholder="Count of points" appendTo="body" />
+      </label>
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Search radius (m)</span>
+          <input type="number" class="bo__input" min="1" [(ngModel)]="heatRadius" />
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Pixel size (m)</span>
+          <input type="number" class="bo__input" min="0.1" step="any" [(ngModel)]="gridPixel" />
+        </label>
+      </div>
+      <p class="bo__hint">Quartic kernel density in points per km². A larger radius gives smoother, broader hotspots.</p>
+    }
+
+    @case ('proximity') {
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Max distance (m)</span>
+          <input type="number" class="bo__input" min="1" [(ngModel)]="proximityMax" />
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Pixel size (m)</span>
+          <input type="number" class="bo__input" min="0.1" step="any" [(ngModel)]="gridPixel" />
+        </label>
+      </div>
+      <p class="bo__hint">Each pixel holds the distance in metres to the nearest feature, up to the maximum.</p>
+    }
+
+    @case ('indices') {
+      <div class="bo__modes" role="tablist">
+        <button type="button" class="bo__mode" [class.bo__mode--active]="indexKind === 'ndwi'" (click)="setIndexKind('ndwi')">NDWI</button>
+        <button type="button" class="bo__mode" [class.bo__mode--active]="indexKind === 'ndbi'" (click)="setIndexKind('ndbi')">NDBI</button>
+        <button type="button" class="bo__mode" [class.bo__mode--active]="indexKind === 'savi'" (click)="setIndexKind('savi')">SAVI</button>
+      </div>
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">{{ indexKind === 'ndwi' ? 'Green' : indexKind === 'ndbi' ? 'SWIR' : 'Red' }} band</span>
+          <input type="number" class="bo__input" min="1" [(ngModel)]="indexA" />
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Near-infrared band</span>
+          <input type="number" class="bo__input" min="1" [(ngModel)]="indexB" />
+        </label>
+      </div>
+      @if (indexKind === 'savi') {
+        <label class="bo__field">
+          <span class="bo__label">Soil factor L ({{ soilFactor }})</span>
+          <input type="range" min="0" max="1" step="0.05" [(ngModel)]="soilFactor" />
+        </label>
+      }
+      <p class="bo__hint">
+        @switch (indexKind) {
+          @case ('ndwi') { NDWI = (Green − NIR) / (Green + NIR) — water bodies are &gt; 0. Sentinel-2: Green = 3, NIR = 8. }
+          @case ('ndbi') { NDBI = (SWIR − NIR) / (SWIR + NIR) — built-up areas are &gt; 0. Sentinel-2: SWIR = 11, NIR = 8. }
+          @case ('savi') { SAVI = (1 + L)(NIR − Red) / (NIR + Red + L) — NDVI corrected for bare soil; needs reflectance (0–1). }
+        }
+      </p>
+    }
+
+    @case ('classify') {
+      <label class="bo__field">
+        <span class="bo__label">Number of classes ({{ classCount }})</span>
+        <input type="range" min="2" max="12" step="1" [(ngModel)]="classCount" />
+      </label>
+      <p class="bo__hint">K-means groups pixels with similar values across all bands. Classes are numbered dark → bright; name them afterwards with Raster Styling.</p>
+    }
+
     @case ('change') {
       <div class="bo__row">
         <label class="bo__field bo__field--grow">
@@ -473,12 +697,47 @@
     </figure>
   }
 
+  @if (histogram(); as hg) {
+    <figure class="ra__chart">
+      <svg [attr.viewBox]="'0 0 ' + hg.w + ' ' + hg.h" preserveAspectRatio="none" role="img" aria-label="Histogram">
+        @for (b of hg.bars; track $index) {
+          <rect [attr.x]="b.x" [attr.y]="b.y" [attr.width]="b.w" [attr.height]="b.h" fill="currentColor" opacity="0.85">
+            <title>{{ b.title }}</title>
+          </rect>
+        }
+      </svg>
+      <figcaption>
+        <span>{{ hg.min }}</span><span>{{ hg.max }}</span>
+      </figcaption>
+    </figure>
+  }
+  @if (zoneRows(); as rows) {
+    <div class="ra__table-wrap">
+      <table class="ra__table">
+        <thead>
+          <tr><th>Zone</th><th>Mean</th><th>Min</th><th>Max</th><th>Sum</th></tr>
+        </thead>
+        <tbody>
+          @for (r of rows; track $index) {
+            <tr [class.ra__table-empty]="!r.count">
+              <td [title]="r.zone">{{ r.zone }}</td>
+              <td>{{ fmtValue(r.mean) }}</td>
+              <td>{{ fmtValue(r.min) }}</td>
+              <td>{{ fmtValue(r.max) }}</td>
+              <td>{{ fmtValue(r.sum) }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+
   @if (tool() !== 'swipe') {
     <div class="bo__controls">
       <button
         pButton
         type="button"
-        [label]="running() ? 'Working…' : tool() === 'upload' ? 'Upload & publish' : tool() === 'style' ? 'Apply style' : tool() === 'identify' ? 'Identify' : 'Run'"
+        [label]="running() ? 'Working…' : tool() === 'upload' ? 'Upload & publish' : tool() === 'style' ? 'Apply style' : tool() === 'identify' ? 'Identify' : tool() === 'download' ? 'Download' : tool() === 'stats' ? 'Compute' : 'Run'"
         icon="pi pi-play"
         class="p-button-sm bo__run"
         [disabled]="running()"
@@ -522,4 +781,11 @@
       <input type="number" class="bo__input" min="0" step="0.1" [(ngModel)]="targetHeight" />
     </label>
   </div>
+</ng-template>
+
+<ng-template #gridInput>
+  <label class="bo__field">
+    <span class="bo__label">Pixel size (m)</span>
+    <input type="number" class="bo__input" min="0.1" step="any" [(ngModel)]="gridPixel" />
+  </label>
 </ng-template>

@@ -1,4 +1,4 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../environments/environment';
@@ -76,6 +76,47 @@ export interface CutFillResult {
   meanZ: number;
 }
 
+export interface RasterStatistics {
+  band: number;
+  validCells: number;
+  nodataCells: number;
+  min: number;
+  max: number;
+  mean: number;
+  std: number;
+  p1: number;
+  p25: number;
+  median: number;
+  p75: number;
+  p99: number;
+  areaM2: number;
+  histogram: { counts: number[]; edges: number[] };
+}
+
+export interface ZoneRow {
+  zone: string;
+  count: number;
+  min: number | null;
+  max: number | null;
+  mean: number | null;
+  sum: number | null;
+  std: number | null;
+  areaM2: number;
+}
+
+export interface ZonalResult {
+  zones: number;
+  zonesWithData: number;
+  rows: ZoneRow[];
+  truncated: boolean;
+}
+
+export interface VectorField {
+  name: string;
+  type: string;
+  numeric: boolean;
+}
+
 /** A tool that published its output as a new layer. */
 export interface LayerResult {
   layer: GisLayer;
@@ -124,6 +165,26 @@ export class RasterService {
 
   cutFill(body: Record<string, unknown>): Observable<CutFillResult> {
     return this.http.post<CutFillResult>(`${this.baseUrl}/cut-fill`, body);
+  }
+
+  vectorFields(layerId: string): Observable<VectorField[]> {
+    return this.http.get<VectorField[]>(`${this.baseUrl}/vector/${layerId}/fields`);
+  }
+
+  statistics(body: { layerId: string; band: number; bins?: number }): Observable<RasterStatistics> {
+    return this.http.post<RasterStatistics>(`${this.baseUrl}/statistics`, body);
+  }
+
+  /** Without `outputName` only the table comes back; with it the zones are
+   *  also published as a layer. */
+  zonalStatistics(body: Record<string, unknown>): Observable<{ layer?: GisLayer; result: ZonalResult }> {
+    return this.http.post<{ layer?: GisLayer; result: ZonalResult }>(`${this.baseUrl}/zonal-statistics`, body);
+  }
+
+  /** GeoTIFF download; `bbox` (EPSG:4326) cuts it to the map view. */
+  download(layerId: string, bbox?: [number, number, number, number]): Observable<HttpResponse<Blob>> {
+    const params: Record<string, string> = bbox ? { bbox: bbox.join(',') } : {};
+    return this.http.get(`${this.baseUrl}/${layerId}/download`, { params, responseType: 'blob', observe: 'response' });
   }
 
   /** Every tool that creates a layer: terrain, contour, watershed, flood,

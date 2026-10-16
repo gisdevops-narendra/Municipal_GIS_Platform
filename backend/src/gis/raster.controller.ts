@@ -1,4 +1,5 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Put, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, Param, Post, Put, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { RequireMunicipalityMember } from '../auth/decorators/authorization.decorators';
 import { CurrentAppUser } from '../auth/decorators/current-app-user.decorator';
@@ -7,7 +8,18 @@ import { RasterService } from './raster.service';
 import { RasterToolsService } from './raster-tools.service';
 import {
   ChangeDetectionDto,
+  ClassifyDto,
   ClipDto,
+  FillSinksDto,
+  HeatmapDto,
+  IdwDto,
+  MosaicDto,
+  ProximityDto,
+  RasterizeDto,
+  RasterStatisticsDto,
+  ResampleDto,
+  SpectralIndexDto,
+  ZonalStatisticsDto,
   ContourDto,
   CutFillDto,
   FloodDto,
@@ -68,6 +80,61 @@ export class RasterController {
     return this.rasters.applyStyle(appUser, layerId, dto);
   }
 
+  @RequireMunicipalityMember()
+  @Get('vector/:layerId/fields')
+  vectorFields(@CurrentAppUser() appUser: AppUser, @Param('layerId') layerId: string) {
+    return this.rasters.vectorFields(appUser, layerId);
+  }
+
+  /** Download Raster — `?bbox=minX,minY,maxX,maxY` (EPSG:4326) cuts it to
+   *  the current map view. */
+  @RequireMunicipalityMember()
+  @Get(':layerId/download')
+  async download(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('layerId') layerId: string,
+    @Query('bbox') bbox: string | undefined,
+    @Res() res: Response,
+  ) {
+    let box: [number, number, number, number] | undefined;
+    if (bbox) {
+      const parts = bbox.split(',').map(Number);
+      if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) {
+        throw new BadRequestException('bbox must be minX,minY,maxX,maxY.');
+      }
+      box = parts as [number, number, number, number];
+    }
+    const file = await this.rasters.download(appUser, layerId, box);
+    res.setHeader('Content-Type', 'image/tiff');
+    res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+    res.send(file.body);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('statistics')
+  @HttpCode(200)
+  statistics(@CurrentAppUser() appUser: AppUser, @Body() dto: RasterStatisticsDto) {
+    return this.tools.statistics(appUser, dto);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('mosaic')
+  mosaic(@CurrentAppUser() appUser: AppUser, @Body() dto: MosaicDto) {
+    return this.tools.mosaic(appUser, dto);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('resample')
+  resample(@CurrentAppUser() appUser: AppUser, @Body() dto: ResampleDto) {
+    return this.tools.resample(appUser, dto);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('rasterize')
+  rasterize(@CurrentAppUser() appUser: AppUser, @Body() dto: RasterizeDto) {
+    return this.tools.rasterize(appUser, dto);
+  }
+
   // ----- Terrain Analysis -----
 
   @RequireMunicipalityMember()
@@ -121,7 +188,37 @@ export class RasterController {
     return this.tools.viewshed(appUser, dto);
   }
 
+  @RequireMunicipalityMember()
+  @Post('fill-sinks')
+  fillSinks(@CurrentAppUser() appUser: AppUser, @Body() dto: FillSinksDto) {
+    return this.tools.fillSinks(appUser, dto);
+  }
+
   // ----- Raster Analytics -----
+
+  @RequireMunicipalityMember()
+  @Post('zonal-statistics')
+  zonalStatistics(@CurrentAppUser() appUser: AppUser, @Body() dto: ZonalStatisticsDto) {
+    return this.tools.zonalStatistics(appUser, dto);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('idw')
+  idw(@CurrentAppUser() appUser: AppUser, @Body() dto: IdwDto) {
+    return this.tools.idw(appUser, dto);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('heatmap')
+  heatmap(@CurrentAppUser() appUser: AppUser, @Body() dto: HeatmapDto) {
+    return this.tools.heatmap(appUser, dto);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('proximity')
+  proximity(@CurrentAppUser() appUser: AppUser, @Body() dto: ProximityDto) {
+    return this.tools.proximity(appUser, dto);
+  }
 
   @RequireMunicipalityMember()
   @Post('calculator')
@@ -153,6 +250,18 @@ export class RasterController {
   @Post('ndvi')
   ndvi(@CurrentAppUser() appUser: AppUser, @Body() dto: NdviDto) {
     return this.tools.ndvi(appUser, dto);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('spectral-index')
+  spectralIndex(@CurrentAppUser() appUser: AppUser, @Body() dto: SpectralIndexDto) {
+    return this.tools.spectralIndex(appUser, dto);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('classify')
+  classify(@CurrentAppUser() appUser: AppUser, @Body() dto: ClassifyDto) {
+    return this.tools.classify(appUser, dto);
   }
 
   @RequireMunicipalityMember()

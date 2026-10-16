@@ -1355,6 +1355,15 @@ export class MapService {
   // ----- spatial bookmarks -----
 
   /** Current view centre / zoom / projection — for saving a bookmark. */
+  /** The visible map extent as an EPSG:4326 `[minX, minY, maxX, maxY]`. */
+  getViewExtent4326(): [number, number, number, number] | null {
+    if (!this.map) return null;
+    const size = this.map.getSize();
+    if (!size) return null;
+    const extent = this.map.getView().calculateExtent(size);
+    return transformExtent(extent, MAP_PROJECTION, LAYER_PROJECTION) as [number, number, number, number];
+  }
+
   getViewState(): { center: [number, number]; zoom: number; projection: string } | null {
     const view = this.map?.getView();
     const center = view?.getCenter();

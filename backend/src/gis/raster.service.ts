@@ -47,6 +47,16 @@ export interface RasterInfo {
   bands: RasterBandInfo[];
 }
 
+export interface VectorField {
+  name: string;
+  type: string;
+  numeric: boolean;
+}
+
+const NUMERIC_TYPES = new Set([
+  'smallint', 'integer', 'bigint', 'numeric', 'real', 'double precision', 'decimal',
+]);
+
 export interface RasterStats {
   min: number | null;
   max: number | null;
@@ -168,6 +178,86 @@ export class RasterService {
       throw new BadRequestException(`The raster file of "${layer.name}" is missing.`);
     });
     return { layer, file };
+  }
+
+  /** The VIEW-checked vector layer, as the `{conn, table}` source
+   *  raster_ops.py reads with OGR (PostGIS). */
+  async resolveVector(appUser: AppUser, layerId: string) {
+    const workspace = await this.prisma.gISWorkspace.findUnique({
+      where: { municipalityId: appUser.municipalityId },
+      select: { id: true },
+    });
+    const layer = workspace
+      ? await this.prisma.gISLayer.findFirst({
+          where: { id: layerId, gisWorkspaceId: workspace.id, status: 'ACTIVE' },
+        })
+      : null;
+    if (!layer || !(await this.gisAuth.canView(appUser, layer))) {
+      throw new NotFoundException('Layer not found.');
+    }
+    if (layer.layerType !== 'VECTOR' || !layer.postgisTable) {
+      throw new BadRequestException(`"${layer.name}" is not a vector layer.`);
+    }
+    return { layer, source: { conn: this.pgConnection(), table: layer.postgisTable } };
+  }
+
+  /** Attribute fields of a vector layer (for the field pickers). */
+  async vectorFields(appUser: AppUser, layerId: string): Promise<VectorField[]> {
+    const { source } = await this.resolveVector(appUser, layerId);
+    const rows = await this.prisma.$queryRaw<{ name: string; type: string }[]>`
+      SELECT column_name AS name, data_type AS type
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = ${source.table}
+      ORDER BY ordinal_position`;
+    return rows
+      .filter((r) => r.type !== 'USER-DEFINED' && r.name !== 'ogc_fid')
+      .map((r) => ({ name: r.name, type: r.type, numeric: NUMERIC_TYPES.has(r.type) }));
+  }
+
+  /** Rejects a field that is not on the layer (or not numeric when it must be). */
+  async assertField(appUser: AppUser, layerId: string, field: string | undefined, numeric: boolean): Promise<void> {
+    if (!field) return;
+    const match = (await this.vectorFields(appUser, layerId)).find((f) => f.name === field);
+    if (!match) throw new BadRequestException(`The layer has no field "${field}".`);
+    if (numeric && !match.numeric) throw new BadRequestException(`"${field}" is not a numeric field.`);
+  }
+
+  /** Download Raster: the GeoTIFF, optionally cut to an EPSG:4326 bbox.
+   *  Gated by the layer's EXPORT permission. */
+  async download(appUser: AppUser, layerId: string, bbox?: [number, number, number, number]) {
+    const { layer, file } = await this.resolveRaster(appUser, layerId);
+    if (!(await this.gisAuth.canExport(appUser, layer))) {
+      throw new ForbiddenException('You do not have permission to export this layer.');
+    }
+    const filename = `${layer.code.toLowerCase()}.tif`;
+    if (!bbox) return { filename, body: await fsp.readFile(file) };
+    const clipped = this.tempPath(appUser.municipalityId, '.tif');
+    await fsp.mkdir(path.dirname(clipped), { recursive: true });
+    try {
+      const [minX, minY, maxX, maxY] = bbox;
+      await execFileAsync(
+        'gdal_translate',
+        ['-q', '-projwin_srs', 'EPSG:4326', '-projwin', `${minX}`, `${maxY}`, `${maxX}`, `${minY}`,
+          '-co', 'COMPRESS=DEFLATE', '-co', 'TILED=YES', file, clipped],
+        { timeout: OP_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 },
+      ).catch(() => {
+        throw new BadRequestException('The current map view does not overlap this raster.');
+      });
+      return { filename: filename.replace(/\.tif$/, '_view.tif'), body: await fsp.readFile(clipped) };
+    } finally {
+      await fsp.rm(clipped, { force: true });
+    }
+  }
+
+  private pgConnection(): string {
+    const q = (v: string) => `'${v.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+    return (
+      `PG:host=${q(this.config.getOrThrow<string>('POSTGIS_HOST'))}` +
+      ` port=${q(String(this.config.getOrThrow<string>('POSTGIS_PORT')))}` +
+      ` dbname=${q(this.config.getOrThrow<string>('POSTGIS_DATABASE'))}` +
+      ` user=${q(this.config.getOrThrow<string>('POSTGIS_USER'))}` +
+      ` password=${q(this.config.getOrThrow<string>('POSTGIS_PASSWORD'))}`
+    );
   }
 
   /** Runs one raster_ops.py operation (JSON in, JSON out). */

@@ -10,6 +10,7 @@ import heapq
 import json
 import math
 import os
+import shutil
 import sys
 import tempfile
 
@@ -23,6 +24,9 @@ GTIFF_OPTIONS = ["COMPRESS=DEFLATE", "TILED=YES", "BIGTIFF=IF_SAFER"]
 FLOAT_NODATA = -9999.0
 MAX_WATERSHED_CELLS = 640_000
 MAX_POLYGONS = 100_000
+MAX_GRID_CELLS = 25_000_000
+MAX_FILL_CELLS = 4_000_000
+MAX_ZONE_ROWS = 300
 
 
 class OpError(Exception):
@@ -536,10 +540,11 @@ def op_watershed(req):
     return {"areaM2": float(mask.sum() * area), "polygons": count, "resampled": ds is not src}
 
 
-def priority_flood(z):
+def priority_flood(z, return_filled=False):
     """Barnes priority-flood: returns the processing order (low to high,
     outlets first) and, per cell, the downstream cell it drains to (-1 for
-    outlets on the edge / next to NoData). Fills depressions implicitly."""
+    outlets on the edge / next to NoData). Fills depressions implicitly;
+    with `return_filled` the depression-filled surface is returned too."""
     h, w = z.shape
     n = h * w
     flat = z.ravel()
@@ -576,6 +581,9 @@ def priority_flood(z):
                     down[j] = i
                     filled[j] = max(filled[j], elev)
                     heapq.heappush(heap, (filled[j], j))
+    if return_filled:
+        out = np.where(valid, filled, np.nan).reshape(h, w)
+        return np.array(order, dtype=np.int64), down, out
     return np.array(order, dtype=np.int64), down
 
 
@@ -703,12 +711,486 @@ def op_change(req):
     }
 
 
+# ------------------------------------------------- vector input (PostGIS)
+
+def open_vector(spec):
+    """`spec` = {"conn": "PG:...", "table": "..."} built by the backend."""
+    ds = gdal.OpenEx(spec["conn"], gdal.OF_VECTOR, open_options=["LIST_ALL_TABLES=NO"])
+    if ds is None or ds.GetLayerByName(spec["table"]) is None:
+        raise OpError("The vector layer could not be read.")
+    return ds
+
+
+def utm_srs(ds, table):
+    """UTM zone (WGS 84) covering the layer's centre — a metric CRS so pixel
+    sizes and distances are in metres."""
+    layer = ds.GetLayerByName(table)
+    minx, maxx, miny, maxy = layer.GetExtent()
+    src = layer.GetSpatialRef() or wgs84()
+    src.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    tr = osr.CoordinateTransformation(src, wgs84())
+    lon, lat, _ = tr.TransformPoint((minx + maxx) / 2, (miny + maxy) / 2)
+    zone = int((lon + 180) // 6) + 1
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG((32600 if lat >= 0 else 32700) + zone)
+    srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    return srs
+
+
+def vector_copy(spec, dst_srs, folder, where=None):
+    """Copies the PostGIS layer into a GeoPackage (layer "src") in `dst_srs`."""
+    path = os.path.join(folder, "src.gpkg")
+    gdal.VectorTranslate(
+        path, open_vector(spec), format="GPKG", layers=[spec["table"]],
+        layerName="src", dstSRS=dst_srs.ExportToWkt(), where=where,
+        geometryType="PROMOTE_TO_MULTI",
+    )
+    ds = ogr.Open(path, 1)
+    layer = ds.GetLayer(0)
+    if layer.GetFeatureCount() == 0:
+        raise OpError("The vector layer has no features to use.")
+    return path, ds, layer
+
+
+def make_grid(extent, pixel, pad=0.0):
+    minx, maxx, miny, maxy = extent
+    minx, maxx, miny, maxy = minx - pad, maxx + pad, miny - pad, maxy + pad
+    if pixel <= 0:
+        raise OpError("The pixel size must be greater than zero.")
+    w = max(int(math.ceil((maxx - minx) / pixel)), 1)
+    h = max(int(math.ceil((maxy - miny) / pixel)), 1)
+    if w * h > MAX_GRID_CELLS:
+        raise OpError(
+            f"That would be a {w} × {h} grid — use a larger pixel size "
+            f"(at least {math.ceil(pixel * math.sqrt(w * h / MAX_GRID_CELLS))} m)."
+        )
+    return w, h, (minx, pixel, 0.0, maxy, 0.0, -pixel)
+
+
+def new_raster(path, w, h, gt, srs, dtype=gdal.GDT_Float32, nodata=FLOAT_NODATA, driver="GTiff"):
+    options = GTIFF_OPTIONS if driver == "GTiff" else []
+    ds = gdal.GetDriverByName(driver).Create(path, w, h, 1, dtype, options)
+    ds.SetGeoTransform(gt)
+    ds.SetProjection(srs.ExportToWkt() if hasattr(srs, "ExportToWkt") else srs)
+    band = ds.GetRasterBand(1)
+    if nodata is not None:
+        band.SetNoDataValue(nodata)
+        band.Fill(nodata)
+    return ds
+
+
+def point_values(layer, field=None):
+    """x, y (layer CRS) and weights of every feature (centroids for lines
+    and polygons); features without a value are skipped."""
+    xs, ys, ws = [], [], []
+    layer.ResetReading()
+    for feature in layer:
+        geom = feature.GetGeometryRef()
+        if geom is None or geom.IsEmpty():
+            continue
+        if field:
+            v = feature.GetField(field)
+            if v is None:
+                continue
+            try:
+                v = float(v)
+            except (TypeError, ValueError):
+                raise OpError(f'"{field}" must be a numeric field.')
+        else:
+            v = 1.0
+        flat = geom.GetGeometryType() in (ogr.wkbPoint, ogr.wkbPoint25D)
+        if geom.GetGeometryName() == "MULTIPOINT":
+            for i in range(geom.GetGeometryCount()):
+                p = geom.GetGeometryRef(i)
+                xs.append(p.GetX()); ys.append(p.GetY()); ws.append(v)
+            continue
+        p = geom if flat else geom.Centroid()
+        xs.append(p.GetX()); ys.append(p.GetY()); ws.append(v)
+    if not xs:
+        raise OpError("No usable features (or no values in that field).")
+    return np.array(xs), np.array(ys), np.array(ws)
+
+
+# ---------------------------------------------------- raster data tools
+
+def op_statistics(req):
+    ds = gdal.Open(req["path"])
+    band = req.get("band", 1)
+    arr = read_band(ds, band)
+    valid = arr[np.isfinite(arr)]
+    total = arr.size
+    if valid.size == 0:
+        raise OpError("The band has no valid pixels.")
+    bins = int(req.get("bins", 32))
+    lo, hi = float(valid.min()), float(valid.max())
+    counts, edges = np.histogram(valid, bins=bins, range=(lo, hi if hi > lo else lo + 1))
+    p = np.percentile(valid, [1, 25, 50, 75, 99])
+    return {
+        "band": band,
+        "validCells": int(valid.size),
+        "nodataCells": int(total - valid.size),
+        "min": lo, "max": hi,
+        "mean": float(valid.mean()), "std": float(valid.std()),
+        "p1": float(p[0]), "p25": float(p[1]), "median": float(p[2]), "p75": float(p[3]), "p99": float(p[4]),
+        "areaM2": float(valid.size * pixel_area_m2(ds)),
+        "histogram": {"counts": counts.tolist(), "edges": edges.tolist()},
+    }
+
+
+def op_mosaic(req):
+    paths = req["paths"]
+    first = gdal.Open(paths[0])
+    count = first.RasterCount
+    for p in paths[1:]:
+        if gdal.Open(p).RasterCount != count:
+            raise OpError("All rasters in a mosaic need the same number of bands.")
+    b = first.GetRasterBand(1)
+    nodata = b.GetNoDataValue()
+    if nodata is None:
+        nodata = 0 if b.DataType == gdal.GDT_Byte else FLOAT_NODATA
+    gdal.Warp(
+        req["output"], paths, format="GTiff", creationOptions=GTIFF_OPTIONS,
+        dstSRS=first.GetProjection(), resampleAlg=req.get("resampling", "bilinear"),
+        dstNodata=nodata, multithread=True,
+    )
+    out = gdal.Open(req["output"])
+    return {"width": out.RasterXSize, "height": out.RasterYSize, "inputs": len(paths),
+            "stats": stats_of(read_band(out))}
+
+
+def op_resample(req):
+    src = gdal.Open(req["path"])
+    target = req.get("targetCrs") or "same"
+    if target == "same":
+        dst = ds_srs(src)
+    elif target == "UTM":
+        gt = src.GetGeoTransform()
+        cx = gt[0] + gt[1] * src.RasterXSize / 2
+        cy = gt[3] + gt[5] * src.RasterYSize / 2
+        lon, lat, _ = osr.CoordinateTransformation(ds_srs(src), wgs84()).TransformPoint(cx, cy)
+        dst = osr.SpatialReference()
+        dst.ImportFromEPSG((32600 if lat >= 0 else 32700) + int((lon + 180) // 6) + 1)
+    else:
+        dst = osr.SpatialReference()
+        if dst.SetFromUserInput(target) != 0:
+            raise OpError(f"Unknown coordinate system {target}.")
+    options = {
+        "format": "GTiff", "creationOptions": GTIFF_OPTIONS, "dstSRS": dst.ExportToWkt(),
+        "resampleAlg": req.get("resampling", "bilinear"), "multithread": True,
+    }
+    size = req.get("pixelSize")
+    if size:
+        res = size / 111320 if dst.IsGeographic() else size / (dst.GetLinearUnits() or 1.0)
+        options.update(xRes=res, yRes=res)
+    gdal.Warp(req["output"], src, **options)
+    out = gdal.Open(req["output"])
+    if out.RasterXSize * out.RasterYSize > MAX_GRID_CELLS * 4:
+        raise OpError("The result is too large — use a larger pixel size.")
+    return {"width": out.RasterXSize, "height": out.RasterYSize, "pixelSizeM": pixel_size_m(out),
+            "crs": dst.GetAuthorityCode(None) and f"EPSG:{dst.GetAuthorityCode(None)}" or dst.GetName()}
+
+
+def op_rasterize(req):
+    folder = tempfile.mkdtemp()
+    try:
+        srs = utm_srs(open_vector(req["vector"]), req["vector"]["table"])
+        _, vds, layer = vector_copy(req["vector"], srs, folder)
+        w, h, gt = make_grid(layer.GetExtent(), req["pixelSize"])
+        out = new_raster(req["output"], w, h, gt, srs)
+        options = {"layers": ["src"], "allTouched": bool(req.get("allTouched"))}
+        if req.get("field"):
+            options["attribute"] = req["field"]
+        else:
+            options["burnValues"] = [1]
+        gdal.Rasterize(out, vds, **options)
+        out.FlushCache()
+        arr = read_band(out)
+        out = None
+        return {"width": w, "height": h, "stats": stats_of(arr),
+                "areaM2": float(np.isfinite(arr).sum() * req["pixelSize"] ** 2)}
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+# -------------------------------------------------------- terrain extras
+
+def op_fill_sinks(req):
+    ds = gdal.Open(req["path"])
+    if ds.RasterXSize * ds.RasterYSize > MAX_FILL_CELLS:
+        raise OpError("The DEM is too large for Fill Sinks — resample it to a coarser pixel size first.")
+    z = read_band(ds, req.get("band", 1))
+    _, _, filled = priority_flood(z, return_filled=True)
+    depth = filled - z
+    sinks = np.isfinite(depth) & (depth > 1e-6)
+    write_array(ds, filled, req["output"])
+    area = pixel_area_m2(ds)
+    return {
+        "stats": stats_of(filled),
+        "filledCells": int(sinks.sum()),
+        "filledAreaM2": float(sinks.sum() * area),
+        "fillVolumeM3": float(np.nansum(np.where(sinks, depth, 0)) * area),
+        "maxFillDepth": float(depth[sinks].max()) if sinks.any() else 0.0,
+    }
+
+
+# ------------------------------------------------------- raster analytics
+
+def op_zonal(req):
+    folder = tempfile.mkdtemp()
+    try:
+        ds = gdal.Open(req["path"])
+        values = read_band(ds, req.get("band", 1))
+        path, vds, layer = vector_copy(req["vector"], ds_srs(ds), folder)
+        layer.CreateField(ogr.FieldDefn("zone_id", ogr.OFTInteger))
+        layer.ResetReading()
+        n = 0
+        for feature in layer:
+            n += 1
+            feature.SetField("zone_id", n)
+            layer.SetFeature(feature)
+        mem = gdal.GetDriverByName("MEM").Create("", ds.RasterXSize, ds.RasterYSize, 1, gdal.GDT_Int32)
+        mem.SetGeoTransform(ds.GetGeoTransform())
+        mem.SetProjection(ds.GetProjection())
+        gdal.Rasterize(mem, vds, layers=["src"], attribute="zone_id", allTouched=bool(req.get("allTouched")))
+        zones = mem.GetRasterBand(1).ReadAsArray()
+        ok = (zones > 0) & np.isfinite(values)
+        z, v = zones[ok], values[ok]
+        count = np.bincount(z, minlength=n + 1)
+        total = np.bincount(z, weights=v, minlength=n + 1)
+        mn = np.full(n + 1, np.inf); np.minimum.at(mn, z, v)
+        mx = np.full(n + 1, -np.inf); np.maximum.at(mx, z, v)
+        sq = np.bincount(z, weights=v * v, minlength=n + 1)
+        area = pixel_area_m2(ds)
+
+        for name in ("z_count", "z_min", "z_max", "z_mean", "z_sum", "z_std", "z_area_m2"):
+            layer.CreateField(ogr.FieldDefn(name, ogr.OFTInteger if name == "z_count" else ogr.OFTReal))
+        rows = []
+        label_field = req.get("labelField")
+        layer.ResetReading()
+        for feature in layer:
+            i = feature.GetField("zone_id")
+            c = int(count[i])
+            mean = total[i] / c if c else None
+            std = math.sqrt(max(sq[i] / c - mean * mean, 0)) if c else None
+            stats = {
+                "count": c,
+                "min": float(mn[i]) if c else None,
+                "max": float(mx[i]) if c else None,
+                "mean": mean,
+                "sum": float(total[i]) if c else None,
+                "std": std,
+                "areaM2": c * area,
+            }
+            for key, field in (("count", "z_count"), ("min", "z_min"), ("max", "z_max"), ("mean", "z_mean"),
+                               ("sum", "z_sum"), ("std", "z_std"), ("areaM2", "z_area_m2")):
+                if stats[key] is not None:
+                    feature.SetField(field, stats[key])
+            layer.SetFeature(feature)
+            label = feature.GetField(label_field) if label_field else None
+            rows.append({"zone": str(label) if label is not None else f"Zone {i}", **stats})
+        covered = sum(1 for r in rows if r["count"])
+        vds = None
+        if req.get("output"):
+            gdal.VectorTranslate(req["output"], path, format="GPKG", layerName="result")
+        return {
+            "zones": len(rows),
+            "zonesWithData": covered,
+            "rows": rows[:MAX_ZONE_ROWS],
+            "truncated": len(rows) > MAX_ZONE_ROWS,
+        }
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def op_idw(req):
+    folder = tempfile.mkdtemp()
+    try:
+        field = req["field"]
+        srs = utm_srs(open_vector(req["vector"]), req["vector"]["table"])
+        path, vds, layer = vector_copy(req["vector"], srs, folder, where=f'"{field}" IS NOT NULL')
+        xs, ys, _ = point_values(layer, field)
+        if xs.size < 3:
+            raise OpError("Interpolation needs at least 3 points with a value.")
+        pixel = req["pixelSize"]
+        minx, maxx, miny, maxy = layer.GetExtent()
+        pad = pixel * 2
+        w, h, gt = make_grid((minx, maxx, miny, maxy), pixel, pad)
+        diag = math.hypot(maxx - minx, maxy - miny) + pad * 2
+        vds = None
+        algorithm = (
+            f"invdistnn:power={req.get('power', 2)}:smoothing=0:radius={diag}:"
+            f"max_points={int(req.get('maxPoints', 12))}:min_points=1:nodata={FLOAT_NODATA}"
+        )
+        gdal.Grid(
+            req["output"], path, format="GTiff", creationOptions=GTIFF_OPTIONS, layers=["src"],
+            zfield=field, algorithm=algorithm, outputType=gdal.GDT_Float32,
+            outputBounds=[gt[0], gt[3], gt[0] + w * pixel, gt[3] - h * pixel],
+            width=w, height=h, outputSRS=srs.ExportToWkt(),
+        )
+        out = gdal.Open(req["output"], 1)
+        out.GetRasterBand(1).SetNoDataValue(FLOAT_NODATA)
+        arr = read_band(out)
+        out = None
+        return {"points": int(xs.size), "width": w, "height": h, "stats": stats_of(arr)}
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def op_heatmap(req):
+    folder = tempfile.mkdtemp()
+    try:
+        srs = utm_srs(open_vector(req["vector"]), req["vector"]["table"])
+        _, vds, layer = vector_copy(req["vector"], srs, folder)
+        xs, ys, ws = point_values(layer, req.get("weightField"))
+        pixel = req["pixelSize"]
+        radius = req["radius"]
+        k = max(int(math.ceil(radius / pixel)), 1)
+        w, h, gt = make_grid((xs.min(), xs.max(), ys.min(), ys.max()), pixel, radius)
+        cols = np.clip(((xs - gt[0]) / pixel).astype(int), 0, w - 1)
+        rows = np.clip(((gt[3] - ys) / pixel).astype(int), 0, h - 1)
+        grid = np.zeros((h, w))
+        np.add.at(grid, (rows, cols), ws)
+
+        # Quartic (biweight) kernel, normalised so the surface integrates to
+        # the total weight; then expressed per km².
+        yy, xx = np.mgrid[-k:k + 1, -k:k + 1] * pixel
+        d2 = (xx * xx + yy * yy) / (radius * radius)
+        kernel = np.where(d2 < 1, (1 - d2) ** 2, 0.0)
+        kernel /= kernel.sum()
+        fh, fw = h + 2 * k, w + 2 * k
+        density = np.fft.irfft2(np.fft.rfft2(grid, (fh, fw)) * np.fft.rfft2(kernel, (fh, fw)), (fh, fw))
+        density = density[k:k + h, k:k + w] / (pixel * pixel / 1e6)
+        density[density < density.max() * 1e-4] = np.nan
+        out = new_raster(req["output"], w, h, gt, srs)
+        out.GetRasterBand(1).WriteArray(np.where(np.isfinite(density), density, FLOAT_NODATA))
+        out = None
+        return {"points": int(xs.size), "width": w, "height": h, "peakPerKm2": float(np.nanmax(density)),
+                "stats": stats_of(density)}
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def op_proximity(req):
+    folder = tempfile.mkdtemp()
+    try:
+        srs = utm_srs(open_vector(req["vector"]), req["vector"]["table"])
+        _, vds, layer = vector_copy(req["vector"], srs, folder)
+        max_distance = req["maxDistance"]
+        w, h, gt = make_grid(layer.GetExtent(), req["pixelSize"], max_distance)
+        mem = new_raster("", w, h, gt, srs, gdal.GDT_Byte, None, "MEM")
+        gdal.Rasterize(mem, vds, layers=["src"], burnValues=[1], allTouched=True)
+        out = new_raster(req["output"], w, h, gt, srs)
+        gdal.ComputeProximity(
+            mem.GetRasterBand(1), out.GetRasterBand(1),
+            ["VALUES=1", "DISTUNITS=GEO", f"MAXDIST={max_distance}", f"NODATA={FLOAT_NODATA}"],
+        )
+        out.FlushCache()
+        arr = read_band(out)
+        out = None
+        within = np.isfinite(arr)
+        return {"width": w, "height": h, "withinM2": float(within.sum() * req["pixelSize"] ** 2),
+                "stats": stats_of(arr)}
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+# -------------------------------------------------------- imagery tools
+
+INDEX_FORMULAS = {
+    # (A, B) bands per index: NDWI = Green, NIR; NDBI = SWIR, NIR; SAVI = Red, NIR
+    "ndwi": lambda a, b, L: (a - b) / (a + b),
+    "ndbi": lambda a, b, L: (a - b) / (a + b),
+    "savi": lambda a, b, L: (1 + L) * (b - a) / (b + a + L),
+}
+
+
+def op_index(req):
+    ds = gdal.Open(req["path"])
+    kind = req["kind"]
+    a = read_band(ds, req["bandA"])
+    b = read_band(ds, req["bandB"])
+    with np.errstate(all="ignore"):
+        idx = INDEX_FORMULAS[kind](a, b, float(req.get("soilFactor", 0.5)))
+    idx[~np.isfinite(idx)] = np.nan
+    write_array(ds, idx, req["output"])
+    valid = idx[np.isfinite(idx)]
+    total = valid.size or 1
+    result = {"stats": stats_of(idx)}
+    if kind == "ndwi":
+        result["openWaterPct"] = float((valid > 0).sum() * 100 / total)
+    elif kind == "ndbi":
+        result["builtUpPct"] = float((valid > 0).sum() * 100 / total)
+    else:
+        result["vegetationPct"] = float((valid > 0.3).sum() * 100 / total)
+    return result
+
+
+def op_classify(req):
+    ds = gdal.Open(req["path"])
+    bands = req.get("bands") or list(range(1, ds.RasterCount + 1))
+    k = int(req["classes"])
+    stack = np.stack([read_band(ds, b) for b in bands], axis=-1)
+    h, w, nb = stack.shape
+    flat = stack.reshape(-1, nb)
+    ok = np.all(np.isfinite(flat), axis=1)
+    data = flat[ok]
+    if data.shape[0] < k * 10:
+        raise OpError("Not enough valid pixels to classify.")
+    rng = np.random.default_rng(0)
+    sample = data[rng.choice(data.shape[0], min(200_000, data.shape[0]), replace=False)]
+    mu, sd = sample.mean(axis=0), sample.std(axis=0)
+    sd[sd == 0] = 1
+    xs = (sample - mu) / sd
+
+    # k-means++ seeding, then Lloyd iterations on the sample.
+    centers = [xs[rng.integers(xs.shape[0])]]
+    for _ in range(1, k):
+        d = np.min(((xs[:, None, :] - np.array(centers)[None]) ** 2).sum(-1), axis=1)
+        centers.append(xs[rng.choice(xs.shape[0], p=d / d.sum())] if d.sum() > 0 else xs[rng.integers(xs.shape[0])])
+    centers = np.array(centers)
+    for _ in range(int(req.get("iterations", 25))):
+        labels = np.argmin(((xs[:, None, :] - centers[None]) ** 2).sum(-1), axis=1)
+        moved = np.array([xs[labels == i].mean(axis=0) if (labels == i).any() else centers[i] for i in range(k)])
+        if np.allclose(moved, centers, atol=1e-4):
+            break
+        centers = moved
+
+    # Number classes dark → bright so reruns read the same way.
+    order = np.argsort(centers.mean(axis=1))
+    rank = np.empty(k, dtype=np.int64)
+    rank[order] = np.arange(1, k + 1)
+    out = np.zeros(flat.shape[0], dtype=np.uint8)
+    idx = np.flatnonzero(ok)
+    for start in range(0, idx.size, 500_000):
+        part = idx[start:start + 500_000]
+        z = (flat[part] - mu) / sd
+        out[part] = rank[np.argmin(((z[:, None, :] - centers[None]) ** 2).sum(-1), axis=1)]
+    drv = gdal.GetDriverByName("GTiff").Create(req["output"], w, h, 1, gdal.GDT_Byte, GTIFF_OPTIONS)
+    drv.SetGeoTransform(ds.GetGeoTransform())
+    drv.SetProjection(ds.GetProjection())
+    band = drv.GetRasterBand(1)
+    band.SetNoDataValue(0)
+    band.WriteArray(out.reshape(h, w))
+    drv = None
+    area = pixel_area_m2(ds)
+    counts = np.bincount(out, minlength=k + 1)
+    total = counts[1:].sum() or 1
+    return {"classes": [
+        {"value": i, "label": f"Class {i}", "areaM2": float(counts[i] * area), "pct": float(counts[i] * 100 / total)}
+        for i in range(1, k + 1)
+    ]}
+
+
 OPS = {
     "info": op_info, "identify": op_identify, "profile": op_profile,
     "line_of_sight": op_line_of_sight, "terrain": op_terrain, "contour": op_contour,
     "cut_fill": op_cut_fill, "flood": op_flood, "viewshed": op_viewshed,
     "watershed": op_watershed, "calc": op_calc, "reclassify": op_reclassify,
     "clip": op_clip, "polygonize": op_polygonize, "ndvi": op_ndvi, "change": op_change,
+    "statistics": op_statistics, "mosaic": op_mosaic, "resample": op_resample,
+    "rasterize": op_rasterize, "fill_sinks": op_fill_sinks, "zonal": op_zonal,
+    "idw": op_idw, "heatmap": op_heatmap, "proximity": op_proximity,
+    "index": op_index, "classify": op_classify,
 }
 
 

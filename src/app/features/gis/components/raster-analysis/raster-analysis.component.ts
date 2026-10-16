@@ -17,15 +17,18 @@ import {
   RASTER_RAMP_NAMES,
   RasterInfo,
   RasterService,
-  RasterStyleSpec
+  RasterStatistics,
+  RasterStyleSpec,
+  VectorField,
+  ZoneRow
 } from '../../services/raster.service';
 
 export type RasterToolId =
-  | 'upload' | 'style' | 'identify'
-  | 'profile' | 'slope' | 'aspect' | 'hillshade' | 'contour' | 'cutfill'
+  | 'upload' | 'style' | 'identify' | 'stats' | 'download' | 'mosaic' | 'resample' | 'rasterize'
+  | 'profile' | 'slope' | 'aspect' | 'hillshade' | 'contour' | 'rugged' | 'cutfill' | 'fillsinks'
   | 'watershed' | 'flood' | 'los' | 'viewshed'
-  | 'calc' | 'reclass' | 'clip' | 'polygonize'
-  | 'swipe' | 'ndvi' | 'change';
+  | 'calc' | 'reclass' | 'clip' | 'polygonize' | 'zonal' | 'idw' | 'heatmap' | 'proximity'
+  | 'swipe' | 'change' | 'ndvi' | 'indices' | 'classify';
 
 interface ToolDef {
   id: RasterToolId;
@@ -42,34 +45,53 @@ interface ToolDef {
 
 /** Raster Analysis (69) and its sub-modules, in catalog order. */
 export const RASTER_TOOLS: ToolDef[] = [
-  { id: 'upload', label: 'Raster Upload & Publish', group: 'Raster Data', moduleId: 911, icon: 'pi pi-upload', description: 'Publish a GeoTIFF (DEM, satellite or drone image) as a map layer.' },
-  { id: 'style', label: 'Raster Styling', group: 'Raster Data', moduleId: 912, icon: 'pi pi-palette', description: 'Colour a raster with a ramp, stretch and opacity.' },
-  { id: 'identify', label: 'Pixel Identify', group: 'Raster Data', moduleId: 913, icon: 'pi pi-info-circle', description: 'Click the map to read pixel values from every band.' },
-  { id: 'profile', label: 'Elevation Profile', group: 'Terrain Analysis', moduleId: 921, section: 'Surface', icon: 'pi pi-chart-line', description: 'Draw a line to plot the elevation profile along it.' },
-  { id: 'slope', label: 'Slope', group: 'Terrain Analysis', moduleId: 922, section: 'Surface', icon: 'pi pi-sort-amount-up', description: 'Steepness of the terrain from a DEM, in degrees or percent.' },
-  { id: 'aspect', label: 'Aspect', group: 'Terrain Analysis', moduleId: 923, section: 'Surface', icon: 'pi pi-compass', description: 'Direction each slope faces (0–360°).' },
-  { id: 'hillshade', label: 'Hillshade', group: 'Terrain Analysis', moduleId: 924, section: 'Surface', icon: 'pi pi-sun', description: 'Shaded relief from a light source for 3D-looking terrain.' },
-  { id: 'contour', label: 'Contour Generation', group: 'Terrain Analysis', moduleId: 925, section: 'Surface', icon: 'pi pi-wave-pulse', description: 'Generate contour lines at a fixed elevation interval.' },
-  { id: 'cutfill', label: 'Cut & Fill / Volume', group: 'Terrain Analysis', moduleId: 926, section: 'Hydrology & Earthwork', icon: 'pi pi-box', description: 'Earthwork volumes to bring an area to a target height.' },
-  { id: 'watershed', label: 'Drainage / Watershed', group: 'Terrain Analysis', moduleId: 927, section: 'Hydrology & Earthwork', icon: 'pi pi-share-alt', description: 'Flow paths and catchment area draining to a point.' },
-  { id: 'flood', label: 'Flood Inundation', group: 'Terrain Analysis', moduleId: 928, section: 'Hydrology & Earthwork', icon: 'pi pi-cloud', description: 'Area flooded at a given water level.' },
-  { id: 'los', label: 'Line of Sight', group: 'Terrain Analysis', moduleId: 929, section: 'Visibility', icon: 'pi pi-eye', description: 'Is the target visible from the observer along a line?' },
-  { id: 'viewshed', label: 'Viewshed', group: 'Terrain Analysis', moduleId: 930, section: 'Visibility', icon: 'pi pi-bullseye', description: 'Everything visible from an observer point.' },
-  { id: 'calc', label: 'Raster Calculator', group: 'Raster Analytics', moduleId: 942, icon: 'pi pi-calculator', description: 'Map algebra across rasters, e.g. (A - B) / (A + B).' },
-  { id: 'reclass', label: 'Reclassify', group: 'Raster Analytics', moduleId: 943, icon: 'pi pi-sliders-h', description: 'Group pixel values into new classes.' },
-  { id: 'clip', label: 'Clip to Boundary', group: 'Raster Analytics', moduleId: 944, icon: 'pi pi-stop', description: 'Cut a raster to a drawn or chosen boundary.' },
-  { id: 'polygonize', label: 'Raster to Vector', group: 'Raster Analytics', moduleId: 945, icon: 'pi pi-th-large', description: 'Convert raster zones into vector polygons.' },
-  { id: 'swipe', label: 'Swipe / Compare', group: 'Imagery Analysis', moduleId: 951, icon: 'pi pi-arrows-h', description: 'Slide between two layers to compare them.' },
-  { id: 'ndvi', label: 'NDVI / Vegetation Index', group: 'Imagery Analysis', moduleId: 952, icon: 'pi pi-sparkles', description: 'Vegetation health from red and near-infrared bands.' },
-  { id: 'change', label: 'Change Detection', group: 'Imagery Analysis', moduleId: 953, icon: 'pi pi-sync', description: 'Detect what changed between two dates.' }
+  { id: 'upload', label: 'Raster Upload & Publish', group: 'Raster Data', section: 'Publish & Inspect', moduleId: 911, icon: 'pi pi-upload', description: 'Publish a GeoTIFF (DEM, satellite or drone image) as a map layer.' },
+  { id: 'style', label: 'Raster Styling', group: 'Raster Data', section: 'Publish & Inspect', moduleId: 912, icon: 'pi pi-palette', description: 'Colour a raster with a ramp, stretch and opacity.' },
+  { id: 'identify', label: 'Pixel Identify', group: 'Raster Data', section: 'Publish & Inspect', moduleId: 913, icon: 'pi pi-info-circle', description: 'Click the map to read pixel values from every band.' },
+  { id: 'stats', label: 'Statistics & Histogram', group: 'Raster Data', section: 'Publish & Inspect', moduleId: 914, icon: 'pi pi-chart-bar', description: 'Value distribution, percentiles and NoData coverage of a band.' },
+  { id: 'download', label: 'Download Raster', group: 'Raster Data', section: 'Publish & Inspect', moduleId: 918, icon: 'pi pi-download', description: 'Export a raster as GeoTIFF — whole layer or just the current view.' },
+  { id: 'mosaic', label: 'Mosaic / Merge', group: 'Raster Data', section: 'Transform', moduleId: 915, icon: 'pi pi-objects-column', description: 'Stitch several raster tiles into one seamless layer.' },
+  { id: 'resample', label: 'Resample / Reproject', group: 'Raster Data', section: 'Transform', moduleId: 916, icon: 'pi pi-expand', description: 'Change the pixel size and/or coordinate system.' },
+  { id: 'rasterize', label: 'Rasterize Vector', group: 'Raster Data', section: 'Transform', moduleId: 917, icon: 'pi pi-table', description: 'Burn a vector layer (or one of its fields) into a raster grid.' },
+  { id: 'profile', label: 'Elevation Profile', group: 'Terrain Analysis', section: 'Surface', moduleId: 921, icon: 'pi pi-chart-line', description: 'Draw a line to plot the elevation profile along it.' },
+  { id: 'slope', label: 'Slope', group: 'Terrain Analysis', section: 'Surface', moduleId: 922, icon: 'pi pi-sort-amount-up', description: 'Steepness of the terrain from a DEM, in degrees or percent.' },
+  { id: 'aspect', label: 'Aspect', group: 'Terrain Analysis', section: 'Surface', moduleId: 923, icon: 'pi pi-compass', description: 'Direction each slope faces (0–360°).' },
+  { id: 'hillshade', label: 'Hillshade', group: 'Terrain Analysis', section: 'Surface', moduleId: 924, icon: 'pi pi-sun', description: 'Shaded relief from a light source for 3D-looking terrain.' },
+  { id: 'contour', label: 'Contour Generation', group: 'Terrain Analysis', section: 'Surface', moduleId: 925, icon: 'pi pi-wave-pulse', description: 'Generate contour lines at a fixed elevation interval.' },
+  { id: 'rugged', label: 'Terrain Ruggedness', group: 'Terrain Analysis', section: 'Surface', moduleId: 931, icon: 'pi pi-chart-scatter', description: 'Roughness, Terrain Ruggedness Index (TRI) or Topographic Position (TPI).' },
+  { id: 'fillsinks', label: 'Fill Sinks', group: 'Terrain Analysis', section: 'Hydrology & Earthwork', moduleId: 932, icon: 'pi pi-filter-fill', description: 'Remove pits from a DEM so water can drain — run before watershed.' },
+  { id: 'cutfill', label: 'Cut & Fill / Volume', group: 'Terrain Analysis', section: 'Hydrology & Earthwork', moduleId: 926, icon: 'pi pi-box', description: 'Earthwork volumes to bring an area to a target height.' },
+  { id: 'watershed', label: 'Drainage / Watershed', group: 'Terrain Analysis', section: 'Hydrology & Earthwork', moduleId: 927, icon: 'pi pi-share-alt', description: 'Flow paths and catchment area draining to a point.' },
+  { id: 'flood', label: 'Flood Inundation', group: 'Terrain Analysis', section: 'Hydrology & Earthwork', moduleId: 928, icon: 'pi pi-cloud', description: 'Area flooded at a given water level.' },
+  { id: 'los', label: 'Line of Sight', group: 'Terrain Analysis', section: 'Visibility', moduleId: 929, icon: 'pi pi-eye', description: 'Is the target visible from the observer along a line?' },
+  { id: 'viewshed', label: 'Viewshed', group: 'Terrain Analysis', section: 'Visibility', moduleId: 930, icon: 'pi pi-bullseye', description: 'Everything visible from an observer point.' },
+  { id: 'calc', label: 'Raster Calculator', group: 'Raster Analytics', section: 'Map Algebra', moduleId: 942, icon: 'pi pi-calculator', description: 'Map algebra across rasters, e.g. (A - B) / (A + B).' },
+  { id: 'reclass', label: 'Reclassify', group: 'Raster Analytics', section: 'Map Algebra', moduleId: 943, icon: 'pi pi-sliders-h', description: 'Group pixel values into new classes.' },
+  { id: 'clip', label: 'Clip to Boundary', group: 'Raster Analytics', section: 'Map Algebra', moduleId: 944, icon: 'pi pi-stop', description: 'Cut a raster to a drawn or chosen boundary.' },
+  { id: 'polygonize', label: 'Raster to Vector', group: 'Raster Analytics', section: 'Map Algebra', moduleId: 945, icon: 'pi pi-th-large', description: 'Convert raster zones into vector polygons.' },
+  { id: 'zonal', label: 'Zonal Statistics', group: 'Raster Analytics', section: 'Spatial Statistics', moduleId: 946, icon: 'pi pi-chart-pie', description: 'Min / max / mean / sum of a raster per ward, zone or polygon.' },
+  { id: 'idw', label: 'IDW Interpolation', group: 'Raster Analytics', section: 'Spatial Statistics', moduleId: 947, icon: 'pi pi-sitemap', description: 'Continuous surface from point measurements (e.g. levels, readings).' },
+  { id: 'heatmap', label: 'Heatmap (Kernel Density)', group: 'Raster Analytics', section: 'Spatial Statistics', moduleId: 948, icon: 'pi pi-map-marker', description: 'Hotspots of point features such as trees, complaints or incidents.' },
+  { id: 'proximity', label: 'Proximity / Distance', group: 'Raster Analytics', section: 'Spatial Statistics', moduleId: 949, icon: 'pi pi-arrows-alt', description: 'Distance to the nearest feature — road, hospital, garden…' },
+  { id: 'swipe', label: 'Swipe / Compare', group: 'Imagery Analysis', section: 'Compare', moduleId: 951, icon: 'pi pi-arrows-h', description: 'Slide between two layers to compare them.' },
+  { id: 'change', label: 'Change Detection', group: 'Imagery Analysis', section: 'Compare', moduleId: 953, icon: 'pi pi-sync', description: 'Detect what changed between two dates.' },
+  { id: 'ndvi', label: 'NDVI / Vegetation Index', group: 'Imagery Analysis', section: 'Spectral', moduleId: 952, icon: 'pi pi-sparkles', description: 'Vegetation health from red and near-infrared bands.' },
+  { id: 'indices', label: 'Spectral Indices', group: 'Imagery Analysis', section: 'Spectral', moduleId: 954, icon: 'pi pi-palette', description: 'NDWI (water), NDBI (built-up) or SAVI (vegetation on bare soil).' },
+  { id: 'classify', label: 'Unsupervised Classification', group: 'Imagery Analysis', section: 'Spectral', moduleId: 955, icon: 'pi pi-clone', description: 'K-means land-cover classes from multi-band imagery.' }
 ];
 export const RASTER_TOOL_MODULE_IDS = RASTER_TOOLS.map((t) => t.moduleId);
 
 /** Tools that publish a new layer and so need an output name. */
 const OUTPUT_TOOLS: RasterToolId[] = [
-  'slope', 'aspect', 'hillshade', 'contour', 'watershed', 'flood', 'viewshed',
-  'calc', 'reclass', 'clip', 'polygonize', 'ndvi', 'change'
+  'slope', 'aspect', 'hillshade', 'contour', 'rugged', 'fillsinks', 'watershed', 'flood', 'viewshed',
+  'calc', 'reclass', 'clip', 'polygonize', 'ndvi', 'change', 'mosaic', 'resample', 'rasterize',
+  'idw', 'heatmap', 'proximity', 'indices', 'classify'
 ];
+
+/** Tools whose main input is a vector layer instead of a raster. */
+const VECTOR_TOOLS: RasterToolId[] = ['rasterize', 'idw', 'heatmap', 'proximity'];
+/** Tools that pick their own rasters (no single "input raster" picker). */
+const NO_RASTER_INPUT: RasterToolId[] = ['upload', 'calc', 'swipe', 'mosaic', ...VECTOR_TOOLS];
 
 type Slot = 'a' | 'b' | 'line' | 'polygon';
 
@@ -173,6 +195,14 @@ export class RasterAnalysisComponent implements OnDestroy {
       .filter((l) => l.layerType === 'RASTER')
       .map((l) => ({ label: l.name, value: l.id }))
   );
+  readonly vectorLayers = computed(() =>
+    this.layersSignal()
+      .filter((l) => l.layerType === 'VECTOR')
+      .map((l) => ({ label: l.name, value: l.id, geometryType: l.geometryType }))
+  );
+  readonly polygonLayers = computed(() => this.vectorLayers().filter((l) => l.geometryType === 'POLYGON'));
+  readonly needsRasterInput = computed(() => !NO_RASTER_INPUT.includes(this.tool()));
+  readonly needsVectorInput = computed(() => VECTOR_TOOLS.includes(this.tool()));
   readonly departments = signal<{ label: string; value: string }[]>([]);
 
   // ----- input raster -----
@@ -227,6 +257,36 @@ export class RasterAnalysisComponent implements OnDestroy {
   afterBand = 1;
   changeThreshold = 0;
 
+  // raster data
+  mosaicIds: (string | null)[] = [null, null];
+  resampling: 'nearest' | 'bilinear' | 'cubic' | 'average' | 'mode' = 'bilinear';
+  resamplePixel: number | null = null;
+  resampleCrs: 'same' | 'UTM' | 'EPSG:4326' | 'EPSG:3857' | 'custom' = 'same';
+  resampleEpsg = '';
+  downloadView = false;
+  histogramBins = 32;
+
+  // vector input (rasterize, zonal, idw, heatmap, proximity)
+  readonly vectorLayerId = signal<string | null>(null);
+  readonly vectorFields = signal<VectorField[]>([]);
+  readonly numericFields = computed(() => this.vectorFields().filter((f) => f.numeric).map((f) => ({ label: f.name, value: f.name })));
+  readonly allFields = computed(() => this.vectorFields().map((f) => ({ label: f.name, value: f.name })));
+  field: string | null = null;
+  gridPixel = 10;
+  allTouched = false;
+  idwPower = 2;
+  heatRadius = 500;
+  proximityMax = 2000;
+  zonalPublish = false;
+
+  // terrain / imagery extras
+  ruggedKind: 'roughness' | 'TRI' | 'TPI' = 'TRI';
+  indexKind: 'ndwi' | 'ndbi' | 'savi' = 'ndwi';
+  indexA = 2;
+  indexB = 4;
+  soilFactor = 0.5;
+  classCount = 6;
+
   readonly swipeLayerId = signal<string | null>(null);
   swipeFraction = 50;
 
@@ -236,6 +296,8 @@ export class RasterAnalysisComponent implements OnDestroy {
   readonly message = signal<string | null>(null);
   readonly facts = signal<{ label: string; value: string }[]>([]);
   readonly profile = signal<ProfilePoint[] | null>(null);
+  readonly statistics = signal<RasterStatistics | null>(null);
+  readonly zoneRows = signal<ZoneRow[] | null>(null);
 
   private pickSub?: Subscription;
 
@@ -266,6 +328,7 @@ export class RasterAnalysisComponent implements OnDestroy {
     if (group) this.activeGroup.set(group);
     this.resetResult();
     this.clearInputs();
+    this.zonalPublish = false;
     this.suggestOutputName();
   }
 
@@ -286,6 +349,29 @@ export class RasterAnalysisComponent implements OnDestroy {
     });
   }
 
+  selectVector(id: string | null): void {
+    this.vectorLayerId.set(id);
+    this.vectorFields.set([]);
+    this.field = null;
+    this.resetResult();
+    this.suggestOutputName();
+    if (!id) return;
+    this.api.vectorFields(id).subscribe({
+      next: (fields) => this.vectorFields.set(fields),
+      error: (err: HttpErrorResponse) => this.fail(err)
+    });
+  }
+
+  /** Sensible band defaults per index for 4+ band imagery (B, G, R, NIR…). */
+  setIndexKind(kind: 'ndwi' | 'ndbi' | 'savi'): void {
+    this.indexKind = kind;
+    const count = this.info()?.bandCount ?? 4;
+    const nir = Math.min(4, count);
+    this.indexB = nir;
+    this.indexA = kind === 'ndwi' ? Math.min(2, count) : kind === 'ndbi' ? Math.min(5, count) : Math.min(3, count);
+    this.suggestOutputName();
+  }
+
   private applyInfoDefaults(info: RasterInfo): void {
     const b = info.bands[0];
     const min = b?.min ?? 0;
@@ -302,6 +388,8 @@ export class RasterAnalysisComponent implements OnDestroy {
       value: i + 1,
       label: ['Low', 'Medium', 'High'][i]
     }));
+    this.setIndexKind(this.indexKind);
+    this.classCount = Math.min(Math.max(this.classCount, 2), 12);
     if (info.bandCount >= 4) {
       this.redBand = 3;
       this.nirBand = 4;
@@ -312,7 +400,8 @@ export class RasterAnalysisComponent implements OnDestroy {
   }
 
   private suggestOutputName(): void {
-    const layer = this.layersSignal().find((l) => l.id === this.layerId());
+    const sourceId = VECTOR_TOOLS.includes(this.tool()) ? this.vectorLayerId() : this.layerId();
+    const layer = this.layersSignal().find((l) => l.id === sourceId);
     const label = RASTER_TOOLS.find((t) => t.id === this.tool())?.label.split(' /')[0] ?? '';
     this.outputName = layer ? `${layer.name} ${label}`.slice(0, 80) : label;
   }
@@ -381,6 +470,14 @@ export class RasterAnalysisComponent implements OnDestroy {
     return 'ABCD'[index];
   }
 
+  addMosaicInput(): void {
+    if (this.mosaicIds.length < 20) this.mosaicIds = [...this.mosaicIds, null];
+  }
+
+  removeMosaicInput(index: number): void {
+    this.mosaicIds = this.mosaicIds.filter((_, i) => i !== index);
+  }
+
   addRule(): void {
     const last = this.reclassRules[this.reclassRules.length - 1];
     this.reclassRules = [
@@ -408,7 +505,8 @@ export class RasterAnalysisComponent implements OnDestroy {
 
     if (tool === 'upload') return this.runUpload();
     if (tool === 'swipe') return this.onSwipe();
-    if (tool !== 'calc' && !layerId) return this.error.set('Choose a raster layer first.');
+    if (this.needsRasterInput() && !layerId) return this.error.set('Choose a raster layer first.');
+    if (this.needsVectorInput() && !this.vectorLayerId()) return this.error.set('Choose a vector layer first.');
     if (this.needsOutput() && !this.outputName.trim()) return this.error.set('Enter a name for the new layer.');
     const base = { layerId, band: this.band, outputName: this.outputName.trim() };
 
@@ -527,6 +625,114 @@ export class RasterAnalysisComponent implements OnDestroy {
         return this.runLayerTool('polygonize', base);
       case 'ndvi':
         return this.runLayerTool('ndvi', { layerId, redBand: this.redBand, nirBand: this.nirBand, outputName: base.outputName });
+      case 'stats':
+        this.execute(this.api.statistics({ layerId: layerId!, band: this.band, bins: this.histogramBins }), (r) => {
+          this.statistics.set(r);
+          this.facts.set([
+            { label: 'Min / Max', value: `${fmt(r.min)} / ${fmt(r.max)}` },
+            { label: 'Mean ± std', value: `${fmt(r.mean)} ± ${fmt(r.std)}` },
+            { label: 'Median (P25 – P75)', value: `${fmt(r.median)} (${fmt(r.p25)} – ${fmt(r.p75)})` },
+            { label: 'P1 / P99', value: `${fmt(r.p1)} / ${fmt(r.p99)}` },
+            { label: 'Valid pixels', value: `${fmtInt(r.validCells)} (${formatArea(r.areaM2)})` },
+            { label: 'NoData pixels', value: fmtInt(r.nodataCells) }
+          ]);
+        });
+        return;
+      case 'download':
+        return this.runDownload(layerId!);
+      case 'mosaic': {
+        const layerIds = this.mosaicIds.filter((id): id is string => !!id);
+        if (new Set(layerIds).size < 2) return this.error.set('Choose at least two different rasters.');
+        if (!this.outputName.trim()) return this.error.set('Enter a name for the new layer.');
+        return this.runLayerTool('mosaic', { layerIds, resampling: this.resampling, outputName: this.outputName.trim() });
+      }
+      case 'resample': {
+        const targetCrs = this.resampleCrs === 'custom' ? `EPSG:${this.resampleEpsg.replace(/\D/g, '')}` : this.resampleCrs;
+        if (this.resampleCrs === 'custom' && !/^EPSG:\d{4,6}$/.test(targetCrs)) return this.error.set('Enter a valid EPSG code.');
+        if (!this.resamplePixel && targetCrs === 'same') return this.error.set('Set a new pixel size and/or a different coordinate system.');
+        return this.runLayerTool('resample', {
+          layerId,
+          outputName: base.outputName,
+          pixelSize: this.resamplePixel || undefined,
+          targetCrs,
+          resampling: this.resampling
+        });
+      }
+      case 'rasterize':
+        return this.runLayerTool('rasterize', {
+          vectorLayerId: this.vectorLayerId(),
+          field: this.field || undefined,
+          pixelSize: this.gridPixel,
+          allTouched: this.allTouched,
+          outputName: base.outputName
+        });
+      case 'rugged':
+        return this.runLayerTool('terrain', { ...base, kind: this.ruggedKind });
+      case 'fillsinks':
+        return this.runLayerTool('fill-sinks', base);
+      case 'zonal': {
+        const zones = this.vectorLayerId();
+        if (!zones) return this.error.set('Choose the zones (polygon) layer.');
+        if (this.zonalPublish && !this.outputName.trim()) return this.error.set('Enter a name for the new layer.');
+        this.execute(
+          this.api.zonalStatistics({
+            layerId,
+            band: this.band,
+            zonesLayerId: zones,
+            labelField: this.field || undefined,
+            allTouched: this.allTouched,
+            outputName: this.zonalPublish ? this.outputName.trim() : undefined
+          }),
+          (r) => {
+            this.zoneRows.set(r.result.rows);
+            this.facts.set([
+              { label: 'Zones', value: fmtInt(r.result.zones) },
+              { label: 'Zones with data', value: fmtInt(r.result.zonesWithData) }
+            ]);
+            if (r.result.truncated) this.message.set(`Showing the first ${r.result.rows.length} zones.`);
+            if (r.layer) {
+              this.message.set(`New layer "${r.layer.name}" added — style it by z_mean for a choropleth.`);
+              this.layerCreated.emit(r.layer);
+            }
+          }
+        );
+        return;
+      }
+      case 'idw':
+        if (!this.field) return this.error.set('Choose the numeric field to interpolate.');
+        return this.runLayerTool('idw', {
+          vectorLayerId: this.vectorLayerId(),
+          field: this.field,
+          pixelSize: this.gridPixel,
+          power: this.idwPower,
+          outputName: base.outputName
+        });
+      case 'heatmap':
+        return this.runLayerTool('heatmap', {
+          vectorLayerId: this.vectorLayerId(),
+          weightField: this.field || undefined,
+          pixelSize: this.gridPixel,
+          radius: this.heatRadius,
+          outputName: base.outputName
+        });
+      case 'proximity':
+        return this.runLayerTool('proximity', {
+          vectorLayerId: this.vectorLayerId(),
+          pixelSize: this.gridPixel,
+          maxDistance: this.proximityMax,
+          outputName: base.outputName
+        });
+      case 'indices':
+        return this.runLayerTool('spectral-index', {
+          layerId,
+          kind: this.indexKind,
+          bandA: this.indexA,
+          bandB: this.indexB,
+          soilFactor: this.soilFactor,
+          outputName: base.outputName
+        });
+      case 'classify':
+        return this.runLayerTool('classify', { layerId, classes: this.classCount, outputName: base.outputName });
       case 'change':
         if (!this.afterLayerId) return this.error.set('Choose the "after" raster.');
         return this.runLayerTool('change-detection', {
@@ -590,6 +796,20 @@ export class RasterAnalysisComponent implements OnDestroy {
     });
   }
 
+  private runDownload(layerId: string): void {
+    const bbox = this.downloadView ? (this.mapService.getViewExtent4326() ?? undefined) : undefined;
+    this.execute(this.api.download(layerId, bbox), (response) => {
+      const name = /filename="([^"]+)"/.exec(response.headers.get('Content-Disposition') ?? '')?.[1] ?? 'raster.tif';
+      const url = URL.createObjectURL(response.body as Blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      this.message.set(`Downloaded ${name}.`);
+    });
+  }
+
   private runIdentify(): void {
     const layerId = this.layerId();
     const point = this.pointA();
@@ -629,6 +849,8 @@ export class RasterAnalysisComponent implements OnDestroy {
     this.message.set(null);
     this.facts.set([]);
     this.profile.set(null);
+    this.statistics.set(null);
+    this.zoneRows.set(null);
   }
 
   private fail(err: HttpErrorResponse): void {
@@ -644,6 +866,27 @@ export class RasterAnalysisComponent implements OnDestroy {
             : `Raster processing failed (${err.status || 'unknown'}).`
     );
   }
+
+  fmtValue(v: number | null): string {
+    return fmt(v);
+  }
+
+  // ----- histogram -----
+
+  readonly histogram = computed(() => {
+    const stats = this.statistics();
+    if (!stats) return null;
+    const { counts, edges } = stats.histogram;
+    const peak = Math.max(...counts, 1);
+    const w = 300;
+    const h = 110;
+    const bw = w / counts.length;
+    const bars = counts.map((c, i) => {
+      const bh = (c / peak) * (h - 4);
+      return { x: i * bw + 0.5, y: h - bh, w: Math.max(bw - 1, 0.5), h: bh, title: `${fmt(edges[i])} – ${fmt(edges[i + 1])}: ${fmtInt(c)}` };
+    });
+    return { w, h, bars, min: fmt(edges[0]), max: fmt(edges[edges.length - 1]) };
+  });
 
   // ----- profile chart -----
 
@@ -693,7 +936,18 @@ const LABELS: Record<string, [string, (v: number) => string]> = {
   maxUpstreamKm2: ['Largest catchment', (v) => `${fmt(v)} km²`],
   vegetationPct: ['Dense vegetation (> 0.3)', (v) => `${v.toFixed(1)} %`],
   sparsePct: ['Sparse vegetation', (v) => `${v.toFixed(1)} %`],
-  waterPct: ['Water / bare (< 0)', (v) => `${v.toFixed(1)} %`]
+  waterPct: ['Water / bare (< 0)', (v) => `${v.toFixed(1)} %`],
+  openWaterPct: ['Open water (NDWI > 0)', (v) => `${v.toFixed(1)} %`],
+  builtUpPct: ['Built-up (NDBI > 0)', (v) => `${v.toFixed(1)} %`],
+  filledCells: ['Pits filled (cells)', fmtInt],
+  filledAreaM2: ['Filled area', formatArea],
+  fillVolumeM3: ['Fill volume', (v) => `${fmtInt(v)} m³`],
+  maxFillDepth: ['Deepest pit', (v) => `${fmt(v)} m`],
+  points: ['Points used', fmtInt],
+  peakPerKm2: ['Peak density', (v) => `${fmt(v)} / km²`],
+  withinM2: ['Area within distance', formatArea],
+  inputs: ['Rasters merged', fmtInt],
+  pixelSizeM: ['Pixel size', (v) => `${fmt(v)} m`]
 };
 
 function describe(result: Record<string, unknown>): { label: string; value: string }[] {
@@ -706,7 +960,12 @@ function describe(result: Record<string, unknown>): { label: string; value: stri
     facts.push({ label: 'Min / Mean / Max', value: `${fmt(stats.min)} / ${fmt(stats.mean ?? null)} / ${fmt(stats.max ?? null)}` });
   }
   const classes = result?.['classes'] as { value: number; label?: string; areaM2: number }[] | undefined;
-  for (const c of classes ?? []) facts.push({ label: `Class ${c.label || c.value}`, value: formatArea(c.areaM2) });
+  for (const c of classes ?? []) {
+    const label = c.label?.startsWith('Class') ? c.label : `Class ${c.label || c.value}`;
+    facts.push({ label, value: formatArea(c.areaM2) });
+  }
+  if (typeof result?.['crs'] === 'string') facts.push({ label: 'Coordinate system', value: result['crs'] as string });
+  if (typeof result?.['width'] === 'number') facts.push({ label: 'Size', value: `${fmtInt(result['width'] as number)} × ${fmtInt(result['height'] as number)} px` });
   if (result?.['resampled']) facts.push({ label: 'Note', value: 'Large DEM — processed at reduced resolution' });
   return facts;
 }

@@ -7,7 +7,18 @@ import { RasterService, type RasterStats } from './raster.service';
 import type { RasterStyleSpec } from './raster-style';
 import type {
   ChangeDetectionDto,
+  ClassifyDto,
   ClipDto,
+  FillSinksDto,
+  HeatmapDto,
+  IdwDto,
+  MosaicDto,
+  ProximityDto,
+  RasterizeDto,
+  RasterStatisticsDto,
+  ResampleDto,
+  SpectralIndexDto,
+  ZonalStatisticsDto,
   ContourDto,
   CutFillDto,
   FloodDto,
@@ -60,12 +71,16 @@ export class RasterToolsService {
         op: 'terrain', path: file, output, band: dto.band ?? 1, kind: dto.kind,
         zFactor: dto.zFactor, azimuth: dto.azimuth, altitude: dto.altitude, percent: dto.percent,
       });
+      const [lo, hi] = span(r.stats, [0, 45]);
+      const m = Math.max(Math.abs(lo), Math.abs(hi)) || 1;
       const style: RasterStyleSpec =
         dto.kind === 'hillshade'
           ? { mode: 'ramp', ramp: 'grayscale', min: 0, max: 255 }
           : dto.kind === 'aspect'
             ? { mode: 'ramp', ramp: 'aspect', min: 0, max: 360 }
-            : { mode: 'ramp', ramp: 'heat', min: 0, max: span(r.stats, [0, 45])[1] };
+            : dto.kind === 'TPI'
+              ? { mode: 'ramp', ramp: 'diverging', min: -m, max: m }
+              : { mode: 'ramp', ramp: 'heat', min: 0, max: hi };
       return { style, result: { stats: r.stats } };
     });
   }
@@ -145,7 +160,121 @@ export class RasterToolsService {
     });
   }
 
+  async fillSinks(appUser: AppUser, dto: FillSinksDto) {
+    const { file, layer } = await this.rasters.resolveRaster(appUser, dto.layerId);
+    return this.toRasterLayer(appUser, dto.outputName, async (output) => {
+      const { stats, ...result } = await this.rasters.runOp<Record<string, number> & { stats: RasterStats }>({
+        op: 'fill_sinks', path: file, band: dto.band ?? 1, output,
+      });
+      const [min, max] = span(stats, [0, 1]);
+      const style = (layer.styleSpec as RasterStyleSpec | null) ?? { mode: 'ramp', ramp: 'terrain', min, max };
+      return { style: { ...style, band: 1 } as RasterStyleSpec, result: { ...result, stats } };
+    });
+  }
+
+  // ----- Raster Data -----
+
+  async statistics(appUser: AppUser, dto: RasterStatisticsDto) {
+    const { file } = await this.rasters.resolveRaster(appUser, dto.layerId);
+    return this.rasters.runOp({ op: 'statistics', path: file, band: dto.band ?? 1, bins: dto.bins ?? 32 });
+  }
+
+  async mosaic(appUser: AppUser, dto: MosaicDto) {
+    const paths: string[] = [];
+    let style: RasterStyleSpec | undefined;
+    for (const id of new Set(dto.layerIds)) {
+      const { file, layer } = await this.rasters.resolveRaster(appUser, id);
+      paths.push(file);
+      style ??= (layer.styleSpec as RasterStyleSpec | null) ?? undefined;
+    }
+    if (paths.length < 2) throw new BadRequestException('Choose at least two different rasters.');
+    return this.toRasterLayer(appUser, dto.outputName, async (output) => {
+      const result = await this.rasters.runOp({ op: 'mosaic', paths, resampling: dto.resampling ?? 'bilinear', output });
+      return { style, result };
+    });
+  }
+
+  async resample(appUser: AppUser, dto: ResampleDto) {
+    const { file, layer } = await this.rasters.resolveRaster(appUser, dto.layerId);
+    if (!dto.pixelSize && (!dto.targetCrs || dto.targetCrs === 'same')) {
+      throw new BadRequestException('Set a new pixel size and/or a different coordinate system.');
+    }
+    return this.toRasterLayer(appUser, dto.outputName, async (output) => {
+      const result = await this.rasters.runOp({
+        op: 'resample', path: file, output, pixelSize: dto.pixelSize,
+        targetCrs: dto.targetCrs ?? 'same', resampling: dto.resampling ?? 'bilinear',
+      });
+      return { style: (layer.styleSpec as RasterStyleSpec | null) ?? undefined, result };
+    });
+  }
+
+  async rasterize(appUser: AppUser, dto: RasterizeDto) {
+    const { source } = await this.rasters.resolveVector(appUser, dto.vectorLayerId);
+    await this.rasters.assertField(appUser, dto.vectorLayerId, dto.field, true);
+    return this.toRasterLayer(appUser, dto.outputName, async (output) => {
+      const r = await this.rasters.runOp<{ stats: RasterStats }>({
+        op: 'rasterize', vector: source, field: dto.field, pixelSize: dto.pixelSize,
+        allTouched: dto.allTouched ?? false, output,
+      });
+      const [min, max] = span(r.stats, [0, 1]);
+      const style: RasterStyleSpec = dto.field
+        ? { mode: 'ramp', ramp: 'spectral', min, max }
+        : { mode: 'values', classes: [{ value: 1, color: '#2563eb', label: 'Inside', opacity: 0.7 }] };
+      return { style, result: r };
+    });
+  }
+
   // ----- Raster Analytics -----
+
+  async zonalStatistics(appUser: AppUser, dto: ZonalStatisticsDto) {
+    const { file } = await this.rasters.resolveRaster(appUser, dto.layerId);
+    const { source } = await this.rasters.resolveVector(appUser, dto.zonesLayerId);
+    await this.rasters.assertField(appUser, dto.zonesLayerId, dto.labelField, false);
+    const request = {
+      op: 'zonal', path: file, band: dto.band ?? 1, vector: source,
+      labelField: dto.labelField, allTouched: dto.allTouched ?? false,
+    };
+    if (!dto.outputName?.trim()) return { result: await this.rasters.runOp({ ...request }) };
+    return this.toVectorLayer(appUser, dto.outputName.trim(), 'POLYGON', (output) =>
+      this.rasters.runOp({ ...request, output }),
+    );
+  }
+
+  async idw(appUser: AppUser, dto: IdwDto) {
+    const { source } = await this.rasters.resolveVector(appUser, dto.vectorLayerId);
+    await this.rasters.assertField(appUser, dto.vectorLayerId, dto.field, true);
+    return this.toRasterLayer(appUser, dto.outputName, async (output) => {
+      const r = await this.rasters.runOp<{ stats: RasterStats; points: number }>({
+        op: 'idw', vector: source, field: dto.field, pixelSize: dto.pixelSize,
+        power: dto.power ?? 2, maxPoints: dto.maxPoints ?? 12, output,
+      });
+      const [min, max] = span(r.stats, [0, 1]);
+      return { style: { mode: 'ramp', ramp: 'spectral', min, max, invert: true, opacity: 0.85 }, result: r };
+    });
+  }
+
+  async heatmap(appUser: AppUser, dto: HeatmapDto) {
+    const { source } = await this.rasters.resolveVector(appUser, dto.vectorLayerId);
+    await this.rasters.assertField(appUser, dto.vectorLayerId, dto.weightField, true);
+    return this.toRasterLayer(appUser, dto.outputName, async (output) => {
+      const r = await this.rasters.runOp<{ stats: RasterStats; peakPerKm2: number }>({
+        op: 'heatmap', vector: source, weightField: dto.weightField, pixelSize: dto.pixelSize,
+        radius: dto.radius, output,
+      });
+      return { style: { mode: 'ramp', ramp: 'heat', min: 0, max: r.stats.p98 ?? r.peakPerKm2, opacity: 0.8 }, result: r };
+    });
+  }
+
+  async proximity(appUser: AppUser, dto: ProximityDto) {
+    const { source } = await this.rasters.resolveVector(appUser, dto.vectorLayerId);
+    return this.toRasterLayer(appUser, dto.outputName, async (output) => {
+      const r = await this.rasters.runOp({
+        op: 'proximity', vector: source, pixelSize: dto.pixelSize, maxDistance: dto.maxDistance, output,
+      });
+      return { style: { mode: 'ramp', ramp: 'heat', min: 0, max: dto.maxDistance, invert: true, opacity: 0.75 }, result: r };
+    });
+  }
+
 
   async calculator(appUser: AppUser, dto: RasterCalculatorDto) {
     this.assertExpression(dto.expression, dto.inputs.length);
@@ -222,6 +351,37 @@ export class RasterToolsService {
       const [lo, hi] = span(stats, [-1, 1]);
       const m = Math.max(Math.abs(lo), Math.abs(hi)) || 1;
       return { style: { mode: 'ramp', ramp: 'diverging', min: -m, max: m }, result: { ...result, stats } };
+    });
+  }
+
+  async spectralIndex(appUser: AppUser, dto: SpectralIndexDto) {
+    const { file } = await this.rasters.resolveRaster(appUser, dto.layerId);
+    return this.toRasterLayer(appUser, dto.outputName, async (output) => {
+      const { stats, ...result } = await this.rasters.runOp<Record<string, number> & { stats: RasterStats }>({
+        op: 'index', path: file, kind: dto.kind, bandA: dto.bandA, bandB: dto.bandB,
+        soilFactor: dto.soilFactor ?? 0.5, output,
+      });
+      const style: RasterStyleSpec =
+        dto.kind === 'ndwi'
+          ? { mode: 'ramp', ramp: 'water', min: -0.3, max: 0.6 }
+          : dto.kind === 'ndbi'
+            ? { mode: 'ramp', ramp: 'heat', min: -0.3, max: 0.4 }
+            : { mode: 'ramp', ramp: 'ndvi', min: -0.2, max: 0.9 };
+      return { style, result: { ...result, stats } };
+    });
+  }
+
+  async classify(appUser: AppUser, dto: ClassifyDto) {
+    const { file } = await this.rasters.resolveRaster(appUser, dto.layerId);
+    return this.toRasterLayer(appUser, dto.outputName, async (output) => {
+      const result = await this.rasters.runOp<{ classes: { value: number; label: string }[] }>({
+        op: 'classify', path: file, classes: dto.classes, bands: dto.bands, output,
+      });
+      const style: RasterStyleSpec = {
+        mode: 'values',
+        classes: result.classes.map((c, i) => ({ value: c.value, color: CLASS_COLORS[i % CLASS_COLORS.length], label: c.label })),
+      };
+      return { style, result };
     });
   }
 

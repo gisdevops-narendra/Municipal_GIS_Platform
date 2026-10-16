@@ -13,6 +13,7 @@ import {
   IsString,
   IsUUID,
   Length,
+  Matches,
   Max,
   Min,
   ValidateNested,
@@ -133,8 +134,8 @@ class RasterOutputDto extends RasterInputDto {
 }
 
 export class TerrainDto extends RasterOutputDto {
-  @IsIn(['slope', 'aspect', 'hillshade'])
-  kind!: 'slope' | 'aspect' | 'hillshade';
+  @IsIn(['slope', 'aspect', 'hillshade', 'roughness', 'TRI', 'TPI'])
+  kind!: 'slope' | 'aspect' | 'hillshade' | 'roughness' | 'TRI' | 'TPI';
 
   @IsOptional()
   @IsNumber()
@@ -368,4 +369,181 @@ export class ChangeDetectionDto {
   @IsString()
   @Length(1, 80)
   outputName!: string;
+}
+
+// ----- Raster Data -----
+
+export class RasterStatisticsDto extends RasterInputDto {
+  @IsOptional()
+  @IsInt()
+  @Min(5)
+  @Max(100)
+  bins?: number;
+}
+
+const RESAMPLING = ['nearest', 'bilinear', 'cubic', 'average', 'mode'] as const;
+
+export class MosaicDto {
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(20)
+  @IsUUID('all', { each: true })
+  layerIds!: string[];
+
+  @IsOptional()
+  @IsIn(RESAMPLING)
+  resampling?: (typeof RESAMPLING)[number];
+
+  @IsString()
+  @Length(1, 80)
+  outputName!: string;
+}
+
+export class ResampleDto extends RasterOutputDto {
+  /** Output pixel size in metres; omitted = keep the source resolution. */
+  @IsOptional()
+  @IsNumber()
+  @Min(0.01)
+  @Max(100000)
+  pixelSize?: number;
+
+  /** "same", "UTM" (zone picked from the raster centre) or "EPSG:<code>". */
+  @IsOptional()
+  @Matches(/^(same|UTM|EPSG:\d{4,6})$/)
+  targetCrs?: string;
+
+  @IsOptional()
+  @IsIn(RESAMPLING)
+  resampling?: (typeof RESAMPLING)[number];
+}
+
+/** Tools reading a vector layer onto a grid of `pixelSize` metres. */
+class VectorGridDto {
+  @IsUUID()
+  vectorLayerId!: string;
+
+  @IsNumber()
+  @Min(0.1)
+  @Max(100000)
+  pixelSize!: number;
+
+  @IsString()
+  @Length(1, 80)
+  outputName!: string;
+}
+
+export class RasterizeDto extends VectorGridDto {
+  /** Numeric field to burn; omitted = 1 inside features. */
+  @IsOptional()
+  @IsString()
+  @Length(1, 63)
+  field?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  allTouched?: boolean;
+}
+
+// ----- Terrain -----
+
+export class FillSinksDto extends RasterOutputDto {}
+
+// ----- Raster Analytics -----
+
+export class ZonalStatisticsDto extends RasterInputDto {
+  @IsUUID()
+  zonesLayerId!: string;
+
+  /** Field naming each zone in the result table. */
+  @IsOptional()
+  @IsString()
+  @Length(1, 63)
+  labelField?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  allTouched?: boolean;
+
+  /** When set, the zones are also published with their statistics. */
+  @IsOptional()
+  @IsString()
+  @Length(1, 80)
+  outputName?: string;
+}
+
+export class IdwDto extends VectorGridDto {
+  @IsString()
+  @Length(1, 63)
+  field!: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0.5)
+  @Max(6)
+  power?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(64)
+  maxPoints?: number;
+}
+
+export class HeatmapDto extends VectorGridDto {
+  @IsOptional()
+  @IsString()
+  @Length(1, 63)
+  weightField?: string;
+
+  /** Kernel search radius in metres. */
+  @IsNumber()
+  @Min(1)
+  @Max(50000)
+  radius!: number;
+}
+
+export class ProximityDto extends VectorGridDto {
+  /** Distances beyond this (metres) are left empty. */
+  @IsNumber()
+  @Min(1)
+  @Max(100000)
+  maxDistance!: number;
+}
+
+// ----- Imagery -----
+
+export class SpectralIndexDto extends RasterOutputDto {
+  @IsIn(['ndwi', 'ndbi', 'savi'])
+  kind!: 'ndwi' | 'ndbi' | 'savi';
+
+  /** NDWI: green · NDBI: SWIR · SAVI: red. */
+  @IsInt()
+  @Min(1)
+  bandA!: number;
+
+  /** Near-infrared for all three. */
+  @IsInt()
+  @Min(1)
+  bandB!: number;
+
+  /** SAVI soil brightness factor L. */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  soilFactor?: number;
+}
+
+export class ClassifyDto extends RasterOutputDto {
+  @IsInt()
+  @Min(2)
+  @Max(12)
+  classes!: number;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(12)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  bands?: number[];
 }
