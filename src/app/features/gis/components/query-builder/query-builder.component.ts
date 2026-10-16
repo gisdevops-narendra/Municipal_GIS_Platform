@@ -21,6 +21,10 @@ import { CheckboxModule } from 'primeng/checkbox';
 import { TooltipModule } from 'primeng/tooltip';
 import { MessageModule } from 'primeng/message';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
+
+/** Module Access catalog ids (seed-modules.ts) for the two query sections. */
+const ATTRIBUTE_QUERY_MODULE_ID = 50;
+const SPATIAL_QUERY_MODULE_ID = 16;
 import { AttributeField } from '../../models/attribute-table.model';
 import { AttributeExternalFilter } from '../attribute-table/attribute-table.component';
 import { MapService } from '../../services/map.service';
@@ -84,6 +88,14 @@ export class QueryBuilderComponent implements OnChanges, OnDestroy {
   }
   private readonly layersSignal = signal<GisLayer[]>([]);
   @Input() initialLayerId: string | null = null;
+  /** Module Access ids granted to the current user — the Attribute and
+   *  Spatial sections each need their own module. */
+  @Input() set allowedModuleIds(value: ReadonlySet<number>) {
+    this.allowedSignal.set(value ?? new Set());
+  }
+  private readonly allowedSignal = signal<ReadonlySet<number>>(new Set());
+  readonly canAttribute = computed(() => this.allowedSignal().has(ATTRIBUTE_QUERY_MODULE_ID));
+  readonly canSpatial = computed(() => this.allowedSignal().has(SPATIAL_QUERY_MODULE_ID));
   @Input() workspaceKey = '';
 
   /** False while the panel is kept mounted but hidden (another tool is

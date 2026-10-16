@@ -13,6 +13,8 @@ import VectorSource from 'ol/source/Vector';
 import GeoJSON from 'ol/format/GeoJSON';
 import WKT from 'ol/format/WKT';
 import Draw, { createBox } from 'ol/interaction/Draw';
+import DragPan from 'ol/interaction/DragPan';
+import KeyboardPan from 'ol/interaction/KeyboardPan';
 import Overlay from 'ol/Overlay';
 import LineString from 'ol/geom/LineString';
 import Polygon, { fromCircle } from 'ol/geom/Polygon';
@@ -327,6 +329,7 @@ export class MapService {
     this.resetNavHistory();
     this.map.on('moveend', () => this.recordView());
     this.resetView();
+    this.setPanEnabled(this.panEnabled);
   }
 
   destroy(): void {
@@ -986,6 +989,35 @@ export class MapService {
     }
   }
 
+  /** Information Tool module gate: when off, map clicks open no popup. */
+  private identifyEnabled = true;
+  /** Pan module gate, kept so it can be applied once the map exists. */
+  private panEnabled = true;
+
+  setIdentifyEnabled(enabled: boolean): void {
+    this.identifyEnabled = enabled;
+    if (!enabled) this.featureInfoPopup.set(null);
+  }
+
+  /** User's Identify toggle (map-controls button) — on by default; works
+   *  only while the Information Tool module gate is also open. */
+  readonly identifyActive = signal(true);
+
+  toggleIdentify(): void {
+    this.identifyActive.update((on) => !on);
+    if (!this.identifyActive()) this.featureInfoPopup.set(null);
+  }
+
+  /** Pan module gate: turns map dragging (DragPan + keyboard pan) on/off. */
+  setPanEnabled(enabled: boolean): void {
+    this.panEnabled = enabled;
+    this.map?.getInteractions().forEach((interaction) => {
+      if (interaction instanceof DragPan || interaction instanceof KeyboardPan) {
+        interaction.setActive(enabled);
+      }
+    });
+  }
+
   /** Registers a handler for single-clicks on the map, receiving the
    *  clicked coordinate in the map's own projection (EPSG:3857) — ready to
    *  pass straight into getFeatureInfo. Suppressed while the Measurement
@@ -994,6 +1026,8 @@ export class MapService {
   onSingleClick(handler: (coordinate: number[]) => void): void {
     this.map?.on('singleclick', (event) => {
       if (
+        !this.identifyEnabled ||
+        !this.identifyActive() ||
         this.measureModeActive ||
         this.measureDraw ||
         this.drawInteraction ||

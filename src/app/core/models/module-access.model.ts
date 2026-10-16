@@ -61,7 +61,7 @@ export interface CreateModuleRequest {
  *  "Developed" in the Module Access list; keep in sync as tools ship. */
 export const DEVELOPED_MODULE_IDS: ReadonlySet<number> = new Set([
   1, 2, 3, 4, 6, 11, 12, 15, 16, 17, 18, 19, 20, 21, 30, 32, 50, 57, 58, 59, 73,
-  186, 187, 226, 227, 228, 229, 230, 251, 900, 901
+  186, 187, 226, 227, 228, 229, 230, 251, 900, 901, 960, 961, 962, 963
 ]);
 
 export type ModuleDevStatus = 'developed' | 'partial' | 'not-developed';
@@ -70,3 +70,8 @@ export type ModuleDevStatus = 'developed' | 'partial' | 'not-developed';
  *  20261016090000 (also in prisma/seed-modules.ts). */
 export const AI_ASSISTANT_MODULE_ID = 900;
 export const LAYER_STYLING_MODULE_ID = 901;
+export const PAN_MODULE_ID = 21;
+export const BASEMAP_MODULE_ID = 17;
+export const INFORMATION_TOOL_MODULE_ID = 58;
+export const FREE_SEARCH_MODULE_ID = 30;
+export const WORKSPACE_DETAILS_MODULE_ID = 960;

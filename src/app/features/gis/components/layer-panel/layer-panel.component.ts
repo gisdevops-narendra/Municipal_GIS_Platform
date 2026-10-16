@@ -43,6 +43,8 @@ export class LayerPanelComponent {
   /** Task 9 §4: a layer arriving here via a dashboard deep link gets a
    *  brief visual highlight so the user can see what the click landed on. */
   @Input() highlightLayerId: string | null = null;
+  /** Basemap picker — needs the Basemap module (17). */
+  @Input() showBasemap = true;
   /** Layer Styling module granted — hides the style buttons otherwise. */
   @Input() canStyle = false;
   /** Opens the reusable style editor for this layer (GIS Layer Styling). */

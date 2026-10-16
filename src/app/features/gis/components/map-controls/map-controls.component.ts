@@ -13,6 +13,11 @@ import type { SelectMode, SelectShape } from '../attribute-table/attribute-table
 const NAV_HISTORY_MODULE_ID = 59;
 const GOTO_XY_MODULE_ID = 12;
 const SELECTION_TOOL_MODULE_ID = 57;
+const ZOOM_IN_MODULE_ID = 19;
+const ZOOM_OUT_MODULE_ID = 20;
+const RESET_VIEW_MODULE_ID = 961;
+const FULLSCREEN_MODULE_ID = 962;
+const INFORMATION_TOOL_MODULE_ID = 58;
 
 /** In-map navigation controls — zoom in/out, reset to the initial extent,
  *  fullscreen, Nav History (back/forward through previous views) and
@@ -39,6 +44,19 @@ export class MapControlsComponent {
   readonly showNavHistory = computed(() => this.allowed().has(NAV_HISTORY_MODULE_ID));
   readonly showGoTo = computed(() => this.allowed().has(GOTO_XY_MODULE_ID));
   readonly showSelection = computed(() => this.allowed().has(SELECTION_TOOL_MODULE_ID));
+  readonly showZoomIn = computed(() => this.allowed().has(ZOOM_IN_MODULE_ID));
+  readonly showZoomOut = computed(() => this.allowed().has(ZOOM_OUT_MODULE_ID));
+  readonly showResetView = computed(() => this.allowed().has(RESET_VIEW_MODULE_ID));
+  readonly showFullscreen = computed(() => this.allowed().has(FULLSCREEN_MODULE_ID));
+  readonly showIdentify = computed(() => this.allowed().has(INFORMATION_TOOL_MODULE_ID));
+  readonly identifyActive = this.mapService.identifyActive;
+
+  toggleIdentify(): void {
+    this.mapService.toggleIdentify();
+  }
+  readonly showNavGroup = computed(
+    () => this.showZoomIn() || this.showZoomOut() || this.showResetView() || this.showFullscreen()
+  );
 
   /** Shape currently being drawn by the Selection Tool (owned by the
    *  Attribute Table), so the matching button shows as active. */

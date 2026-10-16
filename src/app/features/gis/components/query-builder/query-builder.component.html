@@ -22,6 +22,7 @@
       <p-message severity="error" [text]="fieldsError()!" styleClass="w-full" />
     } @else {
       <!-- ============ attribute conditions ============ -->
+      @if (canAttribute()) {
       <div class="qb__section">
         <span class="qb__section-title">Attribute conditions</span>
 
@@ -119,8 +120,10 @@
           <i class="pi pi-plus" aria-hidden="true"></i> Group
         </button>
       </div>
+      }
 
       <!-- ============ spatial filter ============ -->
+      @if (canSpatial()) {
       <div class="qb__section">
         <label class="qb__section-toggle">
           <p-checkbox [binary]="true" [ngModel]="def.spatial.enabled" (onChange)="toggleSpatial($event.checked)" />
@@ -184,6 +187,7 @@
           </div>
         }
       </div>
+      }
     }
 
     <!-- ============ validation + preview ============ -->

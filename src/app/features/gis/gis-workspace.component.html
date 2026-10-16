@@ -96,6 +96,7 @@
               [layers]="layers()"
               [highlightLayerId]="highlightLayerId()"
               [canStyle]="canStyleLayers()"
+              [showBasemap]="canPickBasemap()"
               (styleLayer)="openStyleEditor($event)"
             />
           } @else if (leftTool() === 'layers') {
@@ -124,6 +125,7 @@
             [layers]="layers()"
             [initialLayerId]="highlightLayerId()"
             [workspaceKey]="workspace()?.code ?? ''"
+            [allowedModuleIds]="myModuleIds()"
             (queryRun)="onQueryRun($event)"
             (queryCleared)="onQueryCleared()"
           />
@@ -260,7 +262,7 @@
         (clearSelectionRequest)="onMapClearSelection()"
       />
 
-      @if (layersReady()) {
+      @if (layersReady() && canSearch()) {
         <app-gis-search
           class="gis-ws__search"
           (layerSelected)="onSearchLayerSelected($event)"

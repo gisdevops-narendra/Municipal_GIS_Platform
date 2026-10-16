@@ -9,14 +9,16 @@
     >
       Buffer
     </button>
-    <button
-      type="button"
-      class="bo__mode"
-      [class.bo__mode--active]="mode() === 'overlay'"
-      (click)="setMode('overlay')"
-    >
-      Overlay
-    </button>
+    @if (overlayAllowed()) {
+      <button
+        type="button"
+        class="bo__mode"
+        [class.bo__mode--active]="mode() === 'overlay'"
+        (click)="setMode('overlay')"
+      >
+        Overlay
+      </button>
+    }
   </div>
 
   <!-- ============ BUFFER ============ -->
@@ -115,7 +117,7 @@
   }
 
   <!-- ============ OVERLAY ============ -->
-  @if (mode() === 'overlay') {
+  @if (mode() === 'overlay' && overlayAllowed()) {
     <label class="bo__field">
       <span class="bo__label">Operation</span>
       <p-select

@@ -23,6 +23,8 @@ type GeomKind = 'Point' | 'Line' | 'Polygon';
 const MAP_PROJ = 'EPSG:3857';
 /** Module Access catalog id of MultiBuffer (seed-modules.ts). */
 const MULTIBUFFER_MODULE_ID = 187;
+/** Module Access catalog id of Overlay (intersect / union / ...). */
+const OVERLAY_MODULE_ID = 963;
 const MAX_RINGS = 6;
 const GEO_PROJ = 'EPSG:4326';
 
@@ -67,6 +69,7 @@ export class BufferOverlayComponent implements OnDestroy {
   }
   private readonly allowedSignal = signal<ReadonlySet<number>>(new Set());
   readonly multiRingAllowed = computed(() => this.allowedSignal().has(MULTIBUFFER_MODULE_ID));
+  readonly overlayAllowed = computed(() => this.allowedSignal().has(OVERLAY_MODULE_ID));
   @Output() queryRun = new EventEmitter<AttributeExternalFilter>();
   @Output() queryCleared = new EventEmitter<void>();
 

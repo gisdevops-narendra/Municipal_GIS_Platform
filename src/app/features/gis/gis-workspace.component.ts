@@ -42,7 +42,15 @@ import { SketchComponent } from './components/sketch/sketch.component';
 import { LayerStatisticsComponent } from './components/layer-statistics/layer-statistics.component';
 import { LayerReportComponent, TableSelection } from './components/layer-report/layer-report.component';
 import { ANALYTICS_MODULE_ID, DATA_VISUALISATION_MODULE_ID } from '../../core/models/layer-analytics.model';
-import { AI_ASSISTANT_MODULE_ID, LAYER_STYLING_MODULE_ID } from '../../core/models/module-access.model';
+import {
+  AI_ASSISTANT_MODULE_ID,
+  BASEMAP_MODULE_ID,
+  FREE_SEARCH_MODULE_ID,
+  INFORMATION_TOOL_MODULE_ID,
+  LAYER_STYLING_MODULE_ID,
+  PAN_MODULE_ID,
+  WORKSPACE_DETAILS_MODULE_ID
+} from '../../core/models/module-access.model';
 import { SketchService } from './services/sketch.service';
 import { DRAW_MODULE_ID, MARKING_TOOL_MODULE_ID } from './models/sketch.model';
 import { StyleEditorComponent } from './components/style-editor/style-editor.component';
@@ -86,8 +94,7 @@ const GROUP_ORDER: { id: WsToolGroup; label: string }[] = [
  *  backend/prisma/seed-modules.ts) — Layer Switcher=1, Query Module=2,
  *  Print=3, Bookmark=4, Buffer=6 (child of Query Module), Measure=11,
  *  Attribute Table=15, Export Data=226 (formats gated by its children),
- *  AI Assistant=900. Tools with no catalog equivalent (AI Assistant,
- *  Workspace Details) omit moduleId and stay ungated. */
+ *  AI Assistant=900, Workspace Details=960. */
 const TOOLS: WsTool[] = [
   { id: 'layers', label: 'Layers', icon: 'pi pi-clone', group: 'data', dock: 'left', available: true, moduleId: 1 },
   // Legend lives inside the Layers panel (per-visible-layer swatch) — no
@@ -104,7 +111,7 @@ const TOOLS: WsTool[] = [
   { id: 'print', label: 'Print Layout', icon: 'pi pi-print', group: 'output', dock: 'left', available: true, moduleId: 3 },
   { id: 'reports', label: 'Reports', icon: 'pi pi-file', group: 'output', dock: 'bottom', available: true, moduleId: 251 },
   { id: 'export', label: 'Export Data', icon: 'pi pi-download', group: 'output', dock: 'left', available: true, moduleId: 226 },
-  { id: 'workspace', label: 'Workspace Details', icon: 'pi pi-server', group: 'admin', dock: 'left', available: true }
+  { id: 'workspace', label: 'Workspace Details', icon: 'pi pi-server', group: 'admin', dock: 'left', available: true, moduleId: WORKSPACE_DETAILS_MODULE_ID }
 ];
 
 @Component({
@@ -182,6 +189,15 @@ export class GisWorkspaceComponent {
   /** Layer Styling module — whether the Layers panel offers the style
    *  editor at all (saving a style is still MANAGE-checked server-side). */
   readonly canStyleLayers = computed(() => this.myModuleIds().has(LAYER_STYLING_MODULE_ID));
+  readonly canSearch = computed(() => this.myModuleIds().has(FREE_SEARCH_MODULE_ID));
+  readonly canPickBasemap = computed(() => this.myModuleIds().has(BASEMAP_MODULE_ID));
+  /** Pan (map drag) and Identify (click popup) are map behaviours, not
+   *  dock tools — switched on/off directly on the map. */
+  private readonly applyMapGates = effect(() => {
+    const allowed = this.myModuleIds();
+    this.mapService.setPanEnabled(allowed.has(PAN_MODULE_ID));
+    this.mapService.setIdentifyEnabled(allowed.has(INFORMATION_TOOL_MODULE_ID));
+  });
 
   private hasModuleAccess(tool: WsTool): boolean {
     const granted = this.myModuleIds();

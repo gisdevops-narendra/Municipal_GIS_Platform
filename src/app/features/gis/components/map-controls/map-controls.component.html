@@ -1,46 +1,56 @@
 <div class="map-controls">
-  <div class="map-controls__group">
-    <button
-      pButton
-      type="button"
-      icon="pi pi-plus"
-      class="p-button-text map-controls__btn"
-      aria-label="Zoom in"
-      pTooltip="Zoom in"
-      tooltipPosition="left"
-      (click)="zoomIn()"
-    ></button>
-    <button
-      pButton
-      type="button"
-      icon="pi pi-minus"
-      class="p-button-text map-controls__btn"
-      aria-label="Zoom out"
-      pTooltip="Zoom out"
-      tooltipPosition="left"
-      (click)="zoomOut()"
-    ></button>
-    <button
-      pButton
-      type="button"
-      icon="pi pi-refresh"
-      class="p-button-text map-controls__btn"
-      aria-label="Reset view"
-      pTooltip="Reset to initial view"
-      tooltipPosition="left"
-      (click)="resetView()"
-    ></button>
-    <button
-      pButton
-      type="button"
-      icon="pi pi-window-maximize"
-      class="p-button-text map-controls__btn"
-      aria-label="Toggle fullscreen"
-      pTooltip="Fullscreen"
-      tooltipPosition="left"
-      (click)="toggleFullscreen()"
-    ></button>
-  </div>
+  @if (showNavGroup()) {
+    <div class="map-controls__group">
+      @if (showZoomIn()) {
+        <button
+          pButton
+          type="button"
+          icon="pi pi-plus"
+          class="p-button-text map-controls__btn"
+          aria-label="Zoom in"
+          pTooltip="Zoom in"
+          tooltipPosition="left"
+          (click)="zoomIn()"
+        ></button>
+      }
+      @if (showZoomOut()) {
+        <button
+          pButton
+          type="button"
+          icon="pi pi-minus"
+          class="p-button-text map-controls__btn"
+          aria-label="Zoom out"
+          pTooltip="Zoom out"
+          tooltipPosition="left"
+          (click)="zoomOut()"
+        ></button>
+      }
+      @if (showResetView()) {
+        <button
+          pButton
+          type="button"
+          icon="pi pi-refresh"
+          class="p-button-text map-controls__btn"
+          aria-label="Reset view"
+          pTooltip="Reset to initial view"
+          tooltipPosition="left"
+          (click)="resetView()"
+        ></button>
+      }
+      @if (showFullscreen()) {
+        <button
+          pButton
+          type="button"
+          icon="pi pi-window-maximize"
+          class="p-button-text map-controls__btn"
+          aria-label="Toggle fullscreen"
+          pTooltip="Fullscreen"
+          tooltipPosition="left"
+          (click)="toggleFullscreen()"
+        ></button>
+      }
+    </div>
+  }
 
   @if (showNavHistory()) {
     <div class="map-controls__group">
@@ -65,6 +75,23 @@
         tooltipPosition="left"
         [disabled]="!canGoForward()"
         (click)="goForward()"
+      ></button>
+    </div>
+  }
+
+  @if (showIdentify()) {
+    <div class="map-controls__group">
+      <button
+        pButton
+        type="button"
+        icon="pi pi-info-circle"
+        class="p-button-text map-controls__btn"
+        [class.map-controls__btn--active]="identifyActive()"
+        [attr.aria-pressed]="identifyActive()"
+        aria-label="Identify features"
+        [pTooltip]="identifyActive() ? 'Identify: on — click a feature for its details (click to turn off)' : 'Identify: off (click to turn on)'"
+        tooltipPosition="left"
+        (click)="toggleIdentify()"
       ></button>
     </div>
   }
