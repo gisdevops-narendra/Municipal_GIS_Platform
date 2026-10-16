@@ -254,6 +254,8 @@ export class GisWorkspaceComponent {
   readonly leftTool = signal<string | null>('layers');
   readonly bottomTool = signal<string | null>(null);
   readonly leftWidth = signal(300);
+  /** Raster Analysis needs room for its category rail + tool list. */
+  readonly leftPanelWidth = computed(() => (this.leftTool() === 'raster' ? Math.max(this.leftWidth(), 420) : this.leftWidth()));
   readonly bottomHeight = signal(240);
 
   /** Every tool panel that has been opened at least once. Panels are kept
@@ -428,7 +430,7 @@ export class GisWorkspaceComponent {
   startLeftResize(event: PointerEvent): void {
     event.preventDefault();
     const startX = event.clientX;
-    const startW = this.leftWidth();
+    const startW = this.leftPanelWidth();
     const move = (e: PointerEvent) => this.leftWidth.set(Math.min(560, Math.max(240, startW + (e.clientX - startX))));
     this.dragUntilRelease(move);
   }

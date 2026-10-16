@@ -33,30 +33,35 @@ interface ToolDef {
   group: string;
   /** Module Access catalog id (seed-modules.ts, under Raster Analysis 69). */
   moduleId: number;
+  icon: string;
+  /** Sub-heading inside a large category (Terrain). */
+  section?: string;
+  /** One line shown under the tool's name. */
+  description: string;
 }
 
 /** Raster Analysis (69) and its sub-modules, in catalog order. */
 export const RASTER_TOOLS: ToolDef[] = [
-  { id: 'upload', label: 'Raster Upload & Publish', group: 'Raster Data', moduleId: 911 },
-  { id: 'style', label: 'Raster Styling', group: 'Raster Data', moduleId: 912 },
-  { id: 'identify', label: 'Pixel Identify', group: 'Raster Data', moduleId: 913 },
-  { id: 'profile', label: 'Elevation Profile', group: 'Terrain Analysis', moduleId: 921 },
-  { id: 'slope', label: 'Slope', group: 'Terrain Analysis', moduleId: 922 },
-  { id: 'aspect', label: 'Aspect', group: 'Terrain Analysis', moduleId: 923 },
-  { id: 'hillshade', label: 'Hillshade', group: 'Terrain Analysis', moduleId: 924 },
-  { id: 'contour', label: 'Contour Generation', group: 'Terrain Analysis', moduleId: 925 },
-  { id: 'cutfill', label: 'Cut & Fill / Volume', group: 'Terrain Analysis', moduleId: 926 },
-  { id: 'watershed', label: 'Drainage / Watershed', group: 'Terrain Analysis', moduleId: 927 },
-  { id: 'flood', label: 'Flood Inundation', group: 'Terrain Analysis', moduleId: 928 },
-  { id: 'los', label: 'Line of Sight', group: 'Terrain Analysis', moduleId: 929 },
-  { id: 'viewshed', label: 'Viewshed', group: 'Terrain Analysis', moduleId: 930 },
-  { id: 'calc', label: 'Raster Calculator', group: 'Raster Analytics', moduleId: 942 },
-  { id: 'reclass', label: 'Reclassify', group: 'Raster Analytics', moduleId: 943 },
-  { id: 'clip', label: 'Clip to Boundary', group: 'Raster Analytics', moduleId: 944 },
-  { id: 'polygonize', label: 'Raster to Vector', group: 'Raster Analytics', moduleId: 945 },
-  { id: 'swipe', label: 'Swipe / Compare', group: 'Imagery Analysis', moduleId: 951 },
-  { id: 'ndvi', label: 'NDVI / Vegetation Index', group: 'Imagery Analysis', moduleId: 952 },
-  { id: 'change', label: 'Change Detection', group: 'Imagery Analysis', moduleId: 953 }
+  { id: 'upload', label: 'Raster Upload & Publish', group: 'Raster Data', moduleId: 911, icon: 'pi pi-upload', description: 'Publish a GeoTIFF (DEM, satellite or drone image) as a map layer.' },
+  { id: 'style', label: 'Raster Styling', group: 'Raster Data', moduleId: 912, icon: 'pi pi-palette', description: 'Colour a raster with a ramp, stretch and opacity.' },
+  { id: 'identify', label: 'Pixel Identify', group: 'Raster Data', moduleId: 913, icon: 'pi pi-info-circle', description: 'Click the map to read pixel values from every band.' },
+  { id: 'profile', label: 'Elevation Profile', group: 'Terrain Analysis', moduleId: 921, section: 'Surface', icon: 'pi pi-chart-line', description: 'Draw a line to plot the elevation profile along it.' },
+  { id: 'slope', label: 'Slope', group: 'Terrain Analysis', moduleId: 922, section: 'Surface', icon: 'pi pi-sort-amount-up', description: 'Steepness of the terrain from a DEM, in degrees or percent.' },
+  { id: 'aspect', label: 'Aspect', group: 'Terrain Analysis', moduleId: 923, section: 'Surface', icon: 'pi pi-compass', description: 'Direction each slope faces (0–360°).' },
+  { id: 'hillshade', label: 'Hillshade', group: 'Terrain Analysis', moduleId: 924, section: 'Surface', icon: 'pi pi-sun', description: 'Shaded relief from a light source for 3D-looking terrain.' },
+  { id: 'contour', label: 'Contour Generation', group: 'Terrain Analysis', moduleId: 925, section: 'Surface', icon: 'pi pi-wave-pulse', description: 'Generate contour lines at a fixed elevation interval.' },
+  { id: 'cutfill', label: 'Cut & Fill / Volume', group: 'Terrain Analysis', moduleId: 926, section: 'Hydrology & Earthwork', icon: 'pi pi-box', description: 'Earthwork volumes to bring an area to a target height.' },
+  { id: 'watershed', label: 'Drainage / Watershed', group: 'Terrain Analysis', moduleId: 927, section: 'Hydrology & Earthwork', icon: 'pi pi-share-alt', description: 'Flow paths and catchment area draining to a point.' },
+  { id: 'flood', label: 'Flood Inundation', group: 'Terrain Analysis', moduleId: 928, section: 'Hydrology & Earthwork', icon: 'pi pi-cloud', description: 'Area flooded at a given water level.' },
+  { id: 'los', label: 'Line of Sight', group: 'Terrain Analysis', moduleId: 929, section: 'Visibility', icon: 'pi pi-eye', description: 'Is the target visible from the observer along a line?' },
+  { id: 'viewshed', label: 'Viewshed', group: 'Terrain Analysis', moduleId: 930, section: 'Visibility', icon: 'pi pi-bullseye', description: 'Everything visible from an observer point.' },
+  { id: 'calc', label: 'Raster Calculator', group: 'Raster Analytics', moduleId: 942, icon: 'pi pi-calculator', description: 'Map algebra across rasters, e.g. (A - B) / (A + B).' },
+  { id: 'reclass', label: 'Reclassify', group: 'Raster Analytics', moduleId: 943, icon: 'pi pi-sliders-h', description: 'Group pixel values into new classes.' },
+  { id: 'clip', label: 'Clip to Boundary', group: 'Raster Analytics', moduleId: 944, icon: 'pi pi-stop', description: 'Cut a raster to a drawn or chosen boundary.' },
+  { id: 'polygonize', label: 'Raster to Vector', group: 'Raster Analytics', moduleId: 945, icon: 'pi pi-th-large', description: 'Convert raster zones into vector polygons.' },
+  { id: 'swipe', label: 'Swipe / Compare', group: 'Imagery Analysis', moduleId: 951, icon: 'pi pi-arrows-h', description: 'Slide between two layers to compare them.' },
+  { id: 'ndvi', label: 'NDVI / Vegetation Index', group: 'Imagery Analysis', moduleId: 952, icon: 'pi pi-sparkles', description: 'Vegetation health from red and near-infrared bands.' },
+  { id: 'change', label: 'Change Detection', group: 'Imagery Analysis', moduleId: 953, icon: 'pi pi-sync', description: 'Detect what changed between two dates.' }
 ];
 export const RASTER_TOOL_MODULE_IDS = RASTER_TOOLS.map((t) => t.moduleId);
 
@@ -67,6 +72,14 @@ const OUTPUT_TOOLS: RasterToolId[] = [
 ];
 
 type Slot = 'a' | 'b' | 'line' | 'polygon';
+
+/** Rail icon + short caption per tool category. */
+const GROUP_META: Record<string, { short: string; icon: string }> = {
+  'Raster Data': { short: 'Data', icon: 'pi pi-database' },
+  'Terrain Analysis': { short: 'Terrain', icon: 'pi pi-chart-line' },
+  'Raster Analytics': { short: 'Analytics', icon: 'pi pi-calculator' },
+  'Imagery Analysis': { short: 'Imagery', icon: 'pi pi-globe' }
+};
 
 /**
  * Raster Analysis — raster data management, terrain analysis, raster
@@ -124,14 +137,34 @@ export class RasterAnalysisComponent implements OnDestroy {
   readonly ramps = RASTER_RAMP_NAMES;
   readonly tools = computed(() => RASTER_TOOLS.filter((t) => this.allowedSignal().has(t.moduleId)));
   readonly toolGroups = computed(() => {
-    const groups: { label: string; items: { label: string; value: RasterToolId }[] }[] = [];
+    const groups: { label: string; short: string; icon: string; items: { label: string; value: RasterToolId; icon: string }[] }[] = [];
     for (const t of this.tools()) {
       let group = groups.find((g) => g.label === t.group);
-      if (!group) groups.push((group = { label: t.group, items: [] }));
-      group.items.push({ label: t.label, value: t.id });
+      if (!group) groups.push((group = { label: t.group, ...GROUP_META[t.group], items: [] }));
+      group.items.push({ label: t.label, value: t.id, icon: t.icon });
     }
     return groups;
   });
+  /** Category picked in the left rail; its tools are listed beside it. */
+  readonly activeGroup = signal('Raster Data');
+  /** Catalog screen (category's tool cards) vs. the chosen tool's form. */
+  readonly showCatalog = signal(true);
+  /** The active category's tools, split by sub-heading ('' = none). */
+  readonly activeSections = computed(() => {
+    const sections: { label: string; items: ToolDef[] }[] = [];
+    for (const t of this.tools()) {
+      if (t.group !== this.activeToolGroup()?.label) continue;
+      const label = t.section ?? '';
+      let section = sections.find((x) => x.label === label);
+      if (!section) sections.push((section = { label, items: [] }));
+      section.items.push(t);
+    }
+    return sections;
+  });
+  readonly activeToolDef = computed(() => RASTER_TOOLS.find((t) => t.id === this.tool()) ?? null);
+  readonly activeToolGroup = computed(
+    () => this.toolGroups().find((g) => g.label === this.activeGroup()) ?? this.toolGroups()[0] ?? null
+  );
   readonly tool = signal<RasterToolId>('upload');
   readonly needsOutput = computed(() => OUTPUT_TOOLS.includes(this.tool()));
 
@@ -214,9 +247,23 @@ export class RasterAnalysisComponent implements OnDestroy {
 
   // ----- selection of tool / raster -----
 
+  /** Rail click: shows that category's tool catalog. */
+  selectGroup(label: string): void {
+    this.activeGroup.set(label);
+    this.showCatalog.set(true);
+  }
+
+  /** Card click in the catalog: switch to that tool's form. */
+  openTool(id: RasterToolId): void {
+    if (id !== this.tool()) this.selectTool(id);
+    this.showCatalog.set(false);
+  }
+
   selectTool(id: RasterToolId): void {
     if (this.tool() === 'swipe' && id !== 'swipe') this.mapService.setSwipe(null);
     this.tool.set(id);
+    const group = RASTER_TOOLS.find((t) => t.id === id)?.group;
+    if (group) this.activeGroup.set(group);
     this.resetResult();
     this.clearInputs();
     this.suggestOutputName();

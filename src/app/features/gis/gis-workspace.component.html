@@ -75,7 +75,7 @@
   <aside
     class="gis-ws__left"
     [class.is-collapsed]="!activeLeftTool() || !!styleTargetLayer()"
-    [style.width.px]="leftWidth()"
+    [style.width.px]="leftPanelWidth()"
   >
     <header class="gis-ws__panel-head">
       <span class="gis-ws__panel-title">{{ activeLeftTool()?.label }}</span>

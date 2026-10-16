@@ -1,20 +1,69 @@
-<div class="bo">
-  <label class="bo__field">
-    <span class="bo__label">Tool</span>
-    <p-select
-      class="bo__select"
-      [options]="toolGroups()"
-      [group]="true"
-      optionLabel="label"
-      optionValue="value"
-      optionGroupLabel="label"
-      optionGroupChildren="items"
-      [ngModel]="tool()"
-      (ngModelChange)="selectTool($event)"
-      appendTo="body"
-    />
-  </label>
+<div class="ra">
+  <nav class="ra__rail" aria-label="Raster tool categories">
+    @for (group of toolGroups(); track group.label) {
+      <button
+        type="button"
+        class="ra__rail-btn"
+        [class.is-active]="group.label === activeGroup()"
+        [attr.aria-pressed]="group.label === activeGroup()"
+        [title]="group.label"
+        (click)="selectGroup(group.label)"
+      >
+        <i [class]="group.icon" aria-hidden="true"></i>
+        <span>{{ group.short }}</span>
+        <span class="ra__rail-count">{{ group.items.length }}</span>
+      </button>
+    }
+  </nav>
 
+  <div class="ra__main">
+    @if (showCatalog() && activeToolGroup(); as group) {
+      <div class="ra__catalog">
+        <span class="ra__catalog-title">{{ group.label }}</span>
+        @for (section of activeSections(); track section.label) {
+          @if (section.label) {
+            <span class="ra__section">{{ section.label }}</span>
+          }
+          <ul class="ra__tools">
+            @for (item of section.items; track item.id) {
+              <li>
+                <button
+                  type="button"
+                  class="ra__tool"
+                  [class.is-active]="item.id === tool()"
+                  [attr.aria-pressed]="item.id === tool()"
+                  (click)="openTool(item.id)"
+                >
+                  <span class="ra__tool-icon"><i [class]="item.icon" aria-hidden="true"></i></span>
+                  <span class="ra__tool-text">
+                    <span class="ra__tool-name">{{ item.label }}</span>
+                    <span class="ra__tool-desc">{{ item.description }}</span>
+                  </span>
+                  <i class="pi pi-angle-right ra__tool-go" aria-hidden="true"></i>
+                </button>
+              </li>
+            }
+          </ul>
+        }
+      </div>
+    }
+
+    @if (!showCatalog()) {
+    <button type="button" class="ra__back" (click)="showCatalog.set(true)">
+      <i class="pi pi-arrow-left" aria-hidden="true"></i>
+      {{ activeToolGroup()?.label }}
+    </button>
+    @if (activeToolDef(); as def) {
+      <div class="ra__head">
+        <span class="ra__head-icon"><i [class]="def.icon" aria-hidden="true"></i></span>
+        <div class="ra__head-text">
+          <span class="ra__head-title">{{ def.label }}</span>
+          <span class="ra__head-desc">{{ def.description }}</span>
+        </div>
+      </div>
+    }
+
+<div class="bo ra__form">
   <!-- ============ UPLOAD ============ -->
   @if (tool() === 'upload') {
     <label class="bo__field">
@@ -442,6 +491,9 @@
       <button pButton type="button" label="Stop swipe" icon="pi pi-times" class="p-button-sm p-button-text" (click)="clear()"></button>
     </div>
   }
+</div>
+    }
+  </div>
 </div>
 
 <ng-template #polygonInput>
