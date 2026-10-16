@@ -647,6 +647,25 @@ export class GisLayersService {
     return { table, workspaceId };
   }
 
+  /** Advanced Tools: the VIEW-checked PostGIS table behind a vector layer
+   *  of the expected geometry type (LINE network or POINT facilities). */
+  async networkSource(
+    appUser: AppUser,
+    layerId: string,
+    geometryType: 'LINE' | 'POINT',
+  ) {
+    const layer = await this.findLayerInMunicipality(
+      appUser.municipalityId,
+      layerId,
+    );
+    if (layer.geometryType !== geometryType) {
+      throw new BadRequestException(
+        `"${layer.name}" is not a ${geometryType.toLowerCase()} layer.`,
+      );
+    }
+    return { name: layer.name, ...(await this.analyticsSource(appUser, layerId)) };
+  }
+
   async layerStyleAttributes(appUser: AppUser, layerId: string) {
     const layer = await this.findManageableLayer(appUser, layerId);
     const { table, workspaceId } = this.styleSource(layer);

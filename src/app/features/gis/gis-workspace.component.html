@@ -142,6 +142,15 @@
           />
         }
 
+        @if (openedLeftTools().has('advanced') && layersReady()) {
+          <app-advanced-tools
+            [class.gis-ws__panel--hidden]="leftTool() !== 'advanced'"
+            [active]="leftTool() === 'advanced'"
+            [layers]="layers()"
+            [allowedModuleIds]="myModuleIds()"
+          />
+        }
+
         @if (openedLeftTools().has('assistant') && layersReady()) {
           <app-ai-chat
             [class.gis-ws__panel--hidden]="leftTool() !== 'assistant'"

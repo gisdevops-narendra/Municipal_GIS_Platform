@@ -1,0 +1,117 @@
+<div class="bo">
+  @if (modes().length > 1) {
+    <div class="bo__modes" role="tablist">
+      @for (m of modes(); track m.value) {
+        <button type="button" class="bo__mode" [class.bo__mode--active]="mode() === m.value" (click)="setMode(m.value)">
+          {{ m.label }}
+        </button>
+      }
+    </div>
+  }
+
+  <label class="bo__field">
+    <span class="bo__label">{{ mode() === 'trace' ? 'Network (pipes / lines)' : 'Road network' }}</span>
+    <p-select
+      class="bo__select"
+      [options]="lineLayers()"
+      optionLabel="label"
+      optionValue="value"
+      [ngModel]="networkLayerId()"
+      (ngModelChange)="networkLayerId.set($event)"
+      placeholder="Choose a line layer"
+      appendTo="body"
+    />
+  </label>
+  @if (lineLayers().length === 0) {
+    <p class="bo__hint">Upload a line layer (roads or pipelines) through GIS Data to use these tools.</p>
+  }
+
+  @if (mode() === 'nearest') {
+    <div class="bo__row">
+      <label class="bo__field bo__field--grow">
+        <span class="bo__label">Facilities</span>
+        <p-select
+          class="bo__select"
+          [options]="pointLayers()"
+          optionLabel="label"
+          optionValue="value"
+          [ngModel]="facilityLayerId()"
+          (ngModelChange)="facilityLayerId.set($event)"
+          placeholder="Choose a point layer"
+          appendTo="body"
+        />
+      </label>
+      <label class="bo__field">
+        <span class="bo__label">Count</span>
+        <input type="number" class="bo__input" min="1" max="10" style="width: 64px" [(ngModel)]="facilityCount" />
+      </label>
+    </div>
+  }
+
+  <div class="bo__section">
+    <span class="bo__section-title">{{ mode() === 'trace' ? 'Start point' : mode() === 'route' ? 'From' : 'Your location' }}</span>
+    <div class="bo__operand">
+      <span class="bo__operand-state">{{ pointLabel(from()) }}</span>
+      <div class="bo__operand-actions">
+        <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'from'" (click)="pick('from')">
+          <i class="pi pi-map-marker" aria-hidden="true"></i>Pick on map
+        </button>
+      </div>
+    </div>
+  </div>
+
+  @if (mode() === 'route') {
+    <div class="bo__section">
+      <span class="bo__section-title">To</span>
+      <div class="bo__operand">
+        <span class="bo__operand-state">{{ pointLabel(to()) }}</span>
+        <div class="bo__operand-actions">
+          <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'to'" (click)="pick('to')">
+            <i class="pi pi-flag" aria-hidden="true"></i>Pick on map
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+
+  @if (picking()) {
+    <button type="button" class="bo__cancel" (click)="cancelPick()">Cancel picking</button>
+  }
+
+  @if (mode() === 'trace') {
+    <label class="bo__field">
+      <span class="bo__label">Max distance (m) — optional</span>
+      <input type="number" class="bo__input" min="1" placeholder="Whole connected network" [(ngModel)]="maxDistanceM" />
+    </label>
+  }
+
+  @if (error(); as message) {
+    <p class="bo__result bo__result--empty">{{ message }}</p>
+  }
+  @if (summary(); as text) {
+    <p class="bo__result">{{ text }}</p>
+    @if (facilities().length > 0) {
+      <ul class="bo__rings" aria-label="Nearest facilities">
+        @for (f of facilities(); track $index) {
+          <li class="bo__ring">
+            <span class="bo__ring-label">{{ $index + 1 }}. {{ f.label }}</span>
+            <span class="bo__ring-count">{{ f.length }}</span>
+          </li>
+        }
+      </ul>
+    }
+  }
+
+  <div class="bo__controls">
+    <button
+      pButton
+      type="button"
+      [label]="running() ? 'Working…' : mode() === 'route' ? 'Find route' : mode() === 'nearest' ? 'Find nearest' : 'Trace network'"
+      icon="pi pi-directions"
+      class="p-button-sm bo__run"
+      [disabled]="running()"
+      (click)="run()"
+    ></button>
+    <button pButton type="button" label="Clear" icon="pi pi-eraser" class="p-button-sm p-button-text" [disabled]="running()" (click)="clear()"></button>
+  </div>
+</div>

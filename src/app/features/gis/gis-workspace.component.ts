@@ -35,6 +35,12 @@ import { QueryBuilderComponent } from './components/query-builder/query-builder.
 import { MeasureComponent } from './components/measure/measure.component';
 import { BookmarksComponent } from './components/bookmarks/bookmarks.component';
 import { BufferOverlayComponent } from './components/buffer-overlay/buffer-overlay.component';
+import {
+  AdvancedToolsComponent,
+  BASIC_ROUTING_MODULE_ID,
+  NEAREST_FACILITY_MODULE_ID,
+  NETWORK_TRACING_MODULE_ID
+} from './components/advanced-tools/advanced-tools.component';
 import { AiChatComponent } from './components/ai-chat/ai-chat.component';
 import { PrintLayoutComponent } from './components/print-layout/print-layout.component';
 import { ExportDataComponent } from './components/export-data/export-data.component';
@@ -107,6 +113,7 @@ const TOOLS: WsTool[] = [
   { id: 'measure', label: 'Measure', icon: 'pi pi-arrows-h', group: 'analysis', dock: 'left', available: true, moduleId: 11 },
   { id: 'buffer', label: 'Buffer & Overlay', icon: 'pi pi-circle', group: 'analysis', dock: 'left', available: true, moduleId: 6 },
   { id: 'sketch', label: 'Draw & Mark', icon: 'pi pi-pencil', group: 'analysis', dock: 'left', available: true, anyModuleIds: [DRAW_MODULE_ID, MARKING_TOOL_MODULE_ID] },
+  { id: 'advanced', label: 'Advanced Tools', icon: 'pi pi-directions', group: 'analysis', dock: 'left', available: true, anyModuleIds: [BASIC_ROUTING_MODULE_ID, NEAREST_FACILITY_MODULE_ID, NETWORK_TRACING_MODULE_ID] },
   { id: 'statistics', label: 'Statistics', icon: 'pi pi-chart-bar', group: 'analysis', dock: 'bottom', available: true, anyModuleIds: [ANALYTICS_MODULE_ID, DATA_VISUALISATION_MODULE_ID] },
   { id: 'print', label: 'Print Layout', icon: 'pi pi-print', group: 'output', dock: 'left', available: true, moduleId: 3 },
   { id: 'reports', label: 'Reports', icon: 'pi pi-file', group: 'output', dock: 'bottom', available: true, moduleId: 251 },
@@ -138,6 +145,7 @@ const TOOLS: WsTool[] = [
     MeasureComponent,
     BookmarksComponent,
     BufferOverlayComponent,
+    AdvancedToolsComponent,
     AiChatComponent,
     PrintLayoutComponent,
     ExportDataComponent,

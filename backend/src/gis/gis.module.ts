@@ -19,6 +19,8 @@ import { StyleService } from './style.service';
 import { FieldStatsService } from './field-stats.service';
 import { LayerReportService } from './layer-report.service';
 import { YsldGenerator } from './ysld-generator';
+import { NetworkController } from './network.controller';
+import { NetworkService } from './network.service';
 
 @Module({
   imports: [AuthModule, ModuleAccessModule],
@@ -28,6 +30,7 @@ import { YsldGenerator } from './ysld-generator';
     GisUploadsController,
     GisDashboardController,
     PrintController,
+    NetworkController,
   ],
   providers: [
     GisWorkspaceService,
@@ -43,6 +46,7 @@ import { YsldGenerator } from './ysld-generator';
     FieldStatsService,
     LayerReportService,
     YsldGenerator,
+    NetworkService,
   ],
   exports: [
     GisWorkspaceService,
