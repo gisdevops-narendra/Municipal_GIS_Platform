@@ -338,8 +338,26 @@ export class ReclassifyDto extends RasterOutputDto {
 }
 
 export class ClipDto extends RasterOutputDto {
+  /** A drawn / selected boundary (GeoJSON, EPSG:4326)… */
+  @IsOptional()
   @IsObject()
-  polygon!: GeoJsonPolygon;
+  polygon?: GeoJsonPolygon;
+
+  /** …or a polygon layer, optionally only its features where
+   *  `boundaryField` equals `boundaryValue`. */
+  @IsOptional()
+  @IsUUID()
+  boundaryLayerId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 63)
+  boundaryField?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(0, 200)
+  boundaryValue?: string;
 }
 
 export class PolygonizeDto extends RasterOutputDto {}

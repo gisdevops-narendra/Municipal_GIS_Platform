@@ -446,7 +446,53 @@
     }
 
     @case ('clip') {
-      <ng-container *ngTemplateOutlet="polygonInput"></ng-container>
+      <div class="bo__modes" role="tablist">
+        <button type="button" class="bo__mode" [class.bo__mode--active]="clipSource === 'layer'" (click)="clipSource = 'layer'">Boundary layer</button>
+        <button type="button" class="bo__mode" [class.bo__mode--active]="clipSource === 'draw'" (click)="clipSource = 'draw'">Draw / selection</button>
+      </div>
+      @if (clipSource === 'layer') {
+        <label class="bo__field">
+          <span class="bo__label">Polygon layer</span>
+          <p-select
+            class="bo__select"
+            [options]="polygonLayers()"
+            optionLabel="label"
+            optionValue="value"
+            [ngModel]="vectorLayerId()"
+            (ngModelChange)="selectVector($event); boundaryValue = ''"
+            [filter]="true"
+            placeholder="e.g. vmc_aoi, ward, zone"
+            appendTo="body"
+          />
+        </label>
+        @if (vectorLayerId()) {
+          <div class="bo__row">
+            <label class="bo__field bo__field--grow">
+              <span class="bo__label">Only features where</span>
+              <p-select
+                class="bo__select"
+                [options]="allFields()"
+                optionLabel="label"
+                optionValue="value"
+                [(ngModel)]="field"
+                [showClear]="true"
+                placeholder="All features"
+                appendTo="body"
+              />
+            </label>
+            @if (field) {
+              <label class="bo__field bo__field--grow">
+                <span class="bo__label">equals</span>
+                <input type="text" class="bo__input" [(ngModel)]="boundaryValue" placeholder="e.g. Ward 12" />
+              </label>
+            }
+          </div>
+          <p class="bo__hint">Clips to the outline of {{ field ? 'the matching features' : 'every feature' }} of the layer.</p>
+        }
+      } @else {
+        <ng-container *ngTemplateOutlet="polygonInput"></ng-container>
+        <p class="bo__hint">Draw a polygon, or select polygons on the map with the Select tool and press "Selection".</p>
+      }
     }
 
     @case ('polygonize') {

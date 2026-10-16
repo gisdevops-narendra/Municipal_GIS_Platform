@@ -355,8 +355,19 @@ export class RasterToolsService {
 
   async clip(appUser: AppUser, dto: ClipDto) {
     const { file, layer } = await this.rasters.resolveRaster(appUser, dto.layerId);
+    let boundary: Record<string, unknown>;
+    if (dto.boundaryLayerId) {
+      const { layer: zones, source } = await this.rasters.resolveVector(appUser, dto.boundaryLayerId);
+      if (zones.geometryType !== 'POLYGON') throw new BadRequestException(`"${zones.name}" is not a polygon layer.`);
+      await this.rasters.assertField(appUser, dto.boundaryLayerId, dto.boundaryField, false);
+      boundary = { vector: source, field: dto.boundaryField, value: dto.boundaryValue ?? '' };
+    } else if (dto.polygon) {
+      boundary = { polygon: dto.polygon };
+    } else {
+      throw new BadRequestException('Choose a boundary layer, or draw / select a polygon.');
+    }
     return this.toRasterLayer(appUser, dto.outputName, async (output) => {
-      const result = await this.rasters.runOp({ op: 'clip', path: file, polygon: dto.polygon, output });
+      const result = await this.rasters.runOp({ op: 'clip', path: file, ...boundary, output });
       return { style: (layer.styleSpec as RasterStyleSpec | null) ?? undefined, result };
     });
   }

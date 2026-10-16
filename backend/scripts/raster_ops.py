@@ -637,14 +637,28 @@ def op_clip(req):
     nodata = b.GetNoDataValue()
     if nodata is None:
         nodata = 0 if b.DataType == gdal.GDT_Byte else FLOAT_NODATA
-    cutline = write_geojson_temp(req["polygon"])
+    folder = tempfile.mkdtemp()
     try:
+        if req.get("vector"):
+            # A polygon layer from PostGIS — all its features, or only those
+            # matching the backend-validated field / value filter.
+            where = None
+            if req.get("field"):
+                value = str(req.get("value", "")).replace("'", "''")
+                where = f"CAST(\"{req['field']}\" AS TEXT) = '{value}'"
+            cutline, _, layer = vector_copy(req["vector"], wgs84(), folder, where=where)
+            layer = None
+        else:
+            cutline = os.path.join(folder, "cut.geojson")
+            with open(cutline, "w") as f:
+                json.dump({"type": "FeatureCollection",
+                           "features": [{"type": "Feature", "properties": {}, "geometry": req["polygon"]}]}, f)
         out = gdal.Warp(
             req["output"], src, cutlineDSName=cutline, cropToCutline=True,
             dstNodata=nodata, creationOptions=GTIFF_OPTIONS,
         )
     finally:
-        os.remove(cutline)
+        shutil.rmtree(folder, ignore_errors=True)
     arr = out.GetRasterBand(1).ReadAsArray().astype(np.float64)
     arr[arr == nodata] = np.nan
     if not np.isfinite(arr).any():

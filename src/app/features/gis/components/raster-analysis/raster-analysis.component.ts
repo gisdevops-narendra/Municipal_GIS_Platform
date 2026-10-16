@@ -314,6 +314,9 @@ export class RasterAnalysisComponent implements OnDestroy {
   heatRadius = 500;
   proximityMax = 2000;
   zonalPublish = false;
+  /** Clip to Boundary: a polygon layer (default) or a drawn / selected shape. */
+  clipSource: 'layer' | 'draw' = 'layer';
+  boundaryValue = '';
 
   // online data
   onlineSource: 'dem' | 'landcover' | 'sentinel2' | 'population' | 'water' = 'dem';
@@ -1124,6 +1127,17 @@ export class RasterAnalysisComponent implements OnDestroy {
         if (this.reclassRules.length === 0) return this.error.set('Add at least one range.');
         return this.runLayerTool('reclassify', { ...base, rules: this.reclassRules });
       case 'clip':
+        if (this.clipSource === 'layer') {
+          if (!this.vectorLayerId()) return this.error.set('Choose the boundary (polygon) layer.');
+          if (this.field && !this.boundaryValue.trim()) return this.error.set(`Enter the ${this.field} value to clip to, or clear the filter.`);
+          return this.runLayerTool('clip', {
+            layerId,
+            boundaryLayerId: this.vectorLayerId(),
+            boundaryField: this.field || undefined,
+            boundaryValue: this.field ? this.boundaryValue.trim() : undefined,
+            outputName: base.outputName
+          });
+        }
         if (!this.polygon()) return this.error.set('Draw the boundary (or use selected polygons) first.');
         return this.runLayerTool('clip', { layerId, polygon: this.polygon(), outputName: base.outputName });
       case 'polygonize':
