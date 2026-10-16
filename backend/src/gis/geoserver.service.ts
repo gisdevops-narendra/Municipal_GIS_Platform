@@ -406,6 +406,27 @@ export class GeoServerService {
    *  replaces an older one (see Task 7 §16/GisUploadsService.publish) —
    *  only ever called AFTER the new version's own feature type has been
    *  successfully created and verified, never before. */
+  /** Re-reads a published feature type's attribute list and extent from
+   *  its table — after columns are added (Field Calculator, Table Join) or
+   *  the data changes extent. */
+  async refreshFeatureType(
+    workspace: string,
+    datastore: string,
+    name: string,
+  ): Promise<void> {
+    const response = await this.request(
+      `/rest/workspaces/${encodeURIComponent(workspace)}/datastores/${encodeURIComponent(datastore)}/featuretypes/${encodeURIComponent(name)}?recalculate=attribute,nativebbox,latlonbbox`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ featureType: { name, enabled: true } }),
+      },
+    );
+    if (!response.ok) {
+      throw await this.toError('refreshing feature type', response);
+    }
+  }
+
   async deleteFeatureType(
     workspace: string,
     datastore: string,

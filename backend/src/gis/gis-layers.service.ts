@@ -460,6 +460,10 @@ export class GisLayersService {
       );
     }
 
+    const snapshots = await this.prisma.gISLayerSnapshot.findMany({
+      where: { layerId: layer.id },
+      select: { postgisTable: true },
+    });
     await this.prisma.$transaction([
       this.prisma.gISLayerUpload.deleteMany({ where: { layerId: layer.id } }),
       this.prisma.gISLayer.delete({ where: { id: layer.id } }),
@@ -468,7 +472,11 @@ export class GisLayersService {
     // Best-effort cleanup — the rows are already gone, so a failure here
     // only leaves an orphaned table/file, never a broken list.
     const tables = new Set(
-      [layer.postgisTable, ...uploads.map((u) => u.postgisTable)].filter(
+      [
+        layer.postgisTable,
+        ...uploads.map((u) => u.postgisTable),
+        ...snapshots.map((s) => s.postgisTable),
+      ].filter(
         (name): name is string => !!name && isSafeGeneratedTableName(name),
       ),
     );
@@ -481,6 +489,19 @@ export class GisLayersService {
           ),
         );
     }
+    // Feature attachments (see VectorToolsService.attachmentDir).
+    await rm(
+      path.join(
+        path.resolve(
+          this.config.get<string>('GIS_UPLOAD_STORAGE_DIR', './storage/uploads'),
+          '..',
+          'attachments',
+        ),
+        appUser.municipalityId,
+        layer.id,
+      ),
+      { recursive: true, force: true },
+    ).catch(() => undefined);
     if (layer.layerType === 'RASTER') {
       const root = path.resolve(
         this.config.get<string>('GIS_UPLOAD_STORAGE_DIR', './storage/uploads'),
@@ -672,6 +693,46 @@ export class GisLayersService {
       );
     }
     return { table, workspaceId };
+  }
+
+  /**
+   * Feature Editing / Geoprocessing: the permission-checked vector layer
+   * and a SQL relation for it. `view` accepts uploaded and demo layers
+   * (`from` scopes a shared demo table to this workspace); `edit` needs
+   * UPLOAD or MANAGE and an uploaded layer's own `layer_<uuid>` table.
+   */
+  async vectorSource(appUser: AppUser, layerId: string, need: 'view' | 'edit') {
+    const layer = await this.findLayerInMunicipality(
+      appUser.municipalityId,
+      layerId,
+    );
+    if (layer.layerType !== 'VECTOR') {
+      throw new BadRequestException(`"${layer.name}" is not a vector layer.`);
+    }
+    const permissions = await this.gisAuth.getPermissions(appUser, layer);
+    if (!permissions.has('VIEW')) {
+      throw new ForbiddenException('You do not have permission to view this layer.');
+    }
+    if (
+      need === 'edit' &&
+      !permissions.has('UPLOAD') &&
+      !permissions.has('MANAGE')
+    ) {
+      throw new ForbiddenException('You do not have permission to edit this layer.');
+    }
+    const { table, workspaceId } = this.styleSource(layer);
+    if (!table || (need === 'edit' && !isSafeGeneratedTableName(table))) {
+      throw new BadRequestException(
+        need === 'edit'
+          ? 'Only uploaded layers can be edited.'
+          : 'This layer has no PostGIS data.',
+      );
+    }
+    const from =
+      workspaceId && /^[0-9a-f-]{36}$/.test(workspaceId)
+        ? `(SELECT * FROM "${table}" WHERE gis_workspace_id = '${workspaceId}')`
+        : `"${table}"`;
+    return { layer, table, from };
   }
 
   /** Advanced Tools: the VIEW-checked PostGIS table behind a vector layer

@@ -31,6 +31,17 @@ export interface TraceResult {
   endPoints: { type: 'MultiPoint'; coordinates: LonLat[] };
 }
 
+export interface ServiceAreaResult {
+  unit: 'm' | 'min';
+  areas: {
+    break: number;
+    distanceM: number;
+    lengthM: number;
+    roads: MultiLineGeometry;
+    area: Record<string, unknown> | null;
+  }[];
+}
+
 /** GIS Advanced Tools — network analysis on the backend (`/gis/network`). */
 @Injectable({ providedIn: 'root' })
 export class NetworkService {
@@ -53,6 +64,11 @@ export class NetworkService {
       from,
       count
     });
+  }
+
+  /** `breaks` are metres, or minutes when `speedKmh` is given. */
+  serviceArea(layerId: string, at: LonLat, breaks: number[], speedKmh?: number): Observable<ServiceAreaResult> {
+    return this.http.post<ServiceAreaResult>(`${this.baseUrl}/service-area`, { layerId, at, breaks, speedKmh });
   }
 
   trace(layerId: string, at: LonLat, maxDistanceM?: number): Observable<TraceResult> {

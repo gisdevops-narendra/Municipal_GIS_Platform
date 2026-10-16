@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsHexColor,
@@ -19,7 +20,7 @@ export type StyleGeometry = 'point' | 'line' | 'polygon' | 'raster';
 export type StyleMode = 'single' | 'categorized' | 'graduated';
 export type MarkShape =
   'circle' | 'square' | 'triangle' | 'star' | 'cross' | 'x';
-export type ClassificationMethod = 'equalInterval' | 'quantile' | 'manual';
+export type ClassificationMethod = 'equalInterval' | 'quantile' | 'jenks' | 'manual';
 export type IconMime = 'image/svg+xml' | 'image/png';
 
 /** A point icon (ExternalGraphic). `source: 'builtin'` → `name` is a
@@ -163,7 +164,7 @@ export class GraduateSpecDto {
   @MaxLength(63)
   field!: string;
 
-  @IsIn(['equalInterval', 'quantile', 'manual'])
+  @IsIn(['equalInterval', 'quantile', 'jenks', 'manual'])
   method!: ClassificationMethod;
 
   @IsInt()
@@ -182,6 +183,15 @@ export class GraduateSpecDto {
   @ArrayMaxSize(12)
   @IsHexColor({ each: true })
   ramp!: string[];
+
+  /** Graduated symbols: point size / line width grows from the first to
+   *  the second value across the classes (unset = one size). */
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(2)
+  @IsNumber({}, { each: true })
+  sizeRange?: [number, number];
 }
 
 export class LabelSpecDto {

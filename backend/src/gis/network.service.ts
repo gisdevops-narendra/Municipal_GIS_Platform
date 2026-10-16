@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import type { AppUser } from '../auth/types/app-user.type';
 import { GisLayersService } from './gis-layers.service';
 import { isSafeGeneratedTableName } from './layer-naming.util';
-import type { NearestFacilityDto, RouteDto, TraceDto } from './dto/network.dto';
+import type { NearestFacilityDto, RouteDto, ServiceAreaDto, TraceDto } from './dto/network.dto';
 
 /**
  * `road`: lines are split where they cross, so street intersections connect.
@@ -158,6 +158,49 @@ export class NetworkService {
       path: { type: 'MultiLineString', coordinates: lines },
       endPoints: { type: 'MultiPoint', coordinates: endPoints },
     };
+  }
+
+  /** Service Area: roads reachable from a point within each break, and a
+   *  polygon around them (the reached roads buffered by 50 m). */
+  async serviceArea(appUser: AppUser, dto: ServiceAreaDto) {
+    const graph = await this.graphFor(appUser, dto.layerId, 'road');
+    const [start] = await this.snap(graph, [dto.at]);
+    const toMetres = (b: number) => (dto.speedKmh ? (b / 60) * dto.speedKmh * 1000 : b);
+    const breaks = [...new Set(dto.breaks)].sort((a, b) => a - b);
+    const limits = breaks.map(toMetres);
+    if (limits[limits.length - 1] > 100_000) {
+      throw new BadRequestException('Service areas are limited to 100 km.');
+    }
+    const search = this.dijkstra(graph, start, { maxDist: limits[limits.length - 1] });
+    const areas: { break: number; distanceM: number; lengthM: number; roads: unknown; area: unknown }[] = [];
+    for (let i = 0; i < breaks.length; i++) {
+      const limit = limits[i];
+      const lines: LonLat[][] = [];
+      let lengthM = 0;
+      for (const edge of graph.edges) {
+        if (Math.max(search.dist[edge.a], search.dist[edge.b]) > limit) continue;
+        lines.push(edge.coords);
+        lengthM += edge.len;
+      }
+      let area: unknown = null;
+      if (lines.length) {
+        const [row] = await this.prisma.$queryRawUnsafe<{ g: unknown }[]>(
+          `SELECT ST_AsGeoJSON(ST_Transform(ST_SimplifyPreserveTopology(
+                    ST_Buffer(ST_Transform(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326), $2::int), 50, 'quad_segs=4'), 5), 4326), 6)::json AS g`,
+          JSON.stringify({ type: 'MultiLineString', coordinates: lines }),
+          graph.srid,
+        );
+        area = row?.g ?? null;
+      }
+      areas.push({
+        break: breaks[i],
+        distanceM: limit,
+        lengthM,
+        roads: { type: 'MultiLineString', coordinates: lines },
+        area,
+      });
+    }
+    return { unit: dto.speedKmh ? 'min' : 'm', areas };
   }
 
   // ----- graph -----

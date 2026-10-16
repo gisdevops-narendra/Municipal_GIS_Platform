@@ -11,7 +11,7 @@ export type MarkShape =
   | 'star'
   | 'cross'
   | 'x';
-export type ClassificationMethod = 'equalInterval' | 'quantile' | 'manual';
+export type ClassificationMethod = 'equalInterval' | 'quantile' | 'jenks' | 'manual';
 export type FieldKind =
   | 'string'
   | 'number'
@@ -100,6 +100,8 @@ export interface LayerStyleSpec {
     classCount: number;
     breaks: number[];
     ramp: string[];
+    /** Graduated symbols: point size / line width from → to across classes. */
+    sizeRange?: [number, number];
   };
   labels?: LabelSpec;
   scale?: { minDenominator?: number; maxDenominator?: number };
@@ -148,6 +150,7 @@ export const CLASSIFICATION_METHODS: {
   value: ClassificationMethod;
 }[] = [
   { label: 'Quantile (equal count)', value: 'quantile' },
+  { label: 'Natural breaks (Jenks)', value: 'jenks' },
   { label: 'Equal interval', value: 'equalInterval' },
   { label: 'Manual breaks', value: 'manual' },
 ];

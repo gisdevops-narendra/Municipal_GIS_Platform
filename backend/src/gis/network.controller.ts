@@ -3,7 +3,7 @@ import { RequireMunicipalityMember } from '../auth/decorators/authorization.deco
 import { CurrentAppUser } from '../auth/decorators/current-app-user.decorator';
 import type { AppUser } from '../auth/types/app-user.type';
 import { NetworkService } from './network.service';
-import { NearestFacilityDto, RouteDto, TraceDto } from './dto/network.dto';
+import { NearestFacilityDto, RouteDto, ServiceAreaDto, TraceDto } from './dto/network.dto';
 
 /** GIS Advanced Tools. Each call VIEW-checks the layers it reads. */
 @Controller('gis/network')
@@ -32,5 +32,13 @@ export class NetworkController {
   @HttpCode(200)
   trace(@CurrentAppUser() appUser: AppUser, @Body() dto: TraceDto) {
     return this.networkService.trace(appUser, dto);
+  }
+
+  /** Service Area: reachable roads / area within distance or time breaks. */
+  @RequireMunicipalityMember()
+  @Post('service-area')
+  @HttpCode(200)
+  serviceArea(@CurrentAppUser() appUser: AppUser, @Body() dto: ServiceAreaDto) {
+    return this.networkService.serviceArea(appUser, dto);
   }
 }

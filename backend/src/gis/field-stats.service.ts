@@ -139,7 +139,9 @@ export class FieldStatsService {
       const breaks =
         options.method === 'quantile'
           ? await this.quantileBreaks(table, col, classes, scope)
-          : equalIntervalBreaks(min, max, classes);
+          : options.method === 'jenks'
+            ? await this.jenksBreaks(table, col, classes, scope, min, max)
+            : equalIntervalBreaks(min, max, classes);
       return { field, kind: 'number', numeric: { min, max, count, breaks } };
     }
 
@@ -284,6 +286,31 @@ export class FieldStatsService {
 
   // ---- helpers ---------------------------------------------------
 
+  /** Jenks natural breaks on a random sample of up to 1000 values (the
+   *  O(k·n²) optimisation stays fast); the outer bounds are the true min/max. */
+  private async jenksBreaks(
+    table: string,
+    col: string,
+    classes: number,
+    scope: { clause: string; params: string[] },
+    min: number,
+    max: number,
+  ): Promise<number[]> {
+    const rows = await this.prisma.$queryRawUnsafe<{ v: number }[]>(
+      `SELECT ${col}::float8 AS v FROM "${table}" ${scope.clause}
+        ${scope.clause ? 'AND' : 'WHERE'} ${col} IS NOT NULL
+        ORDER BY random() LIMIT 1000`,
+      ...scope.params,
+    );
+    const values = rows.map((r) => Number(r.v)).sort((a, b) => a - b);
+    const k = Math.min(classes, new Set(values).size);
+    if (k < 2) return equalIntervalBreaks(min, max, classes);
+    const breaks = jenks(values, k).map((n) => Math.round(n * 1e6) / 1e6);
+    breaks[0] = min;
+    breaks[breaks.length - 1] = max;
+    return breaks;
+  }
+
   private async quantileBreaks(
     table: string,
     col: string,
@@ -353,4 +380,50 @@ export class FieldStatsService {
     }
     return 'other';
   }
+}
+
+/** Fisher–Jenks optimal classification of sorted `data` into `k` classes —
+ *  returns the k + 1 class boundaries. */
+function jenks(data: number[], k: number): number[] {
+  const n = data.length;
+  const lower = Array.from({ length: n + 1 }, () => new Array<number>(k + 1).fill(0));
+  const variance = Array.from({ length: n + 1 }, () => new Array<number>(k + 1).fill(Infinity));
+  for (let j = 1; j <= k; j++) {
+    lower[1][j] = 1;
+    variance[1][j] = 0;
+  }
+  for (let l = 2; l <= n; l++) {
+    let sum = 0;
+    let sumSq = 0;
+    let w = 0;
+    let v = 0;
+    for (let m = 1; m <= l; m++) {
+      const i = l - m + 1;
+      const val = data[i - 1];
+      w++;
+      sum += val;
+      sumSq += val * val;
+      v = sumSq - (sum * sum) / w;
+      if (i > 1) {
+        for (let j = 2; j <= k; j++) {
+          if (variance[l][j] >= v + variance[i - 1][j - 1]) {
+            lower[l][j] = i;
+            variance[l][j] = v + variance[i - 1][j - 1];
+          }
+        }
+      }
+    }
+    lower[l][1] = 1;
+    variance[l][1] = v;
+  }
+  const breaks = new Array<number>(k + 1);
+  breaks[k] = data[n - 1];
+  breaks[0] = data[0];
+  let idx = n;
+  for (let j = k; j >= 2; j--) {
+    const id = lower[idx][j] - 1;
+    breaks[j - 1] = data[id];
+    idx = id;
+  }
+  return breaks;
 }

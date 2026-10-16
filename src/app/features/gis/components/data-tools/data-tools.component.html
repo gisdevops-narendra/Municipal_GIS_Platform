@@ -1,0 +1,321 @@
+<div class="bo">
+  @if (tools().length > 1) {
+    <div class="bo__modes dt__tabs" role="tablist">
+      @for (t of tools(); track t.value) {
+        <button type="button" class="bo__mode" [class.bo__mode--active]="tool() === t.value" (click)="setTool(t.value)">{{ t.label }}</button>
+      }
+    </div>
+  }
+
+  @if (tool() !== 'geocode') {
+    <label class="bo__field">
+      <span class="bo__label">Layer</span>
+      <p-select
+        class="bo__select"
+        [options]="vectorLayers()"
+        optionLabel="label"
+        optionValue="value"
+        [ngModel]="layerId()"
+        (ngModelChange)="selectLayer($event)"
+        [filter]="true"
+        placeholder="Choose a layer"
+        appendTo="body"
+      />
+    </label>
+  }
+
+  @switch (tool()) {
+    <!-- ============ FIELD CALCULATOR ============ -->
+    @case ('calc') {
+      @if (layerId()) {
+        <label class="bo__toggle">
+          <input type="checkbox" [ngModel]="calcNew()" (ngModelChange)="calcNew.set($event); calcField = ''" />
+          <span>Create a new field</span>
+        </label>
+        @if (calcNew()) {
+          <div class="bo__row">
+            <label class="bo__field bo__field--grow">
+              <span class="bo__label">New field name</span>
+              <input type="text" class="bo__input" maxlength="63" placeholder="area_m2" [(ngModel)]="calcField" />
+            </label>
+            <label class="bo__field bo__field--grow">
+              <span class="bo__label">Type</span>
+              <p-select class="bo__select" [options]="newFieldTypes" optionLabel="label" optionValue="value" [(ngModel)]="calcType" appendTo="body" />
+            </label>
+          </div>
+        } @else {
+          <label class="bo__field">
+            <span class="bo__label">Field to fill</span>
+            <p-select class="bo__select" [options]="fieldOptions()" optionLabel="label" optionValue="value" [(ngModel)]="calcField" [filter]="true" placeholder="Choose a field" appendTo="body" />
+          </label>
+        }
+        <label class="bo__field">
+          <span class="bo__label">Expression</span>
+          <textarea class="bo__input dt__textarea" rows="3" [(ngModel)]="calcExpression" placeholder="round($area / 10000, 2)"></textarea>
+        </label>
+        <div class="dt__tokens">
+          @for (v of variables; track v) {
+            <button type="button" class="bo__chip" (click)="insert(v)">{{ v }}</button>
+          }
+          @for (f of fields(); track f.name) {
+            <button type="button" class="bo__chip bo__chip--ghost" (click)="insert(quoteField(f.name))">{{ f.name }}</button>
+          }
+        </div>
+        <p class="bo__hint">
+          + − × ÷ and || (join text); functions round, abs, ceil, floor, sqrt, upper, lower, trim, coalesce, concat, substr, nullif.
+          Text in 'single quotes'. Every change is recorded in the edit history.
+        </p>
+        @if (calcPreview(); as rows) {
+          <ul class="dt__list">
+            @for (row of rows; track row.id) {
+              <li><span class="dt__muted">#{{ row.id }}</span> {{ row.value ?? '∅' }}</li>
+            } @empty {
+              <li class="dt__muted">The layer has no features.</li>
+            }
+          </ul>
+        }
+        <div class="bo__controls">
+          <button pButton type="button" label="Preview" icon="pi pi-eye" class="p-button-sm p-button-outlined" [disabled]="running()" (click)="previewCalc()"></button>
+          <button pButton type="button" label="Calculate" icon="pi pi-calculator" class="p-button-sm bo__run" [loading]="running()" (click)="runCalc()"></button>
+        </div>
+      }
+    }
+
+    <!-- ============ TABLE JOIN ============ -->
+    @case ('join') {
+      @if (layerId()) {
+        <label class="bo__field">
+          <span class="bo__label">CSV table</span>
+          <input #joinFile type="file" accept=".csv,text/csv" class="bo__input dt__file" (change)="onCsv(joinFile)" />
+        </label>
+        @if (csvHeader().length) {
+          <div class="bo__row">
+            <label class="bo__field bo__field--grow">
+              <span class="bo__label">Layer key</span>
+              <p-select class="bo__select" [options]="fieldOptions()" optionLabel="label" optionValue="value" [(ngModel)]="joinLayerKey" placeholder="e.g. parcel_no" appendTo="body" />
+            </label>
+            <label class="bo__field bo__field--grow">
+              <span class="bo__label">CSV key</span>
+              <p-select class="bo__select" [options]="csvOptions()" optionLabel="label" optionValue="value" [(ngModel)]="joinTableKey" appendTo="body" />
+            </label>
+          </div>
+          <span class="bo__label">Columns to bring in</span>
+          <div class="dt__checks">
+            @for (h of csvHeader(); track h) {
+              @if (h !== joinTableKey) {
+                <label class="bo__toggle">
+                  <input type="checkbox" [ngModel]="joinColumns().has(h)" (ngModelChange)="toggleJoinColumn(h, $event)" />
+                  <span>{{ h }}</span>
+                </label>
+              }
+            }
+          </div>
+          <p class="bo__hint">Matching columns are updated; others are added to the layer (numbers where every value is numeric).</p>
+          <div class="bo__controls">
+            <button pButton type="button" label="Join table" icon="pi pi-link" class="p-button-sm bo__run" [loading]="running()" (click)="runJoin()"></button>
+          </div>
+        }
+      }
+    }
+
+    <!-- ============ GEOCODE ============ -->
+    @case ('geocode') {
+      <label class="bo__field">
+        <span class="bo__label">CSV with addresses</span>
+        <input #geoFile type="file" accept=".csv,text/csv" class="bo__input dt__file" (change)="onCsv(geoFile)" />
+      </label>
+      @if (csvHeader().length) {
+        <label class="bo__field">
+          <span class="bo__label">Address column</span>
+          <p-select class="bo__select" [options]="csvOptions()" optionLabel="label" optionValue="value" [(ngModel)]="geoAddressColumn" appendTo="body" />
+        </label>
+      }
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Match against layer</span>
+          <p-select class="bo__select" [options]="vectorLayers()" optionLabel="label" optionValue="value" [ngModel]="geoRefLayerId()" (ngModelChange)="setGeoRefLayer($event)" [filter]="true" placeholder="Property / address layer" appendTo="body" />
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Its address field</span>
+          <p-select class="bo__select" [options]="geoRefFields()" optionLabel="name" optionValue="name" [(ngModel)]="geoRefField" appendTo="body" />
+        </label>
+      </div>
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">New point layer</span>
+          <input type="text" class="bo__input" maxlength="120" [(ngModel)]="geoOutputName" />
+        </label>
+        <label class="bo__field">
+          <span class="bo__label">Min. match (0.1–1)</span>
+          <input type="number" class="bo__input" min="0.1" max="1" step="0.05" style="width: 88px" [(ngModel)]="geoMinScore" />
+        </label>
+      </div>
+      <p class="bo__hint">Fuzzy text matching on your own data — no addresses are sent outside the platform. Each result keeps its match score.</p>
+      <div class="bo__controls">
+        <button pButton type="button" label="Geocode" icon="pi pi-map-marker" class="p-button-sm bo__run" [loading]="running()" (click)="runGeocode()"></button>
+      </div>
+      @if (geoResult(); as g) {
+        <p class="bo__result">
+          “{{ g.layer.name }}” published: {{ g.matched }} matched, {{ g.unmatchedCount }} unmatched.
+        </p>
+        @if (g.unmatched.length) {
+          <ul class="dt__list">
+            @for (u of g.unmatched; track u.row) {
+              <li><span class="dt__muted">row {{ u.row }}</span> {{ u.address || '(empty)' }}</li>
+            }
+          </ul>
+        }
+      }
+    }
+
+    <!-- ============ VALIDATE ============ -->
+    @case ('validate') {
+      @if (layerId()) {
+        <label class="bo__field">
+          <span class="bo__label">Report polygon gaps up to (m²)</span>
+          <input type="number" class="bo__input" min="0" [(ngModel)]="maxGapArea" />
+        </label>
+        <div class="bo__controls">
+          <button pButton type="button" label="Check layer" icon="pi pi-verified" class="p-button-sm bo__run" [loading]="running()" (click)="runValidate()"></button>
+        </div>
+        @if (issueCounts().length) {
+          <ul class="bo__rings">
+            @for (c of issueCounts(); track c.check) {
+              <li class="bo__ring">
+                <span class="bo__ring-swatch" [style.background]="c.color"></span>
+                <span class="bo__ring-label">{{ c.label }}</span>
+                <span class="bo__ring-count">{{ c.count }}</span>
+              </li>
+            }
+          </ul>
+          <div class="bo__operand-actions">
+            @if (hasCount('invalid')) {
+              <button type="button" class="bo__chip" [disabled]="running()" (click)="fix('invalid')"><i class="pi pi-wrench" aria-hidden="true"></i>Repair invalid</button>
+            }
+            @if (hasCount('duplicate')) {
+              <button type="button" class="bo__chip" [disabled]="running()" (click)="fix('duplicates')"><i class="pi pi-clone" aria-hidden="true"></i>Remove duplicates</button>
+            }
+            @if (hasCount('empty')) {
+              <button type="button" class="bo__chip" [disabled]="running()" (click)="fix('empty')"><i class="pi pi-trash" aria-hidden="true"></i>Remove empty</button>
+            }
+          </div>
+        }
+        @if (issues(); as list) {
+          <ul class="dt__list dt__list--issues">
+            @for (issue of list; track $index) {
+              <li>
+                <button type="button" class="dt__issue" (click)="zoomTo(issue)" [disabled]="!issue.geometry">
+                  <span class="dt__dot" [style.background]="issueColor(issue)"></span>
+                  <span class="dt__issue-type">{{ issueLabel(issue) }}</span>
+                  @if (issue.featureIds.length) { <span class="dt__muted">#{{ issue.featureIds.join(', #') }}</span> }
+                  <span class="dt__issue-detail">{{ issue.detail }}</span>
+                </button>
+              </li>
+            }
+          </ul>
+        }
+      }
+    }
+
+    <!-- ============ FIELD RULES ============ -->
+    @case ('rules') {
+      @if (layerId()) {
+        <p class="bo__hint">Value lists become dropdowns in the Edit panel; rules are enforced on every save and reported by Validate.</p>
+        <div class="dt__rules">
+          @for (r of ruleRows(); track r.field; let i = $index) {
+            <div class="dt__rule">
+              <div class="dt__rule-head">
+                <span class="dt__rule-name">{{ r.field }}</span>
+                <span class="dt__muted">{{ r.type }}</span>
+                <label class="bo__toggle dt__req">
+                  <input type="checkbox" [ngModel]="r.required" (ngModelChange)="updateRule(i, { required: $event })" />
+                  <span>Required</span>
+                </label>
+              </div>
+              <input type="text" class="bo__input" placeholder="Allowed values, comma-separated (optional)" [ngModel]="r.valuesText" (ngModelChange)="updateRule(i, { valuesText: $event })" />
+              @if (isNumeric(r.type)) {
+                <div class="bo__row">
+                  <input type="number" class="bo__input" placeholder="Min" [ngModel]="r.min" (ngModelChange)="updateRule(i, { min: $event })" />
+                  <input type="number" class="bo__input" placeholder="Max" [ngModel]="r.max" (ngModelChange)="updateRule(i, { max: $event })" />
+                </div>
+              }
+            </div>
+          }
+        </div>
+        <div class="bo__controls">
+          <button pButton type="button" label="Save rules" icon="pi pi-save" class="p-button-sm bo__run" [loading]="running()" (click)="saveRules()"></button>
+        </div>
+      }
+    }
+
+    <!-- ============ VERSIONS ============ -->
+    @case ('versions') {
+      @if (layerId()) {
+        <div class="bo__row">
+          <label class="bo__field bo__field--grow">
+            <span class="bo__label">Save current data as version</span>
+            <input type="text" class="bo__input" maxlength="120" placeholder="e.g. Before ward survey" [(ngModel)]="snapshotName" />
+          </label>
+          <button type="button" class="bo__chip dt__chip-end" [disabled]="running()" (click)="createSnapshot()"><i class="pi pi-save" aria-hidden="true"></i>Save</button>
+        </div>
+        <label class="bo__field">
+          <span class="bo__label">Match features by</span>
+          <p-select class="bo__select" [options]="fieldOptions()" optionLabel="label" optionValue="value" [(ngModel)]="compareKey" [showClear]="true" placeholder="Feature id (same upload)" appendTo="body" />
+        </label>
+        <p class="bo__hint">Re-uploads replace feature ids — compare those by a real id field (e.g. parcel number).</p>
+        @if (snapshots(); as rows) {
+          <ul class="dt__list">
+            @for (s of rows; track s.id) {
+              <li class="dt__snap">
+                <div>
+                  <div>{{ s.name }}</div>
+                  <div class="dt__muted">{{ s.createdAt | date: 'medium' }} · {{ s.featureCount }} features</div>
+                </div>
+                <div class="bo__operand-actions">
+                  <button type="button" class="bo__chip" [disabled]="running()" (click)="compare(s)">Compare</button>
+                  <button type="button" class="bo__chip" [class.bo__chip--busy]="confirmRestore() === s.id" [disabled]="running()" (click)="restore(s)">
+                    {{ confirmRestore() === s.id ? 'Confirm restore' : 'Restore' }}
+                  </button>
+                  <button type="button" class="bo__chip bo__chip--ghost" aria-label="Delete version" [disabled]="running()" (click)="deleteSnapshot(s)"><i class="pi pi-trash" aria-hidden="true"></i></button>
+                </div>
+              </li>
+            } @empty {
+              <li class="dt__muted">No versions yet. Re-uploads keep the previous data here automatically.</li>
+            }
+          </ul>
+        }
+        @if (comparison(); as c) {
+          <p class="bo__result">
+            Since “{{ c.snapshot.name }}” (matched by {{ c.key === 'ogc_fid' ? 'feature id' : c.key }}):
+            <span class="dt__added">{{ c.added.count }} added</span>,
+            <span class="dt__removed">{{ c.removed.count }} removed</span>,
+            <span class="dt__modified">{{ c.modified.count }} modified</span>.
+          </p>
+          <ul class="dt__list dt__list--issues">
+            @for (f of c.added.features; track $index) {
+              <li><button type="button" class="dt__issue" (click)="zoomToChange(f.geometry)"><span class="dt__dot" style="background: #16a34a"></span>Added <span class="dt__muted">{{ f.key }}</span></button></li>
+            }
+            @for (f of c.removed.features; track $index) {
+              <li><button type="button" class="dt__issue" (click)="zoomToChange(f.geometry)"><span class="dt__dot" style="background: #dc2626"></span>Removed <span class="dt__muted">{{ f.key }}</span></button></li>
+            }
+            @for (f of c.modified.features; track $index) {
+              <li>
+                <button type="button" class="dt__issue" (click)="zoomToChange(f.geometry)">
+                  <span class="dt__dot" style="background: #ea580c"></span>Modified <span class="dt__muted">{{ f.key }}</span>
+                  <span class="dt__issue-detail">{{ f.geometryChanged ? 'geometry' : '' }}{{ f.geometryChanged && f.changedFields.length ? ', ' : '' }}{{ f.changedFields.join(', ') }}</span>
+                </button>
+              </li>
+            }
+          </ul>
+        }
+      }
+    }
+  }
+
+  @if (notice()) {
+    <p class="bo__result">{{ notice() }}</p>
+  }
+  @if (error()) {
+    <p-message severity="error" [text]="error()!" styleClass="w-full" />
+  }
+</div>

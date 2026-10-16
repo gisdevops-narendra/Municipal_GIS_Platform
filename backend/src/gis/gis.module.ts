@@ -29,6 +29,10 @@ import { RasterMonitorService } from './raster-monitor.service';
 import { RasterMailService } from './raster-mail.service';
 import { RasterWorkspaceService } from './raster-workspace.service';
 import { RasterModuleGuard } from './raster-module.guard';
+import { VectorToolsController } from './vector-tools.controller';
+import { VectorToolsService } from './vector-tools.service';
+import { DataToolsController } from './data-tools.controller';
+import { DataToolsService } from './data-tools.service';
 
 @Module({
   imports: [AuthModule, ModuleAccessModule],
@@ -40,6 +44,8 @@ import { RasterModuleGuard } from './raster-module.guard';
     PrintController,
     NetworkController,
     RasterController,
+    VectorToolsController,
+    DataToolsController,
   ],
   providers: [
     GisWorkspaceService,
@@ -63,6 +69,8 @@ import { RasterModuleGuard } from './raster-module.guard';
     RasterMailService,
     RasterWorkspaceService,
     RasterModuleGuard,
+    VectorToolsService,
+    DataToolsService,
   ],
   exports: [
     GisWorkspaceService,

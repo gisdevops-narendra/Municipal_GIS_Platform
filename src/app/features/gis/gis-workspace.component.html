@@ -142,6 +142,32 @@
           />
         }
 
+        @if (openedLeftTools().has('edit') && layersReady()) {
+          <app-feature-edit
+            [class.gis-ws__panel--hidden]="leftTool() !== 'edit'"
+            [active]="leftTool() === 'edit'"
+            [layers]="layers()"
+            [allowedModuleIds]="myModuleIds()"
+          />
+        }
+
+        @if (openedLeftTools().has('geoprocessing') && layersReady()) {
+          <app-geoprocessing
+            [class.gis-ws__panel--hidden]="leftTool() !== 'geoprocessing'"
+            [layers]="layers()"
+            (layerCreated)="onLayerCreated($event)"
+          />
+        }
+
+        @if (openedLeftTools().has('data') && layersReady()) {
+          <app-data-tools
+            [class.gis-ws__panel--hidden]="leftTool() !== 'data'"
+            [layers]="layers()"
+            [allowedModuleIds]="myModuleIds()"
+            (layerCreated)="onLayerCreated($event)"
+          />
+        }
+
         @if (openedLeftTools().has('advanced') && layersReady()) {
           <app-advanced-tools
             [class.gis-ws__panel--hidden]="leftTool() !== 'advanced'"

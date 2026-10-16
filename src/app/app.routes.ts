@@ -83,6 +83,12 @@ export const routes: Routes = [
     title: 'Municipal GIS — Municipal GIS Platform'
   },
   {
+    path: 'collect',
+    canActivate: [authGuard],
+    loadComponent: () => import('./features/collect/collect.component').then((m) => m.CollectComponent),
+    title: 'Field Collection — Municipal GIS Platform'
+  },
+  {
     path: 'settings',
     canActivate: [authGuard, staffOnlyGuard],
     data: { reuse: true },

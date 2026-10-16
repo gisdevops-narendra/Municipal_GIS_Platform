@@ -35,11 +35,17 @@ import { QueryBuilderComponent } from './components/query-builder/query-builder.
 import { MeasureComponent } from './components/measure/measure.component';
 import { BookmarksComponent } from './components/bookmarks/bookmarks.component';
 import { BufferOverlayComponent } from './components/buffer-overlay/buffer-overlay.component';
+import { FeatureEditComponent } from './components/feature-edit/feature-edit.component';
+import { GeoprocessingComponent } from './components/geoprocessing/geoprocessing.component';
+import { DataToolsComponent } from './components/data-tools/data-tools.component';
+import { DATA_TOOL_MODULE_IDS } from './services/data-tools.service';
+import { EDIT_PANEL_MODULE_ID, GEOPROCESSING_MODULE_ID } from './services/vector-tools.service';
 import {
   AdvancedToolsComponent,
   BASIC_ROUTING_MODULE_ID,
   NEAREST_FACILITY_MODULE_ID,
-  NETWORK_TRACING_MODULE_ID
+  NETWORK_TRACING_MODULE_ID,
+  SERVICE_AREA_MODULE_ID
 } from './components/advanced-tools/advanced-tools.component';
 import { RasterAnalysisComponent, RASTER_TOOL_MODULE_IDS } from './components/raster-analysis/raster-analysis.component';
 import { AiChatComponent } from './components/ai-chat/ai-chat.component';
@@ -113,8 +119,11 @@ const TOOLS: WsTool[] = [
   { id: 'query', label: 'Query Builder', icon: 'pi pi-filter', group: 'analysis', dock: 'left', available: true, moduleId: 2 },
   { id: 'measure', label: 'Measure', icon: 'pi pi-arrows-h', group: 'analysis', dock: 'left', available: true, moduleId: 11 },
   { id: 'buffer', label: 'Buffer & Overlay', icon: 'pi pi-circle', group: 'analysis', dock: 'left', available: true, moduleId: 6 },
+  { id: 'edit', label: 'Edit Features', icon: 'pi pi-pen-to-square', group: 'analysis', dock: 'left', available: true, moduleId: EDIT_PANEL_MODULE_ID },
+  { id: 'geoprocessing', label: 'Geoprocessing', icon: 'pi pi-cog', group: 'analysis', dock: 'left', available: true, moduleId: GEOPROCESSING_MODULE_ID },
+  { id: 'data', label: 'Data Tools', icon: 'pi pi-database', group: 'analysis', dock: 'left', available: true, anyModuleIds: DATA_TOOL_MODULE_IDS },
   { id: 'sketch', label: 'Draw & Mark', icon: 'pi pi-pencil', group: 'analysis', dock: 'left', available: true, anyModuleIds: [DRAW_MODULE_ID, MARKING_TOOL_MODULE_ID] },
-  { id: 'advanced', label: 'Advanced Tools', icon: 'pi pi-directions', group: 'analysis', dock: 'left', available: true, anyModuleIds: [BASIC_ROUTING_MODULE_ID, NEAREST_FACILITY_MODULE_ID, NETWORK_TRACING_MODULE_ID] },
+  { id: 'advanced', label: 'Advanced Tools', icon: 'pi pi-directions', group: 'analysis', dock: 'left', available: true, anyModuleIds: [BASIC_ROUTING_MODULE_ID, NEAREST_FACILITY_MODULE_ID, NETWORK_TRACING_MODULE_ID, SERVICE_AREA_MODULE_ID] },
   { id: 'raster', label: 'Raster Analysis', icon: 'pi pi-images', group: 'analysis', dock: 'left', available: true, anyModuleIds: RASTER_TOOL_MODULE_IDS },
   { id: 'statistics', label: 'Statistics', icon: 'pi pi-chart-bar', group: 'analysis', dock: 'bottom', available: true, anyModuleIds: [ANALYTICS_MODULE_ID, DATA_VISUALISATION_MODULE_ID] },
   { id: 'print', label: 'Print Layout', icon: 'pi pi-print', group: 'output', dock: 'left', available: true, moduleId: 3 },
@@ -147,6 +156,9 @@ const TOOLS: WsTool[] = [
     MeasureComponent,
     BookmarksComponent,
     BufferOverlayComponent,
+    FeatureEditComponent,
+    GeoprocessingComponent,
+    DataToolsComponent,
     AdvancedToolsComponent,
     RasterAnalysisComponent,
     AiChatComponent,

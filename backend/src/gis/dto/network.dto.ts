@@ -71,3 +71,30 @@ export class TraceDto {
   @Min(1)
   maxDistanceM?: number;
 }
+
+/** POST /api/gis/network/service-area — what is reachable along a road
+ *  layer within each break (metres, or minutes at `speedKmh`). */
+export class ServiceAreaDto {
+  @IsUUID()
+  layerId!: string;
+
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(2)
+  @IsNumber({}, { each: true })
+  at!: LonLat;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(5)
+  @IsNumber({}, { each: true })
+  @Min(1, { each: true })
+  breaks!: number[];
+
+  /** When set, `breaks` are minutes of travel at this speed. */
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(150)
+  speedKmh?: number;
+}

@@ -14,6 +14,9 @@ import { WpsService, BufferCap, OverlayOp } from '../../services/wps.service';
 import { QueryService } from '../../services/query.service';
 import { AttributeTableService } from '../../services/attribute-table.service';
 import { LENGTH_UNITS, LengthUnit, toMetres } from '../../services/measure-units';
+import { IMPACT_REPORT_MODULE_ID, VectorToolsService } from '../../services/vector-tools.service';
+import { GisLayersService } from '../../../../core/services/gis-layers.service';
+import { downloadBlob } from '../../../../core/utils/download-blob';
 
 type Mode = 'buffer' | 'overlay';
 type OverlayOperation = 'intersection' | 'union' | 'difference' | 'clip';
@@ -70,6 +73,7 @@ export class BufferOverlayComponent implements OnDestroy {
   private readonly allowedSignal = signal<ReadonlySet<number>>(new Set());
   readonly multiRingAllowed = computed(() => this.allowedSignal().has(MULTIBUFFER_MODULE_ID));
   readonly overlayAllowed = computed(() => this.allowedSignal().has(OVERLAY_MODULE_ID));
+  readonly impactAllowed = computed(() => this.allowedSignal().has(IMPACT_REPORT_MODULE_ID));
   @Output() queryRun = new EventEmitter<AttributeExternalFilter>();
   @Output() queryCleared = new EventEmitter<void>();
 
@@ -119,6 +123,19 @@ export class BufferOverlayComponent implements OnDestroy {
   readonly running = signal(false);
   readonly error = signal<string | null>(null);
   readonly result = signal<{ empty: boolean; affected: number | null } | null>(null);
+  /** Impact Report source: the last run's affected-features area. */
+  private readonly impact = signal<{
+    layerId: string;
+    layerName: string;
+    geometry: Record<string, unknown>;
+    distance: number;
+    cql: string;
+    label: string;
+  } | null>(null);
+  readonly canExportImpact = computed(() => this.impactAllowed() && !!this.impact());
+  readonly impactBusy = signal<'csv' | 'pdf' | null>(null);
+  private readonly vectorTools = inject(VectorToolsService);
+  private readonly gisLayers = inject(GisLayersService);
 
   private drawSub?: Subscription;
 
@@ -138,6 +155,7 @@ export class BufferOverlayComponent implements OnDestroy {
     this.mode.set(mode);
     this.error.set(null);
     this.result.set(null);
+    this.impact.set(null);
   }
 
   // ----- operand capture -----
@@ -297,11 +315,9 @@ export class BufferOverlayComponent implements OnDestroy {
           next: (execution) => {
             this.result.set({ empty: false, affected: execution.total });
             this.running.set(false);
-            this.queryRun.emit({
-              layerId: target.id,
-              cql,
-              label: `${target.name} · ${this.mode() === 'buffer' ? 'buffer' : this.overlayOp()}`
-            });
+            const label = `${target.name} · ${this.mode() === 'buffer' ? 'buffer' : this.overlayOp()}`;
+            this.impact.set({ layerId: target.id, layerName: target.name, geometry: result4326, distance: 0, cql, label });
+            this.queryRun.emit({ layerId: target.id, cql, label });
           },
           error: (err: HttpErrorResponse) => this.fail(err)
         });
@@ -376,6 +392,14 @@ export class BufferOverlayComponent implements OnDestroy {
             this.ringResults.update((bands) => bands?.map((band, i) => ({ ...band, count: counts[i] })) ?? null);
             this.result.set({ empty: false, affected: counts.reduce((sum, c) => sum + c, 0) });
             this.running.set(false);
+            this.impact.set({
+              layerId: target.id,
+              layerName: target.name,
+              geometry: input as Record<string, unknown>,
+              distance: toMetres(Math.max(...distances), unit),
+              cql: inside[inside.length - 1],
+              label: `${target.name} · multibuffer`
+            });
             this.queryRun.emit({
               layerId: target.id,
               cql: inside[inside.length - 1],
@@ -389,7 +413,55 @@ export class BufferOverlayComponent implements OnDestroy {
     });
   }
 
+  /** Impact Report: affected features (attributes, distance, location) as CSV. */
+  downloadImpactCsv(): void {
+    const impact = this.impact();
+    if (!impact) return;
+    this.impactBusy.set('csv');
+    this.vectorTools.impactCsv(impact.layerId, impact.geometry, impact.distance).subscribe({
+      next: (blob) => {
+        this.impactBusy.set(null);
+        downloadBlob(blob, `${impact.layerName.replace(/[^\w-]+/g, '_')}_impact.csv`);
+      },
+      error: (err: HttpErrorResponse) => {
+        this.impactBusy.set(null);
+        this.fail(err);
+      }
+    });
+  }
+
+  /** Impact Report: the existing layer PDF report, scoped to the affected features. */
+  downloadImpactPdf(): void {
+    const impact = this.impact();
+    if (!impact) return;
+    this.impactBusy.set('pdf');
+    this.gisLayers
+      .analyticsFields(impact.layerId)
+      .pipe(
+        switchMap((fields) =>
+          this.gisLayers.report(impact.layerId, {
+            title: `Impact report — ${impact.layerName}`,
+            fields: fields.filter((f) => f.kind !== 'geometry').slice(0, 10).map((f) => f.name),
+            scope: 'query',
+            cqlFilter: impact.cql,
+            scopeLabel: impact.label
+          })
+        )
+      )
+      .subscribe({
+        next: (blob) => {
+          this.impactBusy.set(null);
+          downloadBlob(blob, `${impact.layerName.replace(/[^\w-]+/g, '_')}_impact.pdf`);
+        },
+        error: (err: HttpErrorResponse) => {
+          this.impactBusy.set(null);
+          this.fail(err);
+        }
+      });
+  }
+
   clear(): void {
+    this.impact.set(null);
     this.ringResults.set(null);
     this.mapService.clearAnalysisGeometry();
     this.mapService.clearDraw();

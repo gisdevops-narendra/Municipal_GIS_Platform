@@ -76,8 +76,12 @@ export class YsldGenerator {
     }
 
     if (spec.mode === 'graduated' && spec.graduate) {
-      const { field, breaks, ramp } = spec.graduate;
+      const { field, breaks, ramp, sizeRange } = spec.graduate;
       const classes = Math.max(0, breaks.length - 1);
+      const sizeAt = (i: number) =>
+        sizeRange && classes > 1
+          ? Math.round((sizeRange[0] + ((sizeRange[1] - sizeRange[0]) * i) / (classes - 1)) * 10) / 10
+          : undefined;
       const rules: string[] = [];
       for (let i = 0; i < classes; i++) {
         const lo = breaks[i];
@@ -94,6 +98,8 @@ export class YsldGenerator {
             symbolizers: [
               this.geometrySymbolizer(spec.geometry, {
                 ...spec.symbol,
+                ...(sizeAt(i) !== undefined && spec.geometry === 'point' ? { markSize: sizeAt(i) } : {}),
+                ...(sizeAt(i) !== undefined && spec.geometry === 'line' ? { strokeWidth: sizeAt(i) } : {}),
                 fillColor: ramp[i] ?? spec.symbol.fillColor,
                 strokeColor:
                   spec.geometry === 'line'

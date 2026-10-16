@@ -1,0 +1,233 @@
+<div class="bo">
+  <label class="bo__field">
+    <span class="bo__label">Layer to edit</span>
+    <p-select
+      class="bo__select"
+      [options]="layerOptions()"
+      optionLabel="label"
+      optionValue="value"
+      [ngModel]="layerId()"
+      (ngModelChange)="selectLayer($event)"
+      [showClear]="true"
+      [filter]="true"
+      placeholder="Choose a layer"
+      appendTo="body"
+    />
+  </label>
+
+  @if (collectAllowed()) {
+    <a routerLink="/collect" class="bo__hint"><i class="pi pi-mobile" aria-hidden="true"></i> Collecting on site? Open Field Collection on your phone.</a>
+  }
+
+  @if (busy() === 'schema') {
+    <p class="bo__hint"><i class="pi pi-spin pi-spinner" aria-hidden="true"></i> Checking edit access…</p>
+  }
+
+  @if (schema(); as s) {
+    @if (!target()) {
+      <div class="bo__operand-actions">
+        <button type="button" class="bo__chip" [class.bo__chip--busy]="busy() === 'draw'" (click)="addFeature()">
+          <i class="pi pi-plus" aria-hidden="true"></i>Add {{ s.geometryType?.toLowerCase() }}
+        </button>
+        <button type="button" class="bo__chip" [class.bo__chip--busy]="busy() === 'pick'" (click)="pickFeature()">
+          <i class="pi pi-pencil" aria-hidden="true"></i>Select feature to edit
+        </button>
+        @if (parcelAllowed()) {
+          <button type="button" class="bo__chip" [class.bo__chip--busy]="cogoOpen()" (click)="toggleCogo()">
+            <i class="pi pi-compass" aria-hidden="true"></i>Bearings (COGO)
+          </button>
+        }
+      </div>
+      @if (busy() === 'draw') {
+        <p class="bo__hint">Draw the new {{ s.geometryType?.toLowerCase() }} on the map (double-click to finish a line / polygon).</p>
+        <button type="button" class="bo__cancel" (click)="cancel()">Cancel</button>
+      } @else if (busy() === 'pick') {
+        <p class="bo__hint">Click {{ cogoOpen() ? 'the start point' : 'a feature of this layer' }} on the map.</p>
+        <button type="button" class="bo__cancel" (click)="cancel()">Cancel</button>
+      }
+
+      @if (cogoOpen()) {
+        <div class="bo__section">
+          <span class="bo__section-title">COGO traverse</span>
+          <div class="bo__row">
+            <label class="bo__field bo__field--grow">
+              <span class="bo__label">Start point (lat, lon)</span>
+              <input type="text" class="bo__input" [ngModel]="cogoStartLabel()" (ngModelChange)="setCogoStart($event)" placeholder="21.1702, 72.8311" />
+            </label>
+            <button type="button" class="bo__chip fe__chip-end" (click)="pickCogoStart()">
+              <i class="pi pi-map-marker" aria-hidden="true"></i>Pick
+            </button>
+          </div>
+          <label class="bo__field">
+            <span class="bo__label">Legs — one "bearing distance(m)" per line</span>
+            <textarea class="bo__input fe__textarea" rows="5" [(ngModel)]="cogoText" placeholder="N45-30E 32.5&#10;S44-30E 20&#10;225 32.5&#10;315-30-00 20"></textarea>
+          </label>
+          <p class="bo__hint">Bearings as azimuth (45.5 or 45-30-15) or quadrant (N45-30E).</p>
+          <button type="button" class="bo__chip" (click)="buildCogo()">
+            <i class="pi pi-check" aria-hidden="true"></i>Build {{ s.geometryType?.toLowerCase() }}
+          </button>
+        </div>
+      }
+    }
+
+    @if (target(); as t) {
+      <div class="fe__head">
+        <span class="fe__title">{{ t.id === null ? 'New feature' : 'Feature #' + t.id }}</span>
+        @if (geometryDirty()) { <span class="fe__badge">geometry changed</span> }
+      </div>
+      @if (cogoInfo() && t.id === null) {
+        <p class="bo__hint">{{ cogoInfo() }}</p>
+      }
+      <p class="bo__hint">Drag vertices on the map to reshape; click on an edge to add a vertex, Alt+click a vertex to remove it.</p>
+
+      @if (t.id !== null && (historyAllowed() || filesAllowed())) {
+        <div class="bo__modes" role="tablist">
+          <button type="button" class="bo__mode" [class.bo__mode--active]="tab() === 'attributes'" (click)="setTab('attributes')">Attributes</button>
+          @if (historyAllowed()) {
+            <button type="button" class="bo__mode" [class.bo__mode--active]="tab() === 'history'" (click)="setTab('history')">History</button>
+          }
+          @if (filesAllowed()) {
+            <button type="button" class="bo__mode" [class.bo__mode--active]="tab() === 'files'" (click)="setTab('files')">Files</button>
+          }
+        </div>
+      }
+
+      @if (tab() === 'attributes' || t.id === null) {
+        <div class="fe__form">
+          @for (field of s.fields; track field.name) {
+            <label class="bo__field">
+              <span class="bo__label">{{ field.name }}@if (isRequired(field.name)) {<span class="fe__req"> *</span>}</span>
+              @switch (inputKind(field)) {
+                @case ('list') {
+                  <select class="bo__input" [ngModel]="t.values[field.name]" (ngModelChange)="setValue(field.name, $event)">
+                    <option value="">—</option>
+                    @for (v of ruleValues(field.name); track v) {
+                      <option [value]="v">{{ v }}</option>
+                    }
+                  </select>
+                }
+                @case ('boolean') {
+                  <select class="bo__input" [ngModel]="t.values[field.name]" (ngModelChange)="setValue(field.name, $event)">
+                    <option value="">—</option>
+                    <option value="true">true</option>
+                    <option value="false">false</option>
+                  </select>
+                }
+                @case ('number') {
+                  <input type="number" class="bo__input" [ngModel]="t.values[field.name]" (ngModelChange)="setValue(field.name, $event)" />
+                }
+                @case ('date') {
+                  <input type="date" class="bo__input" [ngModel]="t.values[field.name]" (ngModelChange)="setValue(field.name, $event)" />
+                }
+                @default {
+                  <input type="text" class="bo__input" [ngModel]="t.values[field.name]" (ngModelChange)="setValue(field.name, $event)" />
+                }
+              }
+            </label>
+          } @empty {
+            <p class="bo__hint">This layer has no attribute fields.</p>
+          }
+        </div>
+      } @else if (tab() === 'history') {
+        @if (history(); as entries) {
+          <ul class="fe__history">
+            @for (entry of entries; track entry.id) {
+              <li class="fe__entry">
+                <div class="fe__entry-head">
+                  <span class="fe__action fe__action--{{ entry.action.toLowerCase() }}">{{ entry.action }}</span>
+                  <span>{{ entry.userName ?? 'Unknown user' }}</span>
+                  <span class="fe__when">{{ entry.createdAt | date: 'medium' }}</span>
+                </div>
+                @for (line of changes(entry); track line) {
+                  <div class="fe__change">{{ line }}</div>
+                }
+              </li>
+            } @empty {
+              <li class="bo__hint">No edits recorded for this feature yet.</li>
+            }
+          </ul>
+        } @else {
+          <p class="bo__hint"><i class="pi pi-spin pi-spinner" aria-hidden="true"></i> Loading history…</p>
+        }
+      } @else {
+        <label class="bo__chip fe__upload">
+          <i class="pi" [class.pi-upload]="busy() !== 'upload'" [class.pi-spin]="busy() === 'upload'" [class.pi-spinner]="busy() === 'upload'" aria-hidden="true"></i>
+          Attach photo / document
+          <input #fileInput type="file" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt" (change)="upload(fileInput)" hidden />
+        </label>
+        @if (attachments(); as rows) {
+          <ul class="fe__history">
+            @for (row of rows; track row.id) {
+              <li class="fe__entry fe__file">
+                <button type="button" class="fe__file-name" (click)="openAttachment(row)">
+                  <i class="pi" [class.pi-image]="row.contentType.startsWith('image/')" [class.pi-file]="!row.contentType.startsWith('image/')" aria-hidden="true"></i>
+                  {{ row.fileName }}
+                </button>
+                <span class="fe__when">{{ row.size / 1024 | number: '1.0-0' }} KB</span>
+                <button type="button" class="bo__chip bo__chip--ghost" aria-label="Delete attachment" (click)="deleteAttachment(row)">
+                  <i class="pi pi-trash" aria-hidden="true"></i>
+                </button>
+              </li>
+            } @empty {
+              <li class="bo__hint">No files attached yet.</li>
+            }
+          </ul>
+        }
+      }
+
+      @if (parcelAllowed() && canSplitMerge() && t.id !== null) {
+        <div class="bo__section">
+          <span class="bo__section-title">Parcel tools</span>
+          <div class="bo__operand-actions">
+            <button type="button" class="bo__chip" [class.bo__chip--busy]="busy() === 'split'" [disabled]="!!busy()" (click)="split()">
+              <i class="pi pi-arrows-h" aria-hidden="true"></i>Split by line
+            </button>
+            <button type="button" class="bo__chip" [disabled]="!!busy()" (click)="pickMergeFeature()">
+              <i class="pi pi-plus-circle" aria-hidden="true"></i>Add feature to merge
+            </button>
+            @if (mergeIds().length) {
+              <button type="button" class="bo__chip" [class.bo__chip--busy]="busy() === 'merge'" [disabled]="!!busy()" (click)="merge()">
+                <i class="pi pi-objects-column" aria-hidden="true"></i>Merge #{{ t.id }} + #{{ mergeIds().join(', #') }}
+              </button>
+              <button type="button" class="bo__chip bo__chip--ghost" (click)="mergeIds.set([])"><i class="pi pi-times" aria-hidden="true"></i></button>
+            }
+          </div>
+        </div>
+      }
+
+      <div class="bo__controls">
+        <button
+          pButton
+          type="button"
+          [label]="t.id === null ? 'Add feature' : 'Save'"
+          icon="pi pi-check"
+          class="p-button-sm bo__run"
+          [loading]="busy() === 'save'"
+          [disabled]="!!busy()"
+          (click)="save()"
+        ></button>
+        @if (t.id !== null) {
+          <button
+            pButton
+            type="button"
+            [label]="confirmDelete() ? 'Confirm delete' : 'Delete'"
+            icon="pi pi-trash"
+            class="p-button-sm p-button-danger"
+            [class.p-button-outlined]="!confirmDelete()"
+            [loading]="busy() === 'delete'"
+            [disabled]="!!busy() && busy() !== 'delete'"
+            (click)="remove()"
+          ></button>
+        }
+        <button pButton type="button" label="Cancel" class="p-button-sm p-button-text" [disabled]="busy() === 'save'" (click)="cancel()"></button>
+      </div>
+    }
+  }
+
+  @if (notice()) {
+    <p class="bo__result">{{ notice() }}</p>
+  }
+  @if (error()) {
+    <p-message severity="error" [text]="error()!" styleClass="w-full" />
+  }
+</div>

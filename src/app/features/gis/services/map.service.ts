@@ -15,6 +15,8 @@ import VectorSource from 'ol/source/Vector';
 import GeoJSON from 'ol/format/GeoJSON';
 import WKT from 'ol/format/WKT';
 import Draw, { createBox } from 'ol/interaction/Draw';
+import Modify from 'ol/interaction/Modify';
+import Snap from 'ol/interaction/Snap';
 import DragPan from 'ol/interaction/DragPan';
 import KeyboardPan from 'ol/interaction/KeyboardPan';
 import Overlay from 'ol/Overlay';
@@ -27,7 +29,7 @@ import { defaults as defaultControls } from 'ol/control';
 import ScaleLine from 'ol/control/ScaleLine';
 import MousePosition from 'ol/control/MousePosition';
 import { createStringXY } from 'ol/coordinate';
-import { fromLonLat, getPointResolution, transform, transformExtent } from 'ol/proj';
+import { fromLonLat, getPointResolution, toLonLat, transform, transformExtent } from 'ol/proj';
 import { createEmpty, extend as extendExtent, isEmpty as isEmptyExtent } from 'ol/extent';
 import type Geometry from 'ol/geom/Geometry';
 import { forkJoin, map as rxMap, Observable, of } from 'rxjs';
@@ -375,6 +377,10 @@ export class MapService {
     this.queryLayer = null;
     this.analysisLayer = null;
     this.drawLayer = null;
+    this.editLayer = null;
+    this.editModify = null;
+    this.editSnap = null;
+    this.editPickKey = null;
     this.measureLayer = null;
     this.gotoLayer = null;
     this.sketchLayer = null;
@@ -659,6 +665,109 @@ export class MapService {
   clearDraw(): void {
     this.cancelDraw();
     this.drawLayer?.getSource()?.clear();
+  }
+
+  // ----- feature editing -----
+
+  private editLayer: VectorLayer<VectorSource> | null = null;
+  private editModify: Modify | null = null;
+  private editSnap: Snap | null = null;
+  private editPickKey: EventsKey | null = null;
+  /** Bumped whenever the user moves a vertex of the feature being edited. */
+  readonly editGeometryRevision = signal(0);
+
+  /** Shows one feature (GeoJSON, EPSG:4326) as the edit target; with
+   *  `editable` its vertices can be dragged (snapping to itself). */
+  setEditFeature(geojson: Record<string, unknown> | null, editable = true): void {
+    const source = this.ensureEditSource();
+    this.stopEditInteractions();
+    source.clear();
+    if (!geojson) return;
+    const geometry = this.geoJson.readGeometry(geojson, {
+      dataProjection: LAYER_PROJECTION,
+      featureProjection: MAP_PROJECTION
+    });
+    source.addFeature(new Feature(geometry));
+    if (!editable || !this.map) return;
+    this.editModify = new Modify({ source });
+    this.editModify.on('modifyend', () => this.editGeometryRevision.update((n) => n + 1));
+    this.editSnap = new Snap({ source });
+    this.map.addInteraction(this.editModify);
+    this.map.addInteraction(this.editSnap);
+  }
+
+  /** The edit target's current geometry as GeoJSON (EPSG:4326). */
+  getEditGeometry(): Record<string, unknown> | null {
+    const geometry = this.editLayer?.getSource()?.getFeatures()[0]?.getGeometry();
+    return geometry
+      ? (this.geoJson.writeGeometryObject(geometry, {
+          dataProjection: LAYER_PROJECTION,
+          featureProjection: MAP_PROJECTION
+        }) as Record<string, unknown>)
+      : null;
+  }
+
+  clearEditFeature(): void {
+    this.stopEditInteractions();
+    this.editLayer?.getSource()?.clear();
+  }
+
+  /** One map click → its EPSG:4326 position and a ~8 px pick tolerance in
+   *  metres. Identify is suppressed for that click. */
+  pickMapPoint(): Observable<{ lonLat: [number, number]; toleranceM: number }> {
+    this.cancelMapPick();
+    return new Observable((subscriber) => {
+      this.editPickKey = this.map?.once('singleclick', (event) => {
+        this.editPickKey = null;
+        this.suppressClickUntil = Date.now() + 400;
+        const view = this.map!.getView();
+        const metresPerPixel = getPointResolution(
+          view.getProjection(),
+          view.getResolution() ?? 1,
+          event.coordinate
+        );
+        subscriber.next({
+          lonLat: toLonLat(event.coordinate) as [number, number],
+          toleranceM: metresPerPixel * 8
+        });
+        subscriber.complete();
+      }) as EventsKey | null;
+      return () => this.cancelMapPick();
+    });
+  }
+
+  cancelMapPick(): void {
+    if (this.editPickKey) unByKey(this.editPickKey);
+    this.editPickKey = null;
+  }
+
+  private stopEditInteractions(): void {
+    if (this.map) {
+      if (this.editModify) this.map.removeInteraction(this.editModify);
+      if (this.editSnap) this.map.removeInteraction(this.editSnap);
+    }
+    this.editModify = null;
+    this.editSnap = null;
+  }
+
+  private ensureEditSource(): VectorSource {
+    if (!this.editLayer) {
+      const accent = '#1f7a4d';
+      this.editLayer = new VectorLayer({
+        source: new VectorSource(),
+        style: [
+          new Style({
+            stroke: new Stroke({ color: accent, width: 3 }),
+            fill: new Fill({ color: 'rgba(31, 122, 77, 0.15)' }),
+            image: new CircleStyle({ radius: 7, stroke: new Stroke({ color: '#fff', width: 2 }), fill: new Fill({ color: accent }) })
+          })
+        ],
+        zIndex: 10001,
+        properties: { drawOverlay: true }
+      });
+      this.map?.addLayer(this.editLayer);
+    }
+    return this.editLayer.getSource() as VectorSource;
   }
 
   // ----- measurement tool -----
@@ -1084,6 +1193,8 @@ export class MapService {
         this.measureModeActive ||
         this.measureDraw ||
         this.drawInteraction ||
+        this.editPickKey ||
+        this.editModify ||
         Date.now() < this.suppressClickUntil
       ) {
         return;

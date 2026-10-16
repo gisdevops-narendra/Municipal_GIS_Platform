@@ -5,16 +5,17 @@ import { Observable, Subscription } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { SelectModule } from 'primeng/select';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
-import { MapService } from '../../services/map.service';
+import { MapService, RING_COLORS } from '../../services/map.service';
 import { LonLat, NetworkService } from '../../services/network.service';
 
-type Mode = 'route' | 'nearest' | 'trace';
+type Mode = 'route' | 'nearest' | 'trace' | 'service';
 type Slot = 'from' | 'to';
 
 /** Module Access catalog ids (seed-modules.ts), children of Advanced Tools (5). */
 export const NETWORK_TRACING_MODULE_ID = 13;
 export const BASIC_ROUTING_MODULE_ID = 8;
 export const NEAREST_FACILITY_MODULE_ID = 10;
+export const SERVICE_AREA_MODULE_ID = 1004;
 
 /**
  * GIS Advanced Tools — Basic Routing, Nearest Facility and Network Tracing
@@ -55,7 +56,8 @@ export class AdvancedToolsComponent implements OnDestroy {
     [
       { value: 'route' as Mode, label: 'Routing', moduleId: BASIC_ROUTING_MODULE_ID },
       { value: 'nearest' as Mode, label: 'Nearest Facility', moduleId: NEAREST_FACILITY_MODULE_ID },
-      { value: 'trace' as Mode, label: 'Tracing', moduleId: NETWORK_TRACING_MODULE_ID }
+      { value: 'trace' as Mode, label: 'Tracing', moduleId: NETWORK_TRACING_MODULE_ID },
+      { value: 'service' as Mode, label: 'Service Area', moduleId: SERVICE_AREA_MODULE_ID }
     ].filter((m) => this.allowedSignal().has(m.moduleId))
   );
   readonly mode = signal<Mode>('route');
@@ -75,6 +77,11 @@ export class AdvancedToolsComponent implements OnDestroy {
   readonly facilityLayerId = signal<string | null>(null);
   facilityCount = 3;
   maxDistanceM: number | null = null;
+  /** Service Area: comma-separated breaks, in metres or minutes. */
+  serviceBreaksText = '500, 1000, 2000';
+  readonly serviceByTime = signal(false);
+  speedKmh = 30;
+  readonly bands = signal<{ label: string; color: string; length: string }[]>([]);
 
   readonly from = signal<LonLat | null>(null);
   readonly to = signal<LonLat | null>(null);
@@ -146,6 +153,31 @@ export class AdvancedToolsComponent implements OnDestroy {
         this.facilities.set(r.facilities.map((f) => ({ label: f.label, length: this.formatLength(f.lengthM) })));
         this.summary.set(`${r.facilities.length} nearest facilit${r.facilities.length === 1 ? 'y' : 'ies'} by road:`);
       });
+    } else if (this.mode() === 'service') {
+      const breaks = this.serviceBreaksText
+        .split(/[,\s]+/)
+        .map(Number)
+        .filter((n) => Number.isFinite(n) && n > 0);
+      if (!breaks.length || breaks.length > 5) return this.error.set('Enter 1–5 positive breaks, e.g. 500, 1000, 2000.');
+      const speed = this.serviceByTime() ? this.speedKmh : undefined;
+      this.execute(this.network.serviceArea(layerId, from, breaks, speed), (r) => {
+        const areas = [...r.areas].reverse();
+        this.mapService.setAnalysisColoredGeometries(
+          areas
+            .map((a, i) => ({ geometry: a.area, color: RING_COLORS[Math.min(areas.length - 1 - i, RING_COLORS.length - 1)] }))
+            .filter((a): a is { geometry: Record<string, unknown>; color: string } => !!a.geometry)
+        );
+        const outer = areas[0]?.area;
+        if (outer) this.mapService.zoomToGeometries([outer]);
+        this.bands.set(
+          r.areas.map((a, i) => ({
+            label: `≤ ${a.break} ${r.unit}`,
+            color: RING_COLORS[Math.min(i, RING_COLORS.length - 1)],
+            length: `${this.formatLength(a.lengthM)} of road`
+          }))
+        );
+        this.summary.set(`Reachable area from the start point${speed ? ` at ${speed} km/h` : ''}:`);
+      });
     } else {
       const max = this.maxDistanceM && this.maxDistanceM > 0 ? this.maxDistanceM : undefined;
       this.execute(this.network.trace(layerId, from, max), (r) => {
@@ -166,6 +198,7 @@ export class AdvancedToolsComponent implements OnDestroy {
     this.error.set(null);
     this.summary.set(null);
     this.facilities.set([]);
+    this.bands.set([]);
   }
 
   private execute<T>(request: Observable<T>, onResult: (result: T) => void): void {

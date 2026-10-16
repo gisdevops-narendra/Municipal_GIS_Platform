@@ -232,6 +232,16 @@
           <br />{{ r.affected }} affected feature{{ r.affected === 1 ? '' : 's' }} in the attribute table.
         }
       </p>
+      @if (canExportImpact() && r.affected) {
+        <div class="bo__operand-actions">
+          <button type="button" class="bo__chip" [disabled]="!!impactBusy()" (click)="downloadImpactCsv()">
+            <i class="pi" [class.pi-file-excel]="impactBusy() !== 'csv'" [class.pi-spin]="impactBusy() === 'csv'" [class.pi-spinner]="impactBusy() === 'csv'" aria-hidden="true"></i>Impact CSV
+          </button>
+          <button type="button" class="bo__chip" [disabled]="!!impactBusy()" (click)="downloadImpactPdf()">
+            <i class="pi" [class.pi-file-pdf]="impactBusy() !== 'pdf'" [class.pi-spin]="impactBusy() === 'pdf'" [class.pi-spinner]="impactBusy() === 'pdf'" aria-hidden="true"></i>Impact PDF
+          </button>
+        </div>
+      }
       @if (ringResults(); as bands) {
         <ul class="bo__rings" aria-label="Buffer rings">
           @for (band of bands; track band.label) {

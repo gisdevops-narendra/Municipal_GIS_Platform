@@ -189,6 +189,29 @@
               [ngModel]="rampId()" (ngModelChange)="setRamp($event)" appendTo="body" />
           </label>
         </div>
+        @if (geometry === 'point' || geometry === 'line') {
+          <label class="se__field">
+            <span class="se__label">
+              <input type="checkbox" [ngModel]="!!s.graduate?.sizeRange"
+                (ngModelChange)="patchGraduate({ sizeRange: $event ? (geometry === 'point' ? [6, 24] : [1, 8]) : undefined })" />
+              Graduated {{ geometry === 'point' ? 'symbol size' : 'line width' }}
+            </span>
+          </label>
+          @if (s.graduate?.sizeRange; as range) {
+            <div class="se__grid2">
+              <label class="se__field">
+                <span class="se__label">Smallest</span>
+                <p-inputNumber class="se__ctl" [ngModel]="range[0]" (ngModelChange)="patchGraduate({ sizeRange: [$event, range[1]] })"
+                  [min]="0.5" [max]="64" [showButtons]="true" />
+              </label>
+              <label class="se__field">
+                <span class="se__label">Largest</span>
+                <p-inputNumber class="se__ctl" [ngModel]="range[1]" (ngModelChange)="patchGraduate({ sizeRange: [range[0], $event] })"
+                  [min]="0.5" [max]="64" [showButtons]="true" />
+              </label>
+            </div>
+          }
+        }
         <button pButton type="button" label="Classify" icon="pi pi-sync" class="p-button-sm p-button-outlined se__classify"
           [loading]="classifying()" (click)="classify()"></button>
 

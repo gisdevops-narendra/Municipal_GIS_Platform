@@ -471,14 +471,12 @@ export class RasterService {
     params: { name: string; sourcePath: string; geometryType: GisGeometryType; description?: string },
   ) {
     const job = rasterJobContext.getStore();
-    const owner = this.outputOwnership(appUser, job?.outputDepartmentId);
-    const { workspace, code } = await this.newLayerCode(appUser, params.name);
+    const output = await this.prepareVectorOutput(appUser, params.name, job?.outputDepartmentId);
     job?.setStage('Importing and publishing the layer', false);
-    const table = generateLayerTableName();
     await this.gdal.importToPostgis({
       sourcePath: params.sourcePath,
-      tableName: table,
-      targetCrs: workspace.defaultCrs,
+      tableName: output.table,
+      targetCrs: output.workspace.defaultCrs,
       connection: {
         host: this.config.getOrThrow<string>('POSTGIS_HOST'),
         port: this.config.getOrThrow<string>('POSTGIS_PORT'),
@@ -487,6 +485,30 @@ export class RasterService {
         password: this.config.getOrThrow<string>('POSTGIS_PASSWORD'),
       },
     });
+    return this.publishVectorTable(appUser, output, {
+      name: params.name,
+      geometryType: params.geometryType,
+      description: params.description ?? job?.describe(),
+      rasterAnalysis: true,
+    });
+  }
+
+  /** Ownership check + a free layer code + a fresh table name for a new
+   *  vector layer — call before writing the table (Geoprocessing too). */
+  async prepareVectorOutput(appUser: AppUser, name: string, departmentId?: string) {
+    const owner = this.outputOwnership(appUser, departmentId);
+    const { workspace, code } = await this.newLayerCode(appUser, name);
+    return { owner, workspace, code, table: generateLayerTableName() };
+  }
+
+  /** Publishes a PostGIS table (with a `geom` column) written for
+   *  `prepareVectorOutput` as a new layer; drops the table on failure. */
+  async publishVectorTable(
+    appUser: AppUser,
+    output: Awaited<ReturnType<RasterService['prepareVectorOutput']>>,
+    params: { name: string; geometryType: GisGeometryType; description?: string; rasterAnalysis: boolean },
+  ) {
+    const { owner, workspace, code, table } = output;
     await this.prisma.$executeRawUnsafe(
       `CREATE INDEX IF NOT EXISTS "${table}_geom_idx" ON "${table}" USING GIST (geom)`,
     );
@@ -502,9 +524,9 @@ export class RasterService {
           gisWorkspaceId: workspace.id,
           name: params.name,
           code,
-          description: params.description ?? job?.describe(),
+          description: params.description,
           layerType: 'VECTOR',
-          rasterAnalysis: true,
+          rasterAnalysis: params.rasterAnalysis,
           geoserverWorkspace: workspace.geoserverWorkspace,
           geoserverLayer,
           geometryType: params.geometryType,

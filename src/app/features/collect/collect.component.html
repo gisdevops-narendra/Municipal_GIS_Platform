@@ -1,0 +1,131 @@
+<main class="fc">
+  <header class="fc__head">
+    <a routerLink="/gis" class="fc__back" aria-label="Back to the map"><i class="pi pi-arrow-left" aria-hidden="true"></i></a>
+    <h1 class="fc__title">Field Collection</h1>
+    <span class="fc__status" [class.fc__status--off]="!online()">
+      <i class="pi" [class.pi-wifi]="online()" [class.pi-ban]="!online()" aria-hidden="true"></i>
+      {{ online() ? 'Online' : 'Offline' }}
+    </span>
+  </header>
+
+  @if (allowed() === false) {
+    <p class="fc__card">Field Collection is not enabled for your account. Ask your municipality owner to grant the “Field Collection (Mobile)” module.</p>
+  } @else if (allowed() === null) {
+    <p class="fc__card fc__muted">Loading…</p>
+  } @else {
+    @if (queue().length) {
+      <section class="fc__card fc__queue">
+        <div class="fc__row">
+          <strong>{{ queue().length }} waiting to sync</strong>
+          <button type="button" class="fc__btn fc__btn--small" [disabled]="!online() || busy()" (click)="sync()">Sync now</button>
+        </div>
+        <ul class="fc__list">
+          @for (item of queue(); track item.id) {
+            <li>
+              <span>{{ item.layerName }} · {{ item.createdAt.slice(11, 16) }}{{ item.photo ? ' · photo' : '' }}</span>
+              <button type="button" class="fc__link" (click)="discard(item)">Discard</button>
+            </li>
+          }
+        </ul>
+      </section>
+    }
+
+    <section class="fc__card">
+      <label class="fc__field">
+        <span class="fc__label">Layer</span>
+        <select class="fc__input" [ngModel]="layerId() ?? ''" (ngModelChange)="selectLayer($event)">
+          <option value="">Choose a layer…</option>
+          @for (l of layers(); track l.id) {
+            <option [value]="l.id">{{ l.name }}</option>
+          }
+        </select>
+      </label>
+    </section>
+
+    @if (schema(); as s) {
+      <section class="fc__card">
+        <h2 class="fc__section">Location</h2>
+        @if (s.geometryType === 'POINT') {
+          <button type="button" class="fc__btn fc__btn--wide" [disabled]="locating()" (click)="locate()">
+            <i class="pi" [class.pi-map-marker]="!locating()" [class.pi-spin]="locating()" [class.pi-spinner]="locating()" aria-hidden="true"></i>
+            {{ fix() ? 'Update GPS position' : 'Use my GPS position' }}
+          </button>
+        } @else {
+          <p class="fc__muted">Walk the {{ s.geometryType === 'LINE' ? 'line' : 'boundary' }} and add a GPS point at each corner / bend.</p>
+          <div class="fc__row">
+            <button type="button" class="fc__btn fc__btn--wide" [disabled]="locating()" (click)="locate(true)">
+              <i class="pi" [class.pi-plus]="!locating()" [class.pi-spin]="locating()" [class.pi-spinner]="locating()" aria-hidden="true"></i>
+              Add GPS point ({{ vertices().length }})
+            </button>
+            @if (vertices().length) {
+              <button type="button" class="fc__btn fc__btn--ghost" (click)="undoVertex()">Undo</button>
+            }
+          </div>
+        }
+        @if (fix(); as f) {
+          <p class="fc__coords">
+            {{ f.lat.toFixed(6) }}, {{ f.lon.toFixed(6) }}
+            <span [class.fc__warn]="f.accuracy > 15">± {{ f.accuracy.toFixed(0) }} m</span>
+          </p>
+        }
+      </section>
+
+      <section class="fc__card">
+        <h2 class="fc__section">Details</h2>
+        @for (field of s.fields; track field.name) {
+          <label class="fc__field">
+            <span class="fc__label">{{ field.name }}@if (isRequired(field.name)) {<span class="fc__req"> *</span>}</span>
+            @switch (inputKind(field)) {
+              @case ('list') {
+                <select class="fc__input" [(ngModel)]="values[field.name]">
+                  <option value="">—</option>
+                  @for (v of ruleValues(field.name); track v) {
+                    <option [value]="v">{{ v }}</option>
+                  }
+                </select>
+              }
+              @case ('boolean') {
+                <select class="fc__input" [(ngModel)]="values[field.name]">
+                  <option value="">—</option>
+                  <option value="true">Yes</option>
+                  <option value="false">No</option>
+                </select>
+              }
+              @case ('number') {
+                <input type="number" inputmode="decimal" class="fc__input" [(ngModel)]="values[field.name]" />
+              }
+              @case ('date') {
+                <input type="date" class="fc__input" [(ngModel)]="values[field.name]" />
+              }
+              @default {
+                <input type="text" class="fc__input" [(ngModel)]="values[field.name]" />
+              }
+            }
+          </label>
+        }
+
+        @if (photosAllowed()) {
+          <label class="fc__btn fc__btn--ghost fc__btn--wide">
+            <i class="pi pi-camera" aria-hidden="true"></i>{{ photo() ? 'Retake photo' : 'Take photo' }}
+            <input #cam type="file" accept="image/*" capture="environment" (change)="onPhoto(cam)" hidden />
+          </label>
+          @if (photoUrl(); as url) {
+            <div class="fc__photo">
+              <img [src]="url" alt="Photo preview" />
+              <button type="button" class="fc__link" (click)="setPhoto(null)">Remove photo</button>
+            </div>
+          }
+        }
+      </section>
+
+      <button type="button" class="fc__btn fc__btn--primary fc__btn--wide" [disabled]="busy()" (click)="submit()">
+        <i class="pi" [class.pi-check]="!busy()" [class.pi-spin]="busy()" [class.pi-spinner]="busy()" aria-hidden="true"></i>
+        {{ online() ? 'Submit' : 'Save offline' }}
+      </button>
+    }
+
+    @if (message(); as m) {
+      <p class="fc__msg fc__msg--{{ m.kind }}" role="status">{{ m.text }}</p>
+    }
+  }
+</main>

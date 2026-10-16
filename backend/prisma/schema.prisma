@@ -125,6 +125,12 @@ enum GisPermission {
   MANAGE
 }
 
+enum GisFeatureAction {
+  INSERT
+  UPDATE
+  DELETE
+}
+
 model Municipality {
   id            String             @id @default(uuid())
   name          String
@@ -243,11 +249,17 @@ model GISLayer {
   /// Produced by Raster Analysis (uploaded / downloaded rasters and every
   /// tool output) — the Layers panel lists these in their own group.
   rasterAnalysis Boolean               @default(false) @map("raster_analysis")
+  /// Attribute domains / validation enforced by the Edit panel:
+  /// `{ [field]: { required?, values?: string[], min?, max? } }`.
+  fieldRules     Json?                 @map("field_rules")
 
   gisWorkspace GISWorkspace         @relation(fields: [gisWorkspaceId], references: [id])
   department   Department?          @relation(fields: [departmentId], references: [id])
   uploads      GISLayerUpload[]
   permissions  GISLayerPermission[]
+  history      GISFeatureHistory[]
+  attachments  GISFeatureAttachment[]
+  snapshots    GISLayerSnapshot[]
 
   // Layer code is unique within its workspace (mirrors Department's
   // per-municipality uniqueness pattern) — not globally, since every
@@ -618,4 +630,64 @@ model RasterPin {
 
   @@index([municipalityId])
   @@map("raster_pins")
+}
+
+/// Feature Editing audit trail: one row per insert / update / delete made
+/// through the GIS Edit panel, with the feature's attributes + GeoJSON
+/// geometry (EPSG:4326) before and after. `featureId` is the `ogc_fid` in
+/// the layer's table at the time — a re-publish replaces that table, so
+/// older rows stay listed by layer but no longer match a live feature.
+model GISFeatureHistory {
+  id        String           @id @default(uuid())
+  layerId   String           @map("layer_id")
+  featureId Int              @map("feature_id")
+  action    GisFeatureAction
+  oldData   Json?            @map("old_data")
+  newData   Json?            @map("new_data")
+  userId    String?          @map("user_id")
+  userName  String?          @map("user_name")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  layer GISLayer @relation(fields: [layerId], references: [id], onDelete: Cascade)
+
+  @@index([layerId, featureId])
+  @@index([layerId, createdAt])
+  @@map("gis_feature_history")
+}
+
+/// A file (photo, scan, document) attached to one feature of a layer.
+/// Stored under `<storage>/attachments/<municipality>/<layer>/<id><ext>`.
+model GISFeatureAttachment {
+  id          String   @id @default(uuid())
+  layerId     String   @map("layer_id")
+  featureId   Int      @map("feature_id")
+  fileName    String   @map("file_name")
+  contentType String   @map("content_type")
+  size        Int
+  createdById String?  @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  layer GISLayer @relation(fields: [layerId], references: [id], onDelete: Cascade)
+
+  @@index([layerId, featureId])
+  @@map("gis_feature_attachments")
+}
+
+/// A frozen copy of a layer's PostGIS table — taken by hand, before a
+/// restore, or automatically when a re-upload replaces the layer's data
+/// (the old table is kept instead of dropped). Compared against the live
+/// table for change detection, or restored.
+model GISLayerSnapshot {
+  id           String   @id @default(uuid())
+  layerId      String   @map("layer_id")
+  name         String
+  postgisTable String   @map("postgis_table")
+  featureCount Int      @map("feature_count")
+  createdById  String?  @map("created_by")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  layer GISLayer @relation(fields: [layerId], references: [id], onDelete: Cascade)
+
+  @@index([layerId])
+  @@map("gis_layer_snapshots")
 }

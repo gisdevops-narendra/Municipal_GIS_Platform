@@ -616,11 +616,14 @@ export class GisUploadsService {
       // layer (shared gis_demo_* table, never owned by one upload) — such
       // a table must NEVER be dropped here, only a previous upload's own
       // dedicated layer_<uuid> table.
+      // Versions: the replaced table is kept as a snapshot of the previous
+      // version (Versions & Change Detection), not dropped — it is dropped
+      // with the snapshot or the layer.
       if (
         existingLayer?.postgisTable &&
         existingLayer.postgisTable !== upload.postgisTable
       ) {
-        await this.dropTableIfSafe(existingLayer.postgisTable);
+        await this.keepAsSnapshot(existingLayer, appUser.id);
       }
 
       return this.toResponse(await this.mustFind(uploadId));
@@ -1069,6 +1072,33 @@ export class GisUploadsService {
       invalidCount: Number(rows[0]?.invalid_count ?? 0),
       emptyCount: Number(rows[0]?.empty_count ?? 0),
     };
+  }
+
+  private async keepAsSnapshot(
+    layer: { id: string; version: number; postgisTable: string | null },
+    userId: string,
+  ): Promise<void> {
+    const table = layer.postgisTable;
+    if (!table || !isSafeGeneratedTableName(table)) return;
+    try {
+      const [{ n }] = await this.prisma.$queryRawUnsafe<{ n: number }[]>(
+        `SELECT count(*)::int AS n FROM "${table}"`,
+      );
+      await this.prisma.gISLayerSnapshot.create({
+        data: {
+          layerId: layer.id,
+          name: `Version ${layer.version} (replaced by upload)`,
+          postgisTable: table,
+          featureCount: n,
+          createdById: userId,
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Could not keep "${table}" as a version snapshot: ${(error as Error).message}`,
+      );
+      await this.dropTableIfSafe(table);
+    }
   }
 
   private async dropTableIfSafe(tableName: string): Promise<void> {

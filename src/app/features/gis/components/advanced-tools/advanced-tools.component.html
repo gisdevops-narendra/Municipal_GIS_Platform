@@ -78,6 +78,25 @@
     <button type="button" class="bo__cancel" (click)="cancelPick()">Cancel picking</button>
   }
 
+  @if (mode() === 'service') {
+    <label class="bo__toggle">
+      <input type="checkbox" [ngModel]="serviceByTime()" (ngModelChange)="serviceByTime.set($event)" />
+      <span>Breaks in minutes of travel</span>
+    </label>
+    <div class="bo__row">
+      <label class="bo__field bo__field--grow">
+        <span class="bo__label">{{ serviceByTime() ? 'Minutes' : 'Distances (m)' }}</span>
+        <input type="text" class="bo__input" [placeholder]="serviceByTime() ? '5, 10, 15' : '500, 1000, 2000'" [(ngModel)]="serviceBreaksText" />
+      </label>
+      @if (serviceByTime()) {
+        <label class="bo__field">
+          <span class="bo__label">Speed km/h</span>
+          <input type="number" class="bo__input" min="1" max="150" style="width: 72px" [(ngModel)]="speedKmh" />
+        </label>
+      }
+    </div>
+  }
+
   @if (mode() === 'trace') {
     <label class="bo__field">
       <span class="bo__label">Max distance (m) — optional</span>
@@ -90,6 +109,17 @@
   }
   @if (summary(); as text) {
     <p class="bo__result">{{ text }}</p>
+    @if (bands().length > 0) {
+      <ul class="bo__rings" aria-label="Service area bands">
+        @for (b of bands(); track b.label) {
+          <li class="bo__ring">
+            <span class="bo__ring-swatch" [style.background]="b.color"></span>
+            <span class="bo__ring-label">{{ b.label }}</span>
+            <span class="bo__ring-count">{{ b.length }}</span>
+          </li>
+        }
+      </ul>
+    }
     @if (facilities().length > 0) {
       <ul class="bo__rings" aria-label="Nearest facilities">
         @for (f of facilities(); track $index) {
@@ -106,7 +136,7 @@
     <button
       pButton
       type="button"
-      [label]="running() ? 'Working…' : mode() === 'route' ? 'Find route' : mode() === 'nearest' ? 'Find nearest' : 'Trace network'"
+      [label]="running() ? 'Working…' : mode() === 'route' ? 'Find route' : mode() === 'nearest' ? 'Find nearest' : mode() === 'service' ? 'Compute service area' : 'Trace network'"
       icon="pi pi-directions"
       class="p-button-sm bo__run"
       [disabled]="running()"
