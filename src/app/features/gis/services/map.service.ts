@@ -1,4 +1,4 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, effect, inject, signal, untracked } from '@angular/core';
 import OlMap from 'ol/Map';
 import View from 'ol/View';
 import Feature from 'ol/Feature';
@@ -32,6 +32,7 @@ import { forkJoin, map as rxMap, Observable, of } from 'rxjs';
 import type { EventsKey } from 'ol/events';
 import { unByKey } from 'ol/Observable';
 import { environment } from '../../../../environments/environment';
+import { SettingsService } from '../../../core/services/settings.service';
 import { GisLayer } from '../../../core/models/gis-layer.model';
 import { Sketch } from '../models/sketch.model';
 import './projections';
@@ -221,6 +222,33 @@ const BASEMAPS: Record<string, { label: string; attribution: string; build: () =
 @Injectable()
 export class MapService {
   private map: OlMap | null = null;
+  private readonly settings = inject(SettingsService);
+  /** Settings → Default Layer Visibility as last applied to the map. */
+  private appliedVisibilityOverrides: Record<string, boolean> = {};
+
+  constructor() {
+    // A changed per-layer default takes effect on the open map right away
+    // (the workspace is kept alive, so initMap won't run again).
+    effect(() => {
+      const overrides = this.settings.map().layerVisibility ?? {};
+      untracked(() => {
+        const previous = this.appliedVisibilityOverrides;
+        this.appliedVisibilityOverrides = { ...overrides };
+        for (const { layer } of this.managedLayers.values()) {
+          if (overrides[layer.code] !== previous[layer.code]) {
+            this.setLayerVisibility(layer.id, this.defaultVisible(layer));
+          }
+        }
+      });
+    });
+  }
+
+  /** A layer's start-up visibility: the user's Settings override (keyed by
+   *  layer code) wins over the layer's own `visibleByDefault`. */
+  private defaultVisible(layer: GisLayer): boolean {
+    const overrides = this.settings.map().layerVisibility ?? {};
+    return layer.code in overrides ? overrides[layer.code] : layer.visibleByDefault;
+  }
   private baseLayer: TileLayer<OSM | XYZ> | null = null;
   private readonly managedLayers = new Map<string, ManagedLayer>();
   private initialExtent3857: number[] | null = null;
@@ -322,7 +350,7 @@ export class MapService {
     const initialVisibility: Record<string, boolean> = {};
     const sortedLayers = [...layers].sort((a, b) => a.displayOrder - b.displayOrder);
     for (const layer of sortedLayers) {
-      initialVisibility[layer.id] = layer.visibleByDefault;
+      initialVisibility[layer.id] = this.defaultVisible(layer);
       this.addWmsLayer(layer);
     }
     this.layerVisibility.set(initialVisibility);
@@ -1565,7 +1593,7 @@ export class MapService {
       projection: MAP_PROJECTION,
       ratio: 1
     });
-    const olLayer = new ImageLayer({ source, visible: layer.visibleByDefault, properties: { gisLayerId: layer.id } });
+    const olLayer = new ImageLayer({ source, visible: this.defaultVisible(layer), properties: { gisLayerId: layer.id } });
     // Later additions go just above the existing data layers, below any
     // analysis / sketch overlays drawn on top.
     if (insertAt !== undefined) this.map.getLayers().insertAt(Math.min(insertAt, this.map.getLayers().getLength()), olLayer);
