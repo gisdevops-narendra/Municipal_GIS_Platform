@@ -24,6 +24,8 @@ import { NetworkService } from './network.service';
 import { RasterController } from './raster.controller';
 import { RasterService } from './raster.service';
 import { RasterToolsService } from './raster-tools.service';
+import { RasterJobsService } from './raster-jobs.service';
+import { RasterModuleGuard } from './raster-module.guard';
 
 @Module({
   imports: [AuthModule, ModuleAccessModule],
@@ -53,6 +55,8 @@ import { RasterToolsService } from './raster-tools.service';
     NetworkService,
     RasterService,
     RasterToolsService,
+    RasterJobsService,
+    RasterModuleGuard,
   ],
   exports: [
     GisWorkspaceService,

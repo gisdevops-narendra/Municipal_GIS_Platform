@@ -21,6 +21,7 @@ import { GisLayersService } from './gis-layers.service';
 import { deriveLayerCode, generateLayerTableName } from './layer-naming.util';
 import { rasterFilePath } from './raster-paths.util';
 import { rasterYsld, type RasterStyleSpec } from './raster-style';
+import { rasterJobContext } from './raster-job-context';
 
 const execFileAsync = promisify(execFile);
 const RASTER_EXTENSIONS = /\.(tif|tiff|geotiff|gtiff)$/i;
@@ -47,6 +48,22 @@ export interface RasterInfo {
   pixelSizeM: number;
   bands: RasterBandInfo[];
 }
+
+/** Stage shown in the panel while a background job runs each operation. */
+const OP_STAGES: Record<string, string> = {
+  online_dem: 'Downloading Copernicus DEM tiles',
+  online_landcover: 'Downloading ESA WorldCover tiles',
+  stac_fetch: 'Downloading Sentinel-2 bands',
+  mosaic: 'Merging rasters',
+  resample: 'Resampling',
+  classify: 'Clustering pixels (k-means)',
+  watershed: 'Routing flow across the DEM',
+  fill_sinks: 'Filling depressions',
+  zonal: 'Summarising zones',
+  idw: 'Interpolating',
+  heatmap: 'Computing density',
+  proximity: 'Computing distances',
+};
 
 export interface VectorField {
   name: string;
@@ -97,21 +114,22 @@ export class RasterService {
 
   // ----- Raster Upload & Publish -----
 
+  /** `file.path`: multer wrote the upload straight to disk (it is never
+   *  held in memory); this method always removes it. */
   async upload(
     appUser: AppUser,
-    file: { buffer: Buffer; originalname: string } | undefined,
+    file: { path: string; size: number; originalname: string } | undefined,
     dto: { name: string; description?: string; departmentId?: string },
   ) {
-    if (!file?.buffer?.length) {
+    if (!file?.path || !file.size) {
+      if (file?.path) await fsp.rm(file.path, { force: true });
       throw new BadRequestException('Choose a GeoTIFF file to upload.');
     }
-    if (!RASTER_EXTENSIONS.test(file.originalname)) {
-      throw new BadRequestException('Only GeoTIFF rasters (.tif / .tiff) are supported.');
-    }
-    const source = this.tempPath(appUser.municipalityId, '.tif');
-    await fsp.mkdir(path.dirname(source), { recursive: true });
-    await fsp.writeFile(source, file.buffer);
+    const source = file.path;
     try {
+      if (!RASTER_EXTENSIONS.test(file.originalname)) {
+        throw new BadRequestException('Only GeoTIFF rasters (.tif / .tiff) are supported.');
+      }
       const { stdout } = await execFileAsync('gdalinfo', ['-json', source], {
         maxBuffer: 64 * 1024 * 1024,
       }).catch(() => {
@@ -263,8 +281,13 @@ export class RasterService {
 
   /** Runs one raster_ops.py operation (JSON in, JSON out). */
   async runOp<T = Record<string, unknown>>(request: Record<string, unknown>): Promise<T> {
+    const job = rasterJobContext.getStore();
+    if (job?.signal.aborted) throw new BadRequestException('Cancelled.');
+    job?.setStage(OP_STAGES[String(request.op)] ?? 'Processing');
     return new Promise<T>((resolve, reject) => {
       const child = spawn('python3', [this.script], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const onAbort = () => child.kill('SIGKILL');
+      job?.signal.addEventListener('abort', onAbort, { once: true });
       let stdout = '';
       let stderr = '';
       const timer = setTimeout(() => child.kill('SIGKILL'), OP_TIMEOUT_MS);
@@ -276,6 +299,8 @@ export class RasterService {
       });
       child.on('close', () => {
         clearTimeout(timer);
+        job?.signal.removeEventListener('abort', onAbort);
+        if (job?.signal.aborted) return reject(new BadRequestException('Cancelled.'));
         let body: (T & { error?: string }) | null = null;
         try {
           body = JSON.parse(stdout.trim().split('\n').pop() ?? '') as T & { error?: string };
@@ -311,6 +336,7 @@ export class RasterService {
   ) {
     const owner = this.outputOwnership(appUser, params.departmentId);
     const { workspace, code } = await this.newLayerCode(appUser, params.name);
+    rasterJobContext.getStore()?.setStage('Optimising and publishing the layer', false);
     const id = randomUUID();
     const file = rasterFilePath(this.storageRoot, appUser.municipalityId, id);
     await fsp.mkdir(path.dirname(file), { recursive: true });
@@ -329,7 +355,7 @@ export class RasterService {
         workspace.geoserverWorkspace,
         geoserverLayer,
         geoserverLayer,
-        await fsp.readFile(file),
+        file,
       );
       const layer = await this.prisma.gISLayer.create({
         data: {
@@ -377,6 +403,7 @@ export class RasterService {
   ) {
     const owner = this.outputOwnership(appUser);
     const { workspace, code } = await this.newLayerCode(appUser, params.name);
+    rasterJobContext.getStore()?.setStage('Importing and publishing the layer', false);
     const table = generateLayerTableName();
     await this.gdal.importToPostgis({
       sourcePath: params.sourcePath,

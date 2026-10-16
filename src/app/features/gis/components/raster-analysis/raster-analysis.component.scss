@@ -561,3 +561,32 @@
     transform: translateX(250%);
   }
 }
+
+/* ---------- background job ---------- */
+.ra__job {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.ra__job-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.ra__job-stage {
+  color: var(--color-ink-900);
+  font-weight: 600;
+}
+
+.ra__job-time {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  color: var(--color-ink-500);
+}

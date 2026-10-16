@@ -1,3 +1,6 @@
+import { createReadStream } from 'fs';
+import { stat } from 'fs/promises';
+import { Readable } from 'stream';
 import {
   BadRequestException,
   Injectable,
@@ -632,18 +635,21 @@ export class GeoServerService {
     workspace: string,
     store: string,
     coverage: string,
-    bytes: Buffer,
+    filePath: string,
   ): Promise<LonLatBoundingBox | null> {
     const ws = encodeURIComponent(workspace);
     const cs = encodeURIComponent(store);
+    // Streamed from disk — a multi-GB raster is never held in memory.
+    const { size } = await stat(filePath);
     const response = await this.request(
       `/rest/workspaces/${ws}/coveragestores/${cs}/file.geotiff?configure=first&coverageName=${encodeURIComponent(coverage)}`,
       {
         method: 'PUT',
-        headers: { 'Content-Type': 'image/tiff' },
-        body: new Uint8Array(bytes),
-      },
-      10 * 60 * 1000,
+        headers: { 'Content-Type': 'image/tiff', 'Content-Length': String(size) },
+        body: Readable.toWeb(createReadStream(filePath)) as ReadableStream,
+        duplex: 'half',
+      } as RequestInit,
+      30 * 60 * 1000,
     );
     if (!response.ok) {
       throw await this.toError('publishing raster', response);

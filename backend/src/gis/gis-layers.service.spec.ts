@@ -131,6 +131,7 @@ describe('GisLayersService', () => {
       storage as unknown as StorageService,
       styleService as never,
       fieldStats as never,
+      { getEffectiveModuleIdsForAppUser: jest.fn().mockResolvedValue({ has: () => true }) } as never,
     );
   });
 

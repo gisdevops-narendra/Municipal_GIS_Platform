@@ -2,7 +2,7 @@ import { Component, EventEmitter, Input, OnDestroy, Output, computed, inject, si
 import { FormsModule } from '@angular/forms';
 import { NgTemplateOutlet } from '@angular/common';
 import { HttpErrorResponse, HttpEventType } from '@angular/common/http';
-import { Observable, Subscription } from 'rxjs';
+import { Observable, Subscription, switchMap, takeWhile, timer } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { SelectModule } from 'primeng/select';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
@@ -16,11 +16,13 @@ import {
   ProfilePoint,
   RASTER_RAMP_NAMES,
   RasterInfo,
+  RasterJob,
   RasterService,
   RasterStatistics,
   RasterStyleSpec,
   SentinelScene,
   VectorField,
+  ZonalResult,
   ZoneRow
 } from '../../services/raster.service';
 
@@ -331,6 +333,9 @@ export class RasterAnalysisComponent implements OnDestroy {
   readonly running = signal(false);
   /** Upload: 0–100 while the file is sent, then null while it is processed. */
   readonly uploadProgress = signal<number | null>(null);
+  /** The background job of the current run (layer-producing tools). */
+  readonly job = signal<RasterJob | null>(null);
+  private jobSub?: Subscription;
   readonly error = signal<string | null>(null);
   readonly message = signal<string | null>(null);
   readonly facts = signal<{ label: string; value: string }[]>([]);
@@ -345,6 +350,7 @@ export class RasterAnalysisComponent implements OnDestroy {
     this.mapService.cancelDraw();
     this.mapService.setSwipe(null);
     this.clearPreview();
+    this.jobSub?.unsubscribe();
   }
 
   // ----- selection of tool / raster -----
@@ -844,15 +850,16 @@ export class RasterAnalysisComponent implements OnDestroy {
         const zones = this.vectorLayerId();
         if (!zones) return this.error.set('Choose the zones (polygon) layer.');
         if (this.zonalPublish && !this.outputName.trim()) return this.error.set('Enter a name for the new layer.');
-        this.execute(
-          this.api.zonalStatistics({
+        this.runJob<{ layer?: GisLayer; result: ZonalResult }>(
+          'zonal-statistics',
+          {
             layerId,
             band: this.band,
             zonesLayerId: zones,
             labelField: this.field || undefined,
             allTouched: this.allTouched,
             outputName: this.zonalPublish ? this.outputName.trim() : undefined
-          }),
+          },
           (r) => {
             this.zoneRows.set(r.result.rows);
             this.facts.set([
@@ -1026,13 +1033,66 @@ export class RasterAnalysisComponent implements OnDestroy {
   }
 
   private runLayerTool(tool: string, body: Record<string, unknown>): void {
-    this.execute(this.api.run(tool, body), (r: LayerResult) => {
+    this.runJob<LayerResult>(tool, body, (r) => {
       this.message.set(`New layer "${r.layer.name}" added to the map.`);
       if (r.layer.layerType === 'RASTER') this.pendingInputId = r.layer.id;
       if (this.tool() === 'online') this.clearPreview();
       this.facts.set(describe(r.result));
       this.mapService.clearAnalysisGeometry();
       this.layerCreated.emit(r.layer);
+    });
+  }
+
+  /** Long tools run as a backend job: start it, poll its stage every
+   *  1.5 s, and hand the result over when it is done. */
+  private runJob<T>(tool: string, body: Record<string, unknown>, onResult: (result: T) => void): void {
+    this.jobSub?.unsubscribe();
+    this.running.set(true);
+    this.jobSub = this.api
+      .startJob<T>(tool, body)
+      .pipe(
+        switchMap((started) => {
+          this.job.set(started);
+          return timer(1500, 1500).pipe(
+            switchMap(() => this.api.job<T>(started.id)),
+            takeWhile((j) => j.status === 'queued' || j.status === 'running', true)
+          );
+        })
+      )
+      .subscribe({
+        next: (j) => {
+          this.job.set(j);
+          if (j.status === 'done') {
+            this.running.set(false);
+            this.job.set(null);
+            onResult(j.result as T);
+          } else if (j.status === 'failed' || j.status === 'cancelled') {
+            this.running.set(false);
+            this.job.set(null);
+            if (j.status === 'failed') this.error.set(j.error ?? 'Raster processing failed.');
+            else this.message.set('Cancelled.');
+          }
+        },
+        error: (err: HttpErrorResponse) => {
+          const polling = this.job() !== null;
+          this.job.set(null);
+          // 404 while polling = the backend restarted and lost the job.
+          if (err.status === 404 && polling) {
+            this.running.set(false);
+            this.error.set('The job was lost (the server restarted). Please run it again.');
+            return;
+          }
+          this.fail(err);
+        }
+      });
+  }
+
+  cancelJob(): void {
+    const job = this.job();
+    if (!job) return;
+    this.api.cancelJob(job.id).subscribe({
+      next: (j) => this.job.set({ ...job, ...j }),
+      error: (err: HttpErrorResponse) => this.error.set(err.error?.message ?? 'Could not cancel.')
     });
   }
 
@@ -1068,6 +1128,11 @@ export class RasterAnalysisComponent implements OnDestroy {
             ? 'Could not reach the server.'
             : `Raster processing failed (${err.status || 'unknown'}).`
     );
+  }
+
+  elapsed(ms: number): string {
+    const sec = Math.floor(ms / 1000);
+    return sec >= 60 ? `${Math.floor(sec / 60)} min ${sec % 60} s` : `${sec} s`;
   }
 
   fmtValue(v: number | null): string {

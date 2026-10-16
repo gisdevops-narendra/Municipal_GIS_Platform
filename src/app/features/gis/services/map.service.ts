@@ -9,6 +9,7 @@ import VectorLayer from 'ol/layer/Vector';
 import OSM from 'ol/source/OSM';
 import XYZ from 'ol/source/XYZ';
 import ImageWMS from 'ol/source/ImageWMS';
+import TileWMS from 'ol/source/TileWMS';
 import ImageStatic from 'ol/source/ImageStatic';
 import VectorSource from 'ol/source/Vector';
 import GeoJSON from 'ol/format/GeoJSON';
@@ -102,7 +103,8 @@ export interface FeatureInfoPopupState {
 
 interface ManagedLayer {
   layer: GisLayer;
-  olLayer: ImageLayer<ImageWMS>;
+  /** Vector layers: one untiled WMS image; rasters: cached GWC tiles. */
+  olLayer: ImageLayer<ImageWMS> | TileLayer<TileWMS>;
 }
 
 export interface BasemapOption {
@@ -1617,13 +1619,34 @@ export class MapService {
   private addWmsLayer(layer: GisLayer, insertAt?: number): void {
     if (!this.map) return;
     const qualifiedLayer = `${layer.geoserverWorkspace}:${layer.geoserverLayer}`;
-    const source = new ImageWMS({
-      url: `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wms`,
-      params: { LAYERS: qualifiedLayer, TILED: false },
-      projection: MAP_PROJECTION,
-      ratio: 1
-    });
-    const olLayer = new ImageLayer({ source, visible: this.defaultVisible(layer), properties: { gisLayerId: layer.id } });
+    const visible = this.defaultVisible(layer);
+    const properties = { gisLayerId: layer.id };
+    // Rasters are heavy to render, so they come as 256 px tiles through
+    // GeoWebCache (GeoServer re-renders a tile only once; a style change
+    // truncates the cache). Vector layers stay single-image WMS so CQL
+    // filters and the newest edits always show.
+    const olLayer =
+      layer.layerType === 'RASTER'
+        ? new TileLayer({
+            source: new TileWMS({
+              url: `${environment.geoserverUrl}/gwc/service/wms`,
+              params: { LAYERS: qualifiedLayer, TILED: true, FORMAT: 'image/png', VERSION: '1.1.1' },
+              projection: MAP_PROJECTION,
+              transition: 0
+            }),
+            visible,
+            properties
+          })
+        : new ImageLayer({
+            source: new ImageWMS({
+              url: `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wms`,
+              params: { LAYERS: qualifiedLayer, TILED: false },
+              projection: MAP_PROJECTION,
+              ratio: 1
+            }),
+            visible,
+            properties
+          });
     // Later additions go just above the existing data layers, below any
     // analysis / sketch overlays drawn on top.
     if (insertAt !== undefined) this.map.getLayers().insertAt(Math.min(insertAt, this.map.getLayers().getLength()), olLayer);

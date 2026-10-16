@@ -130,6 +130,18 @@ export interface VectorField {
   numeric: boolean;
 }
 
+export interface RasterJob<T = unknown> {
+  id: string;
+  tool: string;
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+  stage: string;
+  cancellable: boolean;
+  queuePosition: number | null;
+  elapsedMs: number;
+  result: T | null;
+  error: string | null;
+}
+
 /** A tool that published its output as a new layer. */
 export interface LayerResult {
   layer: GisLayer;
@@ -208,6 +220,19 @@ export class RasterService {
   download(layerId: string, bbox?: [number, number, number, number]): Observable<HttpResponse<Blob>> {
     const params: Record<string, string> = bbox ? { bbox: bbox.join(',') } : {};
     return this.http.get(`${this.baseUrl}/${layerId}/download`, { params, responseType: 'blob', observe: 'response' });
+  }
+
+  /** Background job for a layer-producing tool (same body as `run`). */
+  startJob<T = LayerResult>(tool: string, body: Record<string, unknown>): Observable<RasterJob<T>> {
+    return this.http.post<RasterJob<T>>(`${this.baseUrl}/jobs/${tool}`, body);
+  }
+
+  job<T = LayerResult>(id: string): Observable<RasterJob<T>> {
+    return this.http.get<RasterJob<T>>(`${this.baseUrl}/jobs/${id}`);
+  }
+
+  cancelJob(id: string): Observable<RasterJob> {
+    return this.http.post<RasterJob>(`${this.baseUrl}/jobs/${id}/cancel`, {});
   }
 
   /** Every tool that creates a layer: terrain, contour, watershed, flood,

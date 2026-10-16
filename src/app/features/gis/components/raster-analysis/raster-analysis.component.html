@@ -780,8 +780,28 @@
   }
 
   <!-- ============ RESULTS ============ -->
-  @if (running()) {
-    <p class="bo__result">Processing… large rasters can take a minute.</p>
+  @if (job(); as j) {
+    <div class="ra__job">
+      <div class="ra__progress">
+        <div class="ra__progress-bar is-indeterminate"></div>
+      </div>
+      <div class="ra__job-row">
+        <span class="ra__job-stage">
+          @if (j.status === 'queued') {
+            Queued{{ j.queuePosition ? ' · #' + j.queuePosition : '' }} — waiting for a free slot
+          } @else {
+            {{ j.stage }}…
+          }
+        </span>
+        <span class="ra__job-time">{{ elapsed(j.elapsedMs) }}</span>
+      </div>
+      @if (j.cancellable) {
+        <button type="button" class="bo__cancel" (click)="cancelJob()"><i class="pi pi-stop-circle"></i> Cancel</button>
+      }
+      <p class="bo__hint">Runs on the server — you can keep using the map meanwhile.</p>
+    </div>
+  } @else if (running() && tool() !== 'upload') {
+    <p class="bo__result">Processing…</p>
   }
   @if (error(); as e) {
     <p class="bo__result bo__result--empty">{{ e }}</p>
