@@ -55,16 +55,81 @@
   ],
   "users": [
     {
-      "username": "testuser",
-      "email": "testuser@municipal-gis.dev",
-      "firstName": "Test",
-      "lastName": "User",
-      "enabled": true,
+      "id": "a732b044-7fde-4f04-b5bf-bd1bf182ad31",
+      "username": "streetlight.head@gmail.com",
+      "firstName": "Street Light",
+      "lastName": "Head",
+      "email": "streetlight.head@gmail.com",
       "emailVerified": true,
+      "enabled": true,
       "credentials": [
         {
           "type": "password",
-          "value": "Test@1234",
+          "value": "Demo@123",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "c6e9021e-ef4d-4fee-bb77-f6631bf16eb3",
+      "username": "streetlight.user@gmail.com",
+      "firstName": "Street Light",
+      "lastName": "User",
+      "email": "streetlight.user@gmail.com",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Demo@123",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "af06408f-6c52-4285-b6de-5b5b48dac314",
+      "username": "vadodara@gmail.com",
+      "firstName": "Vadodara",
+      "lastName": "Owner",
+      "email": "vadodara@gmail.com",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Demo@123",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "3ab24141-605b-4438-a608-25e8f7190891",
+      "username": "waterworks.head@gmail.com",
+      "firstName": "Water Works",
+      "lastName": "Head",
+      "email": "waterworks.head@gmail.com",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Demo@123",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "acb35c61-b288-48db-97b3-ad2bcaa5d91c",
+      "username": "waterworks.user@gmail.com",
+      "firstName": "Water Works",
+      "lastName": "User",
+      "email": "waterworks.user@gmail.com",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Demo@123",
           "temporary": false
         }
       ]
@@ -74,7 +139,11 @@
       "enabled": true,
       "serviceAccountClientId": "municipal-gis-backend",
       "clientRoles": {
-        "realm-management": ["manage-users", "view-users", "query-users"]
+        "realm-management": [
+          "manage-users",
+          "view-users",
+          "query-users"
+        ]
       }
     }
   ]

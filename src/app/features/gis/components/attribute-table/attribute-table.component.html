@@ -52,32 +52,6 @@
       <span class="attr-table__spacer"></span>
 
       <div class="attr-table__tools">
-        @if (canSelectOnMap()) {
-          <div class="attr-table__select" role="group" aria-label="Select on map">
-            @for (option of selectShapes; track option.shape) {
-              <button
-                type="button"
-                class="attr-table__btn"
-                [class.is-active]="selectingShape() === option.shape"
-                [attr.aria-pressed]="selectingShape() === option.shape"
-                [attr.aria-label]="option.label"
-                [pTooltip]="option.label" tooltipPosition="top"
-                (click)="selectOnMap(option.shape)"
-              ><i [class]="option.icon" aria-hidden="true"></i></button>
-            }
-            <p-select
-              class="attr-table__select-mode"
-              [options]="selectModes"
-              optionLabel="label"
-              optionValue="value"
-              [ngModel]="selectMode()"
-              (ngModelChange)="selectMode.set($event)"
-              appendTo="body"
-              [ariaLabel]="'Selection mode'"
-            />
-          </div>
-        }
-
         <button
           type="button"
           class="attr-table__btn"

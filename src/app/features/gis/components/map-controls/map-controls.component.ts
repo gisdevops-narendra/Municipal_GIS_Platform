@@ -1,4 +1,4 @@
-import { Component, Input, ViewChild, computed, inject, signal } from '@angular/core';
+import { Component, EventEmitter, Input, Output, ViewChild, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { TooltipModule } from 'primeng/tooltip';
@@ -7,14 +7,17 @@ import { SelectModule } from 'primeng/select';
 import { InputTextModule } from 'primeng/inputtext';
 import { MapService } from '../../services/map.service';
 import { GOTO_COORDINATE_SYSTEMS } from '../../services/projections';
+import type { SelectMode, SelectShape } from '../attribute-table/attribute-table.component';
 
 /** Module Access catalog ids (seed-modules.ts) for the gated controls. */
 const NAV_HISTORY_MODULE_ID = 59;
 const GOTO_XY_MODULE_ID = 12;
+const SELECTION_TOOL_MODULE_ID = 57;
 
 /** In-map navigation controls — zoom in/out, reset to the initial extent,
  *  fullscreen, Nav History (back/forward through previous views) and
- *  Go To X:Y. The basemap picker lives in the map card toolbar (outside
+ *  Go To X:Y, plus the Selection Tool (select features by rectangle,
+ *  polygon or lasso — the result lands in the Attribute Table). The basemap picker lives in the map card toolbar (outside
  *  the map surface), not here. */
 @Component({
   selector: 'app-map-controls',
@@ -35,6 +38,42 @@ export class MapControlsComponent {
 
   readonly showNavHistory = computed(() => this.allowed().has(NAV_HISTORY_MODULE_ID));
   readonly showGoTo = computed(() => this.allowed().has(GOTO_XY_MODULE_ID));
+  readonly showSelection = computed(() => this.allowed().has(SELECTION_TOOL_MODULE_ID));
+
+  /** Shape currently being drawn by the Selection Tool (owned by the
+   *  Attribute Table), so the matching button shows as active. */
+  @Input() selectingShape: SelectShape | null = null;
+  @Output() selectRequest = new EventEmitter<{ shape: SelectShape; mode: SelectMode }>();
+  /** Number of features currently selected (enables Clear selection). */
+  @Input() selectedCount = 0;
+  @Output() clearSelectionRequest = new EventEmitter<void>();
+
+  /** Inline SVG icons (24×24 viewBox) — PrimeIcons has no polygon or
+   *  lasso glyph. Dashed outlines read as "selection" like desktop GIS. */
+  readonly selectShapes: { shape: SelectShape; label: string; path: string }[] = [
+    { shape: 'Rectangle', label: 'Select by rectangle', path: 'M4 5h16v14H4z' },
+    { shape: 'Polygon', label: 'Select by polygon', path: 'M12 3l8.5 6.2-3.2 9.8H6.7L3.5 9.2z' },
+    {
+      shape: 'Lasso',
+      label: 'Select by lasso',
+      path: 'M12 4c4.97 0 9 2.46 9 5.5S16.97 15 12 15c-1.3 0-2.54-.17-3.66-.47M7.2 13.9C4.7 12.9 3 11.3 3 9.5 3 6.46 7.03 4 12 4M7.2 13.9c-.9.7-1.2 1.8-.6 2.8.7 1.1 2.3 1.4 3.4.7M10 17.4c.3 1.2-.2 2.4-1.3 3.1'
+    }
+  ];
+  private readonly selectModes: { value: SelectMode; label: string; icon: string }[] = [
+    { value: 'new', label: 'New selection', icon: 'pi pi-circle' },
+    { value: 'add', label: 'Add to selection', icon: 'pi pi-plus-circle' },
+    { value: 'remove', label: 'Remove from selection', icon: 'pi pi-minus-circle' }
+  ];
+  private readonly selectModeIndex = signal(0);
+  readonly selectMode = computed(() => this.selectModes[this.selectModeIndex()]);
+
+  cycleSelectMode(): void {
+    this.selectModeIndex.update((i) => (i + 1) % this.selectModes.length);
+  }
+
+  select(shape: SelectShape): void {
+    this.selectRequest.emit({ shape, mode: this.selectMode().value });
+  }
   readonly canGoBack = this.mapService.canGoBack;
   readonly canGoForward = this.mapService.canGoForward;
 

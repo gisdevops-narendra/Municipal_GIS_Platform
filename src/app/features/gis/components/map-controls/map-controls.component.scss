@@ -37,6 +37,11 @@
   }
 }
 
+.map-controls__btn.p-button.map-controls__btn--active {
+  background: var(--color-primary-100);
+  color: var(--color-primary-700);
+}
+
 .map-controls__btn.p-button:disabled {
   opacity: 0.4;
 }
@@ -114,4 +119,14 @@
 .goto__actions {
   display: flex;
   gap: 6px;
+}
+
+.map-controls__svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }

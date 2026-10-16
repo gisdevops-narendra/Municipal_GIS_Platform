@@ -94,8 +94,8 @@ done
 #     KC_HEALTH_ENABLED=true; its management port (9000) is container-only.
 log "Waiting for Keycloak to be ready"
 for i in $(seq 1 60); do
-  if docker exec municipal-gis-keycloak \
-       curl -sf http://localhost:9000/health/ready >/dev/null 2>&1; then
+  # The Keycloak image ships without curl, so probe from the host instead.
+  if curl -sf http://localhost:8180/realms/master >/dev/null 2>&1; then
     echo "   keycloak is ready"
     break
   fi

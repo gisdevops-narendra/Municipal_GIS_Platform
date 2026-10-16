@@ -69,6 +69,49 @@
     </div>
   }
 
+  @if (showSelection()) {
+    <div class="map-controls__group" role="group" aria-label="Selection tool">
+      @for (option of selectShapes; track option.shape) {
+        <button
+          pButton
+          type="button"
+          class="p-button-text map-controls__btn"
+          [class.map-controls__btn--active]="selectingShape === option.shape"
+          [attr.aria-pressed]="selectingShape === option.shape"
+          [attr.aria-label]="option.label"
+          [pTooltip]="option.label"
+          tooltipPosition="left"
+          (click)="select(option.shape)"
+        >
+          <svg class="map-controls__svg" viewBox="0 0 24 24" aria-hidden="true">
+            <path [attr.d]="option.path" [attr.stroke-dasharray]="option.shape === 'Lasso' ? null : '3 2'" />
+          </svg>
+        </button>
+      }
+      <button
+        pButton
+        type="button"
+        [icon]="selectMode().icon"
+        class="p-button-text map-controls__btn"
+        [attr.aria-label]="'Selection mode: ' + selectMode().label + ' (click to change)'"
+        [pTooltip]="'Mode: ' + selectMode().label + ' — click to change'"
+        tooltipPosition="left"
+        (click)="cycleSelectMode()"
+      ></button>
+      <button
+        pButton
+        type="button"
+        icon="pi pi-times-circle"
+        class="p-button-text map-controls__btn"
+        [attr.aria-label]="'Clear selection (' + selectedCount + ' selected)'"
+        [pTooltip]="selectedCount ? 'Clear selection (' + selectedCount + ')' : 'Clear selection'"
+        tooltipPosition="left"
+        [disabled]="selectedCount === 0"
+        (click)="clearSelectionRequest.emit()"
+      ></button>
+    </div>
+  }
+
   @if (showGoTo()) {
     <div class="map-controls__group">
       <button

@@ -252,7 +252,13 @@
         (featureInfoResults)="onFeatureInfoResults($event)"
         (mapReady)="onMapReady()"
       />
-      <app-map-controls [allowedModuleIds]="myModuleIds()" />
+      <app-map-controls
+        [allowedModuleIds]="myModuleIds()"
+        [selectingShape]="selectingShape()"
+        (selectRequest)="onMapSelectRequest($event)"
+        [selectedCount]="selectedCount()"
+        (clearSelectionRequest)="onMapClearSelection()"
+      />
 
       @if (layersReady()) {
         <app-gis-search
@@ -292,7 +298,6 @@
             [initialLayerId]="highlightLayerId()"
             [mapClickFeatures]="mapClickFeatures()"
             [externalFilter]="activeQueryFilter()"
-            [allowedModuleIds]="myModuleIds()"
             (externalFilterCleared)="onQueryCleared()"
             (selectionChange)="tableSelection.set($event)"
           />

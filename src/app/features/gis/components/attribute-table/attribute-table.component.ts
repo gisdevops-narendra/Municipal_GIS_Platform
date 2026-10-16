@@ -36,19 +36,18 @@ import {
 } from '../../models/attribute-table.model';
 
 /** Feature clicked on the map, forwarded by the workspace so the table can
- *  mirror the selection (and vice versa). */
+ *  mirror the selection (and vice versa). The Selection Tool buttons live
+ *  in MapControlsComponent and call startMapSelect(). */
 export interface MapClickFeatureRef {
   layerId: string;
   featureId: string;
 }
 
-/** Selection Tool (Module Access catalog id, seed-modules.ts). */
-const SELECTION_TOOL_MODULE_ID = 57;
 /** Most features one map selection adds (ids + geometry are fetched). */
 const MAP_SELECT_LIMIT = 2000;
 
-type SelectShape = 'Rectangle' | 'Polygon' | 'Lasso';
-type SelectMode = 'new' | 'add' | 'remove';
+export type SelectShape = 'Rectangle' | 'Polygon' | 'Lasso';
+export type SelectMode = 'new' | 'add' | 'remove';
 
 /** A Query Builder result applied to the table as a locked filter. */
 export interface AttributeExternalFilter {
@@ -116,23 +115,10 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
 
   readonly baseFilter = signal<AttributeExternalFilter | null>(null);
 
-  /** Module Access ids granted to the current user — the map selection
-   *  tools need the Selection Tool module. */
-  @Input() set allowedModuleIds(value: ReadonlySet<number>) {
-    this.allowedSignal.set(value ?? new Set());
-  }
-  private readonly allowedSignal = signal<ReadonlySet<number>>(new Set());
-  readonly canSelectOnMap = computed(() => this.allowedSignal().has(SELECTION_TOOL_MODULE_ID));
-
   readonly selectShapes: { shape: SelectShape; icon: string; label: string; hint: string }[] = [
     { shape: 'Rectangle', icon: 'pi pi-stop', label: 'Select by rectangle', hint: 'Click one corner on the map, then the opposite corner.' },
     { shape: 'Polygon', icon: 'pi pi-share-alt', label: 'Select by polygon', hint: 'Click to add corners; double-click to finish.' },
     { shape: 'Lasso', icon: 'pi pi-pencil', label: 'Select by lasso', hint: 'Press and drag around the features; release to finish.' }
-  ];
-  readonly selectModes: { value: SelectMode; label: string }[] = [
-    { value: 'new', label: 'New' },
-    { value: 'add', label: 'Add' },
-    { value: 'remove', label: 'Remove' }
   ];
   readonly selectMode = signal<SelectMode>('new');
   readonly selectingShape = signal<SelectShape | null>(null);
@@ -407,6 +393,13 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
 
   /** Draw a shape on the map; features of the active layer intersecting it
    *  become the selection (New), join it (Add) or leave it (Remove). */
+  /** Entry point for the map's Selection Tool controls (the buttons live
+   *  in MapControlsComponent; the selection itself is owned here). */
+  startMapSelect(shape: SelectShape, mode: SelectMode): void {
+    this.selectMode.set(mode);
+    this.selectOnMap(shape);
+  }
+
   selectOnMap(shape: SelectShape): void {
     const layer = this.activeLayer();
     if (!layer) return;
@@ -415,7 +408,10 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
     this.selectingShape.set(shape);
     this.selectSub = this.mapService.beginDraw(shape).subscribe({
       next: (geometry) => {
-        this.mapService.clearDraw();
+        // OpenLayers adds the drawn feature to the draw layer only after
+        // 'drawend' has fired, so clearing now would leave the shape on
+        // the map — clear on the next tick instead.
+        setTimeout(() => this.mapService.clearDraw());
         this.selectingShape.set(null);
         this.selectSub = this.service.loadMetadata(layer).subscribe({
           next: ({ geometryField }) => {

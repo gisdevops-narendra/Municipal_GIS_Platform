@@ -1,4 +1,4 @@
-import { Component, WritableSignal, computed, effect, inject, signal } from '@angular/core';
+import { Component, WritableSignal, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
@@ -24,7 +24,13 @@ import { MunicipalMapComponent } from './components/municipal-map/municipal-map.
 import { LayerPanelComponent } from './components/layer-panel/layer-panel.component';
 import { MapControlsComponent } from './components/map-controls/map-controls.component';
 import { GisSearchComponent } from './components/gis-search/gis-search.component';
-import { AttributeExternalFilter, AttributeTableComponent, MapClickFeatureRef } from './components/attribute-table/attribute-table.component';
+import {
+  AttributeExternalFilter,
+  AttributeTableComponent,
+  MapClickFeatureRef,
+  SelectMode,
+  SelectShape
+} from './components/attribute-table/attribute-table.component';
 import { QueryBuilderComponent } from './components/query-builder/query-builder.component';
 import { MeasureComponent } from './components/measure/measure.component';
 import { BookmarksComponent } from './components/bookmarks/bookmarks.component';
@@ -534,6 +540,39 @@ export class GisWorkspaceComponent {
    *  the selection; the feature info shows in the on-map popup. */
   onFeatureInfoResults(results: FeatureInfoResult[]): void {
     this.featureInfoResults.set(results);
+  }
+
+  // ----- selection tool (map controls -> attribute table) -----
+
+  private readonly attributeTable = viewChild(AttributeTableComponent);
+  readonly selectingShape = computed(() => this.attributeTable()?.selectingShape() ?? null);
+  readonly selectedCount = computed(() => this.attributeTable()?.selectedIds().size ?? 0);
+
+  onMapClearSelection(): void {
+    const table = this.attributeTable();
+    if (!table) return;
+    table.cancelMapSelect();
+    table.clearSelection();
+    table.selectNote.set(null);
+  }
+  /** A map selection requested while the Attribute Table was not yet
+   *  rendered; started as soon as the table exists. */
+  private readonly pendingSelect = signal<{ shape: SelectShape; mode: SelectMode } | null>(null);
+  private readonly runPendingSelect = effect(() => {
+    const request = this.pendingSelect();
+    const table = this.attributeTable();
+    if (!request || !table) return;
+    this.pendingSelect.set(null);
+    table.startMapSelect(request.shape, request.mode);
+  });
+
+  /** The Selection Tool sits on the map; its result is shown in the
+   *  Attribute Table, so that panel is opened alongside. */
+  onMapSelectRequest(request: { shape: SelectShape; mode: SelectMode }): void {
+    this.bottomTool.set('attributes');
+    this.rememberOpened(this.openedBottomTools, 'attributes');
+    this.refreshMapSize();
+    this.pendingSelect.set(request);
   }
 
   // ----- query builder -----

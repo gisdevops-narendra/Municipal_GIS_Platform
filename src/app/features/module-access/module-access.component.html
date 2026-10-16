@@ -68,6 +68,14 @@
                 <span class="module-access__stat-value">{{ catalogTotal() }}</span>
                 <span class="module-access__stat-label">Modules in catalog</span>
               </div>
+              <div class="module-access__stat">
+                <span class="module-access__stat-value">{{ developedCount() }}</span>
+                <span class="module-access__stat-label">Developed</span>
+              </div>
+              <div class="module-access__stat">
+                <span class="module-access__stat-value">{{ catalogTotal() - developedCount() }}</span>
+                <span class="module-access__stat-label">Not developed yet</span>
+              </div>
             </div>
             <p class="module-access-card__hint">
               The catalog is shared by every municipality. Deleting a module also deletes its sub-modules and
@@ -167,6 +175,7 @@
                     <div class="module-access__row" [style.padding-left.px]="row.depth * 20 + 12">
                       <span class="module-access__label">{{ row.module.name }}</span>
                       <span class="module-access__id">#{{ row.module.id }}</span>
+                      <ng-container *ngTemplateOutlet="devTag; context: { $implicit: row.module.id }"></ng-container>
                       @if (row.module.type) {
                         <span class="module-access__type">{{ row.module.type }}</span>
                       }
@@ -236,6 +245,7 @@
                       (onChange)="toggle(row, $event)"
                     ></p-checkbox>
                     <label [for]="'module-' + row.module.id" class="module-access__label">{{ row.module.name }}</label>
+                    <ng-container *ngTemplateOutlet="devTag; context: { $implicit: row.module.id }"></ng-container>
                     @if (row.module.type) {
                       <span class="module-access__type">{{ row.module.type }}</span>
                     }
@@ -331,5 +341,19 @@
     </div>
   </form>
 </p-dialog>
+
+<ng-template #devTag let-id>
+  @switch (devStatus().get(id)) {
+    @case ('developed') {
+      <p-tag severity="success" value="Developed" styleClass="module-access__tag"></p-tag>
+    }
+    @case ('partial') {
+      <p-tag severity="warn" value="Partly developed" styleClass="module-access__tag"></p-tag>
+    }
+    @default {
+      <p-tag severity="danger" value="Not developed yet" styleClass="module-access__tag"></p-tag>
+    }
+  }
+</ng-template>
 
 <app-site-footer />

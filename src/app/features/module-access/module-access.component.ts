@@ -1,6 +1,7 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators, FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
+import { NgTemplateOutlet } from '@angular/common';
 import { ButtonModule } from 'primeng/button';
 import { CheckboxModule, CheckboxChangeEvent } from 'primeng/checkbox';
 import { SelectModule } from 'primeng/select';
@@ -19,7 +20,13 @@ import { NotificationService } from '../../core/services/notification.service';
 import { CurrentUser } from '../../core/models/current-user.model';
 import { Department } from '../../core/models/department.model';
 import { MunicipalityUser } from '../../core/models/municipality-user.model';
-import { ModuleCatalogEntry, ModuleType, MODULE_TYPES } from '../../core/models/module-access.model';
+import {
+  DEVELOPED_MODULE_IDS,
+  ModuleCatalogEntry,
+  ModuleDevStatus,
+  ModuleType,
+  MODULE_TYPES
+} from '../../core/models/module-access.model';
 
 /** `catalog` is the Owner's view of the module list itself (browse/delete). */
 type TargetKind = 'department' | 'user' | 'catalog';
@@ -50,23 +57,32 @@ interface ModuleRow {
   outOfReach: boolean;
 }
 
-/** Numeric, depth-first comparison of dot-separated node paths ("5.7"
- *  before "5.68" before "5.70.71") — a plain string sort would put
- *  "5.70" before "5.9" since '7' < '9' as characters. Rows without a
- *  node path sort after every row that has one. */
-function compareNodePaths(a: string | null, b: string | null): number {
-  if (a === b) return 0;
-  if (a === null) return 1;
-  if (b === null) return -1;
-  const as = a.split('.').map(Number);
-  const bs = b.split('.').map(Number);
-  const len = Math.max(as.length, bs.length);
-  for (let i = 0; i < len; i++) {
-    const av = as[i] ?? -1;
-    const bv = bs[i] ?? -1;
-    if (av !== bv) return av - bv;
+/** Catalog in display order: depth-first along the hierarchy, siblings
+ *  by displayPriority (unset last), then name — so the list reads in the
+ *  same order the tools appear in the app. Modules whose parent is
+ *  missing are listed at the end rather than dropped. */
+function orderCatalog(modules: ModuleCatalogEntry[]): ModuleCatalogEntry[] {
+  const ids = new Set(modules.map((m) => m.id));
+  const childrenOf = new Map<number | null, ModuleCatalogEntry[]>();
+  for (const m of modules) {
+    const parent = m.parentId !== null && ids.has(m.parentId) ? m.parentId : null;
+    childrenOf.set(parent, [...(childrenOf.get(parent) ?? []), m]);
   }
-  return 0;
+  const bySiblingOrder = (a: ModuleCatalogEntry, b: ModuleCatalogEntry) =>
+    (a.displayPriority ?? Number.MAX_SAFE_INTEGER) - (b.displayPriority ?? Number.MAX_SAFE_INTEGER) ||
+    a.name.localeCompare(b.name);
+  const ordered: ModuleCatalogEntry[] = [];
+  const seen = new Set<number>();
+  const walk = (parent: number | null) => {
+    for (const m of [...(childrenOf.get(parent) ?? [])].sort(bySiblingOrder)) {
+      if (seen.has(m.id)) continue;
+      seen.add(m.id);
+      ordered.push(m);
+      walk(m.id);
+    }
+  };
+  walk(null);
+  return ordered;
 }
 
 /**
@@ -84,6 +100,7 @@ function compareNodePaths(a: string | null, b: string | null): number {
   selector: 'app-module-access',
   standalone: true,
   imports: [
+    NgTemplateOutlet,
     FormsModule,
     ReactiveFormsModule,
     ButtonModule,
@@ -162,6 +179,36 @@ export class ModuleAccessComponent {
     };
     return new Map(this.catalog().map((m) => [m.id, count(m.id, new Set([m.id]))]));
   });
+
+  /** Development status per module id. A module not built itself is
+   *  "partial" when some sub-module under it is built. */
+  readonly devStatus = computed(() => {
+    const childrenOf = new Map<number, number[]>();
+    for (const m of this.catalog()) {
+      if (m.parentId === null) continue;
+      childrenOf.set(m.parentId, [...(childrenOf.get(m.parentId) ?? []), m.id]);
+    }
+    const hasDevelopedDescendant = (id: number, seen: Set<number>): boolean =>
+      (childrenOf.get(id) ?? []).some((child) => {
+        if (seen.has(child)) return false;
+        seen.add(child);
+        return DEVELOPED_MODULE_IDS.has(child) || hasDevelopedDescendant(child, seen);
+      });
+    return new Map<number, ModuleDevStatus>(
+      this.catalog().map((m) => [
+        m.id,
+        DEVELOPED_MODULE_IDS.has(m.id)
+          ? 'developed'
+          : hasDevelopedDescendant(m.id, new Set([m.id]))
+            ? 'partial'
+            : 'not-developed'
+      ])
+    );
+  });
+
+  readonly developedCount = computed(
+    () => [...this.devStatus().values()].filter((s) => s === 'developed').length
+  );
 
   readonly addModuleDialogVisible = signal(false);
   readonly addModuleSubmitting = signal(false);
@@ -268,7 +315,7 @@ export class ModuleAccessComponent {
   /** The flattened, depth-ordered, checkbox-ready module list — the
    *  core hierarchy resolution the template renders. */
   readonly rows = computed<ModuleRow[]>(() => {
-    const catalog = [...this.catalog()].sort((a, b) => compareNodePaths(a.nodePath, b.nodePath));
+    const catalog = orderCatalog(this.catalog());
     const explicit = this.explicitIds();
     const ceiling = this.ceilingIds();
     const effective = this.expandWithAncestors(explicit);
@@ -314,9 +361,7 @@ export class ModuleAccessComponent {
    *  itself, so a parent's position in the list matches where the new
    *  module will actually land. */
   readonly parentModuleOptions = computed(() =>
-    [...this.catalog()]
-      .sort((a, b) => compareNodePaths(a.nodePath, b.nodePath))
-      .map((module) => {
+    orderCatalog(this.catalog()).map((module) => {
         const depth = module.nodePath ? module.nodePath.split('.').length - 1 : 0;
         return { label: `${'—'.repeat(depth)}${depth ? ' ' : ''}${module.name}`, value: module.id };
       })
