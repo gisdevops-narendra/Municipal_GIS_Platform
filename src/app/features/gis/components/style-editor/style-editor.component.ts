@@ -139,12 +139,20 @@ export class StyleEditorComponent implements OnInit, OnDestroy {
   );
 
   private readonly change$ = new Subject<void>();
+  private pendingLiveApply = false;
 
   constructor() {
     this.change$
       .pipe(debounceTime(550), takeUntilDestroyed())
       .subscribe(() => {
-        if (this.live && this.state() !== 'applying') this.apply(true);
+        if (!this.live) return;
+        if (this.state() === 'applying') {
+          // Applied as soon as the current request finishes — dropping it
+          // left the map showing an older style than the editor.
+          this.pendingLiveApply = true;
+        } else {
+          this.apply(true);
+        }
       });
   }
 
@@ -579,11 +587,13 @@ export class StyleEditorComponent implements OnInit, OnDestroy {
         this.hasSavedStyle.set(true);
         this.applied.emit({ styleName: result.styleName });
         if (!auto) this.notify.success('Style applied.');
+        this.flushPendingLiveApply();
       },
       error: (error: HttpErrorResponse) => {
         this.state.set('error');
         this.errorMsg.set(this.msg(error));
         if (!auto) this.notify.error(this.msg(error));
+        this.flushPendingLiveApply();
       },
     });
   }
@@ -629,6 +639,12 @@ export class StyleEditorComponent implements OnInit, OnDestroy {
 
   private touch(): void {
     this.change$.next();
+  }
+
+  private flushPendingLiveApply(): void {
+    if (!this.pendingLiveApply) return;
+    this.pendingLiveApply = false;
+    this.apply(true);
   }
 
   private validated(): LayerStyleSpec | null {

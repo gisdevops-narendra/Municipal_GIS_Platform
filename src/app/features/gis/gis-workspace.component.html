@@ -57,15 +57,20 @@
         </button>
       </header>
       <div class="gis-ws__panel-body">
-        <app-style-editor
-          [target]="{ kind: 'layer', id: styleLayer.id }"
-          [geometry]="styleGeometryOf(styleLayer)"
-          [layerName]="styleLayer.name"
-          [live]="true"
-          (applied)="onStyleApplied(styleLayer)"
-          (removed)="onStyleRemoved(styleLayer)"
-          (closed)="closeStyleEditor()"
-        />
+        <!-- Keyed by layer id: styling another layer while the editor is
+             open must create a fresh editor — a reused one kept the first
+             layer's style and live-applied it to the second. -->
+        @for (l of [styleLayer]; track l.id) {
+          <app-style-editor
+            [target]="{ kind: 'layer', id: l.id }"
+            [geometry]="styleGeometryOf(l)"
+            [layerName]="l.name"
+            [live]="true"
+            (applied)="onStyleApplied(l)"
+            (removed)="onStyleRemoved(l)"
+            (closed)="closeStyleEditor()"
+          />
+        }
       </div>
       <div class="gis-ws__resize gis-ws__resize--x" (pointerdown)="startLeftResize($event)" title="Drag to resize"></div>
     </aside>
