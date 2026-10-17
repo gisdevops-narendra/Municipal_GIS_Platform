@@ -14,7 +14,7 @@ import {
 import { NgClass } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Subject, Subscription, debounceTime, distinctUntilChanged } from 'rxjs';
+import { Subject, Subscription, debounceTime, filter as rxFilter } from 'rxjs';
 import { TableModule } from 'primeng/table';
 import { PaginatorModule, PaginatorState } from 'primeng/paginator';
 import { ButtonModule } from 'primeng/button';
@@ -69,6 +69,10 @@ export interface AttributeExternalFilter {
  * `AttributeTableService` and the `selectedIds` set without touching this
  * component's rendering.
  */
+/** Integer fields that hold labels rather than quantities (shapefile names
+ *  are often cut to 10 chars: census_yea, election_w). */
+const IDENTIFIER_FIELD = /(^|_)(id|fid|gid|objectid|code|no|num|number|year|yea|yr|pin|pincode|zip|phone|mobile|srid)$/i;
+
 @Component({
   selector: 'app-attribute-table',
   standalone: true,
@@ -151,6 +155,7 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
   private readonly geomCache = new Map<string, GeoJsonGeometry | null>();
   private readonly search$ = new Subject<string>();
   private loadToken = 0;
+  private selectionToken = 0;
   private lastClickedIndex = -1;
 
   readonly visibleFields = computed(() =>
@@ -179,7 +184,10 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
 
   constructor() {
     this.search$
-      .pipe(debounceTime(300), distinctUntilChanged())
+      // Compared with the search actually applied (not the last value typed):
+      // switching layers clears `search`, and typing the same text again on
+      // the new layer must still filter it.
+      .pipe(debounceTime(300), rxFilter((value) => value.trim() !== this.search()))
       .subscribe((value) => {
         this.search.set(value.trim());
         this.first.set(0);
@@ -221,8 +229,9 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
       this.search.set('');
       this.hiddenFields.set(new Set());
       this.fields.set(this.service.getFields(filter.layerId) || []);
-      this.selectedIds.set(new Set());
       this.geomCache.clear();
+      this.lastClickedIndex = -1;
+      this.applySelection(new Set());
     }
     this.first.set(0);
     this.load();
@@ -270,10 +279,10 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
     this.search.set('');
     this.hiddenFields.set(new Set());
     this.fields.set((layerId && this.service.getFields(layerId)) || []);
-    this.selectedIds.set(new Set());
     this.geomCache.clear();
     this.lastClickedIndex = -1;
-    this.mapService.clearSelectionHighlight();
+    // Emits too, so Report Generation drops the previous layer's selection.
+    this.applySelection(new Set());
     if (this.baseFilter()) {
       // the query filter belonged to the previous layer
       this.baseFilter.set(null);
@@ -313,6 +322,8 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
       next: (page) => {
         if (token !== this.loadToken) return;
         this.rows.set(page.rows);
+        // Row indexes now refer to a different page / order.
+        this.lastClickedIndex = -1;
         this.total.set(page.total);
         if (page.fields.length > 0) {
           this.fields.set(page.fields);
@@ -489,6 +500,7 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
   }
 
   private applySelection(ids: Set<string>): void {
+    const token = ++this.selectionToken;
     this.selectedIds.set(ids);
     const layerId = this.activeLayerId();
     if (layerId) this.selectionChange.emit({ layerId, featureIds: [...ids] });
@@ -496,7 +508,10 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
       this.mapService.clearSelectionHighlight();
       return;
     }
-    this.withGeometries([...ids], (geometries) => this.mapService.setSelectionHighlight(geometries));
+    this.withGeometries([...ids], (geometries) => {
+      // A newer selection may have been made while geometries loaded.
+      if (token === this.selectionToken) this.mapService.setSelectionHighlight(geometries);
+    });
   }
 
   /** Ensures every id has a cached geometry (fetching the missing ones by
@@ -599,7 +614,9 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
         return value === true || value === 'true' ? 'Yes' : 'No';
       case 'integer': {
         const num = Number(value);
-        return Number.isFinite(num) ? num.toLocaleString() : String(value);
+        if (!Number.isFinite(num)) return String(value);
+        // Years, ids and codes are labels, not amounts: 2011, not "2,011".
+        return IDENTIFIER_FIELD.test(field.name) ? String(num) : num.toLocaleString();
       }
       case 'number': {
         const num = Number(value);

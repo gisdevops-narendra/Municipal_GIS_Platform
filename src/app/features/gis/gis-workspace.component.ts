@@ -386,6 +386,12 @@ export class GisWorkspaceComponent {
         this.rememberOpened(this.openedBottomTools, tool.id);
       }
     }
+    // On a phone both docks are full-width overlays: the one just opened
+    // would sit hidden under the other, so close the other one.
+    if (typeof window !== 'undefined' && window.innerWidth < 900) {
+      if (tool.dock === 'left' && this.leftTool()) this.bottomTool.set(null);
+      if (tool.dock !== 'left' && this.bottomTool()) this.leftTool.set(null);
+    }
     this.refreshMapSize();
   }
 
