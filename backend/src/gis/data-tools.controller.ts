@@ -29,6 +29,11 @@ import {
   FieldManageDto,
   FindReplaceDto,
   SplitLayerDto,
+  AppendDto,
+  AutoNumberDto,
+  ChangeTypeDto,
+  DuplicatesDto,
+  StandardiseDto,
 } from './dto/data-tools.dto';
 
 const CSV_LIMIT = { limits: { fileSize: 20 * 1024 * 1024 } };
@@ -38,6 +43,47 @@ const CSV_LIMIT = { limits: { fileSize: 20 * 1024 * 1024 } };
 @Controller('gis')
 export class DataToolsController {
   constructor(private readonly dataTools: DataToolsService) {}
+
+  @RequireMunicipalityMember()
+  @Post('layers/:id/auto-number')
+  @HttpCode(200)
+  autoNumber(@CurrentAppUser() appUser: AppUser, @Param('id') id: string, @Body() dto: AutoNumberDto) {
+    return this.dataTools.autoNumber(appUser, id, dto);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('layers/:id/change-type')
+  @HttpCode(200)
+  changeType(@CurrentAppUser() appUser: AppUser, @Param('id') id: string, @Body() dto: ChangeTypeDto) {
+    return this.dataTools.changeType(appUser, id, dto);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('layers/:id/duplicates')
+  @HttpCode(200)
+  duplicates(@CurrentAppUser() appUser: AppUser, @Param('id') id: string, @Body() dto: DuplicatesDto) {
+    return this.dataTools.duplicates(appUser, id, dto);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('layers/:id/standardise')
+  @HttpCode(200)
+  standardise(@CurrentAppUser() appUser: AppUser, @Param('id') id: string, @Body() dto: StandardiseDto) {
+    return this.dataTools.standardise(appUser, id, dto);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('layers/:id/append')
+  @HttpCode(200)
+  append(@CurrentAppUser() appUser: AppUser, @Param('id') id: string, @Body() dto: AppendDto) {
+    return this.dataTools.append(appUser, id, dto);
+  }
+
+  @RequireMunicipalityMember()
+  @Get('layers/:id/change-log')
+  changeLog(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
+    return this.dataTools.changeLog(appUser, id);
+  }
 
   @RequireMunicipalityMember()
   @Post('layers/:id/fields')

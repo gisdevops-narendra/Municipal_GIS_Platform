@@ -221,3 +221,82 @@ export class SplitLayerDto {
   @MaxLength(63)
   field!: string;
 }
+
+// ----- Data Tools batch 3 -----
+
+export class AutoNumberDto {
+  @IsString()
+  @MaxLength(63)
+  field!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  prefix?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1_000_000)
+  start?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(10)
+  pad?: number;
+
+  /** Restart numbering within each value of this field (e.g. ward). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(63)
+  groupBy?: string;
+}
+
+export class ChangeTypeDto {
+  @IsString()
+  @MaxLength(63)
+  field!: string;
+
+  @IsIn(['text', 'integer', 'double precision', 'date', 'boolean'])
+  to!: 'text' | 'integer' | 'double precision' | 'date' | 'boolean';
+
+  @IsOptional()
+  @IsBoolean()
+  preview?: boolean;
+}
+
+export class DuplicatesDto {
+  @IsArray()
+  @ArrayMaxSize(5)
+  @IsString({ each: true })
+  fields!: string[];
+}
+
+export class StandardiseDto {
+  @IsString()
+  @MaxLength(63)
+  field!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  trim?: boolean;
+
+  @IsOptional()
+  @IsIn(['upper', 'lower', 'title'])
+  letterCase?: 'upper' | 'lower' | 'title';
+
+  /** "-", "NA", "N/A", "null", "" → empty (NULL). */
+  @IsOptional()
+  @IsBoolean()
+  nullify?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  preview?: boolean;
+}
+
+export class AppendDto {
+  @IsUUID()
+  sourceLayerId!: string;
+}

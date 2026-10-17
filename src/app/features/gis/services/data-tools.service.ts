@@ -59,6 +59,36 @@ export class DataToolsService {
   private readonly http = inject(HttpClient);
   private readonly baseUrl = `${environment.apiUrl}/gis`;
 
+  autoNumber(layerId: string, body: { field: string; prefix?: string; start?: number; pad?: number; groupBy?: string }) {
+    return this.http.post<{ field: string; changed: number }>(`${this.baseUrl}/layers/${layerId}/auto-number`, body);
+  }
+
+  changeType(layerId: string, body: { field: string; to: string; preview?: boolean }) {
+    return this.http.post<{ from: string; to: string; values?: number; unconvertible?: number; sample?: string[]; converted?: number; emptied?: number }>(
+      `${this.baseUrl}/layers/${layerId}/change-type`, body
+    );
+  }
+
+  duplicates(layerId: string, fields: string[]) {
+    return this.http.post<{ groups: { key: string; n: number; ids: number[] }[]; duplicateFeatures: number }>(`${this.baseUrl}/layers/${layerId}/duplicates`, { fields });
+  }
+
+  standardise(layerId: string, body: { field: string; trim?: boolean; letterCase?: string; nullify?: boolean; preview?: boolean }) {
+    return this.http.post<{ changed?: number; total?: number; preview?: { before: string | null; after: string | null; n: number }[] }>(
+      `${this.baseUrl}/layers/${layerId}/standardise`, body
+    );
+  }
+
+  append(layerId: string, sourceLayerId: string) {
+    return this.http.post<{ added: number; sharedFields: string[]; skippedFields: string[] }>(`${this.baseUrl}/layers/${layerId}/append`, { sourceLayerId });
+  }
+
+  changeLog(layerId: string) {
+    return this.http.get<{ total: number; editors: number; last: string | null; rows: { at: string; user: string | null; action: string; feature: number; fields: string | null }[] }>(
+      `${this.baseUrl}/layers/${layerId}/change-log`
+    );
+  }
+
   manageField(layerId: string, body: { action: 'add' | 'rename' | 'delete'; field: string; type?: string; newName?: string }) {
     return this.http.post<{ fields: { name: string; dataType: string }[] }>(`${this.baseUrl}/layers/${layerId}/fields`, body);
   }

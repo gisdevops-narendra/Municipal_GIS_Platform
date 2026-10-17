@@ -1,3 +1,4 @@
+import { MultiSelectModule } from 'primeng/multiselect';
 import { NotificationService } from '../../../../core/services/notification.service';
 import { Component, EventEmitter, Input, Output, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -24,7 +25,7 @@ import {
   VERSIONS_MODULE_ID
 } from '../../services/data-tools.service';
 
-type Tool = 'calc' | 'fields' | 'geometry' | 'replace' | 'join' | 'geocode' | 'validate' | 'completeness' | 'rules' | 'versions' | 'split';
+type Tool = 'calc' | 'fields' | 'geometry' | 'replace' | 'autonum' | 'convert' | 'standardise' | 'join' | 'geocode' | 'append' | 'split' | 'validate' | 'completeness' | 'duplicates' | 'rules' | 'versions' | 'changelog';
 
 interface Field {
   name: string;
@@ -69,7 +70,7 @@ const CHECK_COLORS: Record<TopologyIssue['check'], string> = {
 @Component({
   selector: 'app-data-tools',
   standalone: true,
-  imports: [FormsModule, DatePipe, ButtonModule, SelectModule, MessageModule],
+  imports: [FormsModule, DatePipe, ButtonModule, SelectModule, MultiSelectModule, MessageModule],
   templateUrl: './data-tools.component.html',
   styleUrls: ['../buffer-overlay/buffer-overlay.component.scss', './data-tools.component.scss']
 })
@@ -93,18 +94,29 @@ export class DataToolsComponent {
 
   readonly tools = computed(() =>
     [
-      { value: 'calc' as Tool, label: 'Calculator', moduleId: FIELD_CALCULATOR_MODULE_ID },
-      { value: 'fields' as Tool, label: 'Fields', moduleId: FIELD_CALCULATOR_MODULE_ID },
-      { value: 'geometry' as Tool, label: 'Geometry', moduleId: FIELD_CALCULATOR_MODULE_ID },
-      { value: 'replace' as Tool, label: 'Replace', moduleId: FIELD_CALCULATOR_MODULE_ID },
-      { value: 'join' as Tool, label: 'Join', moduleId: TABLE_JOIN_MODULE_ID },
-      { value: 'geocode' as Tool, label: 'Geocode', moduleId: GEOCODE_MODULE_ID },
-      { value: 'validate' as Tool, label: 'Validate', moduleId: TOPOLOGY_MODULE_ID },
-      { value: 'completeness' as Tool, label: 'Completeness', moduleId: TOPOLOGY_MODULE_ID },
-      { value: 'rules' as Tool, label: 'Rules', moduleId: FIELD_RULES_MODULE_ID },
-      { value: 'versions' as Tool, label: 'Versions', moduleId: VERSIONS_MODULE_ID },
-      { value: 'split' as Tool, label: 'Split', moduleId: FIELD_CALCULATOR_MODULE_ID }
+      { value: 'calc' as Tool, group: 'Fields & values', label: 'Field Calculator', moduleId: FIELD_CALCULATOR_MODULE_ID },
+      { value: 'fields' as Tool, group: 'Fields & values', label: 'Add / Rename / Delete Field', moduleId: FIELD_CALCULATOR_MODULE_ID },
+      { value: 'geometry' as Tool, group: 'Fields & values', label: 'Calculate Geometry', moduleId: FIELD_CALCULATOR_MODULE_ID },
+      { value: 'replace' as Tool, group: 'Fields & values', label: 'Find & Replace', moduleId: FIELD_CALCULATOR_MODULE_ID },
+      { value: 'autonum' as Tool, group: 'Fields & values', label: 'Auto-number IDs', moduleId: FIELD_CALCULATOR_MODULE_ID },
+      { value: 'convert' as Tool, group: 'Fields & values', label: 'Change Field Type', moduleId: FIELD_CALCULATOR_MODULE_ID },
+      { value: 'standardise' as Tool, group: 'Fields & values', label: 'Standardise Values', moduleId: FIELD_CALCULATOR_MODULE_ID },
+      { value: 'validate' as Tool, group: 'Data quality', label: 'Topology Validation', moduleId: TOPOLOGY_MODULE_ID },
+      { value: 'completeness' as Tool, group: 'Data quality', label: 'Completeness Report', moduleId: TOPOLOGY_MODULE_ID },
+      { value: 'duplicates' as Tool, group: 'Data quality', label: 'Find Duplicates', moduleId: TOPOLOGY_MODULE_ID },
+      { value: 'rules' as Tool, group: 'Data quality', label: 'Field Rules', moduleId: FIELD_RULES_MODULE_ID },
+      { value: 'join' as Tool, group: 'Import & combine', label: 'CSV Join', moduleId: TABLE_JOIN_MODULE_ID },
+      { value: 'geocode' as Tool, group: 'Import & combine', label: 'Geocode Addresses', moduleId: GEOCODE_MODULE_ID },
+      { value: 'append' as Tool, group: 'Import & combine', label: 'Append Features', moduleId: FIELD_CALCULATOR_MODULE_ID },
+      { value: 'split' as Tool, group: 'Import & combine', label: 'Split Layer by Attribute', moduleId: FIELD_CALCULATOR_MODULE_ID },
+      { value: 'versions' as Tool, group: 'History', label: 'Versions', moduleId: VERSIONS_MODULE_ID },
+      { value: 'changelog' as Tool, group: 'History', label: 'Change Log', moduleId: VERSIONS_MODULE_ID }
     ].filter((t) => this.allowedSignal().has(t.moduleId))
+  );
+  readonly toolGroups = computed(() =>
+    ['Fields & values', 'Data quality', 'Import & combine', 'History']
+      .map((label) => ({ label, items: this.tools().filter((t) => t.group === label) }))
+      .filter((g) => g.items.length)
   );
   readonly tool = signal<Tool>('calc');
 
@@ -147,6 +159,31 @@ export class DataToolsComponent {
   readonly textFields = computed(() => this.fields().filter((f) => /char|text/.test(f.type)));
   readonly completenessResult = signal<{ total: number; complete: number; fields: { field: string; type: string; filled: number; empty: number; pct: number }[] } | null>(null);
   splitField: string | null = null;
+
+  // ----- batch 3 -----
+  autoField = 'asset_id';
+  autoPrefix = '';
+  autoStart = 1;
+  autoPad = 4;
+  autoGroup: string | null = null;
+  convertField: string | null = null;
+  convertTo = 'integer';
+  readonly convertPreview = signal<{ from: string; to: string; values?: number; unconvertible?: number; sample?: string[] } | null>(null);
+  dupFields: string[] = [];
+  readonly dupResult = signal<{ groups: { key: string; n: number; ids: number[] }[]; duplicateFeatures: number } | null>(null);
+  stdField: string | null = null;
+  stdTrim = true;
+  stdCase: string | null = null;
+  stdNullify = true;
+  readonly stdPreview = signal<{ before: string | null; after: string | null; n: number }[] | null>(null);
+  readonly stdTotal = signal(0);
+  appendSource: string | null = null;
+  readonly appendOptions = computed(() => {
+    const target = this.layersSignal().find((l) => l.id === this.layerId());
+    return this.vectorLayers().filter((o) => o.value !== this.layerId() && this.layersSignal().find((l) => l.id === o.value)?.geometryType === target?.geometryType);
+  });
+  readonly logResult = signal<{ total: number; editors: number; last: string | null; rows: { at: string; user: string | null; action: string; feature: number; fields: string | null }[] } | null>(null);
+  readonly caseOptions = [{ label: 'Keep as is', value: null }, { label: 'UPPER CASE', value: 'upper' }, { label: 'lower case', value: 'lower' }, { label: 'Title Case', value: 'title' }];
   readonly fieldOptions = computed(() => this.fields().map((f) => ({ label: f.name, value: f.name })));
   readonly running = signal(false);
   readonly error = signal<string | null>(null);
@@ -607,6 +644,127 @@ export class DataToolsComponent {
       this.notice.set(`Created ${r.created.length} layer(s): ${r.created.map((c) => `${c.name} (${c.features})`).join(', ')}.`);
       this.layerCreated.emit(undefined as unknown as GisLayer);
     });
+  }
+
+
+  // ----- Auto-number -----
+
+  runAutoNumber(): void {
+    const layerId = this.layerId();
+    if (!layerId || !this.autoField.trim()) return this.error.set('Enter the field to fill.');
+    this.run(
+      this.api.autoNumber(layerId, { field: this.autoField.trim(), prefix: this.autoPrefix, start: this.autoStart, pad: this.autoPad, groupBy: this.autoGroup ?? undefined }),
+      (r) => {
+        this.notice.set(`"${r.field}" numbered on ${r.changed} feature(s).`);
+        this.selectLayer(layerId);
+      }
+    );
+  }
+
+  autoExample(): string {
+    return `${this.autoPrefix}${String(Math.max(0, Math.round(this.autoStart || 0))).padStart(Math.max(1, Math.round(this.autoPad || 1)), '0')}`;
+  }
+
+  // ----- Change type -----
+
+  previewConvert(): void {
+    const layerId = this.layerId();
+    if (!layerId || !this.convertField) return this.error.set('Choose a field.');
+    this.run(this.api.changeType(layerId, { field: this.convertField, to: this.convertTo, preview: true }), (r) => this.convertPreview.set(r));
+  }
+
+  runConvert(): void {
+    const layerId = this.layerId();
+    const p = this.convertPreview();
+    if (!layerId || !this.convertField || !p) return;
+    this.notify.confirm({
+      header: 'Change field type',
+      message: `Convert "${this.convertField}" to ${this.convertTo}? ${p.unconvertible ? `${p.unconvertible} value(s) cannot be converted and will become empty. ` : ''}Save a version first if unsure.`,
+      confirmLabel: 'Convert',
+      destructive: !!p.unconvertible,
+      accept: () =>
+        this.run(this.api.changeType(layerId, { field: this.convertField!, to: this.convertTo }), (r) => {
+          this.notice.set(`Converted ${r.converted} value(s)${r.emptied ? `; ${r.emptied} emptied` : ''}.`);
+          this.convertPreview.set(null);
+          this.selectLayer(layerId);
+        })
+    });
+  }
+
+  // ----- Duplicates -----
+
+  runDuplicates(): void {
+    const layerId = this.layerId();
+    if (!layerId || !this.dupFields.length) return this.error.set('Choose one or more fields.');
+    this.run(this.api.duplicates(layerId, this.dupFields), (r) => {
+      this.dupResult.set(r);
+      if (!r.groups.length) this.notice.set('No duplicates found.');
+    });
+  }
+
+  // ----- Standardise -----
+
+  private stdBody(preview: boolean) {
+    return { field: this.stdField ?? '', trim: this.stdTrim, letterCase: this.stdCase ?? undefined, nullify: this.stdNullify, preview };
+  }
+
+  previewStandardise(): void {
+    const layerId = this.layerId();
+    if (!layerId || !this.stdField) return this.error.set('Choose a text field.');
+    this.run(this.api.standardise(layerId, this.stdBody(true)), (r) => {
+      this.stdPreview.set(r.preview ?? []);
+      this.stdTotal.set(r.total ?? 0);
+      if (!r.total) this.notice.set('Nothing to change — the values are already clean.');
+    });
+  }
+
+  runStandardise(): void {
+    const layerId = this.layerId();
+    if (!layerId || !this.stdField) return;
+    this.run(this.api.standardise(layerId, this.stdBody(false)), (r) => {
+      this.stdPreview.set(null);
+      this.notice.set(`${r.changed} feature(s) cleaned. Each change is in the feature's edit history.`);
+      this.mapService.refreshLayerStyle(layerId);
+    });
+  }
+
+  // ----- Append -----
+
+  runAppend(): void {
+    const layerId = this.layerId();
+    const sourceId = this.appendSource;
+    if (!layerId || !sourceId) return this.error.set('Choose the layer to append from.');
+    const sourceName = this.layersSignal().find((l) => l.id === sourceId)?.name ?? 'that layer';
+    this.notify.confirm({
+      header: 'Append features',
+      message: `Copy every feature of "${sourceName}" into this layer? Fields with the same name are filled; others stay empty.`,
+      confirmLabel: 'Append',
+      accept: () =>
+        this.run(this.api.append(layerId, sourceId), (r) => {
+          this.notice.set(`${r.added} feature(s) added. Matched fields: ${r.sharedFields.join(', ') || 'none'}.${r.skippedFields.length ? ` Not copied: ${r.skippedFields.join(', ')}.` : ''}`);
+          this.mapService.refreshLayerStyle(layerId);
+        })
+    });
+  }
+
+  // ----- Change log -----
+
+  runChangeLog(): void {
+    const layerId = this.layerId();
+    if (!layerId) return;
+    this.run(this.api.changeLog(layerId), (r) => this.logResult.set(r));
+  }
+
+  exportChangeLog(): void {
+    const r = this.logResult();
+    if (!r) return;
+    const rows = [['When', 'Who', 'Action', 'Feature', 'Fields changed'], ...r.rows.map((x) => [x.at, x.user ?? '', x.action, String(x.feature), x.fields ?? ''])];
+    const csv = rows.map((row) => row.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = 'change-log.csv';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
   // ----- shared -----

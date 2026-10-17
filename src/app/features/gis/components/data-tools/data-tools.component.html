@@ -1,10 +1,22 @@
 <div class="bo">
   @if (tools().length > 1) {
-    <div class="bo__modes dt__tabs" role="tablist">
-      @for (t of tools(); track t.value) {
-        <button type="button" class="bo__mode" [class.bo__mode--active]="tool() === t.value" (click)="setTool(t.value)">{{ t.label }}</button>
-      }
-    </div>
+    <label class="bo__field">
+      <span class="bo__label">Tool</span>
+      <p-select
+        class="bo__select"
+        [options]="toolGroups()"
+        [group]="true"
+        optionGroupLabel="label"
+        optionGroupChildren="items"
+        optionLabel="label"
+        optionValue="value"
+        [filter]="true"
+        filterBy="label"
+        [ngModel]="tool()"
+        (ngModelChange)="setTool($event)"
+        appendTo="body"
+      />
+    </label>
   }
 
   @if (tool() !== 'geocode') {
@@ -223,6 +235,127 @@
               </li>
             }
           </ul>
+        }
+      }
+    }
+
+    <!-- ============ AUTO-NUMBER ============ -->
+    @case ('autonum') {
+      @if (layerId()) {
+        <label class="bo__field"><span class="bo__label">Field (created as text if missing)</span><input type="text" class="bo__input" maxlength="63" [(ngModel)]="autoField" /></label>
+        <div class="bo__row">
+          <label class="bo__field bo__field--grow"><span class="bo__label">Prefix</span><input type="text" class="bo__input" maxlength="20" [(ngModel)]="autoPrefix" placeholder="e.g. VLV-" /></label>
+          <label class="bo__field"><span class="bo__label">Start</span><input type="number" class="bo__input" min="0" [(ngModel)]="autoStart" style="width: 80px" /></label>
+          <label class="bo__field"><span class="bo__label">Digits</span><input type="number" class="bo__input" min="1" max="10" [(ngModel)]="autoPad" style="width: 70px" /></label>
+        </div>
+        <label class="bo__field"><span class="bo__label">Restart numbering for each (optional)</span>
+          <p-select class="bo__select" [options]="fields()" optionLabel="name" optionValue="name" [(ngModel)]="autoGroup" [showClear]="true" placeholder="One sequence for the whole layer" appendTo="body" /></label>
+        <p class="bo__hint">First ID: <strong>{{ autoExample() }}</strong></p>
+        <div class="bo__controls">
+          <button pButton type="button" label="Number features" icon="pi pi-sort-numeric-up" class="p-button-sm bo__run" [loading]="running()" (click)="runAutoNumber()"></button>
+        </div>
+      }
+    }
+
+    <!-- ============ CHANGE TYPE ============ -->
+    @case ('convert') {
+      @if (layerId()) {
+        <label class="bo__field"><span class="bo__label">Field</span>
+          <p-select class="bo__select" [options]="fields()" optionLabel="name" optionValue="name" [(ngModel)]="convertField" (ngModelChange)="convertPreview.set(null)" [filter]="true" placeholder="Choose a field" appendTo="body" /></label>
+        <label class="bo__field"><span class="bo__label">New type</span>
+          <p-select class="bo__select" [options]="fieldTypes" optionLabel="label" optionValue="value" [(ngModel)]="convertTo" (ngModelChange)="convertPreview.set(null)" appendTo="body" /></label>
+        @if (convertPreview(); as p) {
+          <p class="bo__result">
+            {{ p.values }} value(s) · {{ p.unconvertible ? p.unconvertible + ' cannot be converted and would become empty' : 'all convert cleanly' }}.
+            @if (p.sample?.length) { <br /><span class="dt__muted">e.g. {{ p.sample!.join(', ') }}</span> }
+          </p>
+        }
+        <div class="bo__controls">
+          <button pButton type="button" label="Check" icon="pi pi-eye" class="p-button-sm p-button-outlined" [loading]="running()" (click)="previewConvert()"></button>
+          <button pButton type="button" label="Convert" icon="pi pi-check" class="p-button-sm bo__run" [disabled]="!convertPreview() || running()" (click)="runConvert()"></button>
+        </div>
+      }
+    }
+
+    <!-- ============ STANDARDISE ============ -->
+    @case ('standardise') {
+      @if (layerId()) {
+        <label class="bo__field"><span class="bo__label">Text field</span>
+          <p-select class="bo__select" [options]="textFields()" optionLabel="name" optionValue="name" [(ngModel)]="stdField" (ngModelChange)="stdPreview.set(null)" [filter]="true" placeholder="Choose a field" appendTo="body" /></label>
+        <label class="bo__toggle"><input type="checkbox" [(ngModel)]="stdTrim" (ngModelChange)="stdPreview.set(null)" /><span>Trim and collapse extra spaces</span></label>
+        <label class="bo__toggle"><input type="checkbox" [(ngModel)]="stdNullify" (ngModelChange)="stdPreview.set(null)" /><span>Turn "-", "NA", "N/A", "null" into empty</span></label>
+        <label class="bo__field"><span class="bo__label">Letter case</span>
+          <p-select class="bo__select" [options]="caseOptions" optionLabel="label" optionValue="value" [(ngModel)]="stdCase" (ngModelChange)="stdPreview.set(null)" appendTo="body" /></label>
+        @if (stdPreview(); as rows) {
+          @if (rows.length) {
+            <p class="bo__result">{{ stdTotal() }} feature(s) would change, e.g.:</p>
+            <ul class="bo__rings">
+              @for (r of rows; track $index) {
+                <li class="bo__ring"><span class="bo__ring-label">"{{ r.before }}" → {{ r.after === null ? '(empty)' : '"' + r.after + '"' }}</span><span class="bo__ring-count">{{ r.n }}</span></li>
+              }
+            </ul>
+          }
+        }
+        <div class="bo__controls">
+          <button pButton type="button" label="Preview" icon="pi pi-eye" class="p-button-sm p-button-outlined" [loading]="running()" (click)="previewStandardise()"></button>
+          <button pButton type="button" label="Apply" icon="pi pi-check" class="p-button-sm bo__run" [disabled]="!stdPreview()?.length || running()" (click)="runStandardise()"></button>
+        </div>
+      }
+    }
+
+    <!-- ============ DUPLICATES ============ -->
+    @case ('duplicates') {
+      @if (layerId()) {
+        <label class="bo__field"><span class="bo__label">Same values in (up to 5 fields)</span>
+          <p-multiselect class="bo__select" [options]="fields()" optionLabel="name" optionValue="name" [(ngModel)]="dupFields" [selectionLimit]="5" [filter]="true" placeholder="e.g. valve_id" appendTo="body" display="chip" /></label>
+        <div class="bo__controls">
+          <button pButton type="button" label="Find duplicates" icon="pi pi-copy" class="p-button-sm bo__run" [loading]="running()" (click)="runDuplicates()"></button>
+        </div>
+        @if (dupResult(); as d) {
+          @if (d.groups.length) {
+            <p class="bo__result">{{ d.groups.length }} duplicated value(s) across {{ d.duplicateFeatures }} feature(s).</p>
+            <ul class="bo__rings">
+              @for (g of d.groups.slice(0, 50); track $index) {
+                <li class="bo__ring" [title]="'Feature ids: ' + g.ids.join(', ')"><span class="bo__ring-label">{{ g.key }}</span><span class="bo__ring-count">×{{ g.n }}</span></li>
+              }
+            </ul>
+          }
+        }
+      }
+    }
+
+    <!-- ============ APPEND ============ -->
+    @case ('append') {
+      @if (layerId()) {
+        <label class="bo__field"><span class="bo__label">Copy features from</span>
+          <p-select class="bo__select" [options]="appendOptions()" optionLabel="label" optionValue="value" [(ngModel)]="appendSource" [filter]="true" placeholder="A layer of the same geometry type" appendTo="body" /></label>
+        <p class="bo__hint">Adds every feature of that layer to the layer above. Fields with the same name are filled; the source layer is not changed.</p>
+        <div class="bo__controls">
+          <button pButton type="button" label="Append" icon="pi pi-plus" class="p-button-sm bo__run" [loading]="running()" (click)="runAppend()"></button>
+        </div>
+      }
+    }
+
+    <!-- ============ CHANGE LOG ============ -->
+    @case ('changelog') {
+      @if (layerId()) {
+        <div class="bo__controls">
+          <button pButton type="button" label="Show change log" icon="pi pi-history" class="p-button-sm bo__run" [loading]="running()" (click)="runChangeLog()"></button>
+          @if (logResult()?.rows?.length) {
+            <button pButton type="button" label="CSV" icon="pi pi-download" class="p-button-sm p-button-text" (click)="exportChangeLog()"></button>
+          }
+        </div>
+        @if (logResult(); as log) {
+          <p class="bo__result">{{ log.total }} change(s) by {{ log.editors }} editor(s){{ log.last ? ' · last ' + (log.last | date: 'd MMM y, h:mm a') : '' }}.</p>
+          <div class="dt__log">
+            @for (r of log.rows; track $index) {
+              <div class="dt__log-row">
+                <span class="dt__log-when">{{ r.at | date: 'd MMM, h:mm a' }}</span>
+                <span class="dt__log-what"><b>{{ r.action === 'INSERT' ? 'Added' : r.action === 'UPDATE' ? 'Edited' : 'Deleted' }}</b> #{{ r.feature }}{{ r.fields ? ' · ' + r.fields : '' }}</span>
+                <span class="dt__log-who">{{ r.user ?? '—' }}</span>
+              </div>
+            }
+          </div>
         }
       }
     }

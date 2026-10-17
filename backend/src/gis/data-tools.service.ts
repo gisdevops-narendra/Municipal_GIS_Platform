@@ -25,6 +25,11 @@ import type {
   FieldManageDto,
   FindReplaceDto,
   SplitLayerDto,
+  AppendDto,
+  AutoNumberDto,
+  ChangeTypeDto,
+  DuplicatesDto,
+  StandardiseDto,
 } from './dto/data-tools.dto';
 
 /** Module Access catalog ids (seed-modules.ts). */
@@ -284,6 +289,177 @@ export class DataToolsService {
       created.push({ name, features: n });
     }
     return { created };
+  }
+
+  // ----- Auto-number -----
+
+  async autoNumber(appUser: AppUser, layerId: string, dto: AutoNumberDto) {
+    await this.vectorTools.requireModule(appUser, FIELD_CALCULATOR_MODULE_ID, 'Field Calculator');
+    const source = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
+    const columns = await this.vectorTools.columns(source.table);
+    const group = dto.groupBy ? columns.find((c) => c.name === dto.groupBy) : undefined;
+    if (dto.groupBy && !group) throw new BadRequestException(`Field "${dto.groupBy}" does not exist.`);
+    if (!columns.some((c) => c.name === dto.field)) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(dto.field) || PROTECTED_COLUMNS.has(dto.field.toLowerCase())) {
+        throw new BadRequestException('Field names use letters, digits and _ only, starting with a letter.');
+      }
+      await this.prisma.$executeRawUnsafe(`ALTER TABLE "${source.table}" ADD COLUMN ${q(dto.field)} text`);
+      await this.refreshLayer(source);
+    }
+    const start = Math.round(dto.start ?? 1);
+    const pad = Math.round(dto.pad ?? 4);
+    const partition = group ? `PARTITION BY ${q(group.name)} ` : '';
+    const changed = await this.bulkUpdate(appUser, layerId, source.table, {
+      columns: [dto.field],
+      // $1 = prefix
+      set: `${q(dto.field)} = $1 || lpad((n.rn + ${start - 1})::text, ${pad}, '0')`,
+      params: [dto.prefix ?? ''],
+      from: `(SELECT ogc_fid, row_number() OVER (${partition}ORDER BY ogc_fid) AS rn FROM "${source.table}") n`,
+      where: 't.ogc_fid = n.ogc_fid',
+    });
+    return { field: dto.field, changed };
+  }
+
+  // ----- Change field type -----
+
+  async changeType(appUser: AppUser, layerId: string, dto: ChangeTypeDto) {
+    await this.vectorTools.requireModule(appUser, FIELD_CALCULATOR_MODULE_ID, 'Field Calculator');
+    const source = await this.gisLayers.vectorSource(appUser, layerId, dto.preview ? 'view' : 'edit');
+    const column = (await this.vectorTools.columns(source.table)).find((c) => c.name === dto.field);
+    if (!column || PROTECTED_COLUMNS.has(dto.field.toLowerCase())) throw new BadRequestException(`Field "${dto.field}" does not exist.`);
+    const v = `trim(${q(column.name)}::text)`;
+    const ok: Record<string, string> = {
+      text: 'true',
+      integer: `${v} ~ '^-?[0-9]+(\\.0+)?$'`,
+      'double precision': `${v} ~ '^-?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)([eE][-+]?[0-9]+)?$'`,
+      date: `${v} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'`,
+      boolean: `lower(${v}) IN ('true', 'false', 'yes', 'no', 'y', 'n', '1', '0', 't', 'f')`,
+    };
+    const cast: Record<string, string> = {
+      text: `${q(column.name)}::text`,
+      integer: `round(${v}::numeric)::integer`,
+      'double precision': `${v}::double precision`,
+      date: `substr(${v}, 1, 10)::date`,
+      boolean: `lower(${v}) IN ('true', 'yes', 'y', '1', 't')`,
+    };
+    const [row] = await this.prisma.$queryRawUnsafe<{ total: number; bad: number; sample: string[] | null }[]>(
+      `SELECT count(*) FILTER (WHERE ${q(column.name)} IS NOT NULL AND ${v} <> '')::int AS total,
+              count(*) FILTER (WHERE ${q(column.name)} IS NOT NULL AND ${v} <> '' AND NOT (${ok[dto.to]}))::int AS bad,
+              (array_agg(DISTINCT ${v}) FILTER (WHERE ${q(column.name)} IS NOT NULL AND ${v} <> '' AND NOT (${ok[dto.to]})))[1:5] AS sample
+         FROM "${source.table}"`,
+    );
+    if (dto.preview) return { from: column.dataType, to: dto.to, values: row.total, unconvertible: row.bad, sample: row.sample ?? [] };
+    await this.prisma.$executeRawUnsafe(
+      `ALTER TABLE "${source.table}" ALTER COLUMN ${q(column.name)} TYPE ${dto.to}
+         USING CASE WHEN ${q(column.name)} IS NULL OR ${v} = '' OR NOT (${ok[dto.to]}) THEN NULL ELSE ${cast[dto.to]} END`,
+    );
+    await this.refreshLayer(source);
+    return { from: column.dataType, to: dto.to, converted: row.total - row.bad, emptied: row.bad };
+  }
+
+  // ----- Duplicates by attributes -----
+
+  async duplicates(appUser: AppUser, layerId: string, dto: DuplicatesDto) {
+    await this.vectorTools.requireModule(appUser, TOPOLOGY_MODULE_ID, 'Topology Validation');
+    const source = await this.gisLayers.vectorSource(appUser, layerId, 'view');
+    const columns = await this.vectorTools.columns(source.table);
+    const fields = dto.fields.map((f) => {
+      const c = columns.find((x) => x.name === f);
+      if (!c) throw new BadRequestException(`Field "${f}" does not exist.`);
+      return q(c.name);
+    });
+    if (!fields.length) throw new BadRequestException('Choose at least one field.');
+    const notBlank = fields.map((f) => `${f} IS NOT NULL AND trim(${f}::text) <> ''`).join(' AND ');
+    const groups = await this.prisma.$queryRawUnsafe<{ key: string; n: number; ids: number[] }[]>(
+      `SELECT concat_ws(' · ', ${fields.map((f) => `${f}::text`).join(', ')}) AS key, count(*)::int AS n,
+              (array_agg(ogc_fid ORDER BY ogc_fid))[1:20] AS ids
+         FROM "${source.table}" WHERE ${notBlank}
+        GROUP BY ${fields.join(', ')} HAVING count(*) > 1 ORDER BY count(*) DESC LIMIT 200`,
+    );
+    return { groups, duplicateFeatures: groups.reduce((s, g) => s + g.n, 0) };
+  }
+
+  // ----- Standardise values -----
+
+  async standardise(appUser: AppUser, layerId: string, dto: StandardiseDto) {
+    await this.vectorTools.requireModule(appUser, FIELD_CALCULATOR_MODULE_ID, 'Field Calculator');
+    const source = await this.gisLayers.vectorSource(appUser, layerId, dto.preview ? 'view' : 'edit');
+    const column = (await this.vectorTools.columns(source.table)).find((c) => c.name === dto.field);
+    if (!column) throw new BadRequestException(`Field "${dto.field}" does not exist.`);
+    if (!/char|text/.test(column.dataType)) throw new BadRequestException('Standardise works on text fields.');
+    let e = `t.${q(column.name)}`;
+    if (dto.trim) e = `nullif(regexp_replace(btrim(${e}), '\\s+', ' ', 'g'), '')`;
+    if (dto.letterCase === 'upper') e = `upper(${e})`;
+    if (dto.letterCase === 'lower') e = `lower(${e})`;
+    if (dto.letterCase === 'title') e = `initcap(${e})`;
+    if (dto.nullify) e = `CASE WHEN lower(btrim(${e})) IN ('', '-', '--', 'na', 'n/a', 'null', 'nil', 'none') THEN NULL ELSE ${e} END`;
+    if (e === `t.${q(column.name)}`) throw new BadRequestException('Choose at least one clean-up option.');
+    const differs = `(${e}) IS DISTINCT FROM t.${q(column.name)}`;
+    if (dto.preview) {
+      const rows = await this.prisma.$queryRawUnsafe<{ before: string | null; after: string | null; n: number }[]>(
+        `SELECT t.${q(column.name)} AS before, ${e} AS after, count(*)::int AS n FROM "${source.table}" t WHERE ${differs} GROUP BY 1, 2 ORDER BY n DESC LIMIT 10`,
+      );
+      const [{ total }] = await this.prisma.$queryRawUnsafe<{ total: number }[]>(`SELECT count(*)::int AS total FROM "${source.table}" t WHERE ${differs}`);
+      return { preview: rows, total };
+    }
+    const changed = await this.bulkUpdate(appUser, layerId, source.table, {
+      columns: [column.name],
+      set: `${q(column.name)} = ${e}`,
+      params: [],
+      where: differs,
+    });
+    return { changed };
+  }
+
+  // ----- Append features -----
+
+  async append(appUser: AppUser, layerId: string, dto: AppendDto) {
+    await this.vectorTools.requireModule(appUser, FIELD_CALCULATOR_MODULE_ID, 'Field Calculator');
+    const target = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
+    const source = await this.gisLayers.vectorSource(appUser, dto.sourceLayerId, 'view');
+    if (target.layer.id === source.layer.id) throw new BadRequestException('Choose a different layer to append from.');
+    if (target.layer.geometryType !== source.layer.geometryType) {
+      throw new BadRequestException('Both layers must have the same geometry type.');
+    }
+    const tCols = (await this.vectorTools.columns(target.table)).filter((c) => !PROTECTED_COLUMNS.has(c.name.toLowerCase()));
+    const sNames = new Set((await this.vectorTools.columns(source.table)).map((c) => c.name));
+    const shared = tCols.filter((c) => sNames.has(c.name));
+    const srid = await this.vectorTools.srid(target.table);
+    const cols = shared.map((c) => q(c.name));
+    const vals = shared.map((c) => `s.${q(c.name)}::${c.dataType}`);
+    const userName = await this.vectorTools.userName(appUser);
+    const added = await this.prisma.$executeRawUnsafe(
+      `WITH ins AS (
+         INSERT INTO "${target.table}" (${[...cols, 'geom'].join(', ')})
+         SELECT ${[...vals, `ST_Multi(ST_Transform(s.geom, ${srid}))`].join(', ')} FROM "${source.table}" s WHERE s.geom IS NOT NULL
+         RETURNING ogc_fid, to_jsonb("${target.table}".*) - 'geom' - 'ogc_fid' AS p)
+       INSERT INTO gis_feature_history (id, layer_id, feature_id, action, old_data, new_data, user_id, user_name)
+       SELECT gen_random_uuid()::text, $1, ins.ogc_fid, 'INSERT'::"GisFeatureAction", NULL, jsonb_build_object('properties', ins.p), $2, $3 FROM ins`,
+      layerId,
+      appUser.id,
+      userName,
+    );
+    await this.refreshLayer(target);
+    return { added, sharedFields: shared.map((c) => c.name), skippedFields: [...sNames].filter((n) => !PROTECTED_COLUMNS.has(n.toLowerCase()) && !shared.some((c) => c.name === n)) };
+  }
+
+  // ----- Change log -----
+
+  async changeLog(appUser: AppUser, layerId: string) {
+    await this.vectorTools.requireModule(appUser, VERSIONS_MODULE_ID, 'Versions');
+    const source = await this.gisLayers.vectorSource(appUser, layerId, 'view');
+    const rows = await this.prisma.$queryRawUnsafe<{ at: Date; user: string | null; action: string; feature: number; fields: string | null }[]>(
+      `SELECT h.created_at AS at, h.user_name AS "user", h.action::text AS action, h.feature_id AS feature,
+              (SELECT string_agg(k, ', ') FROM jsonb_object_keys(COALESCE(h.new_data->'properties', '{}'::jsonb)) k
+                WHERE (h.old_data->'properties'->k) IS DISTINCT FROM (h.new_data->'properties'->k)) AS fields
+         FROM gis_feature_history h WHERE h.layer_id = $1 ORDER BY h.created_at DESC LIMIT 500`,
+      source.layer.id,
+    );
+    const [summary] = await this.prisma.$queryRawUnsafe<{ total: number; editors: number; last: Date | null }[]>(
+      `SELECT count(*)::int AS total, count(DISTINCT user_id)::int AS editors, max(created_at) AS last FROM gis_feature_history WHERE layer_id = $1`,
+      source.layer.id,
+    );
+    return { rows, ...summary };
   }
 
   // ----- Table Join -----
