@@ -5,13 +5,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AppUser } from '../auth/types/app-user.type';
 import { GisLayersService } from './gis-layers.service';
 import { GisAuthorizationService } from './gis-authorization.service';
 import { GeoServerService } from './geoserver.service';
 import { RasterService } from './raster.service';
+import { AddressMatcher } from './address-matcher';
 import { VectorToolsService, type Column, type FieldRules } from './vector-tools.service';
 import { compileFieldExpression, parseCsv } from './field-expression';
 import { generateLayerTableName, isSafeGeneratedTableName } from './layer-naming.util';
@@ -37,6 +37,10 @@ const NUMERIC_TYPES = new Set(['integer', 'bigint', 'smallint', 'numeric', 'doub
  *  nothing (ward_no 37 is not "unusually high"). */
 const IDENTIFIER_FIELD = /(^|_)(id|fid|gid|code|no|num|number|year|yr|zip|pin|pincode|phone|mobile|lat|lon|lng|latitude|longitude|x|y|srid|seq|sr|index|idx)$/i;
 const MAX_OUTLIER_FIELDS = 12;
+/** Fuzzy geocoding: genuine matches score ≥ ~0.7, partial / generic
+ *  overlaps ("lane 3", "peth") ~0.4-0.5, unrelated text ≤ ~0.35. */
+const GEOCODE_MIN_SCORE = 0.6;
+const GEOCODE_MAX_REFERENCE_VALUES = 100_000;
 const MAX_CSV_ROWS = 20_000;
 const MAX_JOIN_COLUMNS = 50;
 const ISSUE_LIMIT = 500;
@@ -165,9 +169,12 @@ export class DataToolsService {
 
   // ----- Geocoding -----
 
-  /** Matches each CSV address to the most similar value of a field in one
-   *  of the municipality's own layers (trigram similarity) and publishes
-   *  the matches as a new point layer. Nothing leaves the server. */
+  /** Matches each CSV address to a value of a field in one of the
+   *  municipality's own layers — fuzzy, for Indian addresses: Indic
+   *  scripts transliterated, abbreviations expanded, spelling variants
+   *  folded, and the reference value found even inside a long address
+   *  (see AddressMatcher). Publishes the matches as a new point layer at
+   *  each matched value's location. Nothing leaves the server. */
   async geocode(appUser: AppUser, csv: Buffer, dto: GeocodeDto) {
     await this.vectorTools.requireModule(appUser, GEOCODE_MODULE_ID, 'Geocode Addresses');
     const reference = await this.gisLayers.vectorSource(appUser, dto.referenceLayerId, 'view');
@@ -176,65 +183,64 @@ export class DataToolsService {
     const { header, records } = this.readCsv(csv);
     const addressIndex = header.indexOf(dto.addressColumn);
     if (addressIndex < 0) throw new BadRequestException(`CSV has no column "${dto.addressColumn}".`);
-    const minScore = dto.minScore ?? 0.4;
+    const minScore = dto.minScore ?? GEOCODE_MIN_SCORE;
 
-    // Trigram index on the reference field (uploaded layers) keeps this fast.
-    if (isSafeGeneratedTableName(reference.table)) {
-      const indexName = `${reference.table}_trgm_${createHash('md5').update(field.name).digest('hex').slice(0, 8)}`;
-      await this.prisma.$executeRawUnsafe(
-        `CREATE INDEX IF NOT EXISTS "${indexName}" ON "${reference.table}" USING gin (lower(${q(field.name)}::text) gin_trgm_ops)`,
+    // One location per distinct reference value (all its features together).
+    const values = await this.prisma.$queryRawUnsafe<{ v: string; lon: number; lat: number }[]>(
+      `SELECT v, ST_X(p)::float8 AS lon, ST_Y(p)::float8 AS lat
+         FROM (SELECT r.${q(field.name)}::text AS v,
+                      ST_Transform(ST_PointOnSurface(ST_Collect(r.geom)), 4326) AS p
+                 FROM ${reference.from} r
+                WHERE r.${q(field.name)} IS NOT NULL AND trim(r.${q(field.name)}::text) <> '' AND r.geom IS NOT NULL
+                GROUP BY 1
+                LIMIT ${GEOCODE_MAX_REFERENCE_VALUES + 1}) s
+        WHERE p IS NOT NULL`,
+    );
+    if (!values.length) {
+      throw new BadRequestException(`"${reference.layer.name}.${field.name}" has no values to match against.`);
+    }
+    if (values.length > GEOCODE_MAX_REFERENCE_VALUES) {
+      throw new BadRequestException(
+        `"${field.name}" has more than ${GEOCODE_MAX_REFERENCE_VALUES} different values — choose a name field (road, locality, landmark) rather than an id.`,
       );
     }
+    const matcher = new AddressMatcher(values.map((r) => ({ value: r.v, payload: [r.lon, r.lat] as [number, number] })));
 
     const output = await this.raster.prepareVectorOutput(appUser, dto.outputName);
     const srid = this.workspaceSrid(output.workspace.defaultCrs);
     const used = new Set(['ogc_fid', 'geom', 'row_no', 'matched_value', 'match_score']);
     const outCols = header.map((h, i) => ({ index: i, name: this.uniqueName(this.safeName(h), used) }));
-    const rows = records.map((r) => header.map((_, i) => r[i] ?? ''));
-    const refField = `lower(r.${q(field.name)}::text)`;
-
-    await this.prisma.$transaction(async (tx) => {
-      await tx.$executeRawUnsafe(`SET LOCAL pg_trgm.similarity_threshold = ${Math.max(0.1, Math.min(minScore, 1))}`);
-      await tx.$executeRawUnsafe(
-        `CREATE TABLE "${output.table}" AS
-         WITH src AS (
-           SELECT e.ordinality::int AS row_no, e.value AS rec
-             FROM jsonb_array_elements($1::jsonb) WITH ORDINALITY e)
-         SELECT src.row_no${outCols.map((c) => `, src.rec->>${c.index} AS ${q(c.name)}`).join('')},
-                best.matched_value, round(best.score::numeric, 3)::float8 AS match_score,
-                ST_Multi(ST_Transform(best.g, ${srid}))::geometry(MultiPoint, ${srid}) AS geom
-           FROM src
-           JOIN LATERAL (
-             SELECT r.${q(field.name)}::text AS matched_value,
-                    similarity(${refField}, lower(src.rec->>${addressIndex})) AS score,
-                    ST_PointOnSurface(r.geom) AS g
-               FROM ${reference.from} r
-              WHERE ${refField} % lower(src.rec->>${addressIndex})
-              ORDER BY score DESC
-              LIMIT 1) best ON best.score >= $2`,
-        JSON.stringify(rows),
-        minScore,
-      );
+    const matchedRows: { row: number; rec: string[]; value: string; score: number; lon: number; lat: number }[] = [];
+    const unmatched: { row: number; address: string }[] = [];
+    records.forEach((r, i) => {
+      const address = r[addressIndex] ?? '';
+      const m = address.trim() ? matcher.match(address, minScore) : null;
+      if (m) {
+        matchedRows.push({ row: i + 1, rec: header.map((_, c) => r[c] ?? ''), value: m.value, score: m.score, lon: m.payload[0], lat: m.payload[1] });
+      } else {
+        unmatched.push({ row: i + 1, address });
+      }
     });
-    await this.prisma.$executeRawUnsafe(`ALTER TABLE "${output.table}" ADD COLUMN ogc_fid SERIAL PRIMARY KEY`);
-    const matchedRows = await this.prisma.$queryRawUnsafe<{ row_no: number }[]>(
-      `SELECT row_no FROM "${output.table}"`,
-    );
     if (!matchedRows.length) {
-      await this.prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS "${output.table}"`);
       throw new BadRequestException('No address could be matched — try a lower minimum score or another field.');
     }
-    const matched = new Set(matchedRows.map((r) => r.row_no));
-    const unmatched = records
-      .map((r, i) => ({ row: i + 1, address: r[addressIndex] ?? '' }))
-      .filter((r) => !matched.has(r.row));
+
+    await this.prisma.$executeRawUnsafe(
+      `CREATE TABLE "${output.table}" AS
+       SELECT (e->>'row')::int AS row_no${outCols.map((c) => `, e->'rec'->>${c.index} AS ${q(c.name)}`).join('')},
+              e->>'value' AS matched_value, (e->>'score')::float8 AS match_score,
+              ST_Multi(ST_Transform(ST_SetSRID(ST_MakePoint((e->>'lon')::float8, (e->>'lat')::float8), 4326), ${srid}))::geometry(MultiPoint, ${srid}) AS geom
+         FROM jsonb_array_elements($1::jsonb) e`,
+      JSON.stringify(matchedRows),
+    );
+    await this.prisma.$executeRawUnsafe(`ALTER TABLE "${output.table}" ADD COLUMN ogc_fid SERIAL PRIMARY KEY`);
     const layer = await this.raster.publishVectorTable(appUser, output, {
       name: dto.outputName,
       geometryType: 'POINT',
       description: `Geocoded from CSV against ${reference.layer.name}.${field.name}`,
       rasterAnalysis: false,
     });
-    return { layer, matched: matched.size, unmatchedCount: unmatched.length, unmatched: unmatched.slice(0, 100) };
+    return { layer, matched: matchedRows.length, unmatchedCount: unmatched.length, unmatched: unmatched.slice(0, 100) };
   }
 
   // ----- Topology validation -----

@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AiClientService } from '../gis-ai/ai-client.service';
+import { UploadReviewService } from './upload-review.service';
 import * as path from 'path';
 import {
   GISLayerUpload,
@@ -97,6 +98,7 @@ export class GisUploadsService {
     private readonly fieldStats: FieldStatsService,
     /** Optional so unit tests need not stub it. */
     @Optional() private readonly ai?: AiClientService,
+    @Optional() private readonly review?: UploadReviewService,
   ) {}
 
   async create(
@@ -364,6 +366,13 @@ export class GisUploadsService {
       workspace.geoserverWorkspace,
       name,
     );
+  }
+
+  /** Automated pre-review of an imported upload — see UploadReviewService. */
+  async reviewCheck(uploadId: string, appUser: AppUser) {
+    const upload = await this.findScoped(uploadId, appUser);
+    if (!this.review) throw new BadRequestException('Automated review is not available.');
+    return this.review.review(upload);
   }
 
   async submitForReview(uploadId: string, appUser: AppUser) {

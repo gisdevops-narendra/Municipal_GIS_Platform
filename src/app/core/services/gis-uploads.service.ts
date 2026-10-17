@@ -7,7 +7,8 @@ import {
   CreateGisUploadRequest,
   GisUpload,
   GisUploadPage,
-  GisUploadPreview
+  GisUploadPreview,
+  UploadReviewReport
 } from '../models/gis-upload.model';
 
 /** One event emitted while an upload is in flight — either real HTTP
@@ -82,6 +83,11 @@ export class GisUploadsService {
 
   preview(id: string): Observable<GisUploadPreview> {
     return this.http.get<GisUploadPreview>(`${this.baseUrl}/${id}/preview`);
+  }
+
+  /** Automated pre-approval checks with a risk score (read-only). */
+  reviewCheck(id: string): Observable<UploadReviewReport> {
+    return this.http.get<UploadReviewReport>(`${this.baseUrl}/${id}/review-check`);
   }
 
   submitForReview(id: string): Observable<GisUpload> {

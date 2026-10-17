@@ -150,7 +150,7 @@
           <input type="number" class="bo__input" min="0.1" max="1" step="0.05" style="width: 88px" [(ngModel)]="geoMinScore" />
         </label>
       </div>
-      <p class="bo__hint">Fuzzy text matching on your own data — no addresses are sent outside the platform. Each result keeps its match score.</p>
+      <p class="bo__hint">Fuzzy matching on your own data — handles abbreviations (Rd, Nr, M.G.), spelling variants (Chowk / Chauk) and addresses in Devanagari or Gujarati, and finds a road or landmark inside a longer address. Nothing is sent outside the platform; each result keeps its match score.</p>
       <div class="bo__controls">
         <button pButton type="button" label="Geocode" icon="pi pi-map-marker" class="p-button-sm bo__run" [loading]="running()" (click)="runGeocode()"></button>
       </div>

@@ -27,6 +27,7 @@ from fastapi import FastAPI, HTTPException
 
 from . import config, db, embeddings, llm, rag
 from .indexer import reindex_municipality
+from .repair import repair_plan
 from .schema import (
     NarrateRequest,
     NarrateResult,
@@ -124,7 +125,7 @@ async def plan(body: PlanRequest) -> PlanResult:
         snippets = []
 
     try:
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             llm.generate_plan,
             body.message,
             body.layers,
@@ -132,6 +133,9 @@ async def plan(body: PlanRequest) -> PlanResult:
             body.history,
             body.municipality_name,
         )
+        # The small model often drops the newer operation fields; the
+        # question's own words fill them (see repair.py).
+        return repair_plan(body.message, result, body.layers)
     except llm.LLMUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:

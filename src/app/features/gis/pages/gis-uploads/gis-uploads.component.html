@@ -194,6 +194,39 @@
           </div>
         }
       }
+      @if (reviewLoading()) {
+        <div class="uploads-detail__row">
+          <dt>Automated review</dt>
+          <dd class="uploads-review__muted"><i class="pi pi-spin pi-spinner"></i> Checking geometry, location, schema and duplicates…</dd>
+        </div>
+      } @else if (reviewError()) {
+        <div class="uploads-detail__row">
+          <dt>Automated review</dt>
+          <dd class="uploads-review__muted">{{ reviewError() }}</dd>
+        </div>
+      } @else {
+        @if (review(); as report) {
+          <div class="uploads-detail__row">
+            <dt>Automated review</dt>
+            <dd>
+              <div class="uploads-review__head">
+                <p-tag [severity]="riskSeverity(report.riskLevel)" [value]="'Risk: ' + report.riskLevel + ' (' + report.riskScore + ')'"></p-tag>
+                <span>{{ report.summary }}</span>
+              </div>
+              @if (report.findings.length) {
+                <ul class="uploads-review__list">
+                  @for (f of report.findings; track f.check + $index) {
+                    <li class="uploads-review__item" [attr.data-severity]="f.severity">
+                      <strong>{{ f.title }}</strong>
+                      <span>{{ f.detail }}</span>
+                    </li>
+                  }
+                </ul>
+              }
+            </dd>
+          </div>
+        }
+      }
       @if (upload.review.rejectionReason) {
         <div class="uploads-detail__row">
           <dt>Rejection Reason</dt>

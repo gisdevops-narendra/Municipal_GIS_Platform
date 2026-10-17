@@ -16,11 +16,14 @@ import { SiteFooterComponent } from '../../../../shared/components/site-footer/s
 import { GisUploadsService } from '../../../../core/services/gis-uploads.service';
 import { CurrentUserService } from '../../../../core/services/current-user.service';
 import { CurrentUser } from '../../../../core/models/current-user.model';
-import { GisUpload } from '../../../../core/models/gis-upload.model';
+import { GisUpload, UploadReviewReport } from '../../../../core/models/gis-upload.model';
 import { UploadWizardComponent } from '../../components/upload-wizard/upload-wizard.component';
 
 const DEFAULT_PAGE_SIZE = 20;
 const PAGE_SIZES = [10, 20, 50];
+
+/** Statuses with an imported staging table the automated review can read. */
+const REVIEWABLE = new Set<GisUpload['status']>(['DRAFT', 'IN_REVIEW', 'APPROVED', 'PUBLISH_FAILED']);
 
 @Component({
   selector: 'app-gis-uploads',
@@ -69,6 +72,10 @@ export class GisUploadsComponent {
 
   readonly wizardVisible = signal(false);
   readonly detailUpload = signal<GisUpload | null>(null);
+  /** Automated review of the upload shown in the details dialog. */
+  readonly review = signal<UploadReviewReport | null>(null);
+  readonly reviewLoading = signal(false);
+  readonly reviewError = signal<string | null>(null);
   readonly rejectTarget = signal<GisUpload | null>(null);
   readonly rejectionReason = signal('');
   readonly actionBusy = signal<string | null>(null);
@@ -202,10 +209,30 @@ export class GisUploadsComponent {
 
   viewDetail(upload: GisUpload): void {
     this.detailUpload.set(upload);
+    this.review.set(null);
+    this.reviewError.set(null);
+    if (!REVIEWABLE.has(upload.status)) return;
+    this.reviewLoading.set(true);
+    this.uploadsService.reviewCheck(upload.id).subscribe({
+      next: (report) => {
+        if (this.detailUpload()?.id !== upload.id) return;
+        this.reviewLoading.set(false);
+        this.review.set(report);
+      },
+      error: (err: HttpErrorResponse) => {
+        this.reviewLoading.set(false);
+        this.reviewError.set(err.error?.message ?? 'The automated review could not run.');
+      },
+    });
   }
 
   closeDetail(): void {
     this.detailUpload.set(null);
+    this.review.set(null);
+  }
+
+  riskSeverity(level: UploadReviewReport['riskLevel']): 'success' | 'warn' | 'danger' {
+    return level === 'high' ? 'danger' : level === 'medium' ? 'warn' : 'success';
   }
 
   retryValidate(upload: GisUpload): void {

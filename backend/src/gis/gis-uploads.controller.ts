@@ -155,6 +155,16 @@ export class GisUploadsController {
     res.send(icon.body);
   }
 
+  /** AI-assisted review: automated pre-approval checks (geometry, location
+   *  / CRS, schema drift vs. the layer it replaces, duplicates of published
+   *  layers, empty fields) with a risk score. Read-only; same visibility as
+   *  the upload itself. */
+  @RequireMunicipalityManager()
+  @Get('uploads/:id/review-check')
+  reviewCheck(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
+    return this.uploadsService.reviewCheck(id, appUser);
+  }
+
   @RequireMunicipalityManager()
   @Post('uploads/:id/submit-review')
   submitForReview(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {

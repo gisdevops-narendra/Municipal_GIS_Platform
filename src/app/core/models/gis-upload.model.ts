@@ -92,3 +92,20 @@ export interface CreateGisUploadRequest {
   xField?: string;
   yField?: string;
 }
+
+/** GET /api/gis/uploads/:id/review-check — automated pre-approval checks. */
+export interface UploadReviewFinding {
+  check: string;
+  severity: 'high' | 'medium' | 'low' | 'info';
+  title: string;
+  detail: string;
+}
+
+export interface UploadReviewReport {
+  riskScore: number;
+  riskLevel: 'low' | 'medium' | 'high';
+  summary: string;
+  findings: UploadReviewFinding[];
+  replaces: { id: string; name: string; version: number } | null;
+  checkedAt: string;
+}

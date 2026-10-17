@@ -144,7 +144,7 @@ export class DataToolsComponent {
   readonly geoRefLayerId = signal<string | null>(null);
   readonly geoRefFields = signal<Field[]>([]);
   geoRefField: string | null = null;
-  geoMinScore = 0.4;
+  geoMinScore = 0.6;
   geoOutputName = 'Geocoded addresses';
   readonly geoResult = signal<GeocodeResult | null>(null);
 
