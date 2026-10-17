@@ -103,3 +103,29 @@
 .feature-info__raw-toggle {
   align-self: flex-start;
 }
+
+.feature-info__pager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--color-ink-500);
+}
+
+.feature-info__pager-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-ink-700);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--color-surface-alt);
+  }
+}

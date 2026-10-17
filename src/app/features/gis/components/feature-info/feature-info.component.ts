@@ -29,11 +29,15 @@ export class FeatureInfoComponent implements OnChanges {
   @Input() results: FeatureInfoResult[] = [];
 
   readonly selectedIndex = signal(0);
+  /** Which feature of the selected layer is shown — a click on overlapping
+   *  polygons or stacked points returns several, not just one. */
+  readonly featureIndex = signal(0);
   readonly showRawAttributes = signal(false);
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['results']) {
       this.selectedIndex.set(0);
+      this.featureIndex.set(0);
       this.showRawAttributes.set(false);
     }
   }
@@ -42,8 +46,17 @@ export class FeatureInfoComponent implements OnChanges {
     return this.results[this.selectedIndex()] ?? null;
   }
 
+  get featureCount(): number {
+    return this.selectedResult?.features.length ?? 0;
+  }
+
+  stepFeature(delta: number): void {
+    const count = this.featureCount;
+    if (count > 1) this.featureIndex.set((this.featureIndex() + delta + count) % count);
+  }
+
   get selectedFeatureAttributes(): AttributeRow[] {
-    const attributes = this.selectedResult?.features[0]?.attributes;
+    const attributes = this.selectedResult?.features[this.featureIndex()]?.attributes;
     if (!attributes) return [];
     return Object.entries(attributes)
       .filter(([key]) => !HIDDEN_ATTRIBUTE_KEYS.has(key))
@@ -52,6 +65,7 @@ export class FeatureInfoComponent implements OnChanges {
 
   selectResult(index: number): void {
     this.selectedIndex.set(index);
+    this.featureIndex.set(0);
     this.showRawAttributes.set(false);
   }
 
@@ -60,7 +74,7 @@ export class FeatureInfoComponent implements OnChanges {
   }
 
   rawJson(): string {
-    return JSON.stringify(this.selectedResult?.features[0]?.attributes ?? {}, null, 2);
+    return JSON.stringify(this.selectedResult?.features[this.featureIndex()]?.attributes ?? {}, null, 2);
   }
 
   private humanizeKey(key: string): string {

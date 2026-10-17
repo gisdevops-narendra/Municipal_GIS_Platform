@@ -29,6 +29,17 @@
     @if (selectedResult; as result) {
       <div class="feature-info__detail">
         <h3 class="feature-info__layer-name">{{ result.layer.name }}</h3>
+        @if (featureCount > 1) {
+          <div class="feature-info__pager">
+            <button type="button" class="feature-info__pager-btn" aria-label="Previous feature" (click)="stepFeature(-1)">
+              <i class="pi pi-chevron-left" aria-hidden="true"></i>
+            </button>
+            <span>Feature {{ featureIndex() + 1 }} of {{ featureCount }}</span>
+            <button type="button" class="feature-info__pager-btn" aria-label="Next feature" (click)="stepFeature(1)">
+              <i class="pi pi-chevron-right" aria-hidden="true"></i>
+            </button>
+          </div>
+        }
 
         @if (!showRawAttributes()) {
           <div class="feature-info__table-scroll">
