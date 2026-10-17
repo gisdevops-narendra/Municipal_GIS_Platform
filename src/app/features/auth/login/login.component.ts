@@ -53,6 +53,22 @@ export class LoginComponent implements OnInit {
   ngOnInit(): void {
     if (this.auth.isAuthenticated()) {
       this.router.navigateByUrl('/dashboard');
+      return;
+    }
+    // Go straight to Keycloak's sign-in page: this page's own email field
+    // made users sign in twice (email here, then username + password on
+    // Keycloak). Stay here only after the auth guard stopped a redirect
+    // loop — redirecting again would restart it — or if Keycloak is down
+    // (onSubmit shows the error).
+    if (!this.signinInterrupted) {
+      this.redirecting = true;
+      Promise.resolve()
+        .then(() => this.auth.login({ redirectUri: window.location.origin + '/dashboard' }))
+        .catch((err) => {
+          console.error('Keycloak login failed to start', err);
+          this.redirecting = false;
+          this.loginError = true;
+        });
     }
   }
 
