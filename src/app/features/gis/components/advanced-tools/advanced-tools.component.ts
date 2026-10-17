@@ -202,6 +202,7 @@ export class AdvancedToolsComponent implements OnDestroy {
   }
 
   private execute<T>(request: Observable<T>, onResult: (result: T) => void): void {
+    const mode = this.mode();
     this.running.set(true);
     this.error.set(null);
     this.summary.set(null);
@@ -209,13 +210,17 @@ export class AdvancedToolsComponent implements OnDestroy {
     request.subscribe({
       next: (result) => {
         this.running.set(false);
-        onResult(result);
+        // Mode switched while waiting: don't draw e.g. a route in Service Area.
+        if (this.mode() === mode) onResult(result);
       },
       error: (err: HttpErrorResponse) => {
         this.running.set(false);
         const message = err.error?.message;
+        if (this.mode() !== mode) return;
         this.error.set(
-          typeof message === 'string'
+          Array.isArray(message)
+            ? message.join('. ')
+            : typeof message === 'string'
             ? message
             : err.status === 0
               ? 'Could not reach the server.'
