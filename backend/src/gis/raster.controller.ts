@@ -318,7 +318,9 @@ export class RasterController {
     return this.tools.onlineRaster(appUser, dto);
   }
 
-  @RequireRasterModule([RASTER_MODULES.statistics, RASTER_MODULES.style])
+  // Any raster tool: the results screen reads the output's statistics
+  // after every analysis (read-only; layer VIEW is still checked).
+  @RequireRasterModule(Object.values(RASTER_MODULES))
   @Post('statistics')
   @HttpCode(200)
   statistics(@CurrentAppUser() appUser: AppUser, @Body() dto: RasterStatisticsDto) {
