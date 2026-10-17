@@ -1,4 +1,5 @@
-import { Component, EventEmitter, Input, OnInit, Output, computed, inject, signal } from '@angular/core';
+import { Component, EventEmitter, Input, OnDestroy, OnInit, Output, computed, inject, signal } from '@angular/core';
+import { Subscription } from 'rxjs';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
 import { ButtonModule } from 'primeng/button';
@@ -59,7 +60,15 @@ const CRS_PATTERN = /^EPSG:\d{4,6}$/;
   templateUrl: './upload-wizard.component.html',
   styleUrl: './upload-wizard.component.scss'
 })
-export class UploadWizardComponent implements OnInit {
+export class UploadWizardComponent implements OnInit, OnDestroy {
+  /** The file transfer in progress — aborted if the wizard is closed, so a
+   *  "cancelled" upload doesn't quietly finish in the background. */
+  private uploadSub?: Subscription;
+
+  ngOnDestroy(): void {
+    this.uploadSub?.unsubscribe();
+  }
+
   @Input({ required: true }) currentUser!: CurrentUser;
   @Output() closed = new EventEmitter<void>();
   @Output() submittedForReview = new EventEmitter<GisUpload>();
@@ -165,7 +174,7 @@ export class UploadWizardComponent implements OnInit {
     this.uploadPercent.set(0);
     this.submitError.set(null);
 
-    this.uploadsService
+    this.uploadSub = this.uploadsService
       .create(file, {
         layerName: value.layerName,
         description: value.description || undefined,
@@ -292,6 +301,8 @@ export class UploadWizardComponent implements OnInit {
   }
 
   private resolveErrorMessage(error: HttpErrorResponse): string {
-    return error.error?.message ?? 'Something went wrong. Please try again.';
+    const message = error.error?.message;
+    if (Array.isArray(message)) return message.join('. ');
+    return message ?? 'Something went wrong. Please try again.';
   }
 }
