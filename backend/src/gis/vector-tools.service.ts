@@ -223,7 +223,7 @@ export class VectorToolsService {
   async geoprocess(appUser: AppUser, dto: GeoprocessDto) {
     await this.requireModule(appUser, GEOPROCESSING_MODULE_ID, 'Geoprocessing');
     const a = await this.gisLayers.vectorSource(appUser, dto.inputLayerId, 'view');
-    const needsB = ['intersect', 'clip', 'erase', 'join'].includes(dto.operation);
+    const needsB = ['intersect', 'clip', 'erase', 'join', 'merge', 'symdifference', 'nearest', 'selectbylocation'].includes(dto.operation);
     const b = needsB
       ? await this.gisLayers.vectorSource(appUser, this.required(dto.overlayLayerId, 'Choose the overlay layer.'), 'view')
       : null;
@@ -354,6 +354,152 @@ export class VectorToolsService {
             `WHERE ST_Intersects(${ga}, ${gb}) LIMIT 1) j ON true`,
           geometryType: aType,
           description: `${a.layer.name} joined with attributes of ${b!.layer.name}`,
+        };
+      }
+      // ----- one layer -----
+      case 'centroids':
+        return {
+          select: `SELECT ${this.list(aCols)}ST_PointOnSurface(${this.valid(ga, aType)}) AS g FROM ${a.from} a`,
+          geometryType: 'POINT',
+          description: `Points inside the features of ${a.layer.name}`,
+        };
+      case 'convexhull':
+        return {
+          select: `SELECT count(*)::int AS feature_count, ST_ConvexHull(ST_Collect(${ga})) AS g FROM ${a.from} a`,
+          geometryType: 'POLYGON',
+          description: `Convex hull of ${a.layer.name}`,
+        };
+      case 'envelope':
+        return {
+          select: `SELECT ${this.list(aCols)}ST_Envelope(${ga}) AS g FROM ${a.from} a`,
+          geometryType: 'POLYGON',
+          description: `Bounding boxes of ${a.layer.name}`,
+        };
+      case 'simplify': {
+        const tol = this.metres(dto.distance, 'Simplify tolerance');
+        const [toM, fromM] = await this.metricWrap(srid);
+        return {
+          select: `SELECT ${this.list(aCols)}${fromM(`ST_SimplifyPreserveTopology(${toM(ga)}, ${tol})`)} AS g FROM ${a.from} a`,
+          geometryType: aType,
+          description: `${a.layer.name} simplified (${tol} m)`,
+        };
+      }
+      case 'explode':
+        return {
+          select: `SELECT ${this.list(aCols)}(ST_Dump(${ga})).geom AS g FROM ${a.from} a`,
+          geometryType: aType,
+          description: `${a.layer.name} split into single parts`,
+        };
+      case 'polygonstolines':
+        this.requireType(aType, 'POLYGON', 'Polygons → Lines');
+        return {
+          select: `SELECT ${this.list(aCols)}ST_Boundary(${this.valid(ga, aType)}) AS g FROM ${a.from} a`,
+          geometryType: 'LINE',
+          description: `Outlines of ${a.layer.name}`,
+        };
+      case 'linestopolygons':
+        this.requireType(aType, 'LINE', 'Lines → Polygons');
+        return {
+          select: `SELECT ${this.list(aCols)}ST_BuildArea(ST_Node(${ga})) AS g FROM ${a.from} a`,
+          geometryType: 'POLYGON',
+          description: `Polygons from the closed lines of ${a.layer.name}`,
+        };
+      case 'pointsalonglines': {
+        this.requireType(aType, 'LINE', 'Points Along Lines');
+        const step = this.metres(dto.distance, 'Point spacing');
+        const [toM, fromM] = await this.metricWrap(srid);
+        return {
+          select:
+            `SELECT ${this.list(aCols)}${fromM('(ST_DumpPoints(ST_Segmentize(' + toM(ga) + `, ${step}))).geom`)} AS g FROM ${a.from} a`,
+          geometryType: 'POINT',
+          description: `Points every ${step} m along ${a.layer.name}`,
+        };
+      }
+      case 'voronoi': {
+        this.requireType(aType, 'POINT', 'Voronoi');
+        // Cells clipped to the points' extent (grown 10 %), each carrying the
+        // attributes of the point it belongs to.
+        return {
+          select:
+            `WITH pts AS (SELECT ST_Collect(${ga}) AS c FROM ${a.from} a), ` +
+            `cells AS (SELECT (ST_Dump(ST_VoronoiPolygons(c, 0, ST_Expand(ST_Envelope(c), GREATEST(ST_XMax(c) - ST_XMin(c), ST_YMax(c) - ST_YMin(c)) * 0.1)))).geom AS cell FROM pts) ` +
+            `SELECT ${this.list(aCols)}cells.cell AS g FROM cells JOIN ${a.from} a ON ST_Intersects(cells.cell, ${ga})`,
+          geometryType: 'POLYGON',
+          description: `Voronoi (Thiessen) polygons of ${a.layer.name}`,
+        };
+      }
+      case 'squaregrid':
+      case 'hexgrid': {
+        const size = this.metres(dto.distance, 'Cell size');
+        const [toM, fromM] = await this.metricWrap(srid);
+        const fn = dto.operation === 'squaregrid' ? 'ST_SquareGrid' : 'ST_HexagonGrid';
+        const ext = `(SELECT ST_Extent(${toM(ga)})::geometry AS e FROM ${a.from} a)`;
+        return {
+          select:
+            `SELECT cell.i AS col, cell.j AS row, ` +
+            `(SELECT count(*)::int FROM ${a.from} a WHERE ST_Intersects(${toM(ga)}, cell.geom)) AS feature_count, ` +
+            `${fromM('cell.geom')} AS g FROM ${ext} x, ${fn}(${size}, x.e) cell`,
+          geometryType: 'POLYGON',
+          description: `${size} m ${dto.operation === 'squaregrid' ? 'square' : 'hexagon'} grid over ${a.layer.name}`,
+        };
+      }
+      // ----- two layers -----
+      case 'merge': {
+        const bType = this.geometryTypeOf(b!);
+        if (bType !== aType) throw new BadRequestException('Merge needs two layers of the same geometry type.');
+        const gb = await this.geomIn('b', b!.table, srid);
+        const bNames = new Set((await this.columns(b!.table)).map((c) => c.name));
+        const shared = (await this.columns(a.table)).filter((c) => bNames.has(c.name) && !['geom', 'ogc_fid'].includes(c.name));
+        const cols = shared.map((c) => q(c.name));
+        const pick = (alias: string) => shared.map((c) => `${alias}.${q(c.name)}::text AS ${q(c.name)}`).join(', ');
+        return {
+          select:
+            `SELECT ${cols.length ? pick('a') + ', ' : ''}${this.lit(a.layer.name)} AS source_layer, ${ga} AS g FROM ${a.from} a ` +
+            `UNION ALL SELECT ${cols.length ? pick('b') + ', ' : ''}${this.lit(b!.layer.name)} AS source_layer, ${gb} AS g FROM ${b!.from} b`,
+          geometryType: aType,
+          description: `${a.layer.name} + ${b!.layer.name}`,
+        };
+      }
+      case 'symdifference': {
+        const bType = this.geometryTypeOf(b!);
+        const gb = await this.geomIn('b', b!.table, srid);
+        const ua = `(SELECT ST_Union(${this.valid(ga, aType)}) FROM ${a.from} a)`;
+        const ub = `(SELECT ST_Union(${this.valid(gb, bType)}) FROM ${b!.from} b)`;
+        return {
+          select:
+            `SELECT ${this.lit(a.layer.name)} AS source_layer, ST_Difference(${ua}, ${ub}) AS g ` +
+            `UNION ALL SELECT ${this.lit(b!.layer.name)} AS source_layer, ST_Difference(${ub}, ${ua}) AS g`,
+          geometryType: BY_DIMENSION[Math.max(DIMENSION[aType], DIMENSION[bType])],
+          description: `Parts of ${a.layer.name} and ${b!.layer.name} that do not overlap`,
+        };
+      }
+      case 'nearest': {
+        const gb = await this.geomIn('b', b!.table, srid);
+        const bCols = this.outputColumns(await this.columns(b!.table), 'n', 'near_', used);
+        const inner = (await this.columns(b!.table)).map((c) => `b.${q(c.name)}`).join(', ');
+        const distCol = this.unique('distance_m', used);
+        return {
+          select:
+            `SELECT ${this.list(aCols)}${this.list(bCols)}round(ST_Distance(ST_Transform(${ga}, 4326)::geography, ST_Transform(n._g, 4326)::geography)::numeric, 1)::float8 AS ${q(distCol)}, ${ga} AS g ` +
+            `FROM ${a.from} a LEFT JOIN LATERAL (SELECT ${inner ? inner + ', ' : ''}${gb} AS _g FROM ${b!.from} b ORDER BY ${gb} <-> ${ga} LIMIT 1) n ON true`,
+          geometryType: aType,
+          description: `${a.layer.name} with its nearest ${b!.layer.name}`,
+        };
+      }
+      case 'selectbylocation': {
+        const d = dto.distance ?? 0;
+        if (!(d >= 0 && d <= MAX_BUFFER_METRES)) throw new BadRequestException(`Distance must be between 0 and ${MAX_BUFFER_METRES} m.`);
+        const gb = await this.geomIn('b', b!.table, srid);
+        // A cheap planar pre-filter (metres, or ~degrees for a geographic CRS
+        // with a safe margin) before the exact geodesic distance.
+        const rough = (await this.isMetric(srid)) ? d * 1.05 : d / 80_000;
+        const near = d > 0
+          ? `ST_DWithin(${ga}, ${gb}, ${rough}) AND ST_DWithin(ST_Transform(${ga}, 4326)::geography, ST_Transform(${gb}, 4326)::geography, ${d})`
+          : `ST_Intersects(${ga}, ${gb})`;
+        return {
+          select: `SELECT ${this.list(aCols)}${ga} AS g FROM ${a.from} a WHERE EXISTS (SELECT 1 FROM ${b!.from} b WHERE ${near})`,
+          geometryType: aType,
+          description: `${a.layer.name} ${d > 0 ? `within ${d} m of` : 'intersecting'} ${b!.layer.name}`,
         };
       }
     }
@@ -712,6 +858,30 @@ export class VectorToolsService {
   /** `alias."col" AS "prefix+col"` for each column, de-duplicated. */
   private outputColumns(columns: Column[], alias: string, prefix: string, used: Set<string>): string[] {
     return columns.map((c) => `${alias}.${q(c.name)} AS ${q(this.unique(prefix + c.name, used))}`);
+  }
+
+  /** A required distance-like parameter in metres. */
+  private metres(value: number | undefined, label: string): number {
+    if (!(value !== undefined && value > 0 && value <= MAX_BUFFER_METRES)) {
+      throw new BadRequestException(`${label} must be between 0 and ${MAX_BUFFER_METRES} m.`);
+    }
+    return value;
+  }
+
+  /** Wrappers so metre-based ST_ functions work in any CRS: identity in a
+   *  metric CRS, otherwise a round trip through Web Mercator. */
+  private async metricWrap(srid: number): Promise<[(g: string) => string, (g: string) => string]> {
+    if (await this.isMetric(srid)) return [(g) => g, (g) => g];
+    return [(g) => `ST_Transform(${g}, 3857)`, (g) => `ST_Transform(${g}, ${srid})`];
+  }
+
+  private requireType(actual: GisGeometryType, wanted: GisGeometryType, tool: string): void {
+    if (actual !== wanted) throw new BadRequestException(`${tool} needs a ${wanted.toLowerCase()} layer.`);
+  }
+
+  /** SQL string literal. */
+  private lit(value: string): string {
+    return `'${value.replace(/'/g, "''")}'`;
   }
 
   private unique(name: string, used: Set<string>): string {

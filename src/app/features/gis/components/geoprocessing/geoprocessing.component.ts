@@ -12,8 +12,13 @@ interface OperationDef {
   value: GeoprocessOperation;
   label: string;
   hint: string;
+  group: string;
   /** Needs a second (overlay) layer; `polygonOnly` restricts it. */
   overlay?: 'any' | 'polygon';
+  /** Input must be this geometry type. */
+  input?: 'POINT' | 'LINE' | 'POLYGON';
+  /** A number the tool needs (metres), with its label and default. */
+  param?: { label: string; value: number; min?: number };
 }
 
 /**
@@ -40,13 +45,34 @@ export class GeoprocessingComponent {
   @Output() readonly layerCreated = new EventEmitter<GisLayer>();
 
   readonly operations: OperationDef[] = [
-    { value: 'buffer', label: 'Buffer', hint: 'A polygon around every feature at a fixed distance.' },
-    { value: 'dissolve', label: 'Dissolve', hint: 'Merge features — all of them, or those sharing a field value.' },
-    { value: 'intersect', label: 'Intersect', hint: 'Only the overlapping parts, with attributes of both layers.', overlay: 'any' },
-    { value: 'clip', label: 'Clip', hint: 'The input cut to the area of a polygon layer.', overlay: 'polygon' },
-    { value: 'erase', label: 'Erase', hint: 'The input minus the area of a polygon layer.', overlay: 'polygon' },
-    { value: 'join', label: 'Spatial join', hint: 'Attach attributes (or a count) of intersecting features of another layer.', overlay: 'any' }
+    { value: 'intersect', group: 'Overlay', label: 'Intersect', hint: 'Only the overlapping parts, with attributes of both layers.', overlay: 'any' },
+    { value: 'clip', group: 'Overlay', label: 'Clip', hint: 'The input cut to the area of a polygon layer.', overlay: 'polygon' },
+    { value: 'erase', group: 'Overlay', label: 'Erase', hint: 'The input minus the area of a polygon layer.', overlay: 'polygon' },
+    { value: 'symdifference', group: 'Overlay', label: 'Symmetrical Difference', hint: 'The parts covered by only one of the two layers.', overlay: 'any' },
+    { value: 'merge', group: 'Overlay', label: 'Merge', hint: 'Two layers of the same type combined into one (shared fields kept, plus the source layer).', overlay: 'any' },
+    { value: 'buffer', group: 'Proximity', label: 'Buffer', hint: 'A polygon around every feature at a fixed distance.', param: { label: 'Distance (m)', value: 100 } },
+    { value: 'nearest', group: 'Proximity', label: 'Nearest Join', hint: 'Each feature gets the nearest feature of another layer and the distance to it (m).', overlay: 'any' },
+    { value: 'selectbylocation', group: 'Proximity', label: 'Select by Location', hint: 'Features that intersect — or lie within a distance of — another layer.', overlay: 'any', param: { label: 'Within distance (m, 0 = intersecting)', value: 0, min: 0 } },
+    { value: 'voronoi', group: 'Proximity', label: 'Voronoi (Thiessen) Polygons', hint: 'The area closest to each point — e.g. the service area of every facility.', input: 'POINT' },
+    { value: 'centroids', group: 'Geometry', label: 'Centroids', hint: 'A point inside every feature (always within the shape).' },
+    { value: 'convexhull', group: 'Geometry', label: 'Convex Hull', hint: 'The smallest convex polygon enclosing the whole layer.' },
+    { value: 'envelope', group: 'Geometry', label: 'Bounding Boxes', hint: 'A rectangle around every feature.' },
+    { value: 'simplify', group: 'Geometry', label: 'Simplify', hint: 'Fewer vertices within a tolerance; shapes stay valid.', param: { label: 'Tolerance (m)', value: 5 } },
+    { value: 'explode', group: 'Geometry', label: 'Explode Multipart', hint: 'Multi-part features split into single parts.' },
+    { value: 'polygonstolines', group: 'Geometry', label: 'Polygons → Lines', hint: 'The outline of every polygon as a line.', input: 'POLYGON' },
+    { value: 'linestopolygons', group: 'Geometry', label: 'Lines → Polygons', hint: 'Closed lines turned into polygons.', input: 'LINE' },
+    { value: 'pointsalonglines', group: 'Geometry', label: 'Points Along Lines', hint: 'A point at a fixed spacing along every line (e.g. chainage, pole positions).', input: 'LINE', param: { label: 'Spacing (m)', value: 50 } },
+    { value: 'dissolve', group: 'Summarise', label: 'Dissolve', hint: 'Merge features — all of them, or those sharing a field value.' },
+    { value: 'join', group: 'Summarise', label: 'Spatial Join', hint: 'Attach attributes (or a count) of intersecting features of another layer.', overlay: 'any' },
+    { value: 'squaregrid', group: 'Summarise', label: 'Square Grid', hint: 'A grid of square cells over the layer, with the number of features in each.', param: { label: 'Cell size (m)', value: 250 } },
+    { value: 'hexgrid', group: 'Summarise', label: 'Hexagon Grid', hint: 'A grid of hexagons over the layer, with the number of features in each.', param: { label: 'Cell size (m)', value: 250 } }
   ];
+
+  /** The picker, grouped. */
+  readonly operationGroups = ['Overlay', 'Proximity', 'Geometry', 'Summarise'].map((label) => ({
+    label,
+    items: this.operations.filter((o) => o.group === label)
+  }));
 
   readonly operation = signal<GeoprocessOperation>('buffer');
   readonly inputLayerId = signal<string | null>(null);
@@ -69,7 +95,11 @@ export class GeoprocessingComponent {
   private readonly vectorLayers = computed(() =>
     this.layersSignal().filter((l) => l.layerType === 'VECTOR' && l.geometryType)
   );
-  readonly inputOptions = computed(() => this.vectorLayers().map((l) => ({ label: l.name, value: l.id })));
+  readonly inputOptions = computed(() =>
+    this.vectorLayers()
+      .filter((l) => !this.def().input || l.geometryType === this.def().input)
+      .map((l) => ({ label: l.name, value: l.id }))
+  );
   readonly overlayOptions = computed(() =>
     this.vectorLayers()
       .filter((l) => this.def().overlay !== 'polygon' || l.geometryType === 'POLYGON')
@@ -79,6 +109,9 @@ export class GeoprocessingComponent {
   setOperation(op: GeoprocessOperation): void {
     this.operation.set(op);
     this.error.set(null);
+    const def = this.def();
+    if (def.param) this.distance = def.param.value;
+    if (def.input && this.inputLayerId() && !this.inputOptions().some((o) => o.value === this.inputLayerId())) this.setInput(null);
     this.created.set(null);
     if (!this.overlayOptions().some((o) => o.value === this.overlayLayerId())) this.overlayLayerId.set(null);
     this.suggestName();
@@ -127,7 +160,7 @@ export class GeoprocessingComponent {
     if (def.overlay && this.overlayLayerId() === inputLayerId) {
       return this.error.set('Choose a different overlay layer — it is the same as the input.');
     }
-    if (def.value === 'buffer' && !(this.distance > 0)) return this.error.set('Enter a buffer distance above 0.');
+    if (def.param && !(this.distance >= (def.param.min ?? 0.0001))) return this.error.set(`Enter a value for "${def.param.label}".`);
     if (!this.outputName.trim()) return this.error.set('Enter a name for the new layer.');
 
     this.running.set(true);
@@ -139,7 +172,8 @@ export class GeoprocessingComponent {
         inputLayerId,
         overlayLayerId: def.overlay ? this.overlayLayerId()! : undefined,
         outputName: this.outputName.trim(),
-        ...(def.value === 'buffer' ? { distance: this.distance, dissolve: this.dissolve() } : {}),
+        ...(def.param ? { distance: this.distance } : {}),
+        ...(def.value === 'buffer' ? { dissolve: this.dissolve() } : {}),
         ...(def.value === 'dissolve' && this.dissolveField() ? { dissolveField: this.dissolveField()! } : {}),
         ...(def.value === 'join' ? { joinMode: this.joinMode() } : {})
       })

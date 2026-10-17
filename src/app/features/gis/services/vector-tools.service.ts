@@ -54,7 +54,11 @@ export interface FeatureHistoryEntry {
   createdAt: string;
 }
 
-export type GeoprocessOperation = 'buffer' | 'dissolve' | 'intersect' | 'clip' | 'erase' | 'join';
+export type GeoprocessOperation =
+  | 'buffer' | 'dissolve' | 'intersect' | 'clip' | 'erase' | 'join'
+  | 'centroids' | 'convexhull' | 'envelope' | 'simplify' | 'explode' | 'polygonstolines'
+  | 'linestopolygons' | 'pointsalonglines' | 'voronoi' | 'squaregrid' | 'hexgrid'
+  | 'merge' | 'symdifference' | 'nearest' | 'selectbylocation';
 
 export interface GeoprocessRequest {
   operation: GeoprocessOperation;

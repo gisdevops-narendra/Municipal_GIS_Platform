@@ -43,6 +43,23 @@ export const GEOPROCESS_OPERATIONS = [
   'clip',
   'erase',
   'join',
+  // one layer
+  'centroids',
+  'convexhull',
+  'envelope',
+  'simplify',
+  'explode',
+  'polygonstolines',
+  'linestopolygons',
+  'pointsalonglines',
+  'voronoi',
+  'squaregrid',
+  'hexgrid',
+  // two layers
+  'merge',
+  'symdifference',
+  'nearest',
+  'selectbylocation',
 ] as const;
 export type GeoprocessOperation = (typeof GEOPROCESS_OPERATIONS)[number];
 
