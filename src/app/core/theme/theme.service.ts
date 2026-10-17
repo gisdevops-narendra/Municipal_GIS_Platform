@@ -56,6 +56,11 @@ export class ThemeService {
       // backgrounds — let the dark rules in styles.scss own those instead.
       if (dark && prop.endsWith('-100')) {
         this.root.style.removeProperty(prop);
+      } else if (dark && prop === '--color-primary-700') {
+        // -700 is the "text on a -100 wash" shade. With the dark wash it
+        // was dark-on-dark (e.g. active map tools, selected states), so
+        // use the ramp's light end instead — same hue, readable.
+        this.root.style.setProperty(prop, theme.primary[300]);
       } else {
         this.root.style.setProperty(prop, value);
       }
