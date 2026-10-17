@@ -105,6 +105,9 @@ export class GisLayersController {
     @Param('id') id: string,
     @Query('format') format: string | undefined,
     @Res() res: Response,
+    @Query('field') field?: string,
+    @Query('op') op?: string,
+    @Query('value') value?: string,
   ) {
     const requested = format ?? 'geojson';
     if (!Object.hasOwn(LAYER_EXPORT_FORMATS, requested)) {
@@ -117,6 +120,7 @@ export class GisLayersController {
         appUser,
         id,
         requested as LayerExportFormat,
+        field && op ? { field, op, value: value ?? '' } : undefined,
       );
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

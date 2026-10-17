@@ -540,9 +540,9 @@ export class GisWorkspaceComponent {
   }
 
   /** Raster Analysis published a new layer (upload or tool output). */
-  onLayerCreated(layer: GisLayer): void {
+  onLayerCreated(layer: GisLayer | undefined): void {
     this.loadLayers();
-    if (layer.bbox) setTimeout(() => this.mapService.zoomToLayer(layer), 300);
+    if (layer?.bbox) setTimeout(() => this.mapService.zoomToLayer(layer), 300);
   }
 
   loadLayers(): void {

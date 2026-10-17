@@ -40,9 +40,10 @@ export class GisLayersService {
    *  (binary-safe for zipped shapefiles) — the backend fetches it from
    *  GeoServer itself and streams it back, never a GeoServer URL handed to
    *  the browser, which would bypass this permission check entirely. */
-  export(id: string, format: LayerExportFormat = 'geojson'): Observable<Blob> {
+  /** `filter` exports only matching features (built safely server-side). */
+  export(id: string, format: LayerExportFormat = 'geojson', filter?: { field: string; op: string; value: string }): Observable<Blob> {
     return this.http.get(`${this.baseUrl}/${id}/export`, {
-      params: { format },
+      params: filter ? { format, field: filter.field, op: filter.op, value: filter.value } : { format },
       responseType: 'blob'
     });
   }

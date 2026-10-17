@@ -24,7 +24,7 @@ import {
   VERSIONS_MODULE_ID
 } from '../../services/data-tools.service';
 
-type Tool = 'calc' | 'join' | 'geocode' | 'validate' | 'rules' | 'versions';
+type Tool = 'calc' | 'fields' | 'geometry' | 'replace' | 'join' | 'geocode' | 'validate' | 'completeness' | 'rules' | 'versions' | 'split';
 
 interface Field {
   name: string;
@@ -94,11 +94,16 @@ export class DataToolsComponent {
   readonly tools = computed(() =>
     [
       { value: 'calc' as Tool, label: 'Calculator', moduleId: FIELD_CALCULATOR_MODULE_ID },
+      { value: 'fields' as Tool, label: 'Fields', moduleId: FIELD_CALCULATOR_MODULE_ID },
+      { value: 'geometry' as Tool, label: 'Geometry', moduleId: FIELD_CALCULATOR_MODULE_ID },
+      { value: 'replace' as Tool, label: 'Replace', moduleId: FIELD_CALCULATOR_MODULE_ID },
       { value: 'join' as Tool, label: 'Join', moduleId: TABLE_JOIN_MODULE_ID },
       { value: 'geocode' as Tool, label: 'Geocode', moduleId: GEOCODE_MODULE_ID },
       { value: 'validate' as Tool, label: 'Validate', moduleId: TOPOLOGY_MODULE_ID },
+      { value: 'completeness' as Tool, label: 'Completeness', moduleId: TOPOLOGY_MODULE_ID },
       { value: 'rules' as Tool, label: 'Rules', moduleId: FIELD_RULES_MODULE_ID },
-      { value: 'versions' as Tool, label: 'Versions', moduleId: VERSIONS_MODULE_ID }
+      { value: 'versions' as Tool, label: 'Versions', moduleId: VERSIONS_MODULE_ID },
+      { value: 'split' as Tool, label: 'Split', moduleId: FIELD_CALCULATOR_MODULE_ID }
     ].filter((t) => this.allowedSignal().has(t.moduleId))
   );
   readonly tool = signal<Tool>('calc');
@@ -111,6 +116,37 @@ export class DataToolsComponent {
 
   readonly layerId = signal<string | null>(null);
   readonly fields = signal<Field[]>([]);
+
+  // ----- batch 2: fields, geometry, find & replace, completeness, split -----
+  fieldAction: 'add' | 'rename' | 'delete' = 'add';
+  fieldName = '';
+  fieldNewName = '';
+  fieldType = 'text';
+  readonly fieldTypes = [
+    { label: 'Text', value: 'text' }, { label: 'Whole number', value: 'integer' },
+    { label: 'Decimal number', value: 'double precision' }, { label: 'Date', value: 'date' }, { label: 'Yes / No', value: 'boolean' }
+  ];
+  geoMeasure = 'area_m2';
+  geoField = 'area_m2';
+  readonly geoMeasures = [
+    { label: 'Area (m²)', value: 'area_m2', kinds: ['POLYGON'] }, { label: 'Area (hectares)', value: 'area_ha', kinds: ['POLYGON'] },
+    { label: 'Perimeter (m)', value: 'perimeter_m', kinds: ['POLYGON'] }, { label: 'Length (m)', value: 'length_m', kinds: ['LINE'] },
+    { label: 'Longitude', value: 'lon', kinds: ['POINT', 'LINE', 'POLYGON'] }, { label: 'Latitude', value: 'lat', kinds: ['POINT', 'LINE', 'POLYGON'] },
+    { label: 'X (layer CRS)', value: 'x', kinds: ['POINT', 'LINE', 'POLYGON'] }, { label: 'Y (layer CRS)', value: 'y', kinds: ['POINT', 'LINE', 'POLYGON'] }
+  ];
+  readonly geoMeasureOptions = computed(() => {
+    const kind = this.layersSignal().find((l) => l.id === this.layerId())?.geometryType ?? '';
+    return this.geoMeasures.filter((m) => m.kinds.includes(kind));
+  });
+  replaceField: string | null = null;
+  replaceFind = '';
+  replaceWith = '';
+  replaceMatchCase = false;
+  replaceWhole = false;
+  readonly replacePreview = signal<{ before: string; after: string; n: number }[] | null>(null);
+  readonly textFields = computed(() => this.fields().filter((f) => /char|text/.test(f.type)));
+  readonly completenessResult = signal<{ total: number; complete: number; fields: { field: string; type: string; filled: number; empty: number; pct: number }[] } | null>(null);
+  splitField: string | null = null;
   readonly fieldOptions = computed(() => this.fields().map((f) => ({ label: f.name, value: f.name })));
   readonly running = signal(false);
   readonly error = signal<string | null>(null);
@@ -479,6 +515,98 @@ export class DataToolsComponent {
 
   zoomToChange(geometry: Record<string, unknown> | null): void {
     if (geometry) this.mapService.zoomToGeometries([geometry]);
+  }
+
+
+  // ----- Fields -----
+
+  runManageField(): void {
+    const layerId = this.layerId();
+    if (!layerId) return;
+    const field = this.fieldName.trim();
+    if (!field) return this.error.set('Enter or choose the field.');
+    const go = () =>
+      this.run(this.api.manageField(layerId, { action: this.fieldAction, field, type: this.fieldType, newName: this.fieldNewName.trim() }), () => {
+        this.notice.set(
+          this.fieldAction === 'add' ? `Field "${field}" added.` : this.fieldAction === 'rename' ? `"${field}" renamed to "${this.fieldNewName.trim()}".` : `Field "${field}" deleted.`
+        );
+        this.fieldName = '';
+        this.fieldNewName = '';
+        this.selectLayer(layerId);
+      });
+    if (this.fieldAction === 'add') return go();
+    this.notify.confirm({
+      header: this.fieldAction === 'delete' ? 'Delete field' : 'Rename field',
+      message:
+        this.fieldAction === 'delete'
+          ? `Delete "${field}" and all its values? Styles, queries or reports using it will stop working. Save a version first if unsure.`
+          : `Rename "${field}" to "${this.fieldNewName.trim()}"? Styles, queries or reports using the old name will need updating.`,
+      confirmLabel: this.fieldAction === 'delete' ? 'Delete field' : 'Rename',
+      destructive: this.fieldAction === 'delete',
+      accept: go
+    });
+  }
+
+  // ----- Calculate geometry -----
+
+  onGeoMeasure(value: string): void {
+    this.geoMeasure = value;
+    this.geoField = value;
+  }
+
+  runCalculateGeometry(): void {
+    const layerId = this.layerId();
+    if (!layerId) return;
+    if (!this.geoField.trim()) return this.error.set('Enter the field to fill.');
+    this.run(this.api.calculateGeometry(layerId, { measure: this.geoMeasure, field: this.geoField.trim() }), (r) => {
+      this.notice.set(`"${r.field}" filled for ${r.changed} feature(s).`);
+      this.selectLayer(layerId);
+    });
+  }
+
+  // ----- Find & replace -----
+
+  private replaceBody(preview: boolean) {
+    return { field: this.replaceField ?? '', find: this.replaceFind, replace: this.replaceWith, matchCase: this.replaceMatchCase, wholeValue: this.replaceWhole, preview };
+  }
+
+  previewReplace(): void {
+    const layerId = this.layerId();
+    if (!layerId || !this.replaceField) return this.error.set('Choose a text field.');
+    if (!this.replaceFind) return this.error.set('Enter the text to find.');
+    this.run(this.api.findReplace(layerId, this.replaceBody(true)), (r) => {
+      this.replacePreview.set(r.preview ?? []);
+      if (!r.preview?.length) this.notice.set('No values match.');
+    });
+  }
+
+  runReplace(): void {
+    const layerId = this.layerId();
+    if (!layerId || !this.replaceField || !this.replaceFind) return this.error.set('Choose a field and enter the text to find.');
+    this.run(this.api.findReplace(layerId, this.replaceBody(false)), (r) => {
+      this.replacePreview.set(null);
+      this.notice.set(`${r.changed} feature(s) updated. Each change is in the feature's edit history.`);
+      this.mapService.refreshLayerStyle(layerId);
+    });
+  }
+
+  // ----- Completeness -----
+
+  runCompleteness(): void {
+    const layerId = this.layerId();
+    if (!layerId) return;
+    this.run(this.api.completeness(layerId), (r) => this.completenessResult.set(r));
+  }
+
+  // ----- Split -----
+
+  runSplit(): void {
+    const layerId = this.layerId();
+    if (!layerId || !this.splitField) return this.error.set('Choose the field to split by.');
+    this.run(this.api.splitLayer(layerId, this.splitField), (r) => {
+      this.notice.set(`Created ${r.created.length} layer(s): ${r.created.map((c) => `${c.name} (${c.features})`).join(', ')}.`);
+      this.layerCreated.emit(undefined as unknown as GisLayer);
+    });
   }
 
   // ----- shared -----

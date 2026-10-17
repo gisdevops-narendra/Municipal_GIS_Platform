@@ -25,6 +25,10 @@ import {
   GeocodeDto,
   TableJoinDto,
   ValidateLayerDto,
+  CalcGeometryDto,
+  FieldManageDto,
+  FindReplaceDto,
+  SplitLayerDto,
 } from './dto/data-tools.dto';
 
 const CSV_LIMIT = { limits: { fileSize: 20 * 1024 * 1024 } };
@@ -34,6 +38,40 @@ const CSV_LIMIT = { limits: { fileSize: 20 * 1024 * 1024 } };
 @Controller('gis')
 export class DataToolsController {
   constructor(private readonly dataTools: DataToolsService) {}
+
+  @RequireMunicipalityMember()
+  @Post('layers/:id/fields')
+  @HttpCode(200)
+  manageField(@CurrentAppUser() appUser: AppUser, @Param('id') id: string, @Body() dto: FieldManageDto) {
+    return this.dataTools.manageField(appUser, id, dto);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('layers/:id/calculate-geometry')
+  @HttpCode(200)
+  calculateGeometry(@CurrentAppUser() appUser: AppUser, @Param('id') id: string, @Body() dto: CalcGeometryDto) {
+    return this.dataTools.calculateGeometry(appUser, id, dto);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('layers/:id/find-replace')
+  @HttpCode(200)
+  findReplace(@CurrentAppUser() appUser: AppUser, @Param('id') id: string, @Body() dto: FindReplaceDto) {
+    return this.dataTools.findReplace(appUser, id, dto);
+  }
+
+  @RequireMunicipalityMember()
+  @Get('layers/:id/completeness')
+  completeness(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
+    return this.dataTools.completeness(appUser, id);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('layers/:id/split')
+  @HttpCode(200)
+  split(@CurrentAppUser() appUser: AppUser, @Param('id') id: string, @Body() dto: SplitLayerDto) {
+    return this.dataTools.splitByAttribute(appUser, id, dto);
+  }
 
   @RequireMunicipalityMember()
   @Post('layers/:id/field-calculator')

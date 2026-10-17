@@ -86,6 +86,7 @@ export class GeoServerService {
       maxFeatures?: number;
       timeoutMs?: number;
       srsName?: string;
+      cqlFilter?: string;
     } = {},
   ): Promise<string> {
     const qualifiedLayer = `${workspace}:${layer}`;
@@ -99,6 +100,7 @@ export class GeoServerService {
     if (options.maxFeatures) {
       params.set('count', String(options.maxFeatures));
     }
+    if (options.cqlFilter) params.set('CQL_FILTER', options.cqlFilter);
     if (options.srsName) {
       // Task 9 search: features/bboxes must come back in EPSG:4326 to
       // match GISLayer.bbox's own convention, regardless of the
@@ -183,7 +185,7 @@ export class GeoServerService {
     workspace: string,
     layer: string,
     outputFormat: string,
-    options: { srsName?: string; timeoutMs?: number } = {},
+    options: { srsName?: string; timeoutMs?: number; cqlFilter?: string } = {},
   ): Promise<{ body: Buffer; contentType: string }> {
     const params = new URLSearchParams({
       service: 'WFS',
@@ -195,6 +197,7 @@ export class GeoServerService {
     if (options.srsName) {
       params.set('srsName', options.srsName);
     }
+    if (options.cqlFilter) params.set('CQL_FILTER', options.cqlFilter);
     const response = await this.request(
       `/${encodeURIComponent(workspace)}/wfs?${params.toString()}`,
       { method: 'GET' },

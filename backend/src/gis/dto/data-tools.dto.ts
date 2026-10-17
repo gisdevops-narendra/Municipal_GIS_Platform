@@ -153,3 +153,71 @@ export class CreateSnapshotDto {
   @MaxLength(120)
   name!: string;
 }
+
+// ----- Field management, geometry, find & replace, split (Data Tools batch 2) -----
+
+export const FIELD_TYPES = ['text', 'integer', 'double precision', 'date', 'boolean'] as const;
+export const GEOMETRY_MEASURES = ['area_m2', 'area_ha', 'length_m', 'perimeter_m', 'x', 'y', 'lon', 'lat'] as const;
+
+export class FieldManageDto {
+  @IsIn(['add', 'rename', 'delete'])
+  action!: 'add' | 'rename' | 'delete';
+
+  @IsString()
+  @MaxLength(63)
+  field!: string;
+
+  /** add: the column type. */
+  @IsOptional()
+  @IsIn(FIELD_TYPES)
+  type?: (typeof FIELD_TYPES)[number];
+
+  /** rename: the new name. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(63)
+  newName?: string;
+}
+
+export class CalcGeometryDto {
+  @IsIn(GEOMETRY_MEASURES)
+  measure!: (typeof GEOMETRY_MEASURES)[number];
+
+  /** Target field — created (double precision) when missing. */
+  @IsString()
+  @MaxLength(63)
+  field!: string;
+}
+
+export class FindReplaceDto {
+  @IsString()
+  @MaxLength(63)
+  field!: string;
+
+  @IsString()
+  @MaxLength(500)
+  find!: string;
+
+  @IsString()
+  @MaxLength(500)
+  replace!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  matchCase?: boolean;
+
+  /** Only values equal to `find` (otherwise every occurrence inside a value). */
+  @IsOptional()
+  @IsBoolean()
+  wholeValue?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  preview?: boolean;
+}
+
+export class SplitLayerDto {
+  @IsString()
+  @MaxLength(63)
+  field!: string;
+}

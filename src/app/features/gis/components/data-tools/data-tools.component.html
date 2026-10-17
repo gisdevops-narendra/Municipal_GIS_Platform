@@ -227,6 +227,106 @@
       }
     }
 
+    <!-- ============ FIELDS ============ -->
+    @case ('fields') {
+      @if (layerId()) {
+        <div class="bo__modes">
+          <button type="button" class="bo__mode" [class.bo__mode--active]="fieldAction === 'add'" (click)="fieldAction = 'add'; fieldName = ''">Add</button>
+          <button type="button" class="bo__mode" [class.bo__mode--active]="fieldAction === 'rename'" (click)="fieldAction = 'rename'; fieldName = ''">Rename</button>
+          <button type="button" class="bo__mode" [class.bo__mode--active]="fieldAction === 'delete'" (click)="fieldAction = 'delete'; fieldName = ''">Delete</button>
+        </div>
+        @if (fieldAction === 'add') {
+          <label class="bo__field"><span class="bo__label">New field name</span><input type="text" class="bo__input" maxlength="63" [(ngModel)]="fieldName" placeholder="e.g. condition" /></label>
+          <label class="bo__field"><span class="bo__label">Type</span>
+            <p-select class="bo__select" [options]="fieldTypes" optionLabel="label" optionValue="value" [(ngModel)]="fieldType" appendTo="body" /></label>
+        } @else {
+          <label class="bo__field"><span class="bo__label">Field</span>
+            <p-select class="bo__select" [options]="fields()" optionLabel="name" optionValue="name" [(ngModel)]="fieldName" [filter]="true" placeholder="Choose a field" appendTo="body" /></label>
+          @if (fieldAction === 'rename') {
+            <label class="bo__field"><span class="bo__label">New name</span><input type="text" class="bo__input" maxlength="63" [(ngModel)]="fieldNewName" /></label>
+          }
+        }
+        <p class="bo__hint">Letters, digits and _ only. Renaming or deleting affects styles, queries and reports that use the field.</p>
+        <div class="bo__controls">
+          <button pButton type="button" [label]="fieldAction === 'add' ? 'Add field' : fieldAction === 'rename' ? 'Rename field' : 'Delete field'" [icon]="fieldAction === 'delete' ? 'pi pi-trash' : 'pi pi-check'" class="p-button-sm bo__run" [class.p-button-danger]="fieldAction === 'delete'" [loading]="running()" (click)="runManageField()"></button>
+        </div>
+      }
+    }
+
+    <!-- ============ CALCULATE GEOMETRY ============ -->
+    @case ('geometry') {
+      @if (layerId()) {
+        <label class="bo__field"><span class="bo__label">Measure</span>
+          <p-select class="bo__select" [options]="geoMeasureOptions()" optionLabel="label" optionValue="value" [ngModel]="geoMeasure" (ngModelChange)="onGeoMeasure($event)" appendTo="body" /></label>
+        <label class="bo__field"><span class="bo__label">Save into field (created if missing)</span><input type="text" class="bo__input" maxlength="63" [(ngModel)]="geoField" /></label>
+        <p class="bo__hint">Areas and lengths are true ground measurements (geodesic), whatever the layer's coordinate system.</p>
+        <div class="bo__controls">
+          <button pButton type="button" label="Calculate" icon="pi pi-calculator" class="p-button-sm bo__run" [loading]="running()" (click)="runCalculateGeometry()"></button>
+        </div>
+      }
+    }
+
+    <!-- ============ FIND & REPLACE ============ -->
+    @case ('replace') {
+      @if (layerId()) {
+        <label class="bo__field"><span class="bo__label">Text field</span>
+          <p-select class="bo__select" [options]="textFields()" optionLabel="name" optionValue="name" [(ngModel)]="replaceField" [filter]="true" placeholder="Choose a field" appendTo="body" /></label>
+        <div class="bo__row">
+          <label class="bo__field bo__field--grow"><span class="bo__label">Find</span><input type="text" class="bo__input" [(ngModel)]="replaceFind" (ngModelChange)="replacePreview.set(null)" /></label>
+          <label class="bo__field bo__field--grow"><span class="bo__label">Replace with</span><input type="text" class="bo__input" [(ngModel)]="replaceWith" (ngModelChange)="replacePreview.set(null)" /></label>
+        </div>
+        <label class="bo__toggle"><input type="checkbox" [(ngModel)]="replaceWhole" (ngModelChange)="replacePreview.set(null)" /><span>Whole value only</span></label>
+        <label class="bo__toggle"><input type="checkbox" [(ngModel)]="replaceMatchCase" (ngModelChange)="replacePreview.set(null)" /><span>Match case</span></label>
+        @if (replacePreview(); as rows) {
+          @if (rows.length) {
+            <ul class="bo__rings">
+              @for (r of rows; track $index) {
+                <li class="bo__ring"><span class="bo__ring-label">{{ r.before }} → {{ r.after || '(empty)' }}</span><span class="bo__ring-count">{{ r.n }}</span></li>
+              }
+            </ul>
+          }
+        }
+        <div class="bo__controls">
+          <button pButton type="button" label="Preview" icon="pi pi-eye" class="p-button-sm p-button-outlined" [loading]="running()" (click)="previewReplace()"></button>
+          <button pButton type="button" label="Replace all" icon="pi pi-check" class="p-button-sm bo__run" [disabled]="!replacePreview()?.length || running()" (click)="runReplace()"></button>
+        </div>
+      }
+    }
+
+    <!-- ============ COMPLETENESS ============ -->
+    @case ('completeness') {
+      @if (layerId()) {
+        <p class="bo__hint">How full every field is. Blank, "-", "NA" and "N/A" count as empty.</p>
+        <div class="bo__controls">
+          <button pButton type="button" label="Check completeness" icon="pi pi-chart-bar" class="p-button-sm bo__run" [loading]="running()" (click)="runCompleteness()"></button>
+        </div>
+        @if (completenessResult(); as c) {
+          <p class="bo__result">{{ c.complete }} of {{ c.total }} features have every field filled.</p>
+          <div class="dt__complete">
+            @for (f of c.fields; track f.field) {
+              <div class="dt__complete-row">
+                <span class="dt__complete-name" [title]="f.field">{{ f.field }}</span>
+                <span class="dt__complete-bar"><span [style.width.%]="f.pct" [class.is-low]="f.pct < 50"></span></span>
+                <span class="dt__complete-pct">{{ f.pct }} %</span>
+              </div>
+            }
+          </div>
+        }
+      }
+    }
+
+    <!-- ============ SPLIT ============ -->
+    @case ('split') {
+      @if (layerId()) {
+        <label class="bo__field"><span class="bo__label">Split by field</span>
+          <p-select class="bo__select" [options]="fields()" optionLabel="name" optionValue="name" [(ngModel)]="splitField" [filter]="true" placeholder="e.g. ward or zone" appendTo="body" /></label>
+        <p class="bo__hint">Creates one new layer per value (up to 30), e.g. one layer per ward. The original layer is not changed.</p>
+        <div class="bo__controls">
+          <button pButton type="button" label="Split layer" icon="pi pi-clone" class="p-button-sm bo__run" [loading]="running()" (click)="runSplit()"></button>
+        </div>
+      }
+    }
+
     <!-- ============ FIELD RULES ============ -->
     @case ('rules') {
       @if (layerId()) {

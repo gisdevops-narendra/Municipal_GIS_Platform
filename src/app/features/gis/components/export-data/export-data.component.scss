@@ -88,3 +88,30 @@
     color: var(--color-ink-500);
   }
 }
+
+.export__filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 8px;
+  font-size: 13px;
+  color: var(--color-ink-700);
+  cursor: pointer;
+}
+
+.export__filter {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.export__input {
+  width: 100%;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-ink-900);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-sm);
+}

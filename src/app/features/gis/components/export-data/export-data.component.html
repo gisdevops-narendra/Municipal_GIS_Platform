@@ -10,11 +10,25 @@
         optionLabel="label"
         optionValue="value"
         [ngModel]="selectedLayer()?.id"
-        (ngModelChange)="layerId.set($event); error.set(null)"
+        (ngModelChange)="layerId.set($event); error.set(null); toggleFilter(false)"
         [filter]="layerOptions().length > 8"
         appendTo="body"
       />
     </label>
+
+    <label class="export__filter-toggle">
+      <input type="checkbox" [ngModel]="filterOn" (ngModelChange)="toggleFilter($event)" />
+      <span>Only features where…</span>
+    </label>
+    @if (filterOn) {
+      <div class="export__filter">
+        <p-select class="export__select" [options]="filterFields()" optionLabel="label" optionValue="value" [(ngModel)]="filterField" [filter]="true" placeholder="Field" appendTo="body" />
+        <p-select class="export__select" [options]="filterOps" optionLabel="label" optionValue="value" [(ngModel)]="filterOp" appendTo="body" />
+        @if (filterOp !== 'empty' && filterOp !== 'notempty') {
+          <input type="text" class="export__input" [(ngModel)]="filterValue" placeholder="Value" />
+        }
+      </div>
+    }
 
     <div class="export__field">
       <span class="export__label">Format</span>

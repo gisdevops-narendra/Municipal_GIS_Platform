@@ -59,6 +59,30 @@ export class DataToolsService {
   private readonly http = inject(HttpClient);
   private readonly baseUrl = `${environment.apiUrl}/gis`;
 
+  manageField(layerId: string, body: { action: 'add' | 'rename' | 'delete'; field: string; type?: string; newName?: string }) {
+    return this.http.post<{ fields: { name: string; dataType: string }[] }>(`${this.baseUrl}/layers/${layerId}/fields`, body);
+  }
+
+  calculateGeometry(layerId: string, body: { measure: string; field: string }) {
+    return this.http.post<{ field: string; changed: number }>(`${this.baseUrl}/layers/${layerId}/calculate-geometry`, body);
+  }
+
+  findReplace(layerId: string, body: { field: string; find: string; replace: string; matchCase?: boolean; wholeValue?: boolean; preview?: boolean }) {
+    return this.http.post<{ changed?: number; total?: number; preview?: { before: string; after: string; n: number }[] }>(
+      `${this.baseUrl}/layers/${layerId}/find-replace`, body
+    );
+  }
+
+  completeness(layerId: string) {
+    return this.http.get<{ total: number; complete: number; fields: { field: string; type: string; filled: number; empty: number; pct: number }[] }>(
+      `${this.baseUrl}/layers/${layerId}/completeness`
+    );
+  }
+
+  splitLayer(layerId: string, field: string) {
+    return this.http.post<{ created: { name: string; features: number }[] }>(`${this.baseUrl}/layers/${layerId}/split`, { field });
+  }
+
   fieldCalculate(
     layerId: string,
     body: { field: string; expression: string; newFieldType?: NewFieldType; preview?: boolean }

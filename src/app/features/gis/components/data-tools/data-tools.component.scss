@@ -156,3 +156,48 @@
 .dt__modified {
   color: #ea580c;
 }
+
+/* Completeness: one bar per field. */
+.dt__complete {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.dt__complete-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 90px 52px;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.dt__complete-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dt__complete-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--color-surface-alt);
+  overflow: hidden;
+
+  span {
+    display: block;
+    height: 100%;
+    background: var(--color-success-600);
+
+    &.is-low {
+      background: var(--color-error-600);
+    }
+  }
+}
+
+.dt__complete-pct {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

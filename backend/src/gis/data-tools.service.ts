@@ -21,6 +21,10 @@ import type {
   GeocodeDto,
   TableJoinDto,
   ValidateLayerDto,
+  CalcGeometryDto,
+  FieldManageDto,
+  FindReplaceDto,
+  SplitLayerDto,
 } from './dto/data-tools.dto';
 
 /** Module Access catalog ids (seed-modules.ts). */
@@ -47,6 +51,9 @@ const ISSUE_LIMIT = 500;
 const CHANGE_LIMIT = 1000;
 
 const q = (ident: string) => `"${ident.replace(/"/g, '""')}"`;
+/** Columns GDAL / the platform own — never renamed, dropped or reported on. */
+const PROTECTED_COLUMNS = new Set(['ogc_fid', 'geom', 'gis_workspace_id', 'fid']);
+const MAX_SPLIT_LAYERS = 30;
 
 export interface TopologyIssue {
   check: 'invalid' | 'empty' | 'duplicate' | 'overlap' | 'gap' | 'dangle' | 'rule' | 'outlier';
@@ -107,6 +114,176 @@ export class DataToolsService {
       params,
     });
     return { field: column.name, changed };
+  }
+
+  // ----- Field management (add / rename / delete) -----
+
+  async manageField(appUser: AppUser, layerId: string, dto: FieldManageDto) {
+    await this.vectorTools.requireModule(appUser, FIELD_CALCULATOR_MODULE_ID, 'Field Calculator');
+    const source = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
+    const columns = await this.vectorTools.columns(source.table);
+    const exists = (name: string) => columns.some((c) => c.name === name);
+    const validName = (name: string) => {
+      if (!/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(name)) {
+        throw new BadRequestException('Field names use letters, digits and _ only, starting with a letter.');
+      }
+      if (PROTECTED_COLUMNS.has(name.toLowerCase())) throw new BadRequestException(`"${name}" is reserved.`);
+    };
+    const rules = { ...((source.layer.fieldRules as FieldRules | null) ?? {}) };
+
+    if (dto.action === 'add') {
+      validName(dto.field);
+      if (exists(dto.field)) throw new BadRequestException(`Field "${dto.field}" already exists.`);
+      if (!dto.type) throw new BadRequestException('Choose the field type.');
+      await this.prisma.$executeRawUnsafe(`ALTER TABLE "${source.table}" ADD COLUMN ${q(dto.field)} ${dto.type}`);
+    } else {
+      if (PROTECTED_COLUMNS.has(dto.field.toLowerCase())) throw new BadRequestException(`"${dto.field}" cannot be changed.`);
+      if (!exists(dto.field)) throw new BadRequestException(`Field "${dto.field}" does not exist.`);
+      if (dto.action === 'rename') {
+        const to = (dto.newName ?? '').trim();
+        validName(to);
+        if (exists(to)) throw new BadRequestException(`Field "${to}" already exists.`);
+        await this.prisma.$executeRawUnsafe(`ALTER TABLE "${source.table}" RENAME COLUMN ${q(dto.field)} TO ${q(to)}`);
+        if (rules[dto.field]) { rules[to] = rules[dto.field]; delete rules[dto.field]; }
+      } else {
+        await this.prisma.$executeRawUnsafe(`ALTER TABLE "${source.table}" DROP COLUMN ${q(dto.field)}`);
+        delete rules[dto.field];
+      }
+      await this.prisma.gISLayer.update({ where: { id: source.layer.id }, data: { fieldRules: rules as Prisma.InputJsonObject } });
+    }
+    await this.refreshLayer(source);
+    return { fields: await this.vectorTools.columns(source.table) };
+  }
+
+  // ----- Calculate geometry -----
+
+  async calculateGeometry(appUser: AppUser, layerId: string, dto: CalcGeometryDto) {
+    await this.vectorTools.requireModule(appUser, FIELD_CALCULATOR_MODULE_ID, 'Field Calculator');
+    const source = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
+    const kind = source.layer.geometryType;
+    if (['area_m2', 'area_ha', 'perimeter_m'].includes(dto.measure) && kind !== 'POLYGON') {
+      throw new BadRequestException('Area and perimeter need a polygon layer.');
+    }
+    if (dto.measure === 'length_m' && kind !== 'LINE') throw new BadRequestException('Length needs a line layer.');
+    const geog = `ST_Transform(t.geom, 4326)::geography`;
+    const pt = `ST_PointOnSurface(t.geom)`;
+    const expr: Record<string, string> = {
+      area_m2: `ST_Area(${geog})`,
+      area_ha: `ST_Area(${geog}) / 10000`,
+      length_m: `ST_Length(${geog})`,
+      perimeter_m: `ST_Perimeter(${geog})`,
+      x: `ST_X(${pt})`,
+      y: `ST_Y(${pt})`,
+      lon: `ST_X(ST_Transform(${pt}, 4326))`,
+      lat: `ST_Y(ST_Transform(${pt}, 4326))`,
+    };
+    const columns = await this.vectorTools.columns(source.table);
+    if (!columns.some((c) => c.name === dto.field)) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(dto.field) || PROTECTED_COLUMNS.has(dto.field.toLowerCase())) {
+        throw new BadRequestException('Field names use letters, digits and _ only, starting with a letter.');
+      }
+      await this.prisma.$executeRawUnsafe(`ALTER TABLE "${source.table}" ADD COLUMN ${q(dto.field)} double precision`);
+      await this.refreshLayer(source);
+    }
+    const digits = ['lon', 'lat'].includes(dto.measure) ? 7 : 2;
+    const changed = await this.bulkUpdate(appUser, layerId, source.table, {
+      columns: [dto.field],
+      set: `${q(dto.field)} = round((${expr[dto.measure]})::numeric, ${digits})`,
+      params: [],
+      where: 't.geom IS NOT NULL',
+    });
+    return { field: dto.field, changed };
+  }
+
+  // ----- Find & replace -----
+
+  async findReplace(appUser: AppUser, layerId: string, dto: FindReplaceDto) {
+    await this.vectorTools.requireModule(appUser, FIELD_CALCULATOR_MODULE_ID, 'Field Calculator');
+    const source = await this.gisLayers.vectorSource(appUser, layerId, dto.preview ? 'view' : 'edit');
+    const column = (await this.vectorTools.columns(source.table)).find((c) => c.name === dto.field);
+    if (!column) throw new BadRequestException(`Field "${dto.field}" does not exist.`);
+    if (!/char|text/.test(column.dataType)) throw new BadRequestException('Find & replace works on text fields.');
+    if (!dto.find) throw new BadRequestException('Enter the text to find.');
+    const f = q(column.name);
+    const flags = dto.matchCase ? 'g' : 'gi';
+    // $1 = find (regex-escaped for partial matches), $2 = replacement
+    const pattern = dto.wholeValue ? dto.find : dto.find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const matches = dto.wholeValue
+      ? dto.matchCase ? `t.${f} = $1` : `lower(t.${f}) = lower($1)`
+      : `t.${f} ~${dto.matchCase ? '' : '*'} $1`;
+    if (dto.preview) {
+      const rows = await this.prisma.$queryRawUnsafe<{ before: string; after: string; n: number }[]>(
+        `SELECT t.${f} AS before, ${dto.wholeValue ? '$2' : `regexp_replace(t.${f}, $1, $2, '${flags}')`} AS after, count(*)::int AS n
+           FROM "${source.table}" t WHERE ${matches} GROUP BY 1, 2 ORDER BY n DESC LIMIT 10`,
+        pattern,
+        dto.replace,
+      );
+      return { preview: rows, total: rows.reduce((s, r) => s + r.n, 0) };
+    }
+    const changed = await this.bulkUpdate(appUser, layerId, source.table, {
+      columns: [column.name],
+      set: `${f} = ${dto.wholeValue ? '$2' : `regexp_replace(t.${f}, $1, $2, '${flags}')`}`,
+      params: [pattern, dto.replace],
+      where: matches,
+    });
+    return { changed };
+  }
+
+  // ----- Attribute completeness -----
+
+  async completeness(appUser: AppUser, layerId: string) {
+    await this.vectorTools.requireModule(appUser, TOPOLOGY_MODULE_ID, 'Topology Validation');
+    const source = await this.gisLayers.vectorSource(appUser, layerId, 'view');
+    const columns = (await this.vectorTools.columns(source.table)).filter(
+      (c) => !PROTECTED_COLUMNS.has(c.name.toLowerCase()) && c.dataType !== 'USER-DEFINED',
+    );
+    if (!columns.length) return { total: 0, fields: [], complete: 0 };
+    const blank = (c: { name: string }) => `(t.${q(c.name)} IS NULL OR trim(t.${q(c.name)}::text) IN ('', '-', 'NA', 'N/A', 'null'))`;
+    const exprs = columns.slice(0, 150).map((c, i) => `count(*) FILTER (WHERE ${blank(c)})::int AS c${i}`);
+    const [row] = await this.prisma.$queryRawUnsafe<Record<string, number>[]>(
+      `SELECT count(*)::int AS total, count(*) FILTER (WHERE NOT (${columns.slice(0, 150).map(blank).join(' OR ')}))::int AS complete,
+              ${exprs.join(', ')} FROM "${source.table}" t`,
+    );
+    const total = Number(row.total ?? 0);
+    const fields = columns.slice(0, 150).map((c, i) => {
+      const empty = Number(row[`c${i}`] ?? 0);
+      return { field: c.name, type: c.dataType, filled: total - empty, empty, pct: total ? Math.round((1000 * (total - empty)) / total) / 10 : 0 };
+    }).sort((a, b) => a.pct - b.pct);
+    return { total, complete: Number(row.complete ?? 0), fields };
+  }
+
+  // ----- Split layer by attribute -----
+
+  async splitByAttribute(appUser: AppUser, layerId: string, dto: SplitLayerDto) {
+    await this.vectorTools.requireModule(appUser, FIELD_CALCULATOR_MODULE_ID, 'Field Calculator');
+    const source = await this.gisLayers.vectorSource(appUser, layerId, 'view');
+    const column = (await this.vectorTools.columns(source.table)).find((c) => c.name === dto.field);
+    if (!column) throw new BadRequestException(`Field "${dto.field}" does not exist.`);
+    const values = await this.prisma.$queryRawUnsafe<{ v: string | null; n: number }[]>(
+      `SELECT t.${q(column.name)}::text AS v, count(*)::int AS n FROM "${source.table}" t GROUP BY 1 ORDER BY 1 NULLS LAST LIMIT ${MAX_SPLIT_LAYERS + 1}`,
+    );
+    if (values.length > MAX_SPLIT_LAYERS) {
+      throw new BadRequestException(`"${column.name}" has more than ${MAX_SPLIT_LAYERS} different values — choose a field like ward or zone.`);
+    }
+    const created: { name: string; features: number }[] = [];
+    for (const { v, n } of values) {
+      const name = `${source.layer.name} – ${v ?? '(blank)'}`.slice(0, 120);
+      const output = await this.raster.prepareVectorOutput(appUser, name);
+      await this.prisma.$executeRawUnsafe(
+        `CREATE TABLE "${output.table}" AS SELECT * FROM "${source.table}" t WHERE t.${q(column.name)}::text ${v === null ? 'IS NULL' : '= $1'}`,
+        ...(v === null ? [] : [v]),
+      );
+      await this.prisma.$executeRawUnsafe(`ALTER TABLE "${output.table}" DROP COLUMN IF EXISTS ogc_fid`);
+      await this.prisma.$executeRawUnsafe(`ALTER TABLE "${output.table}" ADD COLUMN ogc_fid SERIAL PRIMARY KEY`);
+      await this.raster.publishVectorTable(appUser, output, {
+        name,
+        geometryType: source.layer.geometryType ?? 'POLYGON',
+        description: `${source.layer.name} where ${column.name} = ${v ?? '(blank)'}`,
+        rasterAnalysis: false,
+      });
+      created.push({ name, features: n });
+    }
+    return { created };
   }
 
   // ----- Table Join -----

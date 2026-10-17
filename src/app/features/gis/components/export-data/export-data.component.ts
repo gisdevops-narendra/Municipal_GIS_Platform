@@ -1,3 +1,4 @@
+import { AttributeTableService } from '../../services/attribute-table.service';
 import { Component, Input, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
@@ -25,6 +26,7 @@ import { blobErrorMessage, downloadBlob } from '../../../../core/utils/download-
 export class ExportDataComponent {
   private readonly gisLayersService = inject(GisLayersService);
   private readonly notify = inject(NotificationService);
+  private readonly attributes = inject(AttributeTableService);
 
   // Signal-backed inputs so the computed option lists follow later changes.
   @Input() set layers(value: GisLayer[]) {
@@ -66,13 +68,40 @@ export class ExportDataComponent {
     return options.find((f) => f.value === this.format()) ?? options.at(0) ?? null;
   });
 
+  /** Export with filter: only features matching one condition. */
+  filterOn = false;
+  filterField: string | null = null;
+  filterOp = '=';
+  filterValue = '';
+  readonly filterOps = [
+    { label: 'equals', value: '=' }, { label: 'is not', value: '!=' }, { label: 'greater than', value: '>' },
+    { label: 'less than', value: '<' }, { label: 'contains', value: 'contains' }, { label: 'is empty', value: 'empty' },
+    { label: 'is not empty', value: 'notempty' }
+  ];
+  readonly filterFields = signal<{ label: string; value: string }[]>([]);
+  private fieldsFor: string | null = null;
+
+  toggleFilter(on: boolean): void {
+    this.filterOn = on;
+    const layer = this.selectedLayer();
+    if (on && layer && this.fieldsFor !== layer.id) {
+      this.fieldsFor = layer.id;
+      this.filterField = null;
+      this.attributes.loadMetadata(layer).subscribe({
+        next: ({ fields }) => this.filterFields.set(fields.map((f) => ({ label: f.label, value: f.name }))),
+        error: () => this.filterFields.set([])
+      });
+    }
+  }
+
   download(): void {
     const layer = this.selectedLayer();
     const format = this.selectedFormat();
     if (!layer || !format || this.busy()) return;
     this.busy.set(true);
     this.error.set(null);
-    this.gisLayersService.export(layer.id, format.value).subscribe({
+    const filter = this.filterOn && this.filterField ? { field: this.filterField, op: this.filterOp, value: this.filterValue } : undefined;
+    this.gisLayersService.export(layer.id, format.value, filter).subscribe({
       next: (blob) => {
         this.busy.set(false);
         downloadBlob(blob, `${layer.code.toLowerCase()}.${format.extension}`);

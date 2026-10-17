@@ -265,6 +265,7 @@ export class GisLayersService {
     appUser: AppUser,
     layerId: string,
     format: LayerExportFormat = 'geojson',
+    filter?: { field: string; op: string; value: string },
   ): Promise<{ filename: string; body: string | Buffer; contentType: string }> {
     const layer = await this.findLayerInMunicipality(
       appUser.municipalityId,
@@ -286,10 +287,12 @@ export class GisLayersService {
       );
     }
     const base = layer.code.toLowerCase();
+    const cqlFilter = filter ? await this.exportFilterCql(layer, filter) : undefined;
     if (format === 'geojson') {
       const geojson = await this.geoServer.getFeaturesAsGeoJson(
         layer.geoserverWorkspace,
         layer.geoserverLayer,
+        { cqlFilter },
       );
       return {
         filename: `${base}.geojson`,
@@ -303,9 +306,42 @@ export class GisLayersService {
       layer.geoserverWorkspace,
       layer.geoserverLayer,
       spec.outputFormat,
-      { srsName: spec.srsName },
+      { srsName: spec.srsName, cqlFilter },
     );
     return { filename: `${base}.${spec.extension}`, body, contentType };
+  }
+
+  /** "Export with filter": ECQL built here from a known field, a whitelisted
+   *  operator and a quoted value — never raw filter text from the client. */
+  private async exportFilterCql(
+    layer: { postgisTable: string | null },
+    filter: { field: string; op: string; value: string },
+  ): Promise<string> {
+    const columns = layer.postgisTable
+      ? await this.prisma.$queryRawUnsafe<{ column_name: string; data_type: string }[]>(
+          `SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1`,
+          layer.postgisTable,
+        )
+      : [];
+    const column = columns.find((c) => c.column_name === filter.field);
+    if (!column) throw new BadRequestException(`Unknown field "${filter.field}".`);
+    const numeric = /int|numeric|double|real/.test(column.data_type);
+    const value = String(filter.value ?? '');
+    if (numeric && filter.op !== 'contains' && !Number.isFinite(Number(value))) {
+      throw new BadRequestException(`"${filter.field}" is numeric — enter a number.`);
+    }
+    const lit = numeric && filter.op !== 'contains' ? String(Number(value)) : `'${value.replace(/'/g, "''")}'`;
+    const f = `"${column.column_name.replace(/"/g, '')}"`;
+    switch (filter.op) {
+      case '=': return `${f} = ${lit}`;
+      case '!=': return `${f} <> ${lit}`;
+      case '>': return `${f} > ${lit}`;
+      case '<': return `${f} < ${lit}`;
+      case 'contains': return `strToLowerCase(${f}) LIKE '%${value.toLowerCase().replace(/'/g, "''").replace(/%/g, '')}%'`;
+      case 'empty': return `${f} IS NULL`;
+      case 'notempty': return `${f} IS NOT NULL`;
+      default: throw new BadRequestException('Unknown filter operator.');
+    }
   }
 
   /** Task 8 §7: every department that currently has at least one grant on
