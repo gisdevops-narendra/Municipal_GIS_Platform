@@ -22,7 +22,7 @@
         <ul class="fc__list">
           @for (item of queue(); track item.id) {
             <li>
-              <span>{{ item.layerName }} · {{ item.createdAt.slice(11, 16) }}{{ item.photo ? ' · photo' : '' }}</span>
+              <span>{{ item.layerName }} · {{ item.createdAt | date: 'd MMM, h:mm a' }}{{ item.photo ? ' · photo' : '' }}</span>
               <button type="button" class="fc__link" (click)="discard(item)">Discard</button>
             </li>
           }
@@ -74,7 +74,7 @@
         <h2 class="fc__section">Details</h2>
         @for (field of s.fields; track field.name) {
           <label class="fc__field">
-            <span class="fc__label">{{ field.name }}@if (isRequired(field.name)) {<span class="fc__req"> *</span>}</span>
+            <span class="fc__label" [title]="field.name">{{ fieldLabel(field.name) }}@if (isRequired(field.name)) {<span class="fc__req"> *</span>}</span>
             @switch (inputKind(field)) {
               @case ('list') {
                 <select class="fc__input" [(ngModel)]="values[field.name]">

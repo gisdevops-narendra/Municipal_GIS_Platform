@@ -1,4 +1,5 @@
 import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { HttpErrorResponse } from '@angular/common/http';
@@ -6,6 +7,7 @@ import { firstValueFrom } from 'rxjs';
 import { GisLayer } from '../../core/models/gis-layer.model';
 import { GisLayersService } from '../../core/services/gis-layers.service';
 import { ModuleAccessService } from '../../core/services/module-access.service';
+import { NotificationService } from '../../core/services/notification.service';
 import {
   ATTACHMENTS_MODULE_ID,
   EditSchema,
@@ -31,7 +33,7 @@ interface Fix {
 @Component({
   selector: 'app-collect',
   standalone: true,
-  imports: [FormsModule, RouterLink],
+  imports: [DatePipe, FormsModule, RouterLink],
   templateUrl: './collect.component.html',
   styleUrl: './collect.component.scss'
 })
@@ -39,6 +41,7 @@ export class CollectComponent implements OnInit, OnDestroy {
   private readonly gisLayers = inject(GisLayersService);
   private readonly moduleAccess = inject(ModuleAccessService);
   private readonly vectorTools = inject(VectorToolsService);
+  private readonly notify = inject(NotificationService);
 
   readonly allowed = signal<boolean | null>(null);
   readonly photosAllowed = signal(false);
@@ -68,7 +71,11 @@ export class CollectComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     window.addEventListener('online', this.onOnline);
     window.addEventListener('offline', this.onOffline);
-    void this.refreshQueue();
+    // Work queued in an earlier visit syncs as soon as the page opens
+    // online — not only on a later offline→online transition.
+    void this.refreshQueue().then(() => {
+      if (this.online() && this.queue().length) void this.sync();
+    });
     this.moduleAccess.getMyModuleIds().subscribe({
       next: ({ moduleIds }) => {
         const ids = new Set(moduleIds);
@@ -100,6 +107,7 @@ export class CollectComponent implements OnInit, OnDestroy {
   selectLayer(layerId: string): void {
     this.layerId.set(layerId || null);
     this.schema.set(null);
+    this.values = {};
     this.vertices.set([]);
     this.message.set(null);
     if (!layerId) return;
@@ -140,6 +148,12 @@ export class CollectComponent implements OnInit, OnDestroy {
 
   ruleValues(field: string): string[] {
     return this.schema()?.rules[field]?.values ?? [];
+  }
+
+  /** `installed_on` → "Installed on" — column names are not crew-friendly. */
+  fieldLabel(name: string): string {
+    const text = name.replace(/[_-]+/g, ' ').trim();
+    return text ? text[0].toUpperCase() + text.slice(1) : name;
   }
 
   isRequired(field: string): boolean {
@@ -214,7 +228,7 @@ export class CollectComponent implements OnInit, OnDestroy {
     }
     const missing = this.schema()!.fields.filter((f) => this.isRequired(f.name) && !this.values[f.name]?.trim());
     if (missing.length) {
-      this.message.set({ kind: 'error', text: `Required: ${missing.map((f) => f.name).join(', ')}.` });
+      this.message.set({ kind: 'error', text: `Required: ${missing.map((f) => this.fieldLabel(f.name)).join(', ')}.` });
       return;
     }
     const item: QueuedSubmission = {
@@ -232,10 +246,18 @@ export class CollectComponent implements OnInit, OnDestroy {
     this.busy.set(false);
     if (result === 'ok') {
       this.message.set({ kind: 'ok', text: 'Saved to the layer.' });
+    } else if (result === 'ok-no-photo') {
+      this.message.set({ kind: 'error', text: 'Saved to the layer, but the photo could not be uploaded. Add it from the map later.' });
     } else if (result === 'offline' || result === 'signed-out') {
       await collectQueue.add(item);
       await this.refreshQueue();
-      this.message.set({ kind: 'info', text: 'No connection — saved on this device and will sync when you are back online.' });
+      this.message.set({
+        kind: 'info',
+        text:
+          result === 'signed-out'
+            ? 'Your session has expired — saved on this device. Sign in again, then sync.'
+            : 'No connection — saved on this device and will sync when you are back online.'
+      });
     } else {
       this.message.set({ kind: 'error', text: result });
       return;
@@ -246,13 +268,16 @@ export class CollectComponent implements OnInit, OnDestroy {
   /** 'ok', 'offline' / 'signed-out' (keep queued) or an error text (rejected
    *  by the server). A crew offline for hours comes back with an expired
    *  session — that must not discard their queued work. */
-  private async send(item: QueuedSubmission): Promise<'ok' | 'offline' | 'signed-out' | string> {
+  private async send(item: QueuedSubmission): Promise<'ok' | 'ok-no-photo' | 'offline' | 'signed-out' | string> {
     try {
       const feature = await firstValueFrom(this.vectorTools.createFeature(item.layerId, item.geometry, item.properties));
       if (item.photo && this.photosAllowed()) {
-        await firstValueFrom(
+        // The feature is saved either way — never resend it (duplicate);
+        // just tell the user the photo didn't make it.
+        const photoSaved = await firstValueFrom(
           this.vectorTools.addAttachment(item.layerId, feature.id, item.photo, item.photoName ?? 'photo.jpg')
-        ).catch(() => undefined);
+        ).then(() => true, () => false);
+        if (!photoSaved) return 'ok-no-photo';
       }
       return 'ok';
     } catch (err) {
@@ -266,6 +291,7 @@ export class CollectComponent implements OnInit, OnDestroy {
     if (this.busy()) return;
     this.busy.set(true);
     let sent = 0;
+    let photosLost = 0;
     const failed: string[] = [];
     for (const item of await collectQueue.list()) {
       const result = await this.send(item);
@@ -277,22 +303,34 @@ export class CollectComponent implements OnInit, OnDestroy {
         return;
       }
       await collectQueue.remove(item.id);
-      if (result === 'ok') sent++;
+      if (result === 'ok' || result === 'ok-no-photo') sent++;
       else failed.push(`${item.layerName}: ${result}`);
+      if (result === 'ok-no-photo') photosLost++;
     }
     this.busy.set(false);
     await this.refreshQueue();
     if (sent || failed.length) {
       this.message.set({
-        kind: failed.length ? 'error' : 'ok',
-        text: `${sent} queued submission(s) synced.${failed.length ? ` Rejected: ${failed.join('; ')}` : ''}`
+        kind: failed.length || photosLost ? 'error' : 'ok',
+        text:
+          `${sent} queued submission(s) synced.` +
+          (photosLost ? ` ${photosLost} photo(s) could not be uploaded.` : '') +
+          (failed.length ? ` Rejected: ${failed.join('; ')}` : '')
       });
     }
   }
 
-  async discard(item: QueuedSubmission): Promise<void> {
-    await collectQueue.remove(item.id);
-    await this.refreshQueue();
+  discard(item: QueuedSubmission): void {
+    this.notify.confirm({
+      header: 'Discard submission?',
+      message: `This ${item.layerName} record${item.photo ? ' and its photo' : ''} has not been synced and will be lost.`,
+      confirmLabel: 'Discard',
+      destructive: true,
+      accept: async () => {
+        await collectQueue.remove(item.id);
+        await this.refreshQueue();
+      }
+    });
   }
 
   private async refreshQueue(): Promise<void> {
@@ -305,6 +343,8 @@ export class CollectComponent implements OnInit, OnDestroy {
 
   private resetForm(): void {
     this.values = Object.fromEntries(Object.keys(this.values).map((k) => [k, '']));
+    // A kept fix would silently place the next point at this one's spot.
+    this.fix.set(null);
     this.vertices.set([]);
     this.setPhoto(null);
   }
