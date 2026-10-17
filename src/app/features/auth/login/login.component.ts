@@ -1,6 +1,6 @@
 import { Component, OnInit, inject } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { MessageModule } from 'primeng/message';
@@ -33,10 +33,13 @@ import { AuthService } from '../../../core/services/auth.service';
 export class LoginComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
   private readonly auth = inject(AuthService);
 
   redirecting = false;
   loginError = false;
+  /** Set when authGuard stopped a sign-in redirect loop. */
+  readonly signinInterrupted = this.route.snapshot.queryParamMap.get('signin') === 'interrupted';
   forgotError = false;
 
   readonly form = this.fb.nonNullable.group({

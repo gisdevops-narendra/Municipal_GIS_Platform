@@ -29,6 +29,9 @@
           }
         </div>
 
+        @if (signinInterrupted) {
+          <p-message severity="warn" text="Sign-in didn't complete automatically (this can happen right after the platform restarts). Click Login to sign in again." styleClass="w-full" />
+        }
         @if (loginError) {
           <p-message severity="error" text="Could not reach the identity provider. Check that Keycloak is running, then try again." styleClass="w-full" />
         }

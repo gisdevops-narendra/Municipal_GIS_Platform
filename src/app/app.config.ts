@@ -66,7 +66,15 @@ export const appConfig: ApplicationConfig = {
         // iframe check misfires as "logged out" and drives a redirect loop
         // between /dashboard and Keycloak. Token freshness is handled by
         // withAutoRefreshToken() below instead.
-        checkLoginIframe: false
+        checkLoginIframe: false,
+        // When keycloak-js thinks 3rd-party cookies are blocked it otherwise
+        // replaces the silent iframe with a full-page `prompt=none` redirect
+        // — and if that callback can't be matched to its stored state, it
+        // simply redirects again, forever (blank /dashboard#state=… reload
+        // loop, no token request ever reaching Keycloak). Without the
+        // fallback, check-sso stays silent; protected routes still sign in
+        // through authGuard, which has its own loop breaker.
+        silentCheckSsoFallback: false
       },
       features: [withAutoRefreshToken({ onInactivityTimeout: 'none' })]
     })

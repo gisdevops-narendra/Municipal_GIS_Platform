@@ -49,6 +49,12 @@ export class AuthService {
         case KeycloakEventType.AuthRefreshError:
           this.syncState(false);
           break;
+        case KeycloakEventType.AuthError:
+          // e.g. a login callback the adapter rejected — the usual reason
+          // behind a sign-in redirect loop, so make it visible.
+          console.error('[auth] Keycloak authentication error', event.args);
+          this.syncState(false);
+          break;
         default:
           break;
       }

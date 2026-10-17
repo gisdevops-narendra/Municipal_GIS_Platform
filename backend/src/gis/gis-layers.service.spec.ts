@@ -32,6 +32,7 @@ describe('GisLayersService', () => {
       delete: jest.Mock;
     };
     gISLayerUpload: { findMany: jest.Mock; deleteMany: jest.Mock };
+    gISLayerSnapshot: { findMany: jest.Mock };
     department: { findMany: jest.Mock };
     $executeRawUnsafe: jest.Mock;
     $transaction: jest.Mock;
