@@ -56,6 +56,8 @@ export class GeoprocessingComponent {
   readonly dissolveField = signal<string | null>(null);
   readonly joinMode = signal<'attributes' | 'count'>('attributes');
   outputName = '';
+  /** Once the user types a name, stop replacing it with suggestions. */
+  private nameEdited = false;
 
   readonly fieldOptions = signal<{ label: string; value: string }[]>([]);
   readonly running = signal(false);
@@ -89,11 +91,13 @@ export class GeoprocessingComponent {
     this.suggestName();
     if (!layerId) return;
     this.gisLayers.analyticsFields(layerId).subscribe({
-      next: (fields) =>
+      next: (fields) => {
+        if (this.inputLayerId() !== layerId) return; // input changed meanwhile
         this.fieldOptions.set(
           fields.filter((f) => f.kind !== 'geometry').map((f) => ({ label: f.name, value: f.name }))
-        ),
-      error: () => this.fieldOptions.set([])
+        );
+      },
+      error: () => this.inputLayerId() === layerId && this.fieldOptions.set([])
     });
   }
 
@@ -102,7 +106,13 @@ export class GeoprocessingComponent {
     this.suggestName();
   }
 
+  onNameInput(value: string): void {
+    this.outputName = value;
+    this.nameEdited = value.trim().length > 0;
+  }
+
   private suggestName(): void {
+    if (this.nameEdited) return;
     const input = this.vectorLayers().find((l) => l.id === this.inputLayerId());
     if (!input) return;
     const overlay = this.vectorLayers().find((l) => l.id === this.overlayLayerId());
@@ -114,6 +124,9 @@ export class GeoprocessingComponent {
     const def = this.def();
     if (!inputLayerId) return this.error.set('Choose the input layer.');
     if (def.overlay && !this.overlayLayerId()) return this.error.set('Choose the overlay layer.');
+    if (def.overlay && this.overlayLayerId() === inputLayerId) {
+      return this.error.set('Choose a different overlay layer — it is the same as the input.');
+    }
     if (def.value === 'buffer' && !(this.distance > 0)) return this.error.set('Enter a buffer distance above 0.');
     if (!this.outputName.trim()) return this.error.set('Enter a name for the new layer.');
 

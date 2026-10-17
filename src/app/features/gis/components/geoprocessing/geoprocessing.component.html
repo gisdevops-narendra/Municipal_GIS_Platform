@@ -82,7 +82,7 @@
 
   <label class="bo__field">
     <span class="bo__label">New layer name</span>
-    <input type="text" class="bo__input" maxlength="120" [(ngModel)]="outputName" />
+    <input type="text" class="bo__input" maxlength="120" [ngModel]="outputName" (ngModelChange)="onNameInput($event)" />
   </label>
 
   @if (error()) {
