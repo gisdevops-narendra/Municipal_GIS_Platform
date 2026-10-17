@@ -1,54 +1,70 @@
 <div class="layer-panel">
-  <span class="eyebrow">Layers</span>
+
+  <!-- One row template for every group, so they cannot drift apart. -->
+  <ng-template #row let-layer let-showDepartment="showDepartment">
+    <li class="layer-panel__item" [class.layer-panel__item--highlight]="layer.id === highlightLayerId">
+      <p-checkbox
+        [inputId]="'layer-' + layer.id"
+        [binary]="true"
+        [ngModel]="isVisible(layer.id)"
+        (onChange)="onToggle(layer.id, $event)"
+      ></p-checkbox>
+      <label [for]="'layer-' + layer.id" class="layer-panel__label" [title]="layer.description || layer.name">
+        {{ layer.name }}
+        @if (showDepartment && layer.departmentName) {
+          <span class="layer-panel__tag">{{ layer.departmentName }}</span>
+        }
+      </label>
+      @if (layer.bbox) {
+        <button
+          type="button"
+          class="layer-panel__style"
+          pTooltip="Zoom to layer"
+          tooltipPosition="left"
+          aria-label="Zoom to layer"
+          (click)="onZoom(layer, $event)"
+        >
+          <i class="pi pi-search-plus" aria-hidden="true"></i>
+        </button>
+      }
+      @if (canStyle) {
+        <button
+          type="button"
+          class="layer-panel__style"
+          pTooltip="Style layer"
+          tooltipPosition="left"
+          aria-label="Style layer"
+          (click)="onStyle(layer, $event)"
+        >
+          <i class="pi pi-palette" aria-hidden="true"></i>
+        </button>
+      }
+      @if (isVisible(layer.id)) {
+        <img
+          class="layer-panel__swatch"
+          [class.layer-panel__swatch--ramp]="layer.layerType === 'RASTER'"
+          [src]="legendUrl(layer)"
+          [alt]="layer.name + ' legend'"
+          (error)="$any($event.target).hidden = true"
+          (load)="$any($event.target).hidden = false"
+        />
+      }
+    </li>
+  </ng-template>
 
   <div class="layer-panel__scroll">
+    @if (layers.length === 0) {
+      <p class="layer-panel__empty">
+        No layers are available to you yet. Published layers you have access to will appear here.
+      </p>
+    }
+
     @if (canonicalLayers.length > 0) {
       <div class="layer-panel__group">
         <h3 class="layer-panel__group-title">Canonical Layers</h3>
         <ul class="layer-panel__list">
           @for (layer of canonicalLayers; track layer.id) {
-            <li class="layer-panel__item" [class.layer-panel__item--highlight]="layer.id === highlightLayerId">
-              <p-checkbox
-                [inputId]="'layer-' + layer.id"
-                [binary]="true"
-                [ngModel]="isVisible(layer.id)"
-                (onChange)="onToggle(layer.id, $event)"
-              ></p-checkbox>
-              <label [for]="'layer-' + layer.id" class="layer-panel__label">{{ layer.name }}</label>
-              @if (layer.bbox) {
-                <button
-                  type="button"
-                  class="layer-panel__style"
-                  pTooltip="Zoom to layer"
-                  tooltipPosition="left"
-                  aria-label="Zoom to layer"
-                  (click)="onZoom(layer, $event)"
-                >
-                  <i class="pi pi-search-plus" aria-hidden="true"></i>
-                </button>
-              }
-              @if (canStyle) {
-                <button
-                  type="button"
-                  class="layer-panel__style"
-                  pTooltip="Style layer"
-                  tooltipPosition="left"
-                  aria-label="Style layer"
-                  (click)="onStyle(layer, $event)"
-                >
-                  <i class="pi pi-palette" aria-hidden="true"></i>
-                </button>
-              }
-              @if (isVisible(layer.id)) {
-                <img
-                  class="layer-panel__swatch"
-                  [src]="legendUrl(layer)"
-                  [alt]="layer.name + ' legend'"
-                  (error)="$any($event.target).hidden = true"
-                  (load)="$any($event.target).hidden = false"
-                />
-              }
-            </li>
+            <ng-container *ngTemplateOutlet="row; context: { $implicit: layer }" />
           }
         </ul>
       </div>
@@ -62,48 +78,7 @@
             <h4 class="layer-panel__subgroup-title">{{ group.departmentName }}</h4>
             <ul class="layer-panel__list">
               @for (layer of group.layers; track layer.id) {
-                <li class="layer-panel__item" [class.layer-panel__item--highlight]="layer.id === highlightLayerId">
-                  <p-checkbox
-                    [inputId]="'layer-' + layer.id"
-                    [binary]="true"
-                    [ngModel]="isVisible(layer.id)"
-                    (onChange)="onToggle(layer.id, $event)"
-                  ></p-checkbox>
-                  <label [for]="'layer-' + layer.id" class="layer-panel__label">{{ layer.name }}</label>
-                  @if (layer.bbox) {
-                    <button
-                      type="button"
-                      class="layer-panel__style"
-                      pTooltip="Zoom to layer"
-                      tooltipPosition="left"
-                      aria-label="Zoom to layer"
-                      (click)="onZoom(layer, $event)"
-                    >
-                      <i class="pi pi-search-plus" aria-hidden="true"></i>
-                    </button>
-                  }
-                  @if (canStyle) {
-                    <button
-                      type="button"
-                      class="layer-panel__style"
-                      pTooltip="Style layer"
-                      tooltipPosition="left"
-                      aria-label="Style layer"
-                      (click)="onStyle(layer, $event)"
-                    >
-                      <i class="pi pi-palette" aria-hidden="true"></i>
-                    </button>
-                  }
-                  @if (isVisible(layer.id)) {
-                    <img
-                      class="layer-panel__swatch"
-                      [src]="legendUrl(layer)"
-                      [alt]="layer.name + ' legend'"
-                      (error)="$any($event.target).hidden = true"
-                      (load)="$any($event.target).hidden = false"
-                    />
-                  }
-                </li>
+                <ng-container *ngTemplateOutlet="row; context: { $implicit: layer }" />
               }
             </ul>
           </div>
@@ -116,53 +91,7 @@
         <h3 class="layer-panel__group-title">Raster Analysis</h3>
         <ul class="layer-panel__list">
           @for (layer of rasterAnalysisLayers; track layer.id) {
-            <li class="layer-panel__item" [class.layer-panel__item--highlight]="layer.id === highlightLayerId">
-              <p-checkbox
-                [inputId]="'layer-' + layer.id"
-                [binary]="true"
-                [ngModel]="isVisible(layer.id)"
-                (onChange)="onToggle(layer.id, $event)"
-              ></p-checkbox>
-              <label [for]="'layer-' + layer.id" class="layer-panel__label" [title]="layer.description ?? layer.name">
-                {{ layer.name }}
-                @if (layer.departmentName) {
-                  <span class="layer-panel__tag">{{ layer.departmentName }}</span>
-                }
-              </label>
-              @if (layer.bbox) {
-                <button
-                  type="button"
-                  class="layer-panel__style"
-                  pTooltip="Zoom to layer"
-                  tooltipPosition="left"
-                  aria-label="Zoom to layer"
-                  (click)="onZoom(layer, $event)"
-                >
-                  <i class="pi pi-search-plus" aria-hidden="true"></i>
-                </button>
-              }
-              @if (canStyle) {
-                <button
-                  type="button"
-                  class="layer-panel__style"
-                  pTooltip="Style layer"
-                  tooltipPosition="left"
-                  aria-label="Style layer"
-                  (click)="onStyle(layer, $event)"
-                >
-                  <i class="pi pi-palette" aria-hidden="true"></i>
-                </button>
-              }
-              @if (isVisible(layer.id)) {
-                <img
-                  class="layer-panel__swatch"
-                  [src]="legendUrl(layer)"
-                  [alt]="layer.name + ' legend'"
-                  (error)="$any($event.target).hidden = true"
-                  (load)="$any($event.target).hidden = false"
-                />
-              }
-            </li>
+            <ng-container *ngTemplateOutlet="row; context: { $implicit: layer, showDepartment: true }" />
           }
         </ul>
       </div>
@@ -170,18 +99,18 @@
   </div>
 
   @if (showBasemap) {
-  <div class="layer-panel__basemap">
-    <label for="basemap-select" class="layer-panel__group-title">Basemap</label>
-    <p-select
-      inputId="basemap-select"
-      [options]="basemapOptions"
-      optionLabel="label"
-      optionValue="id"
-      [ngModel]="activeBasemap()"
-      (onChange)="onBasemapChange($event.value)"
-      appendTo="body"
-      styleClass="layer-panel__basemap-select"
-    />
-  </div>
+    <div class="layer-panel__basemap">
+      <label for="basemap-select" class="layer-panel__group-title">Basemap</label>
+      <p-select
+        inputId="basemap-select"
+        [options]="basemapOptions"
+        optionLabel="label"
+        optionValue="id"
+        [ngModel]="activeBasemap()"
+        (onChange)="onBasemapChange($event.value)"
+        appendTo="body"
+        styleClass="layer-panel__basemap-select"
+      />
+    </div>
   }
 </div>

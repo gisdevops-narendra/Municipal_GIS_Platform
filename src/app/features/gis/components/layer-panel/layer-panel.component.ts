@@ -1,4 +1,5 @@
 import { Component, EventEmitter, Input, Output, inject } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { CheckboxModule, CheckboxChangeEvent } from 'primeng/checkbox';
@@ -32,7 +33,7 @@ export interface LayerPanelDepartmentGroup {
 @Component({
   selector: 'app-layer-panel',
   standalone: true,
-  imports: [FormsModule, ButtonModule, CheckboxModule, SelectModule, TooltipModule],
+  imports: [NgTemplateOutlet, FormsModule, ButtonModule, CheckboxModule, SelectModule, TooltipModule],
   templateUrl: './layer-panel.component.html',
   styleUrl: './layer-panel.component.scss'
 })
