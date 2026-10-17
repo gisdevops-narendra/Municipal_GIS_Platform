@@ -16,6 +16,7 @@
       />
     </label>
 
+    @if (canFilter()) {
     <label class="export__filter-toggle">
       <input type="checkbox" [ngModel]="filterOn" (ngModelChange)="toggleFilter($event)" />
       <span>Only features where…</span>
@@ -28,6 +29,7 @@
           <input type="text" class="export__input" [(ngModel)]="filterValue" placeholder="Value" />
         }
       </div>
+    }
     }
 
     <div class="export__field">

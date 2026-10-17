@@ -44,6 +44,17 @@ export class GeoprocessingComponent {
 
   @Output() readonly layerCreated = new EventEmitter<GisLayer>();
 
+  /** Granted module ids — the newer tool groups each have their own module. */
+  @Input() set allowedModuleIds(value: ReadonlySet<number>) {
+    this.allowedSignal.set(value ?? new Set());
+  }
+  private readonly allowedSignal = signal<ReadonlySet<number>>(new Set());
+  private static readonly GROUP_MODULE: Partial<Record<GeoprocessOperation, number>> = {
+    symdifference: 1031, merge: 1031, nearest: 1032, selectbylocation: 1032, voronoi: 1032,
+    centroids: 1033, convexhull: 1033, envelope: 1033, simplify: 1033, explode: 1033,
+    polygonstolines: 1033, linestopolygons: 1033, pointsalonglines: 1033, squaregrid: 1034, hexgrid: 1034
+  };
+
   readonly operations: OperationDef[] = [
     { value: 'intersect', group: 'Overlay', label: 'Intersect', hint: 'Only the overlapping parts, with attributes of both layers.', overlay: 'any' },
     { value: 'clip', group: 'Overlay', label: 'Clip', hint: 'The input cut to the area of a polygon layer.', overlay: 'polygon' },
@@ -69,10 +80,16 @@ export class GeoprocessingComponent {
   ];
 
   /** The picker, grouped. */
-  readonly operationGroups = ['Overlay', 'Proximity', 'Geometry', 'Summarise'].map((label) => ({
-    label,
-    items: this.operations.filter((o) => o.group === label)
-  }));
+  readonly operationGroups = computed(() => {
+    const allowed = this.allowedSignal();
+    const ok = (o: OperationDef) => {
+      const id = GeoprocessingComponent.GROUP_MODULE[o.value];
+      return id === undefined || allowed.has(id);
+    };
+    return ['Overlay', 'Proximity', 'Geometry', 'Summarise']
+      .map((label) => ({ label, items: this.operations.filter((o) => o.group === label && ok(o)) }))
+      .filter((g) => g.items.length);
+  });
 
   readonly operation = signal<GeoprocessOperation>('buffer');
   readonly inputLayerId = signal<string | null>(null);

@@ -21,6 +21,14 @@ import type { GeoprocessDto } from './dto/vector-tools.dto';
 export const EDIT_PANEL_MODULE_ID = 55;
 export const EDIT_HISTORY_MODULE_ID = 1001;
 export const GEOPROCESSING_MODULE_ID = 1002;
+/** Sub-modules of Geoprocessing for the tools added later (seed-modules.ts). */
+const GEOPROCESS_GROUP_MODULE: Record<string, [number, string]> = {
+  symdifference: [1031, 'Advanced Overlay'], merge: [1031, 'Advanced Overlay'],
+  nearest: [1032, 'Proximity Analysis'], selectbylocation: [1032, 'Proximity Analysis'], voronoi: [1032, 'Proximity Analysis'],
+  centroids: [1033, 'Geometry Tools'], convexhull: [1033, 'Geometry Tools'], envelope: [1033, 'Geometry Tools'], simplify: [1033, 'Geometry Tools'],
+  explode: [1033, 'Geometry Tools'], polygonstolines: [1033, 'Geometry Tools'], linestopolygons: [1033, 'Geometry Tools'], pointsalonglines: [1033, 'Geometry Tools'],
+  squaregrid: [1034, 'Grid Analysis'], hexgrid: [1034, 'Grid Analysis'],
+};
 export const IMPACT_REPORT_MODULE_ID = 1003;
 export const ATTACHMENTS_MODULE_ID = 1005;
 export const PARCEL_TOOLS_MODULE_ID = 1006;
@@ -222,6 +230,8 @@ export class VectorToolsService {
 
   async geoprocess(appUser: AppUser, dto: GeoprocessDto) {
     await this.requireModule(appUser, GEOPROCESSING_MODULE_ID, 'Geoprocessing');
+    const group = GEOPROCESS_GROUP_MODULE[dto.operation];
+    if (group) await this.requireModule(appUser, group[0], group[1]);
     const a = await this.gisLayers.vectorSource(appUser, dto.inputLayerId, 'view');
     const needsB = ['intersect', 'clip', 'erase', 'join', 'merge', 'symdifference', 'nearest', 'selectbylocation'].includes(dto.operation);
     const b = needsB

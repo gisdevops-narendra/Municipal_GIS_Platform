@@ -79,6 +79,7 @@ export class ExportDataComponent {
     { label: 'is not empty', value: 'notempty' }
   ];
   readonly filterFields = signal<{ label: string; value: string }[]>([]);
+  readonly canFilter = computed(() => this.allowedSignal().has(1035));
   private fieldsFor: string | null = null;
 
   toggleFilter(on: boolean): void {

@@ -95,22 +95,22 @@ export class DataToolsComponent {
   readonly tools = computed(() =>
     [
       { value: 'calc' as Tool, group: 'Fields & values', label: 'Field Calculator', moduleId: FIELD_CALCULATOR_MODULE_ID },
-      { value: 'fields' as Tool, group: 'Fields & values', label: 'Add / Rename / Delete Field', moduleId: FIELD_CALCULATOR_MODULE_ID },
-      { value: 'geometry' as Tool, group: 'Fields & values', label: 'Calculate Geometry', moduleId: FIELD_CALCULATOR_MODULE_ID },
-      { value: 'replace' as Tool, group: 'Fields & values', label: 'Find & Replace', moduleId: FIELD_CALCULATOR_MODULE_ID },
-      { value: 'autonum' as Tool, group: 'Fields & values', label: 'Auto-number IDs', moduleId: FIELD_CALCULATOR_MODULE_ID },
-      { value: 'convert' as Tool, group: 'Fields & values', label: 'Change Field Type', moduleId: FIELD_CALCULATOR_MODULE_ID },
-      { value: 'standardise' as Tool, group: 'Fields & values', label: 'Standardise Values', moduleId: FIELD_CALCULATOR_MODULE_ID },
+      { value: 'fields' as Tool, group: 'Fields & values', label: 'Add / Rename / Delete Field', moduleId: 1017 },
+      { value: 'geometry' as Tool, group: 'Fields & values', label: 'Calculate Geometry', moduleId: 1018 },
+      { value: 'replace' as Tool, group: 'Fields & values', label: 'Find & Replace', moduleId: 1019 },
+      { value: 'autonum' as Tool, group: 'Fields & values', label: 'Auto-number IDs', moduleId: 1020 },
+      { value: 'convert' as Tool, group: 'Fields & values', label: 'Change Field Type', moduleId: 1021 },
+      { value: 'standardise' as Tool, group: 'Fields & values', label: 'Standardise Values', moduleId: 1022 },
       { value: 'validate' as Tool, group: 'Data quality', label: 'Topology Validation', moduleId: TOPOLOGY_MODULE_ID },
-      { value: 'completeness' as Tool, group: 'Data quality', label: 'Completeness Report', moduleId: TOPOLOGY_MODULE_ID },
-      { value: 'duplicates' as Tool, group: 'Data quality', label: 'Find Duplicates', moduleId: TOPOLOGY_MODULE_ID },
+      { value: 'completeness' as Tool, group: 'Data quality', label: 'Completeness Report', moduleId: 1023 },
+      { value: 'duplicates' as Tool, group: 'Data quality', label: 'Find Duplicates', moduleId: 1024 },
       { value: 'rules' as Tool, group: 'Data quality', label: 'Field Rules', moduleId: FIELD_RULES_MODULE_ID },
       { value: 'join' as Tool, group: 'Import & combine', label: 'CSV Join', moduleId: TABLE_JOIN_MODULE_ID },
       { value: 'geocode' as Tool, group: 'Import & combine', label: 'Geocode Addresses', moduleId: GEOCODE_MODULE_ID },
-      { value: 'append' as Tool, group: 'Import & combine', label: 'Append Features', moduleId: FIELD_CALCULATOR_MODULE_ID },
-      { value: 'split' as Tool, group: 'Import & combine', label: 'Split Layer by Attribute', moduleId: FIELD_CALCULATOR_MODULE_ID },
+      { value: 'append' as Tool, group: 'Import & combine', label: 'Append Features', moduleId: 1025 },
+      { value: 'split' as Tool, group: 'Import & combine', label: 'Split Layer by Attribute', moduleId: 1026 },
       { value: 'versions' as Tool, group: 'History', label: 'Versions', moduleId: VERSIONS_MODULE_ID },
-      { value: 'changelog' as Tool, group: 'History', label: 'Change Log', moduleId: VERSIONS_MODULE_ID }
+      { value: 'changelog' as Tool, group: 'History', label: 'Change Log', moduleId: 1027 }
     ].filter((t) => this.allowedSignal().has(t.moduleId))
   );
   readonly toolGroups = computed(() =>

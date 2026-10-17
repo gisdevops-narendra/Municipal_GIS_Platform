@@ -46,6 +46,7 @@ export type LayerExportFormat = keyof typeof LAYER_EXPORT_FORMATS;
 /** Module Access catalog ids gating layer export: Export Data itself plus
  *  one child module per format (seed-modules.ts). */
 export const EXPORT_DATA_MODULE_ID = 226;
+export const EXPORT_FILTER_MODULE_ID = 1035;
 export const LAYER_EXPORT_FORMAT_MODULE_IDS: Record<LayerExportFormat, number> = {
   geojson: 231,
   csv: 227,
@@ -287,6 +288,9 @@ export class GisLayersService {
       );
     }
     const base = layer.code.toLowerCase();
+    if (filter && !modules.has(EXPORT_FILTER_MODULE_ID)) {
+      throw new ForbiddenException('Your module access does not include Export with Filter.');
+    }
     const cqlFilter = filter ? await this.exportFilterCql(layer, filter) : undefined;
     if (format === 'geojson') {
       const geojson = await this.geoServer.getFeaturesAsGeoJson(

@@ -162,6 +162,7 @@
 
         @if (openedLeftTools().has('geoprocessing') && layersReady()) {
           <app-geoprocessing
+            [allowedModuleIds]="myModuleIds()"
             [class.gis-ws__panel--hidden]="leftTool() !== 'geoprocessing'"
             [layers]="layers()"
             (layerCreated)="onLayerCreated($event)"
