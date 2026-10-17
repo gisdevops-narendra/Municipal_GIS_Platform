@@ -476,6 +476,8 @@ export class BufferOverlayComponent implements OnDestroy {
   }
 
   private begin(): void {
+    // A new run must never leave the previous run's impact report around.
+    this.impact.set(null);
     this.ringResults.set(null);
     this.running.set(true);
     this.error.set(null);
