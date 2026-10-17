@@ -1,4 +1,5 @@
 import { Component, Input, OnDestroy, computed, inject, signal } from '@angular/core';
+import { NotificationService } from '../../../../core/services/notification.service';
 import { FormsModule } from '@angular/forms';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
@@ -53,6 +54,7 @@ interface EditTarget {
 export class FeatureEditComponent implements OnDestroy {
   private readonly mapService = inject(MapService);
   private readonly vectorTools = inject(VectorToolsService);
+  private readonly notify = inject(NotificationService);
 
   @Input() set layers(value: GisLayer[]) {
     this.layersSignal.set(value ?? []);
@@ -105,6 +107,13 @@ export class FeatureEditComponent implements OnDestroy {
     return !!t && this.mapService.editGeometryRevision() !== t.geometryRevision;
   });
 
+  /** Unsaved attribute or geometry changes on the current target. */
+  readonly isDirty = computed(() => {
+    const t = this.target();
+    if (!t) return false;
+    return this.geometryDirty() || Object.entries(t.values).some(([k, v]) => v !== t.original[k]);
+  });
+
   readonly canSplitMerge = computed(() => this.schema()?.geometryType !== 'POINT');
 
   private sub?: Subscription;
@@ -123,10 +132,11 @@ export class FeatureEditComponent implements OnDestroy {
     this.busy.set('schema');
     this.vectorTools.editSchema(layerId).subscribe({
       next: (schema) => {
+        if (this.layerId() !== layerId) return; // another layer picked meanwhile
         this.schema.set(schema);
         this.busy.set(null);
       },
-      error: (err: HttpErrorResponse) => this.fail(err)
+      error: (err: HttpErrorResponse) => this.layerId() === layerId && this.fail(err)
     });
   }
 
@@ -151,6 +161,7 @@ export class FeatureEditComponent implements OnDestroy {
   addFeature(): void {
     const schema = this.schema();
     if (!schema?.geometryType) return;
+    if (this.isDirty()) return this.confirmDiscard(() => this.addFeature());
     this.cancel();
     const kind = schema.geometryType === 'POINT' ? 'Point' : schema.geometryType === 'LINE' ? 'Line' : 'Polygon';
     this.busy.set('draw');
@@ -180,6 +191,7 @@ export class FeatureEditComponent implements OnDestroy {
   pickFeature(): void {
     const layerId = this.layerId();
     if (!layerId) return;
+    if (this.isDirty()) return this.confirmDiscard(() => this.pickFeature());
     this.cancel();
     this.busy.set('pick');
     this.sub = this.mapService.pickMapPoint().subscribe(({ lonLat, toleranceM }) => {
@@ -281,7 +293,22 @@ export class FeatureEditComponent implements OnDestroy {
     });
   }
 
+  /** Asks before throwing away unsaved edits, then runs `next`. */
+  private confirmDiscard(next: () => void): void {
+    this.notify.confirm({
+      header: 'Discard unsaved changes?',
+      message: 'This feature has edits that have not been saved.',
+      confirmLabel: 'Discard',
+      destructive: true,
+      accept: () => {
+        this.cancel();
+        next();
+      }
+    });
+  }
+
   cancel(): void {
+    this.error.set(null);
     this.sub?.unsubscribe();
     this.sub = undefined;
     this.mapService.cancelDraw();
@@ -472,9 +499,14 @@ export class FeatureEditComponent implements OnDestroy {
   deleteAttachment(row: FeatureAttachment): void {
     const layerId = this.layerId();
     if (!layerId) return;
-    this.vectorTools.deleteAttachment(layerId, row.id).subscribe({
-      next: () => this.attachments.update((rows) => rows?.filter((r) => r.id !== row.id) ?? null),
-      error: (err: HttpErrorResponse) => this.fail(err)
+    this.notify.confirmDelete({
+      header: 'Delete file',
+      message: `Delete "${row.fileName}" from this feature? This cannot be undone.`,
+      accept: () =>
+        this.vectorTools.deleteAttachment(layerId, row.id).subscribe({
+          next: () => this.attachments.update((rows) => rows?.filter((r) => r.id !== row.id) ?? null),
+          error: (err: HttpErrorResponse) => this.fail(err)
+        })
     });
   }
 
