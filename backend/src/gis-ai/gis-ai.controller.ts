@@ -6,7 +6,7 @@ import {
 import { CurrentAppUser } from '../auth/decorators/current-app-user.decorator';
 import type { AppUser } from '../auth/types/app-user.type';
 import { GisAiService } from './gis-ai.service';
-import { GisChatDto } from './dto/chat.dto';
+import { GisChatDto, GisExplainDto, GisNarrateDto } from './dto/chat.dto';
 import type { AiGisOperation } from './ai-plan.types';
 
 /**
@@ -33,6 +33,21 @@ export class GisAiController {
   @Post('chat')
   chat(@CurrentAppUser() appUser: AppUser, @Body() dto: GisChatDto) {
     return this.gisAi.chat(appUser, dto);
+  }
+
+  /** Friendlier wording of a chat answer from its computed facts (any
+   *  member; the caller already holds the deterministic sentence). */
+  @RequireMunicipalityMember()
+  @Post('narrate')
+  narrate(@CurrentAppUser() appUser: AppUser, @Body() dto: GisNarrateDto) {
+    return this.gisAi.narrate(appUser, dto);
+  }
+
+  /** Plain-language explanation of a raster analysis result (any member). */
+  @RequireMunicipalityMember()
+  @Post('explain')
+  explain(@CurrentAppUser() appUser: AppUser, @Body() dto: GisExplainDto) {
+    return this.gisAi.explain(appUser, dto);
   }
 
   /** Rebuild this municipality's RAG index (layer + field metadata). Owner

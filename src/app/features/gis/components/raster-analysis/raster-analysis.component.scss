@@ -1061,3 +1061,37 @@
     background: var(--color-surface-alt);
   }
 }
+
+/* AI insights card on the results screen. */
+.ra__insights {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--color-line);
+  border-left: 3px solid var(--color-primary-500);
+  border-radius: var(--radius-md);
+  background: var(--color-primary-100);
+}
+
+.ra__insights-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-primary-700);
+}
+
+.ra__insights-text,
+.ra__insights-pending {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-ink-700);
+  white-space: pre-line;
+}
+
+.ra__insights-pending {
+  font-style: italic;
+  color: var(--color-ink-500);
+}

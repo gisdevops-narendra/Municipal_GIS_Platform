@@ -89,7 +89,11 @@ export function rasterInsights(tool: string, stats: RasterStatistics): RasterIns
           { label: 'Mean slope', value: `${num(stats.mean, 1)} ${unit}` },
           { label: 'Steepest', value: `${num(stats.max, 1)} ${unit}` },
           { label: `Easily buildable (< ${percent ? '15 %' : '8.5°'})`, value: `${pct(easy)} · ${area((stats.areaM2 * easy) / 100)}` },
-          { label: 'Steep or worse', value: pct(shareInRange(stats, percent ? 30 : 30, Infinity)) },
+          // The complement too: the AI report states it, and every number it
+          // uses must be one of these facts.
+          { label: `Harder to build on (≥ ${percent ? '15 %' : '8.5°'})`, value: `${pct(100 - easy)} · ${area((stats.areaM2 * (100 - easy)) / 100)}` },
+          { label: `Flat or gentle (< ${percent ? '15 %' : '15°'})`, value: pct(shareInRange(stats, 0, 15)) },
+          { label: 'Steep or worse', value: pct(shareInRange(stats, 30, Infinity)) },
           { label: 'Area analysed', value: area(stats.areaM2) },
         ],
         classes: classify(stats, bands),

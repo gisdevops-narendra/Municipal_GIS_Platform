@@ -1601,13 +1601,18 @@
   }
   @if (facts().length > 0) {
     <div class="ra__export">
-      <button type="button" class="ra__export-btn" (click)="explainResult()" [disabled]="explaining()" title="Explain this result in plain language (local AI model)"><i class="pi" [class.pi-sparkles]="!explaining()" [class.pi-spin]="explaining()" [class.pi-spinner]="explaining()"></i> Explain</button>
+      <button type="button" class="ra__export-btn" (click)="explainResult()" [disabled]="explaining()" title="Regenerate the AI insights (local AI model)"><i class="pi" [class.pi-sparkles]="!explaining()" [class.pi-spin]="explaining()" [class.pi-spinner]="explaining()"></i> {{ explanation() ? 'Regenerate' : 'Explain' }}</button>
       <button type="button" class="ra__export-btn" (click)="exportFacts()" title="Download these results as CSV"><i class="pi pi-download"></i> CSV</button>
     </div>
-    @if (explaining()) {
-      <p class="ra__explain ra__explain--pending">Reading the result… (the local AI model can take up to a minute)</p>
-    } @else if (explanation()) {
-      <p class="ra__explain"><i class="pi pi-sparkles" aria-hidden="true"></i> {{ explanation() }}</p>
+    @if (explaining() || explanation()) {
+      <section class="ra__insights" aria-live="polite">
+        <span class="ra__insights-title"><i class="pi pi-sparkles" aria-hidden="true"></i> AI insights</span>
+        @if (explaining()) {
+          <p class="ra__insights-pending"><i class="pi pi-spin pi-spinner" aria-hidden="true"></i> Reading the result… the local AI model can take up to a minute.</p>
+        } @else {
+          <p class="ra__insights-text">{{ explanation() }}</p>
+        }
+      </section>
     }
     <ul class="bo__rings">
       @for (f of facts(); track f.label) {

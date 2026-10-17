@@ -221,7 +221,9 @@ export class GisAiService {
   async explain(appUser: AppUser, dto: GisExplainDto): Promise<{ text: string | null }> {
     const facts: Record<string, unknown> = {
       analysis: dto.title,
-      results: Object.fromEntries(dto.facts.map((f) => [f.label, f.value])),
+      // "label: value" lines, not {label: value}: the grounding check only
+      // reads values, so numbers in labels ("< 8.5°") were treated as invented.
+      results: dto.facts.map((f) => `${f.label}: ${f.value}`),
     };
     if (dto.rows?.length) facts['table'] = dto.rows.slice(0, 25);
     return this.narrateFacts(
