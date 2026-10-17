@@ -1,8 +1,9 @@
+import { NotificationService } from '../../../../core/services/notification.service';
 import { Component, EventEmitter, Input, OnDestroy, Output, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DatePipe, NgTemplateOutlet } from '@angular/common';
 import { HttpErrorResponse, HttpEventType } from '@angular/common/http';
-import { Observable, Subscription, switchMap, takeWhile, timer } from 'rxjs';
+import { Observable, Subscription, retry, switchMap, takeWhile, throwError, timer } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { SelectModule } from 'primeng/select';
 import { MultiSelectModule } from 'primeng/multiselect';
@@ -163,6 +164,7 @@ const GROUP_META: Record<string, { short: string; icon: string }> = {
   styleUrls: ['../buffer-overlay/buffer-overlay.component.scss', './raster-analysis.component.scss']
 })
 export class RasterAnalysisComponent implements OnDestroy {
+  private readonly notify = inject(NotificationService);
   private readonly mapService = inject(MapService);
   private readonly api = inject(RasterService);
   private readonly gisAi = inject(GisAiService);
@@ -594,10 +596,13 @@ export class RasterAnalysisComponent implements OnDestroy {
     if (!id) return;
     this.api.info(id).subscribe({
       next: (info) => {
+        // A late answer for the previously picked raster would set the
+        // wrong band count / index bands for this one.
+        if (this.layerId() !== id) return;
         this.info.set(info);
         this.applyInfoDefaults(info);
       },
-      error: (err: HttpErrorResponse) => this.fail(err)
+      error: (err: HttpErrorResponse) => this.layerId() === id && this.fail(err)
     });
   }
 
@@ -609,8 +614,8 @@ export class RasterAnalysisComponent implements OnDestroy {
     this.suggestOutputName();
     if (!id) return;
     this.api.vectorFields(id).subscribe({
-      next: (fields) => this.vectorFields.set(fields),
-      error: (err: HttpErrorResponse) => this.fail(err)
+      next: (fields) => this.vectorLayerId() === id && this.vectorFields.set(fields),
+      error: (err: HttpErrorResponse) => this.vectorLayerId() === id && this.fail(err)
     });
   }
 
@@ -975,7 +980,15 @@ export class RasterAnalysisComponent implements OnDestroy {
     );
   }
 
-  monitorAction(m: RasterMonitor, action: 'run' | 'pause' | 'resume' | 'ack' | 'delete'): void {
+  monitorAction(m: RasterMonitor, action: 'run' | 'pause' | 'resume' | 'ack' | 'delete', confirmed = false): void {
+    if (action === 'delete' && !confirmed) {
+      this.notify.confirmDelete({
+        header: 'Delete monitor',
+        message: `Delete the monitor "${m.name}"? Its schedule and alerts stop. This cannot be undone.`,
+        accept: () => this.monitorAction(m, 'delete', true)
+      });
+      return;
+    }
     const request =
       action === 'run'
         ? this.api.runMonitor(m.id)
@@ -1172,9 +1185,14 @@ export class RasterAnalysisComponent implements OnDestroy {
   }
 
   deleteWorkflow(wf: RasterWorkflow): void {
-    this.api.deleteWorkflow(wf.id).subscribe({
-      next: () => this.workflows.update((list) => list.filter((w) => w.id !== wf.id)),
-      error: (e: HttpErrorResponse) => this.fail(e)
+    this.notify.confirmDelete({
+      header: 'Delete workflow',
+      message: `Delete the saved workflow "${wf.name}"? This cannot be undone.`,
+      accept: () =>
+        this.api.deleteWorkflow(wf.id).subscribe({
+          next: () => this.workflows.update((list) => list.filter((w) => w.id !== wf.id)),
+          error: (e: HttpErrorResponse) => this.fail(e)
+        })
     });
   }
 
@@ -2198,7 +2216,17 @@ export class RasterAnalysisComponent implements OnDestroy {
         switchMap((started) => {
           this.job.set(started);
           return timer(1500, 1500).pipe(
-            switchMap(() => this.api.job<T>(started.id)),
+            switchMap(() =>
+              this.api.job<T>(started.id).pipe(
+                // The job keeps running on the server through a network
+                // blip — retry the status check instead of giving up on it.
+                retry({
+                  count: 5,
+                  delay: (err: HttpErrorResponse) =>
+                    err.status === 0 || err.status >= 502 ? timer(3000) : throwError(() => err)
+                })
+              )
+            ),
             takeWhile((j) => j.status === 'queued' || j.status === 'running', true)
           );
         })
