@@ -41,6 +41,8 @@ export class RegistrationStateService {
    *  completing the flow can be redirected back to step 1. */
   submitRegistration(): void {
     this.submittedSignal.set(true);
+    // The account exists now — don't keep the plaintext password around.
+    this.ownerSignal.update((owner) => (owner ? { ...owner, password: '', confirmPassword: '' } : owner));
   }
 
   /** Clears all wizard state, e.g. after returning to the landing page. */

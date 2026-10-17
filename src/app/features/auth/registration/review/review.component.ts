@@ -40,6 +40,7 @@ export class ReviewComponent {
   }
 
   onCreateMunicipality(): void {
+    if (this.submitting) return; // double click
     const owner = this.owner();
     if (!owner) {
       this.router.navigateByUrl('/register/owner');
@@ -89,7 +90,12 @@ export class ReviewComponent {
       );
     }
     if (error.status === 400) {
-      return 'Some details could not be validated. Please go back and check each step.';
+      // Say what failed (e.g. the password policy) rather than "check each step".
+      const message = error.error?.message;
+      const detail = Array.isArray(message) ? message.join('. ') : message;
+      return detail
+        ? `${detail}. Please go back and correct it.`
+        : 'Some details could not be validated. Please go back and check each step.';
     }
     return 'Something went wrong while creating your municipality. Please try again.';
   }

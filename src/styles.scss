@@ -98,6 +98,13 @@ a {
   color: var(--color-primary-600);
 }
 
+/* Links styled as buttons (<a pButton>, e.g. "Register Municipality") kept
+   the browser's link underline — PrimeNG's button theme doesn't reset it. */
+a.p-button,
+a.p-button:hover {
+  text-decoration: none;
+}
+
 /* Respect reduced motion preference throughout the app */
 @media (prefers-reduced-motion: reduce) {
   *,
