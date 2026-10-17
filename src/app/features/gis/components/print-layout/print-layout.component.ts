@@ -1,4 +1,4 @@
-import { Component, Input, OnDestroy, inject, signal } from '@angular/core';
+import { Component, Input, OnDestroy, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse, HttpResponse } from '@angular/common/http';
 import { ButtonModule } from 'primeng/button';
@@ -96,7 +96,12 @@ export class PrintLayoutComponent implements OnDestroy {
   private resultFilename = 'municipal-gis-map.pdf';
 
   constructor() {
-    this.refreshScale();
+    // Follow the live view — the panel stays open while the user pans and
+    // zooms, and a stale scale would not match what gets printed.
+    effect(() => {
+      this.mapService.viewRevision();
+      untracked(() => this.refreshScale());
+    });
     // MapFish capabilities are advisory — the panel stays fully usable if
     // the call fails (the defaults above still apply).
     this.printService.capabilities().subscribe({
@@ -240,7 +245,8 @@ export class PrintLayoutComponent implements OnDestroy {
         .text()
         .then((text) => {
           try {
-            this.fail(JSON.parse(text).message ?? this.genericError(error));
+            const message = JSON.parse(text).message;
+            this.fail(Array.isArray(message) ? message.join('. ') : message ?? this.genericError(error));
           } catch {
             this.fail(this.genericError(error));
           }

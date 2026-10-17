@@ -303,6 +303,8 @@ export class MapService {
 
   /** Nav History availability, for the back/forward buttons. */
   readonly canGoBack = signal(false);
+  /** Bumped after every pan / zoom / rotate, for readouts that follow the view. */
+  readonly viewRevision = signal(0);
   readonly canGoForward = signal(false);
   private navHistory: NavHistoryEntry[] = [];
   private navIndex = -1;
@@ -362,7 +364,10 @@ export class MapService {
 
     this.initialExtent3857 = this.computeInitialExtent(layers);
     this.resetNavHistory();
-    this.map.on('moveend', () => this.recordView());
+    this.map.on('moveend', () => {
+      this.recordView();
+      this.viewRevision.update((n) => n + 1);
+    });
     this.resetView();
     this.setPanEnabled(this.panEnabled);
   }
