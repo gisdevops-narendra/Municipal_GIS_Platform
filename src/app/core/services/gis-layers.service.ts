@@ -64,6 +64,11 @@ export class GisLayersService {
 
   /** Hard-deletes a layer — unpublishes it from GeoServer and drops its
    *  data. Owner-only, enforced server-side. */
+  /** Display name only (Owner). */
+  rename(id: string, name: string): Observable<{ id: string; name: string }> {
+    return this.http.patch<{ id: string; name: string }>(`${this.baseUrl}/${id}`, { name });
+  }
+
   delete(id: string): Observable<{ success: true }> {
     return this.http.delete<{ success: true }>(`${this.baseUrl}/${id}`);
   }

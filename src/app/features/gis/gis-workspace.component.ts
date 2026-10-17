@@ -1,3 +1,4 @@
+import { NotificationService } from '../../core/services/notification.service';
 import { Component, WritableSignal, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
@@ -179,6 +180,7 @@ const TOOLS: WsTool[] = [
 export class GisWorkspaceComponent {
   private readonly gisWorkspaceService = inject(GisWorkspaceService);
   private readonly gisLayersService = inject(GisLayersService);
+  private readonly notify = inject(NotificationService);
   private readonly currentUserService = inject(CurrentUserService);
   private readonly moduleAccessService = inject(ModuleAccessService);
   private readonly fb = inject(FormBuilder);
@@ -434,6 +436,39 @@ export class GisWorkspaceComponent {
   onStyleApplied(layer: GisLayer): void {
     this.mapService.setLayerVisibility(layer.id, true);
     this.mapService.refreshLayerStyle(layer.id);
+  }
+
+  // ----- rename / delete (Owner) -----
+
+  renameLayer(layer: GisLayer, name: string): void {
+    this.gisLayersService.rename(layer.id, name).subscribe({
+      next: () => {
+        this.layers.update((list) => list.map((l) => (l.id === layer.id ? { ...l, name } : l)));
+        this.notify.success(`Renamed to "${name}".`);
+      },
+      error: (err: HttpErrorResponse) => this.notify.error(this.apiError(err, 'Could not rename the layer.'))
+    });
+  }
+
+  deleteLayer(layer: GisLayer): void {
+    this.notify.confirmDelete({
+      message: `Delete "${layer.name}"? This unpublishes the layer and permanently removes its data and upload history. This cannot be undone.`,
+      accept: () =>
+        this.gisLayersService.delete(layer.id).subscribe({
+          next: () => {
+            this.mapService.setLayerVisibility(layer.id, false);
+            if (this.styleTargetLayer()?.id === layer.id) this.closeStyleEditor();
+            this.notify.success(`"${layer.name}" was deleted.`);
+            this.loadLayers();
+          },
+          error: (err: HttpErrorResponse) => this.notify.error(this.apiError(err, 'Delete failed. Please try again.'))
+        })
+    });
+  }
+
+  private apiError(err: HttpErrorResponse, fallback: string): string {
+    const message = err.error?.message;
+    return Array.isArray(message) ? message.join('. ') : (message ?? fallback);
   }
 
   onStyleRemoved(layer: GisLayer): void {

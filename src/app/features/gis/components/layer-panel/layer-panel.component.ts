@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, inject } from '@angular/core';
+import { Component, EventEmitter, Input, Output, inject, signal } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
@@ -50,6 +50,40 @@ export class LayerPanelComponent {
   @Input() canStyle = false;
   /** Opens the reusable style editor for this layer (GIS Layer Styling). */
   @Output() styleLayer = new EventEmitter<GisLayer>();
+  /** Owner: rename / delete straight from the map's layer list. */
+  @Input() canManage = false;
+  @Output() renameLayer = new EventEmitter<{ layer: GisLayer; name: string }>();
+  @Output() deleteLayer = new EventEmitter<GisLayer>();
+
+  /** Layer whose name is being edited in place, and the draft name. */
+  readonly renamingId = signal<string | null>(null);
+  renameDraft = '';
+
+  startRename(layer: GisLayer, event: Event): void {
+    event.stopPropagation();
+    this.renamingId.set(layer.id);
+    this.renameDraft = layer.name;
+    setTimeout(() => {
+      const input = document.querySelector<HTMLInputElement>('.layer-panel__rename');
+      input?.focus();
+      input?.select();
+    });
+  }
+
+  commitRename(layer: GisLayer): void {
+    const name = this.renameDraft.trim();
+    this.renamingId.set(null);
+    if (name.length >= 2 && name !== layer.name) this.renameLayer.emit({ layer, name });
+  }
+
+  cancelRename(): void {
+    this.renamingId.set(null);
+  }
+
+  onDelete(layer: GisLayer, event: Event): void {
+    event.stopPropagation();
+    this.deleteLayer.emit(layer);
+  }
 
   readonly visibility = this.mapService.layerVisibility;
 

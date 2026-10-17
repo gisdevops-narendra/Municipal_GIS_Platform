@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  Patch,
   Get,
   Param,
   ParseIntPipe,
@@ -14,6 +15,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { RenameLayerDto } from './dto/rename-layer.dto';
 import type { Response } from 'express';
 import {
   RequireMunicipalityMember,
@@ -126,6 +128,17 @@ export class GisLayersController {
   @Get('layers/:id/permissions')
   getPermissions(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
     return this.gisLayersService.getPermissionMatrix(appUser, id);
+  }
+
+  /** Renames a layer (display name only). Owner-only, re-checked in the service. */
+  @RequireMunicipalityOwner()
+  @Patch('layers/:id')
+  renameLayer(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @Body() dto: RenameLayerDto,
+  ) {
+    return this.gisLayersService.renameLayer(appUser, id, dto.name);
   }
 
   /** Hard-deletes a layer — unpublishes it from GeoServer and drops its

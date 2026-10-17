@@ -9,12 +9,26 @@
         [ngModel]="isVisible(layer.id)"
         (onChange)="onToggle(layer.id, $event)"
       ></p-checkbox>
-      <label [for]="'layer-' + layer.id" class="layer-panel__label" [title]="layer.description || layer.name">
-        {{ layer.name }}
-        @if (showDepartment && layer.departmentName) {
-          <span class="layer-panel__tag">{{ layer.departmentName }}</span>
-        }
-      </label>
+      @if (renamingId() === layer.id) {
+        <input
+          class="layer-panel__rename"
+          [(ngModel)]="renameDraft"
+          maxlength="150"
+          aria-label="New layer name"
+          (keydown.enter)="commitRename(layer)"
+          (keydown.escape)="cancelRename()"
+          (blur)="commitRename(layer)"
+          #renameInput
+          [attr.autofocus]="true"
+        />
+      } @else {
+        <label [for]="'layer-' + layer.id" class="layer-panel__label" [title]="layer.description || layer.name">
+          {{ layer.name }}
+          @if (showDepartment && layer.departmentName) {
+            <span class="layer-panel__tag">{{ layer.departmentName }}</span>
+          }
+        </label>
+      }
       @if (layer.bbox) {
         <button
           type="button"
@@ -37,6 +51,28 @@
           (click)="onStyle(layer, $event)"
         >
           <i class="pi pi-palette" aria-hidden="true"></i>
+        </button>
+      }
+      @if (canManage) {
+        <button
+          type="button"
+          class="layer-panel__style"
+          pTooltip="Rename layer"
+          tooltipPosition="left"
+          aria-label="Rename layer"
+          (click)="startRename(layer, $event)"
+        >
+          <i class="pi pi-pencil" aria-hidden="true"></i>
+        </button>
+        <button
+          type="button"
+          class="layer-panel__style layer-panel__style--danger"
+          pTooltip="Delete layer"
+          tooltipPosition="left"
+          aria-label="Delete layer"
+          (click)="onDelete(layer, $event)"
+        >
+          <i class="pi pi-trash" aria-hidden="true"></i>
         </button>
       }
       @if (isVisible(layer.id)) {

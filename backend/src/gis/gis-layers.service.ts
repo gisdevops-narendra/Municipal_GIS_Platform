@@ -417,6 +417,18 @@ export class GisLayersService {
    * check). DRAFT / FAILED uploads that never produced this layer
    * (`layerId` null) are left alone — they are pending work, not history.
    */
+  /** Changes the display name only (code, table and GeoServer layer are
+   *  untouched, so styles, queries and permissions keep working).
+   *  Owner-only, like delete. */
+  async renameLayer(appUser: AppUser, layerId: string, name: string) {
+    if (appUser.systemRole !== 'MUNICIPALITY_OWNER') {
+      throw new ForbiddenException('Only the municipality owner may rename a layer.');
+    }
+    const layer = await this.findLayerInMunicipality(appUser.municipalityId, layerId);
+    await this.prisma.gISLayer.update({ where: { id: layer.id }, data: { name } });
+    return { id: layer.id, name };
+  }
+
   async deleteLayer(appUser: AppUser, layerId: string): Promise<void> {
     if (appUser.systemRole !== 'MUNICIPALITY_OWNER') {
       throw new ForbiddenException(

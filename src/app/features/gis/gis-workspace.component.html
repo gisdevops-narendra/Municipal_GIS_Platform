@@ -103,6 +103,9 @@
               [canStyle]="canStyleLayers()"
               [showBasemap]="canPickBasemap()"
               (styleLayer)="openStyleEditor($event)"
+              [canManage]="isOwner()"
+              (renameLayer)="renameLayer($event.layer, $event.name)"
+              (deleteLayer)="deleteLayer($event)"
             />
           } @else if (leftTool() === 'layers') {
             <p class="gis-ws__hint">{{ layersError() ?? 'Loading layers…' }}</p>
