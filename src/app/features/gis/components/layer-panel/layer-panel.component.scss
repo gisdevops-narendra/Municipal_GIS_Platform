@@ -103,8 +103,82 @@
 
 .layer-panel__item {
   display: flex;
+  flex-wrap: wrap; /* the expanded legend drops onto its own line */
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+}
+
+/* ▸ toggle: rotates when the legend is open. */
+.layer-panel__expand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-ink-500);
+  cursor: pointer;
+  flex-shrink: 0;
+
+  .pi {
+    font-size: 10px;
+    transition: transform 0.15s ease;
+  }
+
+  &.is-open .pi {
+    transform: rotate(90deg);
+  }
+
+  &:hover,
+  &:focus-visible {
+    color: var(--color-ink-900);
+    background: var(--color-surface-alt);
+  }
+}
+
+/* Small symbol before the name: the top-left of the GeoServer legend,
+   i.e. the layer's (first) symbol, on a light chip so it reads in dark mode. */
+.layer-panel__symbol {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 3px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px var(--color-line);
+
+  img {
+    width: 20px;
+    height: 20px;
+    object-fit: none;
+    object-position: left top;
+  }
+}
+
+/* Full legend under the row, indented to the name, natural size. */
+.layer-panel__legend {
+  flex-basis: 100%;
+  margin: 2px 0 6px 50px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: #fff;
+  box-shadow: inset 0 0 0 1px var(--color-line);
+  max-height: 260px;
+  overflow: auto;
+
+  img {
+    display: block;
+    max-width: 100%;
+  }
+}
+
+.layer-panel__legend-empty {
+  font-size: 12px;
+  color: #555;
 }
 
 .layer-panel__empty {
@@ -149,27 +223,7 @@
   }
 }
 
-.layer-panel__swatch {
-  /* Same box for every legend so the action buttons line up on all rows. */
-  width: 22px;
-  height: 18px;
-  object-fit: contain;
-  flex-shrink: 0;
-  margin-left: auto;
-  border: 1px solid var(--color-line);
-  border-radius: 2px;
-  background: var(--color-surface);
-}
 
-/* Raster legends are tall colour ramps: fitted into the box they became a
-   1-2px sliver. Show a slice of the ramp at full swatch size instead. */
-.layer-panel__swatch--ramp {
-  width: 22px;
-  height: 18px;
-  max-width: none;
-  object-fit: cover;
-  object-position: left top;
-}
 
 .layer-panel__tag {
   margin-left: 4px;
@@ -230,7 +284,3 @@
   }
 }
 
-/* The swatch follows the actions instead of pushing them apart. */
-.layer-panel__actions + .layer-panel__swatch {
-  margin-left: 4px;
-}

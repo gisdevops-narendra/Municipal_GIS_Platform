@@ -3,12 +3,25 @@
   <!-- One row template for every group, so they cannot drift apart. -->
   <ng-template #row let-layer let-showDepartment="showDepartment">
     <li class="layer-panel__item" [class.layer-panel__item--highlight]="layer.id === highlightLayerId">
+      <button
+        type="button"
+        class="layer-panel__expand"
+        [class.is-open]="isLegendOpen(layer.id)"
+        [attr.aria-expanded]="isLegendOpen(layer.id)"
+        [attr.aria-label]="(isLegendOpen(layer.id) ? 'Hide' : 'Show') + ' legend for ' + layer.name"
+        (click)="toggleLegend(layer.id)"
+      >
+        <i class="pi pi-chevron-right" aria-hidden="true"></i>
+      </button>
       <p-checkbox
         [inputId]="'layer-' + layer.id"
         [binary]="true"
         [ngModel]="isVisible(layer.id)"
         (onChange)="onToggle(layer.id, $event)"
       ></p-checkbox>
+      <span class="layer-panel__symbol" aria-hidden="true">
+        <img [src]="legendUrl(layer)" alt="" (error)="$any($event.target).style.visibility = 'hidden'" />
+      </span>
       @if (renamingId() === layer.id) {
         <input
           class="layer-panel__rename"
@@ -57,15 +70,17 @@
           </button>
         }
       </span>
-      @if (isVisible(layer.id)) {
-        <img
-          class="layer-panel__swatch"
-          [class.layer-panel__swatch--ramp]="layer.layerType === 'RASTER'"
-          [src]="legendUrl(layer)"
-          [alt]="layer.name + ' legend'"
-          (error)="$any($event.target).hidden = true"
-          (load)="$any($event.target).hidden = false"
-        />
+      @if (isLegendOpen(layer.id)) {
+        <div class="layer-panel__legend">
+          <img
+            [src]="legendUrl(layer)"
+            [alt]="layer.name + ' legend'"
+            (error)="$any($event.target).hidden = true; legendFailed.add(layer.id)"
+          />
+          @if (legendFailed.has(layer.id)) {
+            <span class="layer-panel__legend-empty">No legend available for this layer.</span>
+          }
+        </div>
       }
     </li>
   </ng-template>

@@ -152,6 +152,21 @@ export class LayerPanelComponent {
     return [...groups.values()].sort((a, b) => a.departmentName.localeCompare(b.departmentName));
   }
 
+  /** Layers whose full legend is expanded under the row. */
+  readonly openLegends = signal<ReadonlySet<string>>(new Set());
+  /** Layers GeoServer returned no legend image for. */
+  readonly legendFailed = new Set<string>();
+
+  isLegendOpen(layerId: string): boolean {
+    return this.openLegends().has(layerId);
+  }
+
+  toggleLegend(layerId: string): void {
+    const next = new Set(this.openLegends());
+    next.has(layerId) ? next.delete(layerId) : next.add(layerId);
+    this.openLegends.set(next);
+  }
+
   isVisible(layerId: string): boolean {
     return this.visibility()[layerId] ?? false;
   }
