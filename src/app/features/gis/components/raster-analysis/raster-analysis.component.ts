@@ -2615,7 +2615,8 @@ function downloadCsv(filename: string, rows: (string | number)[][]): void {
 function isoDate(offsetDays: number): string {
   const d = new Date();
   d.setDate(d.getDate() + offsetDays);
-  return d.toISOString().slice(0, 10);
+  // Local calendar date — toISOString() is UTC, a day behind before 5:30 am IST.
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 /** EPSG:4326 bbox of a GeoJSON geometry. */

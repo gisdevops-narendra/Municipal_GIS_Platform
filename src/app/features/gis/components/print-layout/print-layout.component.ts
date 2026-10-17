@@ -272,7 +272,8 @@ export class PrintLayoutComponent implements OnDestroy {
     const header = response.headers.get('content-disposition');
     const match = header && /filename="?([^"]+)"?/.exec(header);
     if (match) return match[1];
-    const date = new Date().toISOString().slice(0, 10);
+    const d = new Date(); // local date, not UTC
+    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     return `municipal-gis-map-${date}.${this.format()}`;
   }
 

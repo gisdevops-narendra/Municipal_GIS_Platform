@@ -89,6 +89,9 @@ export class GisSearchComponent {
     this.query.set('');
     this.open.set(false);
     this.result.set(EMPTY_RESULT);
+    // Keep the stream in step: otherwise typing the same text again after
+    // Clear is swallowed by distinctUntilChanged and nothing is searched.
+    this.query$.next('');
   }
 
   selectLayer(match: GisSearchLayerMatch): void {

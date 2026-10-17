@@ -108,6 +108,7 @@ export class LayerReportComponent {
         this.loadingFields.set(false);
       },
       error: async (err: HttpErrorResponse) => {
+        if (this.layerId() !== id) return;
         this.loadingFields.set(false);
         this.error.set(await blobErrorMessage(err, 'Could not load the fields of this layer.'));
       }
@@ -140,7 +141,9 @@ export class LayerReportComponent {
     this.gisLayersService.report(layer.id, request).subscribe({
       next: (blob) => {
         this.generating.set(false);
-        const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        // Local date (toISOString is UTC — a day behind before 5:30 am in India).
+        const d = new Date();
+        const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
         downloadBlob(blob, `${layer.code.toLowerCase()}-report-${stamp}.pdf`);
         this.notify.success(`Report for "${layer.name}" generated.`);
       },
