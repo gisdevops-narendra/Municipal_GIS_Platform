@@ -30,6 +30,10 @@ export class SettingsService {
   readonly loaded = signal(false);
 
   private readonly flush$ = new Subject<void>();
+  /** Changes made while `load()` is in flight. They are replayed over the
+   *  server copy when it arrives — otherwise a late response would undo
+   *  them (and the next debounced save would write the old values back). */
+  private pendingPatches: DeepPartial<AppSettings>[] | null = null;
 
   constructor() {
     this.flush$.pipe(debounceTime(600)).subscribe(() => {
@@ -39,12 +43,20 @@ export class SettingsService {
 
   /** Reconcile with the backend. Safe to call once authenticated. */
   load(): void {
+    this.pendingPatches = [];
     this.http.get<{ settings: DeepPartial<AppSettings> }>(this.url).subscribe({
       next: ({ settings }) => {
-        this.setAll(mergeSettings(settings));
+        const merged = mergeSettings(settings);
+        const replay = this.pendingPatches ?? [];
+        this.pendingPatches = null;
+        for (const p of replay) deepMerge(merged, p);
+        this.setAll(merged);
         this.loaded.set(true);
       },
-      error: () => this.loaded.set(true),
+      error: () => {
+        this.pendingPatches = null;
+        this.loaded.set(true);
+      },
     });
   }
 
@@ -54,6 +66,7 @@ export class SettingsService {
    */
   patch(partial: DeepPartial<AppSettings>): void {
     this.setAll(deepMerge(structuredClone(this.state()), partial));
+    this.pendingPatches?.push(structuredClone(partial));
     this.flush$.next();
   }
 

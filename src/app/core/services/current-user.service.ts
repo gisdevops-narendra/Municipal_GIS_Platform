@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
-import { Injectable, inject } from '@angular/core';
-import { Observable } from 'rxjs';
+import { Injectable, inject, signal } from '@angular/core';
+import { Observable, tap } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { CurrentUser } from '../models/current-user.model';
 
@@ -25,8 +25,14 @@ export class CurrentUserService {
     return this.http.get<CurrentUser>(`${environment.apiUrl}/me`);
   }
 
+  /** Emits the updated user after a successful profile edit, so screens
+   *  kept alive across navigation (e.g. every page's header) can refresh. */
+  readonly updated = signal<CurrentUser | null>(null);
+
   /** Self-service profile edit. Returns the same shape as `getMe()`. */
   updateMe(request: UpdateMeRequest): Observable<CurrentUser> {
-    return this.http.patch<CurrentUser>(`${environment.apiUrl}/me`, request);
+    return this.http
+      .patch<CurrentUser>(`${environment.apiUrl}/me`, request)
+      .pipe(tap((user) => this.updated.set(user)));
   }
 }

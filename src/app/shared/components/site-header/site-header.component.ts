@@ -45,6 +45,11 @@ export class SiteHeaderComponent {
         });
       }
     });
+    // A profile edit (Settings → Profile) updates the chip right away.
+    effect(() => {
+      const updated = this.currentUserService.updated();
+      if (updated) this.me.set(updated);
+    });
   }
 
   readonly displayName = computed(() => {

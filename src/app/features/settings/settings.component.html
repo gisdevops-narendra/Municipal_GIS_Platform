@@ -12,6 +12,26 @@
     </header>
 
     <div class="settings__layout">
+      <!-- Phones: one compact picker instead of 20 stacked links. -->
+      <label class="settings__picker">
+        <span class="settings__picker-label">Section</span>
+        <select
+          class="settings__picker-select"
+          [value]="activeId()"
+          (change)="select($any($event.target).value)"
+        >
+          @for (group of nav; track group.id) {
+            @if (group.sections.length) {
+              <optgroup [label]="group.label">
+                @for (section of group.sections; track section.id) {
+                  <option [value]="section.id" [selected]="activeId() === section.id">{{ section.label }}</option>
+                }
+              </optgroup>
+            }
+          }
+        </select>
+      </label>
+
       <nav class="settings__nav" aria-label="Settings sections">
         @for (group of nav; track group.id) {
           @if (group.sections.length) {

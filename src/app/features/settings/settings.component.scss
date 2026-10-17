@@ -183,6 +183,28 @@ app-site-footer {
    one region instead (still never the page itself, which stays governed
    by the fixed shell above). */
 
+.settings__picker {
+  display: none;
+}
+
+.settings__picker-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--color-ink-500);
+}
+
+.settings__picker-select {
+  width: 100%;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--color-ink-900);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-md);
+}
+
 @media (max-width: 900px) {
   .settings__layout {
     grid-template-columns: 1fr;
@@ -191,9 +213,12 @@ app-site-footer {
     min-height: 0;
   }
 
+  .settings__picker {
+    display: block;
+  }
+
   .settings__nav {
-    flex-shrink: 0;
-    overflow: visible;
+    display: none;
   }
 
   .settings__nav-list {

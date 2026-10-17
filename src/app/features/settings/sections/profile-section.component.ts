@@ -169,7 +169,10 @@ export class ProfileSectionComponent {
       },
       error: (error: HttpErrorResponse) => {
         this.saving.set(false);
-        this.notify.error(error.error?.message ?? 'Could not save your profile. Try again.');
+        const message = error.error?.message;
+        this.notify.error(
+          Array.isArray(message) ? message.join('. ') : message ?? 'Could not save your profile. Try again.'
+        );
       },
     });
   }

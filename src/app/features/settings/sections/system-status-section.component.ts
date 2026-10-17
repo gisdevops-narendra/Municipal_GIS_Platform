@@ -51,7 +51,7 @@ const ROWS: Row[] = [
           <span class="row__label">{{ row.label }}</span>
           @if (component(row.key); as c) {
             <span class="row__detail">
-              {{ c.version || c.detail || '' }}
+              @if (c.version || c.detail) {<span>{{ c.version || c.detail }}</span>}
               @if (c.latencyMs !== undefined && c.latencyMs !== null) {
                 <span class="row__latency">{{ c.latencyMs }} ms</span>
               }
@@ -110,8 +110,13 @@ const ROWS: Row[] = [
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      .row__latency {
+      /* Gap only after a version — a row with just a latency stays
+         aligned with the others. */
+      span + .row__latency {
         margin-left: 8px;
+      }
+
+      .row__latency {
         color: var(--color-ink-300);
       }
       @media (max-width: 620px) {
