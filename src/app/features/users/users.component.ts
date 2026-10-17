@@ -115,6 +115,13 @@ export class UsersComponent {
    *  they can share it with the new user. There is no email/invite
    *  delivery in this task's scope. Cleared as soon as the dialog closes. */
   readonly createdTemporaryPassword = signal<string | null>(null);
+  readonly passwordCopied = signal(false);
+  /** User whose status toggle is in flight (blocks double clicks). */
+  readonly togglingId = signal<string | null>(null);
+  /** Search is debounced, and only the latest request may update the
+   *  table — otherwise a slow early response overwrites newer results. */
+  private searchTimer: ReturnType<typeof setTimeout> | null = null;
+  private loadSeq = 0;
 
   readonly form = this.fb.nonNullable.group({
     fullName: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(150)]],
@@ -154,11 +161,21 @@ export class UsersComponent {
     return [{ label: 'All departments', value: null }, ...this.departments().map((d) => ({ label: d.name, value: d.id }))];
   }
 
+  /** Active departments, plus the edited user's current one (even if it
+   *  has since been deactivated) so the form never shows a blank value. */
   get departmentFormOptions(): { label: string; value: string }[] {
-    return this.departments().map((d) => ({ label: d.name, value: d.id }));
+    const current = this.editingUser()?.department?.id;
+    return this.departments()
+      .filter((d) => d.status === 'ACTIVE' || d.id === current)
+      .map((d) => ({ label: d.name, value: d.id }));
+  }
+
+  get hasFilters(): boolean {
+    return !!(this.searchTerm() || this.departmentFilter() || this.statusFilter());
   }
 
   loadUsers(): void {
+    const seq = ++this.loadSeq;
     this.loading.set(true);
     this.pageError.set(null);
     this.userService
@@ -169,11 +186,13 @@ export class UsersComponent {
       })
       .subscribe({
         next: (users) => {
+          if (seq !== this.loadSeq) return;
           this.users.set(users);
           this.clampFirst(users.length);
           this.loading.set(false);
         },
         error: () => {
+          if (seq !== this.loadSeq) return;
           this.pageError.set('Could not load users. Please try again.');
           this.loading.set(false);
         }
@@ -183,7 +202,8 @@ export class UsersComponent {
   onSearchChange(value: string): void {
     this.searchTerm.set(value);
     this.first.set(0);
-    this.loadUsers();
+    if (this.searchTimer) clearTimeout(this.searchTimer);
+    this.searchTimer = setTimeout(() => this.loadUsers(), 300);
   }
 
   onDepartmentFilterChange(value: string | null): void {
@@ -246,9 +266,11 @@ export class UsersComponent {
   }
 
   closeDialog(): void {
-    const shouldRefresh = this.editingUser() !== null || this.createdTemporaryPassword() !== null;
+    // Only a create leaves unseen changes (edits reload on save).
+    const shouldRefresh = this.createdTemporaryPassword() !== null;
     this.dialogVisible.set(false);
     this.createdTemporaryPassword.set(null);
+    this.passwordCopied.set(false);
     if (shouldRefresh) {
       this.loadUsers();
     }
@@ -277,6 +299,7 @@ export class UsersComponent {
           next: () => {
             this.formSubmitting.set(false);
             this.dialogVisible.set(false);
+            this.notify.success(`${value.fullName} updated.`);
             this.loadUsers();
           },
           error: (error: HttpErrorResponse) => {
@@ -308,16 +331,22 @@ export class UsersComponent {
   }
 
   toggleStatus(user: MunicipalityUser): void {
+    if (this.togglingId()) return;
     const nextStatus: MunicipalityUserStatus = user.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
     const apply = () => {
+      this.togglingId.set(user.id);
       this.userService.updateStatus(user.id, nextStatus).subscribe({
         next: () => {
+          this.togglingId.set(null);
           this.notify.success(
             `${user.fullName} was ${nextStatus === 'ACTIVE' ? 'reactivated' : 'deactivated'}.`
           );
           this.loadUsers();
         },
-        error: (error: HttpErrorResponse) => this.notify.error(this.resolveErrorMessage(error))
+        error: (error: HttpErrorResponse) => {
+          this.togglingId.set(null);
+          this.notify.error(this.resolveErrorMessage(error));
+        }
       });
     };
 
@@ -368,7 +397,17 @@ export class UsersComponent {
     });
   }
 
+  copyTemporaryPassword(password: string): void {
+    navigator.clipboard?.writeText(password).then(
+      () => this.passwordCopied.set(true),
+      () => this.notify.error('Could not copy — select the password and copy it manually.')
+    );
+  }
+
+  /** Nest validation errors arrive as `message: string[]`. */
   private resolveErrorMessage(error: HttpErrorResponse): string {
-    return error.error?.message ?? 'Something went wrong. Please try again.';
+    const message = error.error?.message;
+    if (Array.isArray(message)) return message.join('. ');
+    return message ?? 'Something went wrong. Please try again.';
   }
 }

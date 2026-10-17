@@ -70,7 +70,7 @@ app-site-footer {
 
 .users-card__header {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 20px;
@@ -149,10 +149,28 @@ app-site-footer {
   font-size: 12px;
 }
 
+/* One row of icon buttons — wrapping made rows double height. */
 .users-table__actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.users-table__nowrap {
+  white-space: nowrap;
+}
+
+.users-form__temp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  .users-form__temp-password {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
 }
 
 .users-table__owner-note {
@@ -200,6 +218,11 @@ app-site-footer {
 
   .users-card__header {
     flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .users-card__filters > * {
+    flex: 1 1 100%;
   }
 }
 

@@ -70,7 +70,7 @@
       @if (loading()) {
         <p class="users-card__lede">Loading users…</p>
       } @else if (users().length === 0) {
-        <p class="users-card__lede">No users match these filters.</p>
+        <p class="users-card__lede">{{ hasFilters ? 'No users match these filters.' : 'No users yet.' }}</p>
       } @else {
         <div class="users-card__table">
           <p-table
@@ -98,7 +98,7 @@
               <td>{{ user.fullName }}</td>
               <td class="users-table__mono">{{ user.email }}</td>
               <td>{{ user.department?.name || '—' }}</td>
-              <td>
+              <td class="users-table__nowrap">
                 @if (user.systemRole === 'MUNICIPALITY_OWNER') {
                   Municipality Owner
                 } @else if (user.systemRole === 'DEPARTMENT_HEAD') {
@@ -108,11 +108,12 @@
                 }
               </td>
               <td>
-                <p-tag [severity]="user.status === 'ACTIVE' ? 'success' : 'secondary'" [value]="user.status"></p-tag>
+                <p-tag [severity]="user.status === 'ACTIVE' ? 'success' : 'secondary'" [value]="user.status === 'ACTIVE' ? 'Active' : 'Disabled'"></p-tag>
               </td>
-              <td>{{ user.createdAt | date: 'mediumDate' }}</td>
+              <td class="users-table__nowrap">{{ user.createdAt | date: 'd MMM y' }}</td>
               @if (isOwner() || isDepartmentHead()) {
-                <td class="users-table__actions">
+                <td>
+                <div class="users-table__actions">
                   @if (user.systemRole === 'MUNICIPALITY_OWNER') {
                     <span class="users-table__owner-note">Owner account</span>
                   } @else {
@@ -135,6 +136,7 @@
                         [attr.aria-label]="user.status === 'ACTIVE' ? 'Deactivate' : 'Activate'"
                         [pTooltip]="user.status === 'ACTIVE' ? 'Deactivate' : 'Activate'"
                         tooltipPosition="top"
+                        [loading]="togglingId() === user.id"
                         (click)="toggleStatus(user)"
                       ></button>
                     }
@@ -151,6 +153,7 @@
                       ></button>
                     }
                   }
+                </div>
                 </td>
               }
             </tr>
@@ -177,12 +180,23 @@
   [modal]="true"
   [header]="editingUser() ? 'Edit User' : 'Add User'"
   [style]="{ width: '480px' }"
+  [breakpoints]="{ '600px': '95vw' }"
   (onHide)="closeDialog()"
 >
   @if (createdTemporaryPassword(); as tempPassword) {
     <div class="users-form">
       <p-message severity="success" text="User created. Share this temporary password with them securely — it will not be shown again." styleClass="w-full" />
-      <div class="users-form__temp-password">{{ tempPassword }}</div>
+      <div class="users-form__temp-row">
+        <div class="users-form__temp-password">{{ tempPassword }}</div>
+        <button
+          pButton
+          type="button"
+          [icon]="passwordCopied() ? 'pi pi-check' : 'pi pi-copy'"
+          [label]="passwordCopied() ? 'Copied' : 'Copy'"
+          class="p-button-outlined p-button-sm"
+          (click)="copyTemporaryPassword(tempPassword)"
+        ></button>
+      </div>
       <p class="field-hint">
         They must sign in with this password and will be required to set a new one immediately. There is no automated
         invitation email in this version — please share it out of band (e.g. in person or a secure message).
@@ -229,6 +243,7 @@
           placeholder="No department"
           formControlName="departmentId"
           [showClear]="true"
+          appendTo="body"
           styleClass="w-full"
         ></p-select>
       </div>
@@ -241,6 +256,7 @@
           optionLabel="label"
           optionValue="value"
           formControlName="role"
+          appendTo="body"
           styleClass="w-full"
         ></p-select>
         <div class="field-hint">
