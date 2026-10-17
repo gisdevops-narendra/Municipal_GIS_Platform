@@ -217,6 +217,11 @@ export class RasterService {
   // ----- shared by the analysis tools -----
 
   /** The VIEW-checked raster layer and its GeoTIFF path. */
+  /** VIEW check for any layer type (raster or vector analysis output). */
+  async assertCanView(appUser: AppUser, layerId: string): Promise<void> {
+    await this.gisLayers.getById(appUser, layerId);
+  }
+
   async resolveRaster(appUser: AppUser, layerId: string) {
     const workspace = await this.prisma.gISWorkspace.findUnique({
       where: { municipalityId: appUser.municipalityId },

@@ -104,7 +104,7 @@ export class LayerPanelComponent {
       { label: 'Move up', icon: 'pi pi-angle-up', disabled: isTop, command: move('up') },
       { label: 'Move down', icon: 'pi pi-angle-down', disabled: isBottom, command: move('down') },
       { label: 'Send to back', icon: 'pi pi-angle-double-down', disabled: isBottom, command: move('bottom') },
-      ...(layer.rasterAnalysis && layer.layerType === 'RASTER'
+      ...(layer.rasterAnalysis
         ? [{ separator: true }, { label: 'Analysis report', icon: 'pi pi-chart-bar', command: () => this.openReport.emit(layer) }]
         : []),
       ...(this.canStyle || this.canManage ? [{ separator: true }] : []),

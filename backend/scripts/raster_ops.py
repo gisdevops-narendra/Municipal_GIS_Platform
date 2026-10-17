@@ -1899,6 +1899,7 @@ def op_streams(req):
         layer.CreateField(ogr.FieldDefn(name, kind))
     segments = 0
     max_order = 0
+    by_order = {}  # Strahler order -> [segments, length_m], for the results screen
     for s0 in starts:
         line = ogr.Geometry(ogr.wkbLineString)
         line.AddPoint_2D(*xy(s0))
@@ -1917,13 +1918,24 @@ def op_streams(req):
         feature = ogr.Feature(layer.GetLayerDefn())
         feature.SetField("strahler", strahler[s0])
         feature.SetField("upstream_km2", float(upstream_km2[i]))
-        feature.SetField("length_m", float((n - 1) * math.sqrt(area)))
+        length_m = float((n - 1) * math.sqrt(area))
+        feature.SetField("length_m", length_m)
         feature.SetGeometry(line)
         layer.CreateFeature(feature)
         segments += 1
         max_order = max(max_order, strahler[s0])
+        entry = by_order.setdefault(int(strahler[s0]), [0, 0.0])
+        entry[0] += 1
+        entry[1] += length_m
     vds = None
-    return {"count": segments, "maxOrder": max_order, "streamCells": int(stream.sum()), "resampled": ds is not src}
+    return {
+        "count": segments,
+        "maxOrder": max_order,
+        "streamCells": int(stream.sum()),
+        "totalLengthM": round(sum(v[1] for v in by_order.values()), 1),
+        "orders": [{"order": o, "segments": v[0], "lengthM": round(v[1], 1)} for o, v in sorted(by_order.items())],
+        "resampled": ds is not src,
+    }
 
 
 # ------------------------------------------- 12. population & water

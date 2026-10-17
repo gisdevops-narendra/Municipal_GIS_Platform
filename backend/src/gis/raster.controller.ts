@@ -90,7 +90,7 @@ export class RasterController {
   @RequireMunicipalityMember()
   @Get('layers/:layerId/report')
   async getReport(@CurrentAppUser() appUser: AppUser, @Param('layerId') layerId: string) {
-    await this.rasters.resolveRaster(appUser, layerId); // VIEW permission
+    await this.rasters.assertCanView(appUser, layerId); // raster or vector output
     return this.jobs.getReport(appUser, layerId);
   }
 

@@ -96,8 +96,9 @@ export interface SavedAnalysisReport {
   toolLabel: string;
   heading: string | null;
   facts: { label: string; value: string }[];
-  classes: { label: string; pct: number; areaM2: number; color: string }[] | null;
+  classes: { label: string; pct: number; areaM2: number; color: string; value?: string }[] | null;
   histogram: { counts: number[]; edges: number[] } | null;
+  table?: { headers: string[]; rows: string[][] } | null;
   explanation: string | null;
 }
 

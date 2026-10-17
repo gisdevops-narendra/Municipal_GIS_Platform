@@ -19,6 +19,8 @@ export interface InsightClass {
   pct: number;
   areaM2: number;
   color: string;
+  /** Shown instead of the area when a class is not an area (e.g. km of stream). */
+  value?: string;
 }
 
 export interface RasterInsights {
@@ -191,4 +193,34 @@ export function rasterInsights(tool: string, stats: RasterStatistics): RasterIns
     default:
       return { heading: 'Value distribution', facts: baseFacts(stats, ''), classes: null };
   }
+}
+
+/** Tool-specific reading of a result whose output is a vector layer (or
+ *  that carries its own summary), from the tool's result object. */
+export function resultInsights(tool: string, result: Record<string, unknown> | null | undefined): RasterInsights | null {
+  if (tool === 'streams' && result) {
+    const orders = (result['orders'] as { order: number; segments: number; lengthM: number }[] | undefined) ?? [];
+    const total = Number(result['totalLengthM'] ?? orders.reduce((s, o) => s + o.lengthM, 0));
+    const blues = ['#c6dbef', '#9ecae1', '#6baed6', '#4292c6', '#2171b5', '#08519c', '#08306b'];
+    const km = (m: number) => `${num(m / 1000, 2)} km`;
+    const main = orders.length ? orders[orders.length - 1] : null;
+    return {
+      heading: 'Stream length by Strahler order',
+      facts: [
+        { label: 'Highest stream order', value: num(Number(result['maxOrder'] ?? 0), 0) },
+        ...(total ? [{ label: 'Total stream length', value: km(total) }] : []),
+        ...(main ? [{ label: `Main channel (order ${main.order})`, value: km(main.lengthM) }] : []),
+      ],
+      classes: total
+        ? orders.map((o, i) => ({
+            label: `Order ${o.order}`,
+            pct: (100 * o.lengthM) / total,
+            areaM2: 0,
+            value: `${km(o.lengthM)} · ${o.segments}×`,
+            color: blues[Math.min(i, blues.length - 1)],
+          }))
+        : null,
+    };
+  }
+  return null;
 }

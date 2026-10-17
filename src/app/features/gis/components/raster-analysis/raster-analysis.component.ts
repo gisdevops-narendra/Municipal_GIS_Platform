@@ -1,4 +1,4 @@
-import { InsightClass, rasterInsights } from './raster-insights';
+import { InsightClass, rasterInsights, resultInsights } from './raster-insights';
 import { NotificationService } from '../../../../core/services/notification.service';
 import { Component, EventEmitter, Input, OnDestroy, Output, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -2260,7 +2260,21 @@ export class RasterAnalysisComponent implements OnDestroy {
       this.facts.set(describe(r.result));
       this.mapService.clearAnalysisGeometry();
       this.layerCreated.emit(r.layer);
-      if (r.layer.layerType === 'RASTER') this.loadInsights(r.layer.id);
+      // Every output layer gets a results screen and a saved report: rasters
+      // via their statistics, vector outputs via the tool's own summary.
+      this.reportLayerId = r.layer.id;
+      if (r.layer.layerType === 'RASTER') {
+        this.loadInsights(r.layer.id);
+      } else {
+        const insights = resultInsights(this.tool(), r.result as Record<string, unknown>);
+        if (insights) {
+          const labels = new Set(insights.facts.map((f) => f.label));
+          this.facts.update((list) => [...list.filter((f) => !labels.has(f.label)), ...insights.facts]);
+          this.insightHeading.set(insights.heading);
+          this.insightClasses.set(insights.classes);
+        }
+        this.saveReport();
+      }
     });
   }
 
@@ -2284,9 +2298,24 @@ export class RasterAnalysisComponent implements OnDestroy {
         facts: this.facts(),
         classes: this.insightClasses(),
         histogram: stats ? stats.histogram : null,
+        table: this.reportTable(),
         explanation: explanation && !explanation.startsWith('The AI') ? explanation : null
       })
       .subscribe({ error: () => undefined });
+  }
+
+  /** The result's table (zonal stats, transitions, …), first 50 rows. */
+  private reportTable(): { headers: string[]; rows: string[][] } | null {
+    const t = this.table();
+    if (t) return { headers: t.headers.map(String), rows: t.rows.slice(0, 50).map((r) => r.map((v) => String(v ?? ''))) };
+    const tr = this.transitions();
+    if (tr?.length) return { headers: ['From', 'To', 'Area'], rows: tr.slice(0, 50).map((x) => [x.fromLabel, x.toLabel, formatArea(x.areaM2)]) };
+    const z = this.zoneRows() as unknown as Record<string, unknown>[] | null;
+    if (z?.length) {
+      const headers = Object.keys(z[0]).filter((k) => typeof z[0][k] !== 'object');
+      return { headers, rows: z.slice(0, 50).map((r) => headers.map((h) => String(r[h] ?? ''))) };
+    }
+    return null;
   }
 
   private loadInsights(layerId: string): void {

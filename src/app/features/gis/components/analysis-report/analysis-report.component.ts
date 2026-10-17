@@ -72,6 +72,19 @@ import { RasterService, SavedAnalysisReport } from '../../services/raster.servic
             </section>
           }
 
+          @if (r.table?.rows?.length) {
+            <section class="ar__table-wrap">
+              <table class="ar__table">
+                <thead><tr>@for (h of r.table!.headers; track $index) {<th>{{ h }}</th>}</tr></thead>
+                <tbody>
+                  @for (row of r.table!.rows; track $index) {
+                    <tr>@for (v of row; track $index) {<td>{{ v }}</td>}</tr>
+                  }
+                </tbody>
+              </table>
+            </section>
+          }
+
           <div class="ar__actions">
             <button type="button" class="ar__btn" (click)="downloadCsv()"><i class="pi pi-download"></i> CSV</button>
           </div>
@@ -96,6 +109,10 @@ import { RasterService, SavedAnalysisReport } from '../../services/raster.servic
     .ar__pct { text-align: right; font-variant-numeric: tabular-nums; }
     .ar__hist { width: 100%; height: 90px; color: var(--color-primary-600); rect { fill: currentColor; opacity: 0.85; } }
     .ar__axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--color-ink-500); }
+    .ar__table-wrap { max-height: 240px; overflow: auto; margin-top: 12px; border: 1px solid var(--color-line); border-radius: var(--radius-sm); }
+    .ar__table { width: 100%; border-collapse: collapse; font-size: 12px;
+      th, td { padding: 5px 8px; text-align: left; border-bottom: 1px solid var(--color-line); white-space: nowrap; }
+      th { position: sticky; top: 0; background: var(--color-surface-alt); font-weight: 600; } }
     .ar__actions { display: flex; justify-content: flex-end; margin-top: 12px; }
     .ar__btn { display: inline-flex; gap: 6px; align-items: center; padding: 5px 10px; border: 1px solid var(--color-line-strong); border-radius: var(--radius-sm); background: transparent; color: var(--color-ink-700); cursor: pointer; font: inherit; font-size: 12px; }
   `]
@@ -149,7 +166,8 @@ export class AnalysisReportComponent implements OnChanges {
     const r = this.report();
     if (!r) return;
     const rows = [['Measure', 'Value'], ...r.facts.map((f) => [f.label, f.value]),
-      ...(r.classes ?? []).map((c) => [c.label, `${c.pct.toFixed(1)} %`])];
+      ...(r.classes ?? []).map((c) => [c.label, `${c.pct.toFixed(1)} %`]),
+      ...(r.table ? [[], r.table.headers, ...r.table.rows] : [])];
     const csv = rows.map((row) => row.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));

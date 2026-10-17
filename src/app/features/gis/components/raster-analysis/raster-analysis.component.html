@@ -1638,7 +1638,7 @@
           <span class="ra__class-label">{{ c.label }}</span>
           <span class="ra__class-bar"><span [style.width.%]="c.pct" [style.background]="c.color"></span></span>
           <span class="ra__class-pct">{{ c.pct.toFixed(1) }} %</span>
-          <span class="ra__class-area">{{ fmtArea(c.areaM2) }}</span>
+          <span class="ra__class-area">{{ c.value ?? fmtArea(c.areaM2) }}</span>
         </div>
       }
     </figure>
