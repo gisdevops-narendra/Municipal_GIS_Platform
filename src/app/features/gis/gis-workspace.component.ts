@@ -200,7 +200,11 @@ export class GisWorkspaceComponent {
   readonly layers = signal<GisLayer[]>([]);
   readonly layersLoading = signal(true);
   readonly layersError = signal<string | null>(null);
-  readonly layersReady = computed(() => !this.layersLoading() && !this.layersError() && this.layers().length > 0);
+  /** True once a layer list is loaded — and it stays true while the list is
+   *  reloaded (after an analysis, rename, delete …). Tying it to "not
+   *  loading" destroyed and rebuilt every open tool panel on each reload,
+   *  wiping e.g. the Raster Analysis result the moment its layer appeared. */
+  readonly layersReady = computed(() => this.layers().length > 0);
 
   /** The caller's own resolved Module Access set (GET /api/module-access/me)
    *  — hierarchical module assignment (Owner -> Department -> Department
