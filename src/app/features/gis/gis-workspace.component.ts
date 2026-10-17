@@ -1,3 +1,4 @@
+import { AnalysisReportComponent } from './components/analysis-report/analysis-report.component';
 import { NotificationService } from '../../core/services/notification.service';
 import { Component, WritableSignal, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -137,6 +138,7 @@ const TOOLS: WsTool[] = [
   selector: 'app-gis-workspace',
   standalone: true,
   imports: [
+    AnalysisReportComponent,
     ReactiveFormsModule,
     FormsModule,
     ButtonModule,
@@ -193,6 +195,8 @@ export class GisWorkspaceComponent {
   readonly municipalityName = signal<string | null>(null);
   readonly workspace = signal<GisWorkspace | null>(null);
   readonly isOwner = signal(false);
+  /** Layer whose saved analysis report is open (layer More menu). */
+  readonly reportLayer = signal<GisLayer | null>(null);
   readonly loading = signal(true);
   readonly pageError = signal<string | null>(null);
   readonly geoserverReachable = signal<boolean | null>(null);

@@ -12,6 +12,7 @@ import { RasterJobsService } from './raster-jobs.service';
 import { RasterMonitorService } from './raster-monitor.service';
 import { RasterWorkspaceService } from './raster-workspace.service';
 import { RequireRasterModule } from './raster-module.guard';
+import { RequireMunicipalityMember } from '../auth/decorators/authorization.decorators';
 import { ANY_RASTER_MODULE, RASTER_MODULES, terrainModules } from './raster-tool-registry';
 import { RasterToolsService } from './raster-tools.service';
 import {
@@ -67,6 +68,31 @@ export class RasterController {
     private readonly monitors: RasterMonitorService,
     private readonly workspace: RasterWorkspaceService,
   ) {}
+
+  // ----- Saved analysis report of an output layer -----
+
+  /** Save the results-screen report (any raster tool user; the service
+   *  only allows the job's own user or the Owner). */
+  @RequireRasterModule(Object.values(RASTER_MODULES))
+  @Put('layers/:layerId/report')
+  saveReport(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('layerId') layerId: string,
+    @Body() body: { report: Record<string, unknown> },
+  ) {
+    if (!body?.report || typeof body.report !== 'object' || JSON.stringify(body.report).length > 200_000) {
+      throw new BadRequestException('A report object (under 200 KB) is required.');
+    }
+    return this.jobs.saveReport(appUser, layerId, body.report);
+  }
+
+  /** Reopen it later — anyone who may view the layer. */
+  @RequireMunicipalityMember()
+  @Get('layers/:layerId/report')
+  async getReport(@CurrentAppUser() appUser: AppUser, @Param('layerId') layerId: string) {
+    await this.rasters.resolveRaster(appUser, layerId); // VIEW permission
+    return this.jobs.getReport(appUser, layerId);
+  }
 
   // ----- Workspace: workflows, history, storage, pins -----
 

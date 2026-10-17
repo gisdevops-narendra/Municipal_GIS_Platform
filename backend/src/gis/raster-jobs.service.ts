@@ -13,7 +13,7 @@ import { randomUUID } from 'crypto';
 import type { AppUser } from '../auth/types/app-user.type';
 import { RasterToolsService } from './raster-tools.service';
 import { PrismaService } from '../prisma/prisma.service';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { RASTER_JOB_TOOLS } from './raster-tool-registry';
 import { rasterJobContext, type RasterJobContext } from './raster-job-context';
 
@@ -341,6 +341,36 @@ export class RasterJobsService implements OnModuleInit {
         this.logger.warn(`Could not resume raster job ${row.id}: ${(e as Error).message}`);
       }
     }
+  }
+
+  /** Stores the results-screen report on the job that produced `layerId`
+   *  (the user who ran it, or the Owner). */
+  async saveReport(appUser: AppUser, layerId: string, report: Record<string, unknown>) {
+    const row = await this.prisma.rasterJobHistory.findFirst({
+      where: {
+        layerId,
+        municipalityId: appUser.municipalityId,
+        ...(appUser.systemRole === 'MUNICIPALITY_OWNER' ? {} : { userId: appUser.id }),
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!row) throw new NotFoundException('No analysis job produced this layer.');
+    await this.prisma.rasterJobHistory.update({
+      where: { id: row.id },
+      data: { report: report as Prisma.InputJsonValue },
+    });
+    return { saved: true };
+  }
+
+  /** The latest saved report for a layer (caller has already been checked
+   *  for VIEW access on the layer). */
+  async getReport(appUser: AppUser, layerId: string) {
+    const row = await this.prisma.rasterJobHistory.findFirst({
+      where: { layerId, municipalityId: appUser.municipalityId, report: { not: Prisma.DbNull } },
+      orderBy: { createdAt: 'desc' },
+      select: { report: true, tool: true, createdAt: true, layerName: true },
+    });
+    return row ?? { report: null };
   }
 
   history(appUser: AppUser) {

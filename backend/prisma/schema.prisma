@@ -612,6 +612,9 @@ model RasterJobHistory {
   createdAt      DateTime  @map("created_at")
   /// Null while the job is queued / running.
   finishedAt     DateTime? @map("finished_at")
+  /// Results-screen report saved by the client (statistics, classes, AI
+  /// insights) so it can be reopened later from the layer.
+  report         Json?
 
   @@index([userId, createdAt])
   @@map("raster_job_history")

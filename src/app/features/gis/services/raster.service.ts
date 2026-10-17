@@ -91,6 +91,16 @@ export interface CutFillResult {
   meanZ: number;
 }
 
+export interface SavedAnalysisReport {
+  tool: string;
+  toolLabel: string;
+  heading: string | null;
+  facts: { label: string; value: string }[];
+  classes: { label: string; pct: number; areaM2: number; color: string }[] | null;
+  histogram: { counts: number[]; edges: number[] } | null;
+  explanation: string | null;
+}
+
 export interface RasterStatistics {
   band: number;
   validCells: number;
@@ -279,6 +289,15 @@ export class RasterService {
 
   vectorFields(layerId: string): Observable<VectorField[]> {
     return this.http.get<VectorField[]>(`${this.baseUrl}/vector/${layerId}/fields`);
+  }
+
+  /** Results-screen report kept with an output layer (see AnalysisReportComponent). */
+  saveReport(layerId: string, report: SavedAnalysisReport): Observable<{ saved: true }> {
+    return this.http.put<{ saved: true }>(`${this.baseUrl}/layers/${layerId}/report`, { report });
+  }
+
+  getReport(layerId: string): Observable<{ report: SavedAnalysisReport | null; createdAt?: string }> {
+    return this.http.get<{ report: SavedAnalysisReport | null; createdAt?: string }>(`${this.baseUrl}/layers/${layerId}/report`);
   }
 
   statistics(body: { layerId: string; band: number; bins?: number }): Observable<RasterStatistics> {

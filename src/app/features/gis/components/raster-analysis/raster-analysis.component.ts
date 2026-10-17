@@ -1481,6 +1481,7 @@ export class RasterAnalysisComponent implements OnDestroy {
         this.explanation.set(
           text ?? 'The AI model could not explain this result reliably — the numbers above are the result.'
         );
+        this.saveReport();
       },
       error: (err: HttpErrorResponse) => {
         this.explaining.set(false);
@@ -2265,7 +2266,31 @@ export class RasterAnalysisComponent implements OnDestroy {
 
   /** Statistics of a new raster output, read the way that tool's result
    *  should be read (terrain classes, compass directions, vegetation …). */
+  /** Output layer of the result on screen — its report is saved there. */
+  private reportLayerId: string | null = null;
+
+  /** Keeps the results-screen report with the output layer, so it can be
+   *  reopened later from the layer's More menu. Best effort. */
+  private saveReport(): void {
+    const layerId = this.reportLayerId;
+    if (!layerId || this.facts().length === 0) return;
+    const explanation = this.explanation();
+    const stats = this.statistics();
+    this.api
+      .saveReport(layerId, {
+        tool: this.tool(),
+        toolLabel: RASTER_TOOLS.find((t) => t.id === this.tool())?.label ?? this.tool(),
+        heading: this.insightHeading(),
+        facts: this.facts(),
+        classes: this.insightClasses(),
+        histogram: stats ? stats.histogram : null,
+        explanation: explanation && !explanation.startsWith('The AI') ? explanation : null
+      })
+      .subscribe({ error: () => undefined });
+  }
+
   private loadInsights(layerId: string): void {
+    this.reportLayerId = layerId;
     const tool = this.tool();
     this.insightsLoading.set(true);
     this.api.statistics({ layerId, band: 1, bins: 64 }).subscribe({
@@ -2278,6 +2303,7 @@ export class RasterAnalysisComponent implements OnDestroy {
         this.statistics.set(stats);
         this.insightHeading.set(insights.heading);
         this.insightClasses.set(insights.classes);
+        this.saveReport();
         this.autoExplain();
       },
       error: () => {
@@ -2395,6 +2421,7 @@ export class RasterAnalysisComponent implements OnDestroy {
     this.insightClasses.set(null);
     this.insightsLoading.set(false);
     this.autoExplained = false;
+    this.reportLayerId = null;
     this.zoneRows.set(null);
     this.series.set(null);
     this.transitions.set(null);

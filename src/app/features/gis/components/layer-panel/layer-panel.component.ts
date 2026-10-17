@@ -56,6 +56,8 @@ export class LayerPanelComponent {
   @Input() canManage = false;
   @Output() renameLayer = new EventEmitter<{ layer: GisLayer; name: string }>();
   @Output() deleteLayer = new EventEmitter<GisLayer>();
+  /** Raster Analysis outputs: reopen the saved results report. */
+  @Output() openReport = new EventEmitter<GisLayer>();
 
   /** Layer whose name is being edited in place, and the draft name. */
   readonly renamingId = signal<string | null>(null);
@@ -102,6 +104,9 @@ export class LayerPanelComponent {
       { label: 'Move up', icon: 'pi pi-angle-up', disabled: isTop, command: move('up') },
       { label: 'Move down', icon: 'pi pi-angle-down', disabled: isBottom, command: move('down') },
       { label: 'Send to back', icon: 'pi pi-angle-double-down', disabled: isBottom, command: move('bottom') },
+      ...(layer.rasterAnalysis && layer.layerType === 'RASTER'
+        ? [{ separator: true }, { label: 'Analysis report', icon: 'pi pi-chart-bar', command: () => this.openReport.emit(layer) }]
+        : []),
       ...(this.canStyle || this.canManage ? [{ separator: true }] : []),
       ...(this.canStyle
         ? [{ label: 'Style layer', icon: 'pi pi-palette', command: () => this.styleLayer.emit(layer) }]

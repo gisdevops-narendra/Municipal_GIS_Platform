@@ -106,6 +106,7 @@
               [canManage]="isOwner()"
               (renameLayer)="renameLayer($event.layer, $event.name)"
               (deleteLayer)="deleteLayer($event)"
+              (openReport)="reportLayer.set($event)"
             />
           } @else if (leftTool() === 'layers') {
             <p class="gis-ws__hint">{{ layersError() ?? 'Loading layers…' }}</p>
@@ -456,3 +457,5 @@
     </div>
   </form>
 </p-dialog>
+
+<app-analysis-report [layer]="reportLayer()" (closed)="reportLayer.set(null)" />
