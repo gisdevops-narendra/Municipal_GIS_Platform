@@ -1,3 +1,4 @@
+import { NotificationService } from '../../../../core/services/notification.service';
 import { Component, EventEmitter, Input, Output, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DatePipe } from '@angular/common';
@@ -73,6 +74,7 @@ const CHECK_COLORS: Record<TopologyIssue['check'], string> = {
   styleUrls: ['../buffer-overlay/buffer-overlay.component.scss', './data-tools.component.scss']
 })
 export class DataToolsComponent {
+  private readonly notify = inject(NotificationService);
   private readonly api = inject(DataToolsService);
   private readonly mapService = inject(MapService);
 
@@ -189,6 +191,9 @@ export class DataToolsComponent {
     if (!layerId) return;
     this.api.fieldRules(layerId).subscribe({
       next: ({ fields, rules }) => {
+        // A late answer for the previous layer must not fill the rule
+        // editor — Save would then write those rules onto this layer.
+        if (this.layerId() !== layerId) return;
         this.fields.set(fields);
         this.ruleRows.set(
           fields.map((f) => ({
@@ -201,7 +206,7 @@ export class DataToolsComponent {
           }))
         );
       },
-      error: (err: HttpErrorResponse) => this.fail(err)
+      error: (err: HttpErrorResponse) => this.layerId() === layerId && this.fail(err)
     });
     this.loadForTool();
   }
@@ -210,7 +215,7 @@ export class DataToolsComponent {
     const layerId = this.layerId();
     if (this.tool() === 'versions' && layerId && !this.snapshots()) {
       this.api.snapshots(layerId).subscribe({
-        next: (rows) => this.snapshots.set(rows),
+        next: (rows) => this.layerId() === layerId && this.snapshots.set(rows),
         error: (err: HttpErrorResponse) => this.fail(err)
       });
     }
@@ -462,9 +467,14 @@ export class DataToolsComponent {
   deleteSnapshot(snapshot: LayerSnapshot): void {
     const layerId = this.layerId();
     if (!layerId) return;
-    this.run(this.api.deleteSnapshot(layerId, snapshot.id), () =>
-      this.snapshots.update((rows) => rows?.filter((r) => r.id !== snapshot.id) ?? null)
-    );
+    this.notify.confirmDelete({
+      header: 'Delete version',
+      message: `Delete the saved version "${snapshot.name}"? It can no longer be compared or restored.`,
+      accept: () =>
+        this.run(this.api.deleteSnapshot(layerId, snapshot.id), () =>
+          this.snapshots.update((rows) => rows?.filter((r) => r.id !== snapshot.id) ?? null)
+        )
+    });
   }
 
   zoomToChange(geometry: Record<string, unknown> | null): void {
@@ -474,15 +484,17 @@ export class DataToolsComponent {
   // ----- shared -----
 
   private run<T>(request: Observable<T>, onResult: (result: T) => void): void {
+    const layerId = this.layerId();
     this.running.set(true);
     this.error.set(null);
     this.notice.set(null);
     request.subscribe({
       next: (result) => {
         this.running.set(false);
-        onResult(result);
+        // Results belong to the layer they were run on.
+        if (this.layerId() === layerId) onResult(result);
       },
-      error: (err: HttpErrorResponse) => this.fail(err)
+      error: (err: HttpErrorResponse) => (this.layerId() === layerId ? this.fail(err) : this.running.set(false))
     });
   }
 
