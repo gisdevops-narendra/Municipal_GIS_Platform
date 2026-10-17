@@ -191,7 +191,9 @@
     }
 
     <!-- ============ validation + preview ============ -->
-    @if (issues().length > 0) {
+    @if (isEmptyQuery()) {
+      <p class="qb__hint">Choose a field and a value, or turn on the spatial filter, to build a query.</p>
+    } @else if (issues().length > 0) {
       <ul class="qb__issues">
         @for (issue of issues(); track issue) {
           <li><i class="pi pi-exclamation-triangle" aria-hidden="true"></i> {{ issue }}</li>

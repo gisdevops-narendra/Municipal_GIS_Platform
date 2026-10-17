@@ -154,6 +154,11 @@ export class QueryBuilderComponent implements OnChanges, OnDestroy {
 
   readonly hasLayers = computed(() => this.layerOptions().length > 0);
 
+  /** Nothing entered yet — a starting hint, not an error. */
+  readonly isEmptyQuery = computed(
+    () => this.issues().length === 1 && this.issues()[0].startsWith('Add at least one')
+  );
+
   readonly canRun = computed(() => !!this.previewCql() && this.issues().length === 0 && !this.running());
 
   readonly selectionCount = this.mapService.selectionGeometries;
@@ -187,7 +192,8 @@ export class QueryBuilderComponent implements OnChanges, OnDestroy {
     this.def.layerId = layerId;
     this.def.groups = [emptyGroup()];
     this.fields.set([]);
-    this.result.set(null);
+    // The previous layer's highlight and table filter no longer apply.
+    if (this.result()) this.clearResults();
     this.loadFields();
     this.revalidate();
   }
@@ -206,12 +212,15 @@ export class QueryBuilderComponent implements OnChanges, OnDestroy {
     this.fieldsError.set(null);
     this.attributeService.loadMetadata(layer).subscribe({
       next: ({ fields, geometryField }) => {
+        // Dropped if the user has since picked another layer.
+        if (this.def.layerId !== layer.id) return;
         this.fields.set(fields);
         this.geometryField.set(geometryField);
         this.fieldsLoading.set(false);
         this.revalidate();
       },
       error: () => {
+        if (this.def.layerId !== layer.id) return;
         this.fieldsLoading.set(false);
         this.fieldsError.set('Could not read this layer’s fields.');
       }
@@ -368,6 +377,7 @@ export class QueryBuilderComponent implements OnChanges, OnDestroy {
     this.queryService.execute(layer, cql).subscribe({
       next: (execution) => {
         this.running.set(false);
+        if (this.def.layerId !== layer.id) return; // layer changed meanwhile
         this.result.set({ total: execution.total, truncated: execution.truncated });
         this.mapService.setQueryHighlight(execution.geometries);
         if (execution.geometries.length > 0) {
@@ -422,10 +432,12 @@ export class QueryBuilderComponent implements OnChanges, OnDestroy {
   loadSaved(id: string | null): void {
     const saved = this.savedQueries().find((q) => q.id === id);
     if (!saved) return;
+    if (this.result()) this.clearResults();
     this.def = structuredClone(saved.definition);
     if (this.def.layerId && !this.layers.some((l) => l.id === this.def.layerId)) {
       this.def.layerId = this.layerOptions()[0]?.value ?? null;
     }
+    this.fields.set([]);
     this.loadFields();
     this.revalidate();
   }
