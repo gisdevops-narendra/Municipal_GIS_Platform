@@ -129,7 +129,9 @@ app-site-footer {
 /* ---------- stat tiles ---------- */
 .dashboard-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  /* 120px lets all five tiles share one row on laptop widths (150px left
+     the fifth alone on a second row). */
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 12px;
 }
 

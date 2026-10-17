@@ -5,8 +5,7 @@ import { ButtonModule } from 'primeng/button';
 import { SiteHeaderComponent } from '../../shared/components/site-header/site-header.component';
 import { SiteFooterComponent } from '../../shared/components/site-footer/site-footer.component';
 import { CurrentUserService } from '../../core/services/current-user.service';
-import { DepartmentService } from '../../core/services/department.service';
-import { UserManagementService } from '../../core/services/user-management.service';
+import { NotificationService } from '../../core/services/notification.service';
 import { GisDashboardService } from '../../core/services/gis-dashboard.service';
 import { RasterPin, RasterService } from '../gis/services/raster.service';
 import { CurrentUser } from '../../core/models/current-user.model';
@@ -27,8 +26,7 @@ const SYSTEM_ROLE_LABELS: Record<CurrentUser['systemRole'], string> = {
 })
 export class DashboardPlaceholderComponent {
   private readonly currentUserService = inject(CurrentUserService);
-  private readonly departmentService = inject(DepartmentService);
-  private readonly userManagementService = inject(UserManagementService);
+  private readonly notify = inject(NotificationService);
   private readonly gisDashboardService = inject(GisDashboardService);
   private readonly rasterService = inject(RasterService);
 
@@ -43,12 +41,6 @@ export class DashboardPlaceholderComponent {
   readonly loading = signal(true);
   readonly notRegistered = signal(false);
   readonly errorMessage = signal<string | null>(null);
-
-  /** Simple organization counts from the real backend APIs — no analytics,
-   *  no charts, just counts. Left as null if they fail to load (non-fatal:
-   *  the rest of the dashboard still renders). */
-  readonly departmentCount = signal<number | null>(null);
-  readonly userCount = signal<number | null>(null);
 
   /** Task 9 §1: GIS summary cards — municipality-scoped and already
    *  permission-filtered by the backend (GisDashboardService never
@@ -75,7 +67,8 @@ export class DashboardPlaceholderComponent {
 
   removePin(pin: RasterPin): void {
     this.rasterService.deletePin(pin.id).subscribe({
-      next: () => this.pins.update((list) => list.filter((p) => p.id !== pin.id))
+      next: () => this.pins.update((list) => list.filter((p) => p.id !== pin.id)),
+      error: () => this.notify.error('Could not remove the highlight. Please try again.')
     });
   }
 
@@ -95,9 +88,6 @@ export class DashboardPlaceholderComponent {
         this.errorMessage.set('We could not load your municipality details. Please try again.');
       }
     });
-
-    this.departmentService.list().subscribe({ next: (departments) => this.departmentCount.set(departments.length) });
-    this.userManagementService.list().subscribe({ next: (users) => this.userCount.set(users.length) });
 
     this.gisDashboardService.getSummary().subscribe({
       next: (summary) => {
