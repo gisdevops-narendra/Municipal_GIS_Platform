@@ -40,6 +40,11 @@
   padding: 8px 0;
   overflow-y: auto;
   scrollbar-width: thin;
+  /* With every tool granted the list outgrows short screens: fade the
+     bottom edge so a half-cut icon reads as "more below", and pad so the
+     last tool can scroll clear of the fade. */
+  padding-bottom: 24px;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
 }
 
 /* Always visible at the bottom of the rail, regardless of how tall the
