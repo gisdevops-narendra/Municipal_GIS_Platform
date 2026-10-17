@@ -85,13 +85,24 @@ export class LayerPanelComponent {
   /** Items of the shared More menu, built for the layer it was opened on. */
   moreItems: MenuItem[] = [];
 
+  /** Draw-order moves are for everyone, so the menu is always available. */
   get hasMoreActions(): boolean {
-    return this.canStyle || this.canManage;
+    return true;
   }
 
   openMore(layer: GisLayer, event: Event): void {
     event.stopPropagation();
+    const order = this.mapService.layerOrder();
+    const index = order.indexOf(layer.id);
+    const isTop = index === 0;
+    const isBottom = index === order.length - 1;
+    const move = (where: 'top' | 'up' | 'down' | 'bottom') => () => this.mapService.moveLayer(layer.id, where);
     this.moreItems = [
+      { label: 'Bring to front', icon: 'pi pi-angle-double-up', disabled: isTop, command: move('top') },
+      { label: 'Move up', icon: 'pi pi-angle-up', disabled: isTop, command: move('up') },
+      { label: 'Move down', icon: 'pi pi-angle-down', disabled: isBottom, command: move('down') },
+      { label: 'Send to back', icon: 'pi pi-angle-double-down', disabled: isBottom, command: move('bottom') },
+      ...(this.canStyle || this.canManage ? [{ separator: true }] : []),
       ...(this.canStyle
         ? [{ label: 'Style layer', icon: 'pi pi-palette', command: () => this.styleLayer.emit(layer) }]
         : []),

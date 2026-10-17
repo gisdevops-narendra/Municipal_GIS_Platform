@@ -1,4 +1,5 @@
 import { Injectable, effect, inject, signal, untracked } from '@angular/core';
+import { AuthService } from '../../../core/services/auth.service';
 import OlMap from 'ol/Map';
 import View from 'ol/View';
 import Feature from 'ol/Feature';
@@ -256,6 +257,10 @@ export class MapService {
   }
   private baseLayer: TileLayer<OSM | XYZ> | null = null;
   private readonly managedLayers = new Map<string, ManagedLayer>();
+  private readonly auth = inject(AuthService);
+  /** Draw order of the data layers, top first. Rasters default to the
+   *  bottom so they never hide vector data; the user can reorder. */
+  readonly layerOrder = signal<string[]>([]);
   private initialExtent3857: number[] | null = null;
 
   /** Overlay that draws the attribute table's currently-selected features
@@ -361,6 +366,7 @@ export class MapService {
       this.addWmsLayer(layer);
     }
     this.layerVisibility.set(initialVisibility);
+    this.applyLayerOrder();
 
     this.initialExtent3857 = this.computeInitialExtent(layers);
     this.resetNavHistory();
@@ -1803,6 +1809,75 @@ export class MapService {
       for (const id of Object.keys(current)) if (ids.has(id)) next[id] = current[id];
       return next;
     });
+    this.applyLayerOrder();
+  }
+
+  // ----- draw order -----
+
+  /** Moves a layer in the draw order (top = drawn last, on top). */
+  moveLayer(layerId: string, where: 'top' | 'up' | 'down' | 'bottom'): void {
+    const order = [...this.layerOrder()];
+    const from = order.indexOf(layerId);
+    if (from < 0) return;
+    order.splice(from, 1);
+    const to =
+      where === 'top' ? 0 : where === 'bottom' ? order.length : where === 'up' ? Math.max(0, from - 1) : Math.min(order.length, from + 1);
+    order.splice(to, 0, layerId);
+    this.layerOrder.set(order);
+    this.writeLayerOrder(order);
+    this.applyZIndexes();
+  }
+
+  /** Saved order for the layers still present; new layers placed by kind
+   *  (points over lines over polygons, rasters at the bottom). */
+  private applyLayerOrder(): void {
+    const present = [...this.managedLayers.values()].map((m) => m.layer);
+    const ids = new Set(present.map((l) => l.id));
+    const saved = this.readLayerOrder().filter((id) => ids.has(id));
+    const rank = (l: GisLayer) =>
+      l.layerType === 'RASTER' ? 0 : l.geometryType === 'POLYGON' ? 1 : l.geometryType === 'LINE' ? 2 : 3;
+    const fresh = present
+      .filter((l) => !saved.includes(l.id))
+      .sort((a, b) => rank(b) - rank(a) || a.displayOrder - b.displayOrder);
+    const order = [...saved];
+    for (const layer of fresh) {
+      // New vectors go above existing rasters; new rasters go to the bottom.
+      if (layer.layerType === 'RASTER') {
+        order.push(layer.id);
+      } else {
+        const firstRaster = order.findIndex((id) => this.managedLayers.get(id)?.layer.layerType === 'RASTER');
+        order.splice(firstRaster < 0 ? order.length : firstRaster, 0, layer.id);
+      }
+    }
+    this.layerOrder.set(order);
+    this.applyZIndexes();
+  }
+
+  private applyZIndexes(): void {
+    const order = this.layerOrder();
+    // Data layers sit between the basemap (0) and the overlays (9997+).
+    order.forEach((id, index) => this.managedLayers.get(id)?.olLayer.setZIndex(100 + order.length - index));
+  }
+
+  private layerOrderKey(): string {
+    return `mgp.layerOrder.${this.auth.user()?.id ?? 'anon'}`;
+  }
+
+  private readLayerOrder(): string[] {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(this.layerOrderKey()) ?? '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private writeLayerOrder(order: string[]): void {
+    try {
+      localStorage.setItem(this.layerOrderKey(), JSON.stringify(order));
+    } catch {
+      /* storage unavailable — order still applies for this session */
+    }
   }
 
   private addWmsLayer(layer: GisLayer, insertAt?: number): void {
