@@ -99,6 +99,8 @@ export class DepartmentsComponent {
   readonly editingDepartment = signal<Department | null>(null);
   readonly formSubmitting = signal(false);
   readonly formError = signal<string | null>(null);
+  /** Department whose status toggle is in flight (blocks double clicks). */
+  readonly togglingId = signal<string | null>(null);
 
   readonly form = this.fb.nonNullable.group({
     name: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(150)]],
@@ -120,6 +122,7 @@ export class DepartmentsComponent {
 
   loadDepartments(): void {
     this.loading.set(true);
+    this.pageError.set(null);
     this.departmentService.list().subscribe({
       next: (departments) => {
         this.departments.set(departments);
@@ -195,6 +198,7 @@ export class DepartmentsComponent {
       next: () => {
         this.formSubmitting.set(false);
         this.dialogVisible.set(false);
+        this.notify.success(`"${value.name}" ${editing ? 'updated' : 'created'}.`);
         this.loadDepartments();
       },
       error: (error: HttpErrorResponse) => {
@@ -205,15 +209,21 @@ export class DepartmentsComponent {
   }
 
   toggleStatus(department: Department): void {
+    if (this.togglingId()) return;
     const nextStatus = department.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    this.togglingId.set(department.id);
     this.departmentService.update(department.id, { status: nextStatus }).subscribe({
       next: () => {
+        this.togglingId.set(null);
         this.notify.success(
           `"${department.name}" ${nextStatus === 'ACTIVE' ? 'activated' : 'deactivated'}.`
         );
         this.loadDepartments();
       },
-      error: (error: HttpErrorResponse) => this.notify.error(this.resolveErrorMessage(error))
+      error: (error: HttpErrorResponse) => {
+        this.togglingId.set(null);
+        this.notify.error(this.resolveErrorMessage(error));
+      }
     });
   }
 
@@ -236,7 +246,14 @@ export class DepartmentsComponent {
     this.router.navigate(['/users'], { queryParams: { departmentId: department.id } });
   }
 
+  statusLabel(status: Department['status']): string {
+    return status === 'ACTIVE' ? 'Active' : 'Inactive';
+  }
+
+  /** Nest validation errors arrive as `message: string[]`. */
   private resolveErrorMessage(error: HttpErrorResponse): string {
-    return error.error?.message ?? 'Something went wrong. Please try again.';
+    const message = error.error?.message;
+    if (Array.isArray(message)) return message.join('. ');
+    return message ?? 'Something went wrong. Please try again.';
   }
 }

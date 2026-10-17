@@ -78,12 +78,15 @@
             <tr>
               <td>{{ department.name }}</td>
               <td class="dept-table__mono">{{ department.code }}</td>
-              <td>{{ department.description || '—' }}</td>
+              <td class="dept-table__desc">
+                <span [title]="department.description || ''">{{ department.description || '—' }}</span>
+              </td>
               <td>
-                <p-tag [severity]="department.status === 'ACTIVE' ? 'success' : 'secondary'" [value]="department.status"></p-tag>
+                <p-tag [severity]="department.status === 'ACTIVE' ? 'success' : 'secondary'" [value]="statusLabel(department.status)"></p-tag>
               </td>
               <td>{{ department.userCount }}</td>
-              <td class="dept-table__actions">
+              <td>
+                <div class="dept-table__actions">
                 <button
                   pButton
                   type="button"
@@ -113,6 +116,7 @@
                     [attr.aria-label]="department.status === 'ACTIVE' ? 'Deactivate' : 'Activate'"
                     [pTooltip]="department.status === 'ACTIVE' ? 'Deactivate' : 'Activate'"
                     tooltipPosition="top"
+                    [loading]="togglingId() === department.id"
                     (click)="toggleStatus(department)"
                   ></button>
                   <button
@@ -126,6 +130,7 @@
                     (click)="deleteDepartment(department)"
                   ></button>
                 }
+                </div>
               </td>
             </tr>
           </ng-template>
@@ -151,6 +156,7 @@
   [modal]="true"
   [header]="editingDepartment() ? 'Edit Department' : 'Add Department'"
   [style]="{ width: '480px' }"
+  [breakpoints]="{ '600px': '95vw' }"
 >
   <form [formGroup]="form" (ngSubmit)="submit()" class="dept-form">
     <div class="dept-form__field">
@@ -166,13 +172,18 @@
       <input pInputText id="dept-code" formControlName="code" class="w-full" placeholder="e.g. ROADS" />
       <div class="field-hint">Letters, numbers, hyphen or underscore. Normalized to uppercase automatically.</div>
       @if (f.code.invalid && f.code.touched) {
-        <div class="field-error">Code is required (2-30 characters).</div>
+        <div class="field-error">
+          {{ f.code.errors?.['required'] ? 'Code is required.' : 'Use 2-30 letters, numbers, hyphens or underscores (no spaces).' }}
+        </div>
       }
     </div>
 
     <div class="dept-form__field">
       <label class="field-label" for="dept-description">Description</label>
       <textarea pTextarea id="dept-description" formControlName="description" class="w-full" rows="3"></textarea>
+      @if (f.description.invalid && f.description.touched) {
+        <div class="field-error">Description can be at most 500 characters.</div>
+      }
     </div>
 
     @if (formError(); as message) {
