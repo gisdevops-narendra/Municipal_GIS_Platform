@@ -219,6 +219,13 @@ export class GisLayersComponent {
    *  drops its data. Owner-only; the real gate is the backend. The list
    *  is a permission-filtered snapshot, so on success we just drop the
    *  row locally rather than refetching. */
+  /** POLYGON → "Polygon"; raster layers have no geometry type. */
+  geometryLabel(layer: GisLayer): string {
+    if (layer.layerType === 'RASTER') return 'Raster';
+    const g = layer.geometryType;
+    return g ? g.charAt(0) + g.slice(1).toLowerCase() : '—';
+  }
+
   deleteLayer(layer: GisLayer): void {
     this.notify.confirmDelete({
       message: `Delete "${layer.name}"? This unpublishes the layer and permanently removes its data and upload history. This cannot be undone.`,

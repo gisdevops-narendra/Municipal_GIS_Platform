@@ -75,11 +75,11 @@
               <td>
                 <p-tag
                   [severity]="layer.ownershipType === 'CANONICAL' ? 'info' : 'success'"
-                  [value]="layer.ownershipType"
+                  [value]="layer.ownershipType === 'CANONICAL' ? 'Canonical' : 'Department'"
                 ></p-tag>
               </td>
-              <td>{{ layer.geometryType || '—' }}</td>
-              <td><p-tag severity="success" value="ACTIVE"></p-tag></td>
+              <td>{{ geometryLabel(layer) }}</td>
+              <td><p-tag severity="success" value="Published"></p-tag></td>
               <td>v{{ layer.version }}</td>
               <td class="layers-table__actions">
                 <button
@@ -174,7 +174,7 @@
       </div>
       <div class="layers-detail__row">
         <dt>Ownership</dt>
-        <dd>{{ layer.ownershipType }}</dd>
+        <dd>{{ layer.ownershipType === 'CANONICAL' ? 'Canonical' : 'Department' }}</dd>
       </div>
       @if (layer.departmentName) {
         <div class="layers-detail__row">
@@ -184,7 +184,7 @@
       }
       <div class="layers-detail__row">
         <dt>Geometry</dt>
-        <dd>{{ layer.geometryType || '—' }}</dd>
+        <dd>{{ geometryLabel(layer) }}</dd>
       </div>
       <div class="layers-detail__row">
         <dt>Version</dt>
