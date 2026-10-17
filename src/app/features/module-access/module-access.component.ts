@@ -147,6 +147,10 @@ export class ModuleAccessComponent {
   readonly ceilingIds = signal<Set<number> | null>(null);
 
   readonly grantsLoading = signal(false);
+  /** Bumped on every target change: a grants load or save that answers
+   *  for a target no longer selected is dropped — otherwise its ids land
+   *  on the new target and the next toggle saves them there. */
+  private grantsSeq = 0;
   readonly savingModuleId = signal<number | null>(null);
   readonly pageError = signal<string | null>(null);
   readonly forbidden = signal(false);
@@ -262,6 +266,8 @@ export class ModuleAccessComponent {
   }
 
   selectTargetKind(kind: TargetKind): void {
+    this.grantsSeq++;
+    this.grantsLoading.set(false);
     this.targetKind.set(kind);
     this.selectedDepartmentId.set(null);
     this.selectedUserId.set(null);
@@ -272,35 +278,45 @@ export class ModuleAccessComponent {
   }
 
   selectDepartment(departmentId: string | null): void {
+    const seq = this.beginTarget();
     this.selectedDepartmentId.set(departmentId);
     if (!departmentId) return;
     this.grantsLoading.set(true);
-    this.pageError.set(null);
-    this.forbidden.set(false);
     this.moduleAccessService.getDepartmentGrants(departmentId).subscribe({
       next: (grants) => {
+        if (seq !== this.grantsSeq) return;
         this.explicitIds.set(new Set(grants.explicitModuleIds));
         this.ceilingIds.set(null);
         this.grantsLoading.set(false);
       },
-      error: (error: HttpErrorResponse) => this.onLoadError(error)
+      error: (error: HttpErrorResponse) => seq === this.grantsSeq && this.onLoadError(error)
     });
   }
 
   selectUser(userId: string | null): void {
+    const seq = this.beginTarget();
     this.selectedUserId.set(userId);
     if (!userId) return;
     this.grantsLoading.set(true);
-    this.pageError.set(null);
-    this.forbidden.set(false);
     this.moduleAccessService.getUserGrants(userId).subscribe({
       next: (grants) => {
+        if (seq !== this.grantsSeq) return;
         this.explicitIds.set(new Set(grants.explicitModuleIds));
         this.ceilingIds.set(new Set(grants.departmentEffectiveModuleIds));
         this.grantsLoading.set(false);
       },
-      error: (error: HttpErrorResponse) => this.onLoadError(error)
+      error: (error: HttpErrorResponse) => seq === this.grantsSeq && this.onLoadError(error)
     });
+  }
+
+  /** Clears the previous target's state; returns the new request token. */
+  private beginTarget(): number {
+    this.explicitIds.set(new Set());
+    this.ceilingIds.set(null);
+    this.grantsLoading.set(false);
+    this.pageError.set(null);
+    this.forbidden.set(false);
+    return ++this.grantsSeq;
   }
 
   private onLoadError(error: HttpErrorResponse): void {
@@ -447,7 +463,7 @@ export class ModuleAccessComponent {
         },
         error: (error: HttpErrorResponse) => {
           this.addModuleSubmitting.set(false);
-          this.addModuleError.set(error.error?.message ?? 'Could not add the module. Please try again.');
+          this.addModuleError.set(errorText(error, 'Could not add the module. Please try again.'));
         }
       });
   }
@@ -494,16 +510,19 @@ export class ModuleAccessComponent {
 
   private save(next: Set<number>): void {
     const moduleIds = [...next];
+    const seq = this.grantsSeq;
     this.savingModuleId.set(-1);
     this.pageError.set(null);
 
     const onResult = (grants: { explicitModuleIds: number[] }) => {
-      this.explicitIds.set(new Set(grants.explicitModuleIds));
       this.savingModuleId.set(null);
+      if (seq !== this.grantsSeq) return; // target changed meanwhile
+      this.explicitIds.set(new Set(grants.explicitModuleIds));
     };
     const onError = (error: HttpErrorResponse) => {
       this.savingModuleId.set(null);
-      this.pageError.set(error.error?.message ?? 'Could not save module access. Please try again.');
+      if (seq !== this.grantsSeq) return;
+      this.pageError.set(errorText(error, 'Could not save module access. Please try again.'));
     };
 
     if (this.targetKind() === 'department') {
@@ -520,4 +539,11 @@ export class ModuleAccessComponent {
   get saving(): boolean {
     return this.savingModuleId() !== null;
   }
+}
+
+/** Nest errors carry `message` as a string or (validation) a string[]. */
+function errorText(error: HttpErrorResponse, fallback: string): string {
+  const message = (error.error as { message?: string | string[] } | null)?.message;
+  if (Array.isArray(message)) return message.join('. ');
+  return message ?? fallback;
 }

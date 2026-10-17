@@ -83,7 +83,9 @@ app-site-footer {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 280px 1fr;
+  /* minmax(0, …): a plain 1fr can't shrink below its content, so long
+     module rows pushed the page wider than a phone screen. */
+  grid-template-columns: 280px minmax(0, 1fr);
   gap: 24px;
 }
 
@@ -289,7 +291,7 @@ app-site-footer {
 
 @media (max-width: 900px) {
   .module-access__body {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     overflow-y: auto;
   }
 
@@ -312,6 +314,13 @@ app-site-footer {
 
   .module-access-card__header {
     flex-direction: column;
+  }
+
+  /* Id / status / type tags drop under the module name instead of
+     squeezing it. */
+  .module-access__row {
+    flex-wrap: wrap;
+    row-gap: 4px;
   }
 }
 
