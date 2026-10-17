@@ -1,4 +1,5 @@
 import { Component, Input, OnDestroy, computed, inject, signal } from '@angular/core';
+import { SettingsService } from '../../../../core/services/settings.service';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { SelectModule } from 'primeng/select';
@@ -36,6 +37,9 @@ interface ResultRow {
 })
 export class MeasureComponent implements OnDestroy {
   private readonly mapService = inject(MapService);
+  private readonly settings = inject(SettingsService);
+  /** Starts in the user's Settings → Map Units; still switchable here. */
+  private readonly imperial = this.settings.mapUnits() === 'imperial';
 
   /** The panel is kept mounted after its first open (workspace keeps every
    *  opened tool alive) — this tracks whether it is the *visible* tool, so
@@ -54,6 +58,9 @@ export class MeasureComponent implements OnDestroy {
     } else {
       this.mapService.setMeasureMode(false);
       this.mapService.stopMeasure();
+      // The draw interaction is gone; without this, coming back would show
+      // "click to add points" with nothing listening for the clicks.
+      this.drawing.set(false);
     }
   }
 
@@ -66,8 +73,8 @@ export class MeasureComponent implements OnDestroy {
   readonly areaUnits = AREA_UNITS;
 
   readonly kind = signal<MeasureKind>('distance');
-  readonly lengthUnit = signal<LengthUnit>('m');
-  readonly areaUnit = signal<AreaUnit>('m2');
+  readonly lengthUnit = signal<LengthUnit>(this.imperial ? 'ft' : 'm');
+  readonly areaUnit = signal<AreaUnit>(this.imperial ? 'ac' : 'm2');
   readonly result = signal<MeasureResult | null>(null);
   readonly drawing = signal(false);
 

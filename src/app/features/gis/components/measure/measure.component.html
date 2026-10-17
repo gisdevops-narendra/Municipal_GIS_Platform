@@ -73,7 +73,7 @@
   </div>
 
   <div class="measure__controls">
-    <button pButton type="button" label="Draw" icon="pi pi-pencil" class="p-button-sm measure__draw" (click)="start()"></button>
+    <button pButton type="button" [label]="drawing() ? 'Restart' : result() ? 'New measurement' : 'Draw'" [icon]="drawing() ? 'pi pi-refresh' : 'pi pi-pencil'" class="p-button-sm measure__draw" (click)="start()"></button>
     <button pButton type="button" label="Clear" icon="pi pi-eraser" class="p-button-sm p-button-text" (click)="clear()"></button>
   </div>
 </div>
