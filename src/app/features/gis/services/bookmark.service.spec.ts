@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { BookmarkService } from './bookmark.service';
+import { AuthService } from '../../../core/services/auth.service';
 import { BookmarkView } from '../models/bookmark.model';
 
 const VIEW: BookmarkView = { center: [8280000, 2570000], zoom: 12, projection: 'EPSG:3857' };
@@ -7,11 +8,30 @@ const WS = 'test-ws';
 
 describe('BookmarkService', () => {
   let service: BookmarkService;
+  let userId = 'user-a';
 
   beforeEach(() => {
     localStorage.clear();
-    TestBed.configureTestingModule({ providers: [BookmarkService] });
+    userId = 'user-a';
+    TestBed.configureTestingModule({
+      providers: [BookmarkService, { provide: AuthService, useValue: { user: () => ({ id: userId }) } }]
+    });
     service = TestBed.inject(BookmarkService);
+  });
+
+  it('keeps bookmarks separate per signed-in user (shared PCs)', () => {
+    service.add(WS, 'Mine', VIEW);
+    userId = 'user-b';
+    expect(service.list(WS)).toEqual([]);
+    service.add(WS, 'Theirs', VIEW);
+    userId = 'user-a';
+    expect(service.list(WS).map((b) => b.name)).toEqual(['Mine']);
+  });
+
+  it('adopts bookmarks saved before they were per user', () => {
+    localStorage.setItem(`mgp.bookmarks.${WS}`, JSON.stringify([{ id: 'old', name: 'Old', createdAt: '', view: VIEW }]));
+    expect(service.list(WS).map((b) => b.name)).toEqual(['Old']);
+    expect(localStorage.getItem(`mgp.bookmarks.${WS}`)).toBeNull();
   });
 
   afterEach(() => localStorage.clear());

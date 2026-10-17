@@ -1,4 +1,6 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
+import { AuthService } from '../../../core/services/auth.service';
+import { readUserScoped, userScopedKey } from './user-scoped-storage';
 import { nextUid } from '../models/query-builder.model';
 import { Sketch, SketchKind } from '../models/sketch.model';
 
@@ -12,13 +14,15 @@ const MAX_SKETCHES = 200;
  */
 @Injectable({ providedIn: 'root' })
 export class SketchService {
+  private readonly auth = inject(AuthService);
+
   private key(workspaceKey: string): string {
-    return `mgp.sketches.${workspaceKey || 'default'}`;
+    return userScopedKey('mgp.sketches', workspaceKey, this.auth.user()?.id);
   }
 
   list(workspaceKey: string): Sketch[] {
     try {
-      const raw = localStorage.getItem(this.key(workspaceKey));
+      const raw = readUserScoped('mgp.sketches', workspaceKey, this.auth.user()?.id);
       const parsed = raw ? (JSON.parse(raw) as Sketch[]) : [];
       return Array.isArray(parsed) ? parsed : [];
     } catch {

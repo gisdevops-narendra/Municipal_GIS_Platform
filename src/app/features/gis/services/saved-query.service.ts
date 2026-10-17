@@ -1,4 +1,6 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
+import { AuthService } from '../../../core/services/auth.service';
+import { readUserScoped, userScopedKey } from './user-scoped-storage';
 import { QueryDefinition, SavedQuery, nextUid } from '../models/query-builder.model';
 
 /**
@@ -10,13 +12,15 @@ import { QueryDefinition, SavedQuery, nextUid } from '../models/query-builder.mo
  */
 @Injectable({ providedIn: 'root' })
 export class SavedQueryService {
+  private readonly auth = inject(AuthService);
+
   private key(workspaceKey: string): string {
-    return `mgp.savedQueries.${workspaceKey || 'default'}`;
+    return userScopedKey('mgp.savedQueries', workspaceKey, this.auth.user()?.id);
   }
 
   list(workspaceKey: string): SavedQuery[] {
     try {
-      const raw = localStorage.getItem(this.key(workspaceKey));
+      const raw = readUserScoped('mgp.savedQueries', workspaceKey, this.auth.user()?.id);
       const parsed = raw ? (JSON.parse(raw) as SavedQuery[]) : [];
       return Array.isArray(parsed) ? parsed : [];
     } catch {

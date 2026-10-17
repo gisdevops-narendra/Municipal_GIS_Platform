@@ -1,4 +1,6 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
+import { AuthService } from '../../../core/services/auth.service';
+import { readUserScoped, userScopedKey } from './user-scoped-storage';
 import { nextUid } from '../models/query-builder.model';
 import { Bookmark, BookmarkResult, BookmarkView } from '../models/bookmark.model';
 
@@ -11,13 +13,15 @@ import { Bookmark, BookmarkResult, BookmarkView } from '../models/bookmark.model
  */
 @Injectable({ providedIn: 'root' })
 export class BookmarkService {
+  private readonly auth = inject(AuthService);
+
   private key(workspaceKey: string): string {
-    return `mgp.bookmarks.${workspaceKey || 'default'}`;
+    return userScopedKey('mgp.bookmarks', workspaceKey, this.auth.user()?.id);
   }
 
   list(workspaceKey: string): Bookmark[] {
     try {
-      const raw = localStorage.getItem(this.key(workspaceKey));
+      const raw = readUserScoped('mgp.bookmarks', workspaceKey, this.auth.user()?.id);
       const parsed = raw ? (JSON.parse(raw) as Bookmark[]) : [];
       return Array.isArray(parsed) ? parsed : [];
     } catch {

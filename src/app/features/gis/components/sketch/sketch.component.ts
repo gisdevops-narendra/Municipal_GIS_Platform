@@ -1,4 +1,5 @@
 import { Component, Input, OnDestroy, computed, inject, signal } from '@angular/core';
+import { NotificationService } from '../../../../core/services/notification.service';
 import { FormsModule } from '@angular/forms';
 import { Subscription } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
@@ -53,6 +54,7 @@ const MARKER_KIND: KindOption = {
 export class SketchComponent implements OnDestroy {
   private readonly mapService = inject(MapService);
   private readonly sketchService = inject(SketchService);
+  private readonly notify = inject(NotificationService);
 
   @Input() set workspaceKey(value: string) {
     this.wsKey = value ?? '';
@@ -136,8 +138,15 @@ export class SketchComponent implements OnDestroy {
   }
 
   clearAll(): void {
-    this.sketchService.clear(this.wsKey);
-    this.reload();
+    const count = this.sketches().length;
+    this.notify.confirmDelete({
+      header: 'Clear all sketches',
+      message: `Delete all ${count} sketch${count === 1 ? '' : 'es'} on this map? This cannot be undone.`,
+      accept: () => {
+        this.sketchService.clear(this.wsKey);
+        this.reload();
+      }
+    });
   }
 
   exportGeoJson(): void {
