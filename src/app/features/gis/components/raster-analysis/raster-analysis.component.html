@@ -19,8 +19,28 @@
   <div class="ra__main">
     @if (showCatalog() && activeToolGroup(); as group) {
       <div class="ra__catalog">
-        <span class="ra__catalog-title">{{ group.label }}</span>
-        @for (section of activeSections(); track section.label) {
+        <label class="ra__search">
+          <i class="pi pi-search" aria-hidden="true"></i>
+          <input
+            type="search"
+            placeholder="Search tools — e.g. slope, flood, NDVI"
+            aria-label="Search raster tools"
+            [ngModel]="toolSearch()"
+            (ngModelChange)="toolSearch.set($event)"
+            (keydown.escape)="toolSearch.set('')"
+          />
+        </label>
+        <span class="ra__catalog-title">
+          @if (searchSections()) {
+            {{ searchCount() }} tool{{ searchCount() === 1 ? '' : 's' }} found
+          } @else {
+            {{ group.label }}
+          }
+        </span>
+        @if (searchSections() && searchCount() === 0) {
+          <p class="ra__search-empty">No tool matches “{{ toolSearch() }}”. Try another word, or browse the categories.</p>
+        }
+        @for (section of catalogSections(); track section.label) {
           @if (section.label) {
             <span class="ra__section">{{ section.label }}</span>
           }

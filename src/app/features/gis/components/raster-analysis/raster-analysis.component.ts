@@ -253,6 +253,25 @@ export class RasterAnalysisComponent implements OnDestroy {
     }
     return sections;
   });
+  /** Tool search across every category: each typed word must appear in
+   *  the tool's name, description, category or sub-heading. */
+  readonly toolSearch = signal('');
+  readonly searchSections = computed(() => {
+    const words = this.toolSearch().toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) return null;
+    const sections: { label: string; items: ToolDef[] }[] = [];
+    for (const t of this.tools()) {
+      const text = `${t.label} ${t.description} ${t.group} ${t.section ?? ''}`.toLowerCase();
+      if (!words.every((w) => text.includes(w))) continue;
+      let section = sections.find((x) => x.label === t.group);
+      if (!section) sections.push((section = { label: t.group, items: [] }));
+      section.items.push(t);
+    }
+    return sections;
+  });
+  readonly searchCount = computed(() => (this.searchSections() ?? []).reduce((n, s) => n + s.items.length, 0));
+  /** What the catalog lists: search results, or the picked category. */
+  readonly catalogSections = computed(() => this.searchSections() ?? this.activeSections());
   readonly activeToolDef = computed(() => RASTER_TOOLS.find((t) => t.id === this.tool()) ?? null);
   readonly activeToolGroup = computed(
     () => this.toolGroups().find((g) => g.label === this.activeGroup()) ?? this.toolGroups()[0] ?? null
