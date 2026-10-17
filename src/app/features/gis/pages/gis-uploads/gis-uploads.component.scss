@@ -66,7 +66,7 @@ app-site-footer {
 
 .uploads-card__header {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 20px;
@@ -128,10 +128,28 @@ app-site-footer {
   font-size: 12px;
 }
 
+.uploads-table__file {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uploads-table__layer {
+  min-width: 170px;
+}
+
+.uploads-table__nowrap {
+  white-space: nowrap;
+}
+
+/* One row of buttons — stacked buttons made every row tall and pushed the
+   column off-screen on laptop widths. */
 .uploads-table__actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
 }
 
 .uploads-card__paginator {
@@ -159,6 +177,10 @@ app-site-footer {
     margin: 0;
     font-size: 13px;
   }
+}
+
+.uploads-detail__break {
+  overflow-wrap: anywhere;
 }
 
 .uploads-detail__mono {
@@ -191,6 +213,7 @@ app-site-footer {
 
   .uploads-card__header {
     flex-direction: column;
+    align-items: flex-start;
   }
 }
 

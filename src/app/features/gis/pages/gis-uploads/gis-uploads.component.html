@@ -56,14 +56,15 @@
           </ng-template>
           <ng-template pTemplate="body" let-upload>
             <tr>
-              <td class="uploads-table__mono">{{ upload.filename }}</td>
-              <td>{{ upload.layer.name }}</td>
+              <td class="uploads-table__mono uploads-table__file" [title]="upload.filename">{{ upload.filename }}</td>
+              <td class="uploads-table__layer">{{ upload.layer.name }}</td>
               <td>{{ upload.layer.departmentName || (upload.layer.ownershipType === 'CANONICAL' ? 'Canonical' : '—') }}</td>
-              <td>{{ upload.fileFormat }}</td>
-              <td><p-tag [severity]="statusSeverity(upload.status)" [value]="upload.status"></p-tag></td>
+              <td class="uploads-table__nowrap">{{ formatLabel(upload.fileFormat) }}</td>
+              <td><p-tag [severity]="statusSeverity(upload.status)" [value]="statusLabel(upload.status)"></p-tag></td>
               <td>{{ upload.validation.featureCount ?? '—' }}</td>
-              <td>{{ upload.createdAt | date: 'short' }}</td>
-              <td class="uploads-table__actions">
+              <td class="uploads-table__nowrap">{{ upload.createdAt | date: 'd MMM y, h:mm a' }}</td>
+              <td>
+                <div class="uploads-table__actions">
                 <button pButton type="button" label="View" class="p-button-text p-button-sm" (click)="viewDetail(upload)"></button>
                 @if (canValidate(upload)) {
                   <button
@@ -112,6 +113,7 @@
                     (click)="publish(upload)"
                   ></button>
                 }
+                </div>
               </td>
             </tr>
           </ng-template>
@@ -151,12 +153,13 @@
   [modal]="true"
   header="Upload Details"
   [style]="{ width: '560px' }"
+  [breakpoints]="{ '600px': '95vw' }"
 >
   @if (detailUpload(); as upload) {
     <dl class="uploads-detail">
       <div class="uploads-detail__row">
         <dt>File</dt>
-        <dd>{{ upload.filename }} ({{ upload.fileFormat }}, {{ (upload.fileSize / 1024).toFixed(0) }} KB)</dd>
+        <dd class="uploads-detail__break">{{ upload.filename }} ({{ formatLabel(upload.fileFormat) }}, {{ fileSizeLabel(upload.fileSize) }})</dd>
       </div>
       <div class="uploads-detail__row">
         <dt>Layer</dt>
@@ -164,7 +167,7 @@
       </div>
       <div class="uploads-detail__row">
         <dt>Status</dt>
-        <dd><p-tag [severity]="statusSeverity(upload.status)" [value]="upload.status"></p-tag></dd>
+        <dd><p-tag [severity]="statusSeverity(upload.status)" [value]="statusLabel(upload.status)"></p-tag></dd>
       </div>
       @if (upload.errorMessage) {
         <div class="uploads-detail__row">
@@ -210,7 +213,7 @@
             <dt>Automated review</dt>
             <dd>
               <div class="uploads-review__head">
-                <p-tag [severity]="riskSeverity(report.riskLevel)" [value]="'Risk: ' + report.riskLevel + ' (' + report.riskScore + ')'"></p-tag>
+                <p-tag [severity]="riskSeverity(report.riskLevel)" [value]="'Risk ' + report.riskLevel + ' · ' + report.riskScore + '/100'"></p-tag>
                 <span>{{ report.summary }}</span>
               </div>
               @if (report.findings.length) {
@@ -235,7 +238,7 @@
       }
       <div class="uploads-detail__row">
         <dt>Uploaded</dt>
-        <dd>{{ upload.createdAt | date: 'medium' }}</dd>
+        <dd>{{ upload.createdAt | date: 'd MMM y, h:mm a' }}</dd>
       </div>
     </dl>
   }
@@ -247,6 +250,7 @@
   [modal]="true"
   header="Reject Upload"
   [style]="{ width: '440px' }"
+  [breakpoints]="{ '600px': '95vw' }"
 >
   @if (rejectTarget(); as target) {
     <div class="uploads-reject">

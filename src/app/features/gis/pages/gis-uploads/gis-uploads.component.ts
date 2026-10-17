@@ -25,6 +25,24 @@ const PAGE_SIZES = [10, 20, 50];
 /** Statuses with an imported staging table the automated review can read. */
 const REVIEWABLE = new Set<GisUpload['status']>(['DRAFT', 'IN_REVIEW', 'APPROVED', 'PUBLISH_FAILED']);
 
+const STATUS_LABELS: Record<GisUpload['status'], string> = {
+  UPLOAD_PENDING: 'Uploading',
+  VALIDATING: 'Validating',
+  DRAFT: 'Draft',
+  IN_REVIEW: 'In review',
+  APPROVED: 'Approved',
+  PUBLISHED: 'Published',
+  REJECTED: 'Rejected',
+  FAILED: 'Failed',
+  PUBLISH_FAILED: 'Publish failed'
+};
+
+const FORMAT_LABELS: Record<GisUpload['fileFormat'], string> = {
+  SHAPEFILE_ZIP: 'Shapefile (ZIP)',
+  GEOJSON: 'GeoJSON',
+  CSV: 'CSV'
+};
+
 @Component({
   selector: 'app-gis-uploads',
   standalone: true,
@@ -209,17 +227,22 @@ export class GisUploadsComponent {
 
   viewDetail(upload: GisUpload): void {
     this.detailUpload.set(upload);
-    this.review.set(null);
-    this.reviewError.set(null);
-    if (!REVIEWABLE.has(upload.status)) return;
+    this.resetReview();
+    // The review endpoint is for uploaders / reviewers only; view-only
+    // Department Users would just get a 403.
+    if (!REVIEWABLE.has(upload.status) || !this.canUpload) return;
     this.reviewLoading.set(true);
+    // A response for an upload that is no longer shown is dropped — the
+    // dialog may have been closed or switched to another upload meanwhile.
+    const stillShown = () => this.detailUpload()?.id === upload.id;
     this.uploadsService.reviewCheck(upload.id).subscribe({
       next: (report) => {
-        if (this.detailUpload()?.id !== upload.id) return;
+        if (!stillShown()) return;
         this.reviewLoading.set(false);
         this.review.set(report);
       },
       error: (err: HttpErrorResponse) => {
+        if (!stillShown()) return;
         this.reviewLoading.set(false);
         this.reviewError.set(err.error?.message ?? 'The automated review could not run.');
       },
@@ -228,7 +251,27 @@ export class GisUploadsComponent {
 
   closeDetail(): void {
     this.detailUpload.set(null);
+    this.resetReview();
+  }
+
+  private resetReview(): void {
     this.review.set(null);
+    this.reviewError.set(null);
+    this.reviewLoading.set(false);
+  }
+
+  statusLabel(status: GisUpload['status']): string {
+    return STATUS_LABELS[status] ?? status;
+  }
+
+  formatLabel(format: GisUpload['fileFormat']): string {
+    return FORMAT_LABELS[format] ?? format;
+  }
+
+  fileSizeLabel(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
   riskSeverity(level: UploadReviewReport['riskLevel']): 'success' | 'warn' | 'danger' {
