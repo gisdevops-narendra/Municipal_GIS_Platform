@@ -460,3 +460,10 @@ a.p-button:hover {
   padding-top: 10px;
   padding-bottom: 10px;
 }
+
+/* Layer panel More menu: it is appended to <body>, so its danger style
+   lives here rather than in the (encapsulated) panel stylesheet. */
+.layer-panel__menu-danger .p-menu-item-label,
+.layer-panel__menu-danger .p-menu-item-icon {
+  color: var(--color-error-600);
+}

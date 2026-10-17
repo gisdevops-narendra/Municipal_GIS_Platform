@@ -150,8 +150,9 @@
 }
 
 .layer-panel__swatch {
-  max-width: 22px;
-  max-height: 18px;
+  /* Same box for every legend so the action buttons line up on all rows. */
+  width: 22px;
+  height: 18px;
   object-fit: contain;
   flex-shrink: 0;
   margin-left: auto;
@@ -193,4 +194,43 @@
 
 .layer-panel__style--danger:hover {
   color: var(--color-error-600);
+}
+
+/* Zoom + More sit together at the row's right edge, same size and gap on
+   every row so the list lines up. */
+.layer-panel__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.layer-panel__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-ink-500);
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    background: var(--color-surface-alt);
+    color: var(--color-ink-900);
+  }
+
+  .pi {
+    font-size: 13px;
+  }
+}
+
+/* The swatch follows the actions instead of pushing them apart. */
+.layer-panel__actions + .layer-panel__swatch {
+  margin-left: 4px;
 }

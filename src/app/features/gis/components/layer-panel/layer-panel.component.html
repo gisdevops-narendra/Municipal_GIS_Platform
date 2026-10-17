@@ -29,52 +29,34 @@
           }
         </label>
       }
-      @if (layer.bbox) {
-        <button
-          type="button"
-          class="layer-panel__style"
-          pTooltip="Zoom to layer"
-          tooltipPosition="left"
-          aria-label="Zoom to layer"
-          (click)="onZoom(layer, $event)"
-        >
-          <i class="pi pi-search-plus" aria-hidden="true"></i>
-        </button>
-      }
-      @if (canStyle) {
-        <button
-          type="button"
-          class="layer-panel__style"
-          pTooltip="Style layer"
-          tooltipPosition="left"
-          aria-label="Style layer"
-          (click)="onStyle(layer, $event)"
-        >
-          <i class="pi pi-palette" aria-hidden="true"></i>
-        </button>
-      }
-      @if (canManage) {
-        <button
-          type="button"
-          class="layer-panel__style"
-          pTooltip="Rename layer"
-          tooltipPosition="left"
-          aria-label="Rename layer"
-          (click)="startRename(layer, $event)"
-        >
-          <i class="pi pi-pencil" aria-hidden="true"></i>
-        </button>
-        <button
-          type="button"
-          class="layer-panel__style layer-panel__style--danger"
-          pTooltip="Delete layer"
-          tooltipPosition="left"
-          aria-label="Delete layer"
-          (click)="onDelete(layer, $event)"
-        >
-          <i class="pi pi-trash" aria-hidden="true"></i>
-        </button>
-      }
+      <!-- Zoom stays one click away; everything else lives in the More menu. -->
+      <span class="layer-panel__actions">
+        @if (layer.bbox) {
+          <button
+            type="button"
+            class="layer-panel__action"
+            pTooltip="Zoom to layer"
+            tooltipPosition="left"
+            aria-label="Zoom to layer"
+            (click)="onZoom(layer, $event)"
+          >
+            <i class="pi pi-search-plus" aria-hidden="true"></i>
+          </button>
+        }
+        @if (hasMoreActions) {
+          <button
+            type="button"
+            class="layer-panel__action"
+            pTooltip="More actions"
+            tooltipPosition="left"
+            aria-label="More actions"
+            aria-haspopup="menu"
+            (click)="openMore(layer, $event)"
+          >
+            <i class="pi pi-ellipsis-v" aria-hidden="true"></i>
+          </button>
+        }
+      </span>
       @if (isVisible(layer.id)) {
         <img
           class="layer-panel__swatch"
@@ -149,4 +131,5 @@
       />
     </div>
   }
+  <p-menu #moreMenu [model]="moreItems" [popup]="true" appendTo="body" styleClass="layer-panel__menu" />
 </div>

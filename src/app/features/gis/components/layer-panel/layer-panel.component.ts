@@ -1,4 +1,6 @@
-import { Component, EventEmitter, Input, Output, inject, signal } from '@angular/core';
+import { Component, EventEmitter, Input, Output, ViewChild, inject, signal } from '@angular/core';
+import { MenuItem } from 'primeng/api';
+import { Menu, MenuModule } from 'primeng/menu';
 import { NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
@@ -33,7 +35,7 @@ export interface LayerPanelDepartmentGroup {
 @Component({
   selector: 'app-layer-panel',
   standalone: true,
-  imports: [NgTemplateOutlet, FormsModule, ButtonModule, CheckboxModule, SelectModule, TooltipModule],
+  imports: [NgTemplateOutlet, FormsModule, ButtonModule, CheckboxModule, MenuModule, SelectModule, TooltipModule],
   templateUrl: './layer-panel.component.html',
   styleUrl: './layer-panel.component.scss'
 })
@@ -59,8 +61,7 @@ export class LayerPanelComponent {
   readonly renamingId = signal<string | null>(null);
   renameDraft = '';
 
-  startRename(layer: GisLayer, event: Event): void {
-    event.stopPropagation();
+  private beginRename(layer: GisLayer): void {
     this.renamingId.set(layer.id);
     this.renameDraft = layer.name;
     setTimeout(() => {
@@ -78,6 +79,31 @@ export class LayerPanelComponent {
 
   cancelRename(): void {
     this.renamingId.set(null);
+  }
+
+  @ViewChild('moreMenu') private moreMenu?: Menu;
+  /** Items of the shared More menu, built for the layer it was opened on. */
+  moreItems: MenuItem[] = [];
+
+  get hasMoreActions(): boolean {
+    return this.canStyle || this.canManage;
+  }
+
+  openMore(layer: GisLayer, event: Event): void {
+    event.stopPropagation();
+    this.moreItems = [
+      ...(this.canStyle
+        ? [{ label: 'Style layer', icon: 'pi pi-palette', command: () => this.styleLayer.emit(layer) }]
+        : []),
+      ...(this.canManage
+        ? [
+            { label: 'Rename', icon: 'pi pi-pencil', command: () => this.beginRename(layer) },
+            { separator: true },
+            { label: 'Delete layer', icon: 'pi pi-trash', styleClass: 'layer-panel__menu-danger', command: () => this.deleteLayer.emit(layer) }
+          ]
+        : [])
+    ];
+    this.moreMenu?.toggle(event);
   }
 
   onDelete(layer: GisLayer, event: Event): void {
