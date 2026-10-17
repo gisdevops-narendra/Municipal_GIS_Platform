@@ -1,3 +1,4 @@
+import { Subscription } from 'rxjs';
 import {
   Component,
   EventEmitter,
@@ -61,6 +62,10 @@ export class AiChatComponent {
   readonly sending = signal(false);
   readonly serviceError = signal<string | null>(null);
   draft = '';
+  /** In-flight requests — cancelled by Reset so a slow answer can't land
+   *  in (and change the map from) the new, empty conversation. */
+  private chatSub?: Subscription;
+  private readonly narrateSubs = new Set<Subscription>();
 
   readonly hasResult = computed(() =>
     this.messages().some((m) => m.response?.answerKind === 'gis_operation'),
@@ -98,7 +103,7 @@ export class AiChatComponent {
     ]);
     this.sending.set(true);
 
-    this.aiService.chat(text, priorHistory, this.activeLayerId).subscribe({
+    this.chatSub = this.aiService.chat(text, priorHistory, this.activeLayerId).subscribe({
       next: (response) => {
         this.sending.set(false);
         const wantsWording = !!response.answer && !!response.facts;
@@ -113,8 +118,9 @@ export class AiChatComponent {
       },
       error: (err: HttpErrorResponse) => {
         this.sending.set(false);
+        const raw = err.error?.message;
         const message =
-          err.error?.message ??
+          (Array.isArray(raw) ? raw.join('. ') : raw) ??
           (err.status === 0
             ? 'Could not reach the assistant.'
             : 'The assistant is unavailable right now.');
@@ -153,10 +159,12 @@ export class AiChatComponent {
         next[index] = { ...msg, narrating: false, ...(narration && { narration }) };
         return next;
       });
-    this.aiService.narrate(question, facts).subscribe({
+    const sub = this.aiService.narrate(question, facts).subscribe({
       next: ({ text }) => settle(text ?? undefined),
       error: () => settle(),
     });
+    this.narrateSubs.add(sub);
+    sub.add(() => this.narrateSubs.delete(sub));
   }
 
   private applyResultToMap(response: GisChatResponse): void {
@@ -189,6 +197,11 @@ export class AiChatComponent {
   }
 
   reset(): void {
+    this.chatSub?.unsubscribe();
+    this.chatSub = undefined;
+    this.narrateSubs.forEach((sub) => sub.unsubscribe());
+    this.narrateSubs.clear();
+    this.sending.set(false);
     this.messages.set([]);
     this.serviceError.set(null);
     this.clearResults();
