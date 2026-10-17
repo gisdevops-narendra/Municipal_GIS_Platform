@@ -1,3 +1,4 @@
+import { InsightClass, rasterInsights } from './raster-insights';
 import { NotificationService } from '../../../../core/services/notification.service';
 import { Component, EventEmitter, Input, OnDestroy, Output, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -550,6 +551,10 @@ export class RasterAnalysisComponent implements OnDestroy {
   private explainSub?: Subscription;
   readonly profile = signal<ProfilePoint[] | null>(null);
   readonly statistics = signal<RasterStatistics | null>(null);
+  /** Tool-specific reading of a new raster result (see raster-insights.ts). */
+  readonly insightHeading = signal<string | null>(null);
+  readonly insightClasses = signal<InsightClass[] | null>(null);
+  readonly insightsLoading = signal(false);
   readonly zoneRows = signal<ZoneRow[] | null>(null);
 
   private pickSub?: Subscription;
@@ -1426,7 +1431,10 @@ export class RasterAnalysisComponent implements OnDestroy {
     if (this.explaining() || this.facts().length === 0) return;
     const title = RASTER_TOOLS.find((t) => t.id === this.tool())?.label ?? this.tool();
     const table = this.table();
-    const rows: Record<string, unknown>[] | undefined = table
+    const classes = this.insightClasses();
+    const rows: Record<string, unknown>[] | undefined = classes
+      ? classes.map((c) => ({ class: c.label, share: `${c.pct.toFixed(1)} %`, area: formatArea(c.areaM2) }))
+      : table
       ? table.rows.slice(0, 25).map((r) => Object.fromEntries(table.headers.map((h, i) => [h, r[i]])))
       : (this.zoneRows() as unknown as Record<string, unknown>[] | null)?.slice(0, 25) ??
         this.transitions()?.slice(0, 25).map((t) => ({ from: t.fromLabel, to: t.toLabel, area: formatArea(t.areaM2) }));
@@ -2215,7 +2223,32 @@ export class RasterAnalysisComponent implements OnDestroy {
       this.facts.set(describe(r.result));
       this.mapService.clearAnalysisGeometry();
       this.layerCreated.emit(r.layer);
+      if (r.layer.layerType === 'RASTER') this.loadInsights(r.layer.id);
     });
+  }
+
+  /** Statistics of a new raster output, read the way that tool's result
+   *  should be read (terrain classes, compass directions, vegetation …). */
+  private loadInsights(layerId: string): void {
+    const tool = this.tool();
+    this.insightsLoading.set(true);
+    this.api.statistics({ layerId, band: 1, bins: 64 }).subscribe({
+      next: (stats) => {
+        this.insightsLoading.set(false);
+        if (this.tool() !== tool) return; // another tool opened meanwhile
+        const insights = rasterInsights(tool, stats);
+        const labels = new Set(insights.facts.map((f) => f.label));
+        this.facts.update((list) => [...list.filter((f) => !labels.has(f.label)), ...insights.facts]);
+        this.statistics.set(stats);
+        this.insightHeading.set(insights.heading);
+        this.insightClasses.set(insights.classes);
+      },
+      error: () => this.insightsLoading.set(false)
+    });
+  }
+
+  fmtArea(m2: number): string {
+    return formatArea(m2);
   }
 
   /** Long tools run as a backend job: start it, poll its stage every
@@ -2308,6 +2341,9 @@ export class RasterAnalysisComponent implements OnDestroy {
     this.facts.set([]);
     this.profile.set(null);
     this.statistics.set(null);
+    this.insightHeading.set(null);
+    this.insightClasses.set(null);
+    this.insightsLoading.set(false);
     this.zoneRows.set(null);
     this.series.set(null);
     this.transitions.set(null);

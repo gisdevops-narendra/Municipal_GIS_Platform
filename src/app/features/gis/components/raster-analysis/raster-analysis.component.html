@@ -1609,6 +1609,23 @@
       }
     </ul>
   }
+  @if (insightsLoading()) {
+    <p class="ra__explain ra__explain--pending">Computing statistics for the result…</p>
+  }
+  @if (insightClasses(); as classes) {
+    <figure class="ra__classes" [attr.aria-label]="insightHeading()">
+      <figcaption>{{ insightHeading() }}</figcaption>
+      @for (c of classes; track c.label) {
+        <div class="ra__class">
+          <span class="ra__class-swatch" [style.background]="c.color"></span>
+          <span class="ra__class-label">{{ c.label }}</span>
+          <span class="ra__class-bar"><span [style.width.%]="c.pct" [style.background]="c.color"></span></span>
+          <span class="ra__class-pct">{{ c.pct.toFixed(1) }} %</span>
+          <span class="ra__class-area">{{ fmtArea(c.areaM2) }}</span>
+        </div>
+      }
+    </figure>
+  }
   @if (chart(); as c) {
     <figure class="ra__chart ra__chart--axes">
       <div class="ra__chart-tools">
