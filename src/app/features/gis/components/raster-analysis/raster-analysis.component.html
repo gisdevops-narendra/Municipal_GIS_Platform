@@ -84,6 +84,7 @@
     }
 
 <div class="bo ra__form">
+  @if (!showResults()) {
   <!-- ============ UPLOAD ============ -->
   @if (tool() === 'upload') {
     <label class="bo__field">
@@ -1557,7 +1558,17 @@
     }
   }
 
+  }
+
   <!-- ============ RESULTS ============ -->
+  @if (showResults()) {
+    <div class="ra__results-head">
+      <span class="ra__results-title"><i class="pi pi-check-circle" aria-hidden="true"></i> Results</span>
+      <button type="button" class="ra__results-back" (click)="showResults.set(false)">
+        <i class="pi pi-sliders-h" aria-hidden="true"></i> Settings
+      </button>
+    </div>
+  }
   @if (job(); as j) {
     <div class="ra__job">
       <div class="ra__progress">
@@ -1584,6 +1595,7 @@
   @if (error(); as e) {
     <p class="bo__result bo__result--empty">{{ e }}</p>
   }
+  @if (showResults() || !hasResultView()) {
   @if (message(); as m) {
     <p class="bo__result">{{ m }}</p>
   }
@@ -1764,7 +1776,14 @@
     </div>
   }
 
-  @if (tool() !== 'swipe' && !['workflows', 'history', 'timeslider', 'storage'].includes(tool())) {
+  }
+
+  @if (showResults()) {
+    <div class="bo__controls">
+      <button pButton type="button" label="Run again" icon="pi pi-refresh" class="p-button-sm bo__run" [disabled]="running()" (click)="run()"></button>
+      <button pButton type="button" label="Change settings" icon="pi pi-sliders-h" class="p-button-sm p-button-text" (click)="showResults.set(false)"></button>
+    </div>
+  } @else if (tool() !== 'swipe' && !['workflows', 'history', 'timeslider', 'storage'].includes(tool())) {
     <div class="bo__controls">
       <button
         pButton

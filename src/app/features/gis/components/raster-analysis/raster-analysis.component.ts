@@ -1,6 +1,6 @@
 import { InsightClass, rasterInsights } from './raster-insights';
 import { NotificationService } from '../../../../core/services/notification.service';
-import { Component, EventEmitter, Input, OnDestroy, Output, computed, effect, inject, signal } from '@angular/core';
+import { Component, EventEmitter, Input, OnDestroy, Output, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DatePipe, NgTemplateOutlet } from '@angular/common';
 import { HttpErrorResponse, HttpEventType } from '@angular/common/http';
@@ -555,6 +555,38 @@ export class RasterAnalysisComponent implements OnDestroy {
   readonly insightHeading = signal<string | null>(null);
   readonly insightClasses = signal<InsightClass[] | null>(null);
   readonly insightsLoading = signal(false);
+
+  /** Results view: opens by itself when an analysis finishes, so the
+   *  numbers, charts and AI report get the whole panel; "Settings" goes back. */
+  readonly showResults = signal(false);
+  /** Utility tools keep their result inline under the form. */
+  private static readonly INLINE_RESULT_TOOLS = new Set([
+    'style', 'download', 'monitor', 'swipe', 'workflows', 'history', 'timeslider', 'storage'
+  ]);
+
+  hasResultView(): boolean {
+    return !RasterAnalysisComponent.INLINE_RESULT_TOOLS.has(this.tool());
+  }
+
+  private hasAnyResult(): boolean {
+    return !!(
+      this.message() || this.facts().length || this.statistics() || this.table() || this.zoneRows() ||
+      this.series() || this.transitions() || this.profile() || this.insightClasses()
+    );
+  }
+
+  private readonly resultViewEffect = (() => {
+    let wasRunning = false;
+    return effect(() => {
+      const running = this.running();
+      untracked(() => {
+        if (wasRunning && !running && !this.error() && this.hasResultView() && this.hasAnyResult()) {
+          this.showResults.set(true);
+        }
+        wasRunning = running;
+      });
+    });
+  })();
   readonly zoneRows = signal<ZoneRow[] | null>(null);
 
   private pickSub?: Subscription;
@@ -580,6 +612,7 @@ export class RasterAnalysisComponent implements OnDestroy {
 
   /** Card click in the catalog: switch to that tool's form. */
   openTool(id: RasterToolId): void {
+    this.showResults.set(false);
     if (id !== this.tool()) this.selectTool(id);
     this.showCatalog.set(false);
   }
@@ -1966,6 +1999,7 @@ export class RasterAnalysisComponent implements OnDestroy {
   }
 
   clear(): void {
+    this.showResults.set(false);
     this.cancelPick();
     this.observers.set([]);
     if (this.tool() === 'supervised') this.training.update((list) => list.map((c) => ({ ...c, polygons: [] })));
