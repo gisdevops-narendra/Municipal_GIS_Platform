@@ -44,6 +44,7 @@ from .repair import (
     _tokens,
     _value_phrase_filters,
     abbreviation_words,
+    implied_layers,
     matching_values,
     value_filter,
 )
@@ -346,6 +347,15 @@ def fast_plan(
             if m[0].code not in (group_code, ref_code)
             and not (area_words & set(_tokens(f"{m[0].name} {m[0].code}")))
         ]
+        if not targets:
+            # "temples in ward 3": no layer named, but the value is a real
+            # category of exactly one layer -> that layer.
+            implied = [
+                l for l in implied_layers(body, layers)
+                if l.code not in (group_code, ref_code)
+                and not (area_words & set(_tokens(f"{l.name} {l.code}")))
+            ]
+            targets = implied if len(implied) == 1 else []
         if len(targets) != 1:
             return None
         target = targets[0]

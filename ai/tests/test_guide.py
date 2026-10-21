@@ -87,5 +87,26 @@ model_ci = PlanResult(answer_kind="gis_operation", explanation="x", operation=Gi
 fixed = repair_plan("Show pipelines made of cast iron", model_ci, [PIPES])
 got = [(f.field, tuple(f.values or [f.value])) for f in fixed.operation.attribute_filters] if fixed.operation else fixed.clarification
 check("model's 'cast iron' replaced by the real C.I values", got == [("constructi", ("C.I", "C.I."))], got)
+# One word -> one condition; layer found from a value.
+LM = LayerInfo(id="lm", code="LANDMARKS", name="landmarks", geometry_type="POINT", fields=[
+    LayerField(name="name", type="text", sample_values=["Ganesh Temple", "…(more)"]),
+    LayerField(name="locality", type="text", sample_values=["Akurdi", "…(more)"]),
+    LayerField(name="subtype", type="text", sample_values=["Hospital", "School", "Temple"]),
+    LayerField(name="ward_no", type="integer")])
+SIG = LAYERS[0]
+t = fast_plan("show me all temples in ward 3", [SIG, LM])
+got = (t.operation.target_layer, [(f.field, f.value) for f in t.operation.attribute_filters]) if t else None
+check("'temples in ward 3' -> landmarks, subtype = Temple, ward_no = 3 (instant)",
+      got == ("LANDMARKS", [("ward_no", 3), ("subtype", "Temple")]), got)
+stacked = PlanResult(answer_kind="gis_operation", explanation="x", operation=GisOperation(
+    kind="select", target_layer="LANDMARKS", attribute_filters=[
+        AttributeFilter(field="name", op="ilike", value="Temple"),
+        AttributeFilter(field="locality", op="ilike", value="Temple"),
+        AttributeFilter(field="ward_no", op="=", value=3)]))
+fixed = repair_plan("show me all temples in ward 3", stacked, [SIG, LM])
+got = sorted((f.field, f.op) for f in fixed.operation.attribute_filters)
+check("model's stacked conditions -> one per word", got == [("subtype", "="), ("ward_no", "=")], got)
+check("value of another layer is a new question, not a follow-up",
+      not is_follow_up("show me all temples in ward 3", [SIG, LM], prev))
 print(f"\n{sum(results)}/{len(results)} passed")
 raise SystemExit(0 if all(results) else 1)

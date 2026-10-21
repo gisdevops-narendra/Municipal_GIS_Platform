@@ -74,6 +74,23 @@ _NUMBERED = re.compile(r"\b([a-z]+)\s*(?:no\.?|number|num|#)?\s*[-:]?\s*(\d+)\b"
 _CODED = re.compile(r"\b([a-z]+)\s*(?:no\.?|number|num|#)\s*[-:]?\s*([a-z])\b", re.I)
 
 
+def implied_layers(message: str, layers: List[LayerInfo]) -> List[LayerInfo]:
+    """Layers the request points at through a VALUE rather than a name:
+    "temples" is a landmarks subtype. Free-text columns don't count."""
+    return [
+        lyr for lyr in layers
+        if any(
+            not _FREE_TEXT_FIELD.search(field) and not _NAME_LIKE_FIELD.search(field)
+            for _, field, _ in matching_values(message, [lyr])
+        )
+    ]
+
+
+# Columns that NAME things (a locality "Temple Chowk", a road "Temple Road")
+# never decide which layer a request means.
+_NAME_LIKE_FIELD = re.compile(r"(^|_)(name|locality|address|location|road|street|area)(_|$)|road_name", re.I)
+
+
 def is_follow_up(message: str, layers: List[LayerInfo], previous: Optional[GisOperation]) -> bool:
     """Does this message build on the previous answer? Yes when it refers
     back ("those", "now only"), or names no layer of its own ("which are in
@@ -88,7 +105,13 @@ def is_follow_up(message: str, layers: List[LayerInfo], previous: Optional[GisOp
         m[0] for m in _mentioned_layers(message, layers)
         if not (area_words & set(_tokens(f"{m[0].name} {m[0].code}")))
     ]
-    return not named
+    if named:
+        return False
+    # "show me all temples in ward 3" after a signals answer: the value
+    # points at another layer, so this is a new question.
+    implied = {l.code for l in implied_layers(message, layers)}
+    before = _find_layer(layers, previous.target_layer)
+    return not implied or (before is not None and before.code in implied)
 
 
 def carry_over(previous: GisOperation, plan: PlanResult, layers: List[LayerInfo]) -> PlanResult:
@@ -322,6 +345,47 @@ def _value_choice(plan: PlanResult, op: GisOperation, target: LayerInfo, field: 
         "clarification": f"No {target.name} has {field} = “{value}”. Which value did you mean?",
         "options": options,
     })
+
+
+def _one_condition_per_word(op: GisOperation, target: LayerInfo) -> List[str]:
+    """The model turns one word into several ANDed conditions ("temples" ->
+    name ILIKE Temple AND locality ILIKE Temple AND subtype = Temple), which
+    matches nothing. Keep the best per word: an exact value of a category
+    column, then fewer distinct values; free-text and name-like ILIKE
+    guesses last."""
+    fields = {f.name.lower(): f for f in target.fields}
+
+    def words(f: AttributeFilter) -> frozenset:
+        values = [v for v in ([f.value] if f.value is not None else []) + list(f.values or []) if isinstance(v, str)]
+        return frozenset(t for v in values for t in _value_core(v.strip("%")))
+
+    def rank(f: AttributeFilter):
+        col = fields.get(f.field.lower())
+        samples = [v.lower() for v in (col.sample_values if col else [])]
+        exact = f.op in ("=", "in") and all(
+            isinstance(v, str) and v.lower() in samples for v in ([f.value] if f.value is not None else []) + list(f.values or [])
+        )
+        free = bool(_FREE_TEXT_FIELD.search(f.field)) or bool(re.search(r"(^|_)(name|locality|address|location)$", f.field, re.I))
+        return (not exact, free, len(samples) + (1000 if "…(more)" in samples else 0))
+
+    groups: dict = {}
+    for f in op.attribute_filters:
+        key = words(f)
+        if key and f.op in ("=", "in", "like", "ilike"):
+            groups.setdefault(key, []).append(f)
+    drop = set()
+    notes: List[str] = []
+    for key, group in groups.items():
+        if len(group) < 2:
+            continue
+        best = min(group, key=rank)
+        for f in group:
+            if f is not best:
+                drop.add(id(f))
+                notes.append(f"one condition per word: dropped {f.field} {f.op} {f.value!r}")
+    if drop:
+        op.attribute_filters = [f for f in op.attribute_filters if id(f) not in drop]
+    return notes
 
 
 def _drop_layer_name_values(op: GisOperation, layers: List[LayerInfo]) -> List[str]:
@@ -729,6 +793,7 @@ def repair_plan(message: str, plan: PlanResult, layers: List[LayerInfo], follow_
         notes.extend(_drop_impossible_values(op, target, dropped))
         notes.extend(_drop_layer_name_values(op, layers))
         notes.extend(_value_phrase_filters(text, op, target))
+        notes.extend(_one_condition_per_word(op, target))
         # Never widen silently: a condition whose value does not exist and
         # was not replaced by a real one becomes a question, not "show all".
         layer_names = set().union(*(set(_tokens(f"{l.name} {l.code}")) for l in layers)) if layers else set()
