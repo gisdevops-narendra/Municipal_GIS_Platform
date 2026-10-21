@@ -36,7 +36,8 @@ Output: a single JSON object, no prose, no markdown fences. Keys:
     ...plus the extra keys of its kind (omit or null the others) }
 
 KINDS (target_layer + attribute_filters + spatial_filter pick the features):
-- select: show / find / list features.
+- select: show / find / list features. "the 10 tallest / largest X":
+  order_by: numeric column, order_desc: true (false for smallest), limit.
 - aggregate: "how many", "count", "total", "average", "per ward".
   metric: count|sum|avg|min|max, metric_field: numeric column (null for
   count), group_by: a column of target_layer to group by, OR

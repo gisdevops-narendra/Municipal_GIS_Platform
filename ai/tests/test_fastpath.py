@@ -13,13 +13,15 @@ LAYERS = [
                           "Traffic actuated (automatic)", "Working"]),
                       LayerField(name="ward_no", type="integer"), LayerField(name="zone_no", type="integer"),
                       LayerField(name="height", type="number"),
+                      LayerField(name="chowk", type="text", sample_values=["No", "Yes"]),
+                      LayerField(name="gis_remark", type="text", sample_values=["Not Working", "Shifted"]),
                       LayerField(name="road_name", type="text", sample_values=[
                           "Dehu - Alandi Road", "Dehu Alandi Road", "Spine Road", "…(more)"])]),
     LayerInfo(id="z", code="ZONE", name="zone", geometry_type="POLYGON",
               fields=[LayerField(name="zone_no", type="integer"), LayerField(name="zone_name", type="text")]),
     LayerInfo(id="l", code="LANDMARKS", name="landmarks", geometry_type="POINT",
               fields=[LayerField(name="name", type="text"),
-                      LayerField(name="type", type="text", sample_values=["Commercial", "Educational", "Health Services", "Religious"]),
+                      LayerField(name="type", type="text", sample_values=["Commercial", "Educational", "Health Services", "Other", "Others", "Religious"]),
                       LayerField(name="subtype", type="text", sample_values=["ATM", "Commercial", "Hospital", "…(more)"])]),
     LayerInfo(id="r", code="RIVER", name="river", geometry_type="POLYGON",
               fields=[LayerField(name="waterbody_", type="text", sample_values=["Indrayani River", "Mutha River", "Pawna River"])]),
@@ -108,6 +110,15 @@ results = [
     check("count them", cnt(filters=[eq("type", "Not Working")]), NOT_WORKING),
     check("only those within 100 m of the BRTS",
           sel(filters=[eq("type", "Not Working")], within=("BRTS", 100.0)), NOT_WORKING),
+    # several values of one column / negation / yes-no columns
+    check("Show Pedestrian or Fixed time signals", sel(filters=[("type", "in", ("Fixed time", "Pedestrian"))])),
+    check("Show landmarks other than Religious", sel(target="LANDMARKS", filters=[("type", "!=", "Religious")])),
+    check("signals except Traffic Control in zone 13", sel(filters=[("type", "!=", "Traffic Control"), eq("zone_no", 13)])),
+    check("Show signals at a chowk", sel(filters=[eq("chowk", "Yes")])),
+    check("Show signals not at a chowk in ward 5", sel(filters=[eq("chowk", "No"), eq("ward_no", 5)])),
+    check("How many signals are at a chowk?", cnt(filters=[eq("chowk", "Yes")])),
+    # ranges and ordering
+    check("Show signals with height between 4 and 6", sel(filters=[("height", "between", 4.0)])),
     # anything it cannot fully account for goes to the model
     check("Nearest 3 signals to the zone 13 office", None),
     check("What is the average height of all signals?", None),
@@ -117,5 +128,20 @@ results = [
     check("Show signals with value more than 5", None),
     check("now only the broken ones", None, NOT_WORKING),
 ]
+def order(message):
+    plan = fast_plan(message, LAYERS)
+    op = plan.operation if plan else None
+    return (op.target_layer, op.order_by, op.order_desc, op.limit) if op else None
+
+
+for message, expect in [
+    ("Show the 10 tallest signals", ("SIGNAL", "height", True, 10)),
+    ("5 shortest signals in zone 13", ("SIGNAL", "height", False, 5)),
+    ("top 5 distribution pipelines by diameter", ("DISTRIBUTION_PIPELINE", "pipe_dia_i", True, 5)),
+    ("How many signals are the 10 tallest", None),
+]:
+    got = order(message)
+    results.append(got == expect)
+    print(f"{'PASS' if got == expect else 'FAIL'}  {message!r}: {got}")
 print(f"\n{sum(results)}/{len(results)} passed")
 raise SystemExit(0 if all(results) else 1)

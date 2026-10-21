@@ -71,6 +71,9 @@ export interface AiGisOperation {
   attribute_filters?: AiAttributeFilter[];
   spatial_filter?: AiSpatialFilter | null;
   limit?: number | null;
+  /** select: sort by this column (with `limit` = "the 10 tallest"). */
+  order_by?: string | null;
+  order_desc?: boolean | null;
   // aggregate
   metric?: AggregateMetric | null;
   metric_field?: string | null;

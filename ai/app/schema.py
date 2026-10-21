@@ -58,6 +58,9 @@ class GisOperation(BaseModel):
     attribute_filters: List[AttributeFilter] = Field(default_factory=list)
     spatial_filter: Optional[SpatialFilter] = None
     limit: Optional[int] = None
+    # select: "the 10 tallest" -> order_by=height, order_desc=True, limit=10
+    order_by: Optional[str] = None
+    order_desc: Optional[bool] = None
     # aggregate
     metric: Optional[Metric] = None
     metric_field: Optional[str] = None
@@ -196,6 +199,8 @@ PLAN_JSON_SCHEMA = {
                 },
                 "target_layer": {"type": "string"},
                 "limit": {"type": ["integer", "null"]},
+                "order_by": {"type": ["string", "null"]},
+                "order_desc": {"type": ["boolean", "null"]},
                 "metric": {
                     "type": ["string", "null"],
                     "enum": [*Metric.__args__, None],  # type: ignore[attr-defined]

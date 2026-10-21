@@ -54,6 +54,13 @@ export interface CompiledQuery {
   target: LayerCatalogEntry;
   /** ~1-2 line human summary of the compiled operation. */
   summary: string;
+  /** select only: counts every match, run when the row limit is hit so the
+   *  answer reports the true total, not the cut-off (2,000). */
+  countSql?: string;
+  /** select only: the LIMIT applied; `limitAsked` = the plan asked for it
+   *  ("the 10 tallest"), so the rows ARE the answer. */
+  limit?: number;
+  limitAsked?: boolean;
 }
 
 export interface CompiledAggregate extends CompiledQuery {
@@ -134,11 +141,27 @@ export class GisQueryCompilerService {
     );
 
     const limit = this.clampLimit(operation.limit);
+    // "The 10 tallest signals": a real column of the layer (validated like
+    // every other field name), never an expression from the plan.
+    let orderSql = '';
+    let orderSummary = '';
+    if (operation.order_by) {
+      const col = this.findColumn(target, operation.order_by);
+      if (col.kind === 'geometry') {
+        throw new PlanValidationError(`Cannot sort by the geometry column "${col.name}".`);
+      }
+      const dir = operation.order_desc === false ? 'ASC' : 'DESC';
+      orderSql = `ORDER BY ${t}."${col.name}" ${dir} NULLS LAST `;
+      orderSummary = `, ${dir === 'DESC' ? 'highest' : 'lowest'} ${col.name} first${
+        operation.limit ? ` (top ${limit})` : ''
+      }`;
+    }
     const sql =
       `SELECT ${t}."${target.pkColumn}" AS __id, ` +
       `ST_AsGeoJSON(ST_Transform(${t}."${target.geomColumn}", 4326), 6) AS __geojson ` +
       `FROM "${target.table}" ${t} ` +
       (where.length ? `WHERE ${where.join(' AND ')} ` : '') +
+      orderSql +
       `LIMIT ${limit}`;
 
     return {
@@ -147,7 +170,12 @@ export class GisQueryCompilerService {
       target,
       summary: `Select from ${target.name}${
         summaryBits.length ? ' where ' + summaryBits.join(' and ') : ''
-      }.`,
+      }${orderSummary}.`,
+      countSql:
+        `SELECT count(*)::int AS n FROM "${target.table}" ${t} ` +
+        (where.length ? `WHERE ${where.join(' AND ')}` : ''),
+      limit,
+      limitAsked: operation.limit != null,
     };
   }
 
@@ -412,9 +440,19 @@ export class GisQueryCompilerService {
       compiled.params,
     );
 
-    const matched = rows.length;
+    let matched = rows.length;
+    let cutOff = matched >= HARD_MAX_ROWS;
+    // The row limit was hit: count every match so the answer gives the true
+    // total ("3,119 landmarks"), not the limit ("2,000").
+    if (compiled.countSql && !compiled.limitAsked && compiled.limit && rows.length >= compiled.limit) {
+      const [count] = await this.readOnly<{ n: number }>(compiled.countSql, compiled.params);
+      if (count && count.n > matched) {
+        matched = count.n;
+        cutOff = true;
+      }
+    }
     const rendered = rows.slice(0, MAX_RENDERED);
-    const truncated = matched >= HARD_MAX_ROWS || rendered.length < matched;
+    const truncated = cutOff || rendered.length < matched;
     const ids = rendered.map((row) => row.__id);
     const geometries = rendered
       .map((row) => this.parseGeo(row.__geojson))

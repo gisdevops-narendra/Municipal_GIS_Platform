@@ -331,6 +331,8 @@ def _numbered_filters(text: str, op: GisOperation, target: LayerInfo, layers: Li
     return notes
 
 
+_FREE_TEXT_FIELD = re.compile(r"remark|note|comment|desc|detail|observation", re.I)
+
 _NEEDS_VALUE = {"=", "!=", ">", ">=", "<", "<=", "like", "ilike"}
 
 
@@ -376,11 +378,12 @@ def _value_core(value: str) -> List[str]:
 
 def matching_values(text: str, layers: List[LayerInfo]) -> List[Tuple[LayerInfo, str, List[str]]]:
     """(layer, field, values) for every sampled text value whose words all
-    appear in the request — the longest match per field ('not working'
-    picks 'Not Working' over 'Working'); equally good matches are all kept,
-    since stored data has spelling variants ('Akurdi Railway Station Road'
-    / '... road'). Single short words, numbers and yes/no flags are too weak
-    a signal and never match on their own."""
+    appear in the request (exactly or as a close spelling). A value whose
+    words are all inside a longer match is dropped ('not working' picks
+    'Not Working', not also 'Working'); others are all kept — several
+    values ('Pedestrian or Fixed time') and spelling variants ('Akurdi
+    Railway Station Road' / '... road'). Single short words, numbers and
+    yes/no flags are too weak a signal and never match on their own."""
     words = set(_tokens(text))
     out: List[Tuple[LayerInfo, str, List[str]]] = []
     for lyr in layers:
@@ -388,8 +391,7 @@ def matching_values(text: str, layers: List[LayerInfo]) -> List[Tuple[LayerInfo,
         for field in lyr.fields:
             if field.type != "text":
                 continue
-            best: List[str] = []
-            best_len = 0
+            found: List[Tuple[str, set]] = []
             for value in field.sample_values:
                 if value == "…(more)" or value.strip().lower() in _FLAG_VALUES:
                     continue
@@ -398,10 +400,12 @@ def matching_values(text: str, layers: List[LayerInfo]) -> List[Tuple[LayerInfo,
                     continue
                 if len(core) == 1 and (len(core[0]) < 4 or core[0].isdigit()):
                     continue
-                if len(core) > best_len:
-                    best, best_len = [value], len(core)
-                elif len(core) == best_len and value not in best:
-                    best.append(value)
+                if value not in (v for v, _ in found):
+                    found.append((value, set(core)))
+            # Keep every value not contained in a longer match: "Pedestrian
+            # or Fixed time" keeps both, "not working" drops "Working" for
+            # "Not Working"; spelling variants (same words) are all kept.
+            best = [v for v, c in found if not any(c < other for _, other in found)]
             if best:
                 out.append((lyr, field.name, best))
     return out
@@ -429,8 +433,11 @@ def _value_phrase_filters(text: str, op: GisOperation, target: LayerInfo) -> Lis
     # narrowing condition (type = 'Commercial' AND subtype = 'Commercial'
     # matched nothing).
     size = {f.name: (len(f.sample_values) + (1000 if "…(more)" in f.sample_values else 0)) for f in target.fields}
+    # Free-text columns (remarks, notes...) rank after real category columns:
+    # "Not Working" is a signal type AND appears in gis_remark.
+    rank = lambda m: (bool(_FREE_TEXT_FIELD.search(m[1])), size.get(m[1], 0))
     used_words: set = set()
-    for _, field, values in sorted(matching_values(text, [target]), key=lambda m: size.get(m[1], 0)):
+    for _, field, values in sorted(matching_values(text, [target]), key=rank):
         if field.lower() in have:
             continue
         if (op.group_by or "").lower() == field.lower():
