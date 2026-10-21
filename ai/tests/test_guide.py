@@ -189,5 +189,24 @@ got = apt and [(f.field, f.value) for f in apt.operation.attribute_filters]
 check("'are there' is not the type 'Other'; 'appartment' -> Apartment", got == [("subtype", "Apartment")], got)
 help_text = converse("what can you do?", [APT]).explanation
 check("help examples come from the real layers", "landmarks" in help_text and "signals that are Not Working" not in help_text)
+# Follow-up that only changes the number.
+SIGH = LAYERS[0].model_copy(deep=True)
+SIGH.fields.append(LayerField(name="height", type="number"))
+# "how many traffic signals ... above 5 mt height" is planned by the model
+# ("traffic" alone is not a value); the follow-ups below are instant.
+first = PlanResult(answer_kind="gis_operation", explanation="x", operation=GisOperation(
+    kind="aggregate", metric="count", target_layer="SIGNAL",
+    attribute_filters=[AttributeFilter(field="height", op=">", value=5)]))
+mt = fast_plan("signals above 5 mt height", [SIGH] + LAYERS[1:])
+check("'above 5 mt' reads mt as metres", mt and [(f.field, f.op, f.value) for f in mt.operation.attribute_filters] == [("height", ">", 5.0)],
+      mt and mt.operation.attribute_filters)
+nine = fast_plan("9 mtr", [SIGH] + LAYERS[1:], first.operation if first else None)
+check("'9 mtr' -> same question, height > 9", nine and nine.operation.kind == "aggregate"
+      and [(f.field, f.op, f.value) for f in nine.operation.attribute_filters] == [("height", ">", 9.0)])
+below = fast_plan("and below 4", [SIGH] + LAYERS[1:], first.operation if first else None)
+check("'and below 4' -> height < 4", below and [(f.op, f.value) for f in below.operation.attribute_filters] == [("<", 4.0)])
+near = fast_plan("Find signals within 100 m of the BRTS", LAYERS)
+far = fast_plan("200 m", LAYERS, near.operation)
+check("'200 m' after a distance question -> new distance", far and far.operation.spatial_filter.distance_meters == 200.0)
 print(f"\n{sum(results)}/{len(results)} passed")
 raise SystemExit(0 if all(results) else 1)

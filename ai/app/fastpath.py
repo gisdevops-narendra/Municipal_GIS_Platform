@@ -66,7 +66,7 @@ _COUNTING = re.compile(r"^\s*(how many|count|number of)\b", re.I)
 # "within 300 m of Pawna River", "within 1.5 km from the BRTS" — each one
 # a spatial condition; several are ANDed.
 _WITHIN_HEAD = re.compile(
-    r"\bwithin\s+(?P<num>\d+(?:\.\d+)?)\s*(?P<unit>km|kilomet\w*|m|met\w*)\s+(?:of|from|around)\s+",
+    r"\bwithin\s+(?P<num>\d+(?:\.\d+)?)\s*(?P<unit>km|kilomet\w*|mtrs?|mts?|m|met\w*)\s+(?:of|from|around)\s+",
     re.I,
 )
 
@@ -75,7 +75,7 @@ _COMPARE = re.compile(
     r"\b(?:(?P<field>[a-z][a-z_]*)\s+)?(?:is\s+|are\s+|of\s+)?"
     r"(?P<cmp>taller|higher|greater|more|larger|bigger|wider|longer|above|over|"
     r"shorter|lower|less|smaller|narrower|below|under|at least|at most|minimum|maximum)"
-    r"(?:\s+than)?\s+(?P<num>\d+(?:\.\d+)?)\s*(?P<unit>mm|cm|km|kilomet\w*|m|met\w*)?\b",
+    r"(?:\s+than)?\s+(?P<num>\d+(?:\.\d+)?)\s*(?P<unit>mm|cm|km|kilomet\w*|mtrs?|mts?|m|met\w*)?\b",
     re.I,
 )
 _CMP_OP = {
@@ -110,11 +110,47 @@ _SUP_IMPLIES = {
 _TOP_BY = re.compile(r"\btop\s+(?P<n>\d+)\b.*?\bby\s+(?P<field>[a-z][a-z_ ]*)$", re.I)
 # "height between 4 and 6", "diameter between 100 mm and 300 mm"
 _BETWEEN = re.compile(
-    r"\b(?:(?P<field>[a-z][a-z_]*)\s+)?(?:is\s+|of\s+)?between\s+(?P<a>\d+(?:\.\d+)?)\s*(?P<ua>mm|cm|km|m|met\w*)?"
-    r"\s+and\s+(?P<b>\d+(?:\.\d+)?)\s*(?P<ub>mm|cm|km|kilomet\w*|m|met\w*)?\b",
+    r"\b(?:(?P<field>[a-z][a-z_]*)\s+)?(?:is\s+|of\s+)?between\s+(?P<a>\d+(?:\.\d+)?)\s*(?P<ua>mm|cm|km|mtrs?|mts?|m|met\w*)?"
+    r"\s+and\s+(?P<b>\d+(?:\.\d+)?)\s*(?P<ub>mm|cm|km|kilomet\w*|mtrs?|mts?|m|met\w*)?\b",
     re.I,
 )
 _YES_NO = {"yes", "no", "y", "n", "true", "false"}
+
+
+# A follow-up that only changes the number: "9 mtr", "what about 9 m",
+# "and below 4", "200 m" (after "within 100 m of the BRTS").
+_NUMBER_ONLY = re.compile(
+    r"^\s*(?:and|what about|how about|now|then|for|with|only|just|ok)?\s*"
+    r"(?P<cmp>above|over|more than|greater than|taller than|higher than|below|under|less than|"
+    r"shorter than|lower than|at least|at most)?\s*(?P<n>\d+(?:\.\d+)?)\s*"
+    r"(?P<unit>mm|cm|km|kilomet\w*|mtrs?|mts?|m|met\w*)?\s*\??\s*$",
+    re.I,
+)
+
+
+def _number_follow_up(text: str, previous: GisOperation) -> Optional[GisOperation]:
+    """Same question with a new number: the previous plan's last numeric
+    comparison gets the new value (and comparison word, if given); without
+    one, a distance condition gets the new distance."""
+    m = _NUMBER_ONLY.search(text)
+    if not m:
+        return None
+    value = _metres(m.group("n"), m.group("unit"))
+    op = previous.model_copy(deep=True)
+    numeric = [i for i, f in enumerate(op.attribute_filters)
+               if f.op in (">", ">=", "<", "<=", "=") and isinstance(f.value, (int, float)) and not isinstance(f.value, bool)]
+    if numeric:
+        i = numeric[-1]
+        f = op.attribute_filters[i]
+        new_op = _CMP_OP.get(re.sub(r"\s+than$", "", m.group("cmp").lower()), f.op) if m.group("cmp") else f.op
+        op.attribute_filters[i] = f.model_copy(update={
+            "op": new_op, "value": int(value) if isinstance(f.value, int) and value.is_integer() else value})
+        return op
+    distances = [sf for sf in [op.spatial_filter, *op.spatial_filters] if sf is not None and sf.distance_meters]
+    if distances and not m.group("cmp"):
+        distances[-1].distance_meters = value
+        return op
+    return None
 
 
 def _metres(num: str, unit: Optional[str]) -> float:
@@ -150,8 +186,9 @@ def _comparisons(text: str, target: LayerInfo, words: List[str]) -> Optional[Tup
         if m.group("field"):
             hints.append(m.group("field").lower())
         field = _comparison_field(target, hints)
-        if field is None and not hints:
-            # "with diameter more than 300": the measure is named elsewhere.
+        if field is None:
+            # "with diameter more than 300" / "signals above 5 m height": the
+            # measure is named elsewhere in the question.
             field = _comparison_field(target, words)
         if field is None:
             return None
@@ -430,6 +467,10 @@ def fast_plan(
         target = _find_layer(layers, previous.target_layer)
         if target is None:
             return None
+        renumbered = _number_follow_up(text, previous)
+        if renumbered is not None:
+            return PlanResult(answer_kind="gis_operation", explanation=_describe(renumbered, target),
+                              operation=renumbered, planner="fast")
         op = previous.model_copy(deep=True)
         explained |= _FOLLOW_WORDS
         if counting and op.kind == "select":
