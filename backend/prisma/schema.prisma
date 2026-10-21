@@ -141,6 +141,11 @@ model Municipality {
   officialEmail String             @unique @map("official_email")
   contactNumber String             @map("contact_number")
   status        MunicipalityStatus @default(ACTIVE)
+  /// Getting Started guide: optional steps the Owner acknowledged and
+  /// whether the guide was dismissed — `{ acknowledged: string[],
+  /// dismissed: boolean }`. Mandatory steps are derived from live data
+  /// (see onboarding.service.ts), never stored here.
+  onboardingState Json             @default("{}") @map("onboarding_state")
   createdAt     DateTime           @default(now()) @map("created_at")
   updatedAt     DateTime           @updatedAt @map("updated_at")
 

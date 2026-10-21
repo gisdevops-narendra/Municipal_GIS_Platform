@@ -48,14 +48,52 @@
     <nav class="site-header__nav" aria-label="Primary">
       <div class="site-header__nav-inner">
         @if (showFullNav()) {
-          <a routerLink="/dashboard" routerLinkActive="is-active">Dashboard</a>
-          <a routerLink="/departments" routerLinkActive="is-active">Departments</a>
-          <a routerLink="/users" routerLinkActive="is-active">Users</a>
+          @if (onboarding.showGuide()) {
+            <a routerLink="/setup" routerLinkActive="is-active" class="site-header__nav-setup">
+              <i class="pi pi-flag" aria-hidden="true"></i>
+              <span>Getting Started</span>
+              <span class="site-header__nav-progress">
+                {{ onboarding.mandatoryDone() }}/{{ onboarding.mandatorySteps().length }}
+              </span>
+            </a>
+          }
+          @for (item of navItems(); track item.route) {
+            @if (item.state === 'locked') {
+              <span
+                class="site-header__nav-locked"
+                role="link"
+                aria-disabled="true"
+                [pTooltip]="item.hint"
+                tooltipPosition="bottom"
+              >
+                @if (item.step) {
+                  <span class="site-header__nav-step">{{ item.step }}</span>
+                }
+                <span>{{ item.label }}</span>
+                <i class="pi pi-lock" aria-hidden="true"></i>
+              </span>
+            } @else {
+              <a
+                [routerLink]="item.route"
+                routerLinkActive="is-active"
+                [routerLinkActiveOptions]="{ exact: item.exact }"
+                [class.is-done]="item.state === 'done'"
+                [pTooltip]="item.hint || undefined"
+                tooltipPosition="bottom"
+              >
+                @if (item.state === 'done') {
+                  <span class="site-header__nav-step site-header__nav-step--done"><i class="pi pi-check" aria-hidden="true"></i></span>
+                } @else if (item.step) {
+                  <span class="site-header__nav-step">{{ item.step }}</span>
+                }
+                <span>{{ item.label }}</span>
+              </a>
+            }
+          }
+        } @else {
+          <a routerLink="/gis" routerLinkActive="is-active" [routerLinkActiveOptions]="{ exact: true }">Municipal GIS</a>
         }
-        <a routerLink="/gis" routerLinkActive="is-active" [routerLinkActiveOptions]="{ exact: true }">Municipal GIS</a>
         @if (showFullNav()) {
-          <a routerLink="/gis/layers" routerLinkActive="is-active">GIS Layers</a>
-          <a routerLink="/module-access" routerLinkActive="is-active">Module Access</a>
           <a routerLink="/settings" routerLinkActive="is-active" class="site-header__nav-settings" aria-label="Settings">
             <i class="pi pi-cog" aria-hidden="true"></i>
             <span>Settings</span>
@@ -63,5 +101,16 @@
         }
       </div>
     </nav>
+    @if (showFullNav() && guideBar(); as bar) {
+      <div class="site-header__guide" [attr.data-tone]="bar.tone" role="status">
+        <div class="site-header__guide-inner">
+          <i [class]="bar.tone === 'done' ? 'pi pi-check-circle' : 'pi pi-compass'" aria-hidden="true"></i>
+          <span class="site-header__guide-text">{{ bar.text }}</span>
+          <a [routerLink]="bar.linkRoute" class="site-header__guide-link">
+            {{ bar.linkLabel }} <i class="pi pi-arrow-right" aria-hidden="true"></i>
+          </a>
+        </div>
+      </div>
+    }
   }
 </header>

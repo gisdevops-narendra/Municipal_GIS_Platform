@@ -18,6 +18,7 @@ import { AppRouteReuseStrategy } from './core/routing/app-route-reuse.strategy';
 import { MgpPreset } from './core/theme/mgp-preset';
 import { environment } from '../environments/environment';
 import { bearerTokenInterceptorConfig } from './core/interceptors/bearer-token.interceptor.config';
+import { onboardingRefreshInterceptor } from './core/interceptors/onboarding-refresh.interceptor';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -34,7 +35,7 @@ export const appConfig: ApplicationConfig = {
         }
       }
     }),
-    provideHttpClient(withInterceptors([includeBearerTokenInterceptor])),
+    provideHttpClient(withInterceptors([includeBearerTokenInterceptor, onboardingRefreshInterceptor])),
     { provide: INCLUDE_BEARER_TOKEN_INTERCEPTOR_CONFIG, useValue: bearerTokenInterceptorConfig },
     // Keep-alive navigation: opted-in screens (route `data: { reuse: true }`)
     // are detached and re-attached whole, so state survives leaving and

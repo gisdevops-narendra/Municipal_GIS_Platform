@@ -1,0 +1,168 @@
+<app-site-header />
+
+<main class="setup-shell contour-field">
+  <div class="page-container setup-shell__inner">
+    <section class="setup-hero survey-panel">
+      <span class="eyebrow">Getting Started</span>
+      <h1 class="setup-hero__heading">
+        Set up {{ municipalityName() || 'your municipality' }}
+      </h1>
+      <p class="setup-hero__lede">
+        Follow these steps in order. Each one tells you which menu to use. Menus unlock as you finish the steps before
+        them, and the <strong>Municipal GIS map</strong> opens once the required setup is done.
+      </p>
+
+      @if (onboarding.status(); as status) {
+        <div class="setup-progress">
+          <div class="setup-progress__label">
+            <strong>{{ onboarding.mandatoryDone() }} of {{ onboarding.mandatorySteps().length }}</strong>
+            required steps complete
+          </div>
+          <p-progressbar [value]="progress()" [showValue]="false" styleClass="setup-progress__bar" />
+        </div>
+      }
+
+      @if (lockedMessage(); as message) {
+        <p-message severity="info" [text]="message" styleClass="w-full setup-hero__message" />
+      }
+      @if (loadError(); as message) {
+        <p-message severity="error" [text]="message" styleClass="w-full setup-hero__message" />
+        <button pButton type="button" label="Retry" class="p-button-sm" (click)="reload()"></button>
+      }
+    </section>
+
+    @if (onboarding.status(); as status) {
+      <div class="setup-layout">
+        <ol class="setup-steps">
+          @for (step of guide; track step.id; let i = $index) {
+            @let state = stepState(step);
+            @let info = stepStatus(step);
+            <li class="setup-step survey-panel" [attr.data-state]="state">
+              <div class="setup-step__marker" aria-hidden="true">
+                @switch (state) {
+                  @case ('done') { <i class="pi pi-check"></i> }
+                  @case ('locked') { <i class="pi pi-lock"></i> }
+                  @default { {{ stepNumber(i) }} }
+                }
+              </div>
+
+              <div class="setup-step__body">
+                <div class="setup-step__head">
+                  <h2 class="setup-step__title">{{ step.title }}</h2>
+                  @if (!info?.mandatory) {
+                    <p-tag severity="secondary" value="Optional" />
+                  }
+                  @switch (state) {
+                    @case ('done') { <p-tag severity="success" value="Done" /> }
+                    @case ('current') { <p-tag severity="info" value="Next step" /> }
+                    @case ('locked') { <p-tag severity="secondary" value="Locked" /> }
+                  }
+                  @if (step.menu) {
+                    <span class="setup-step__menu"><i class="pi pi-compass"></i> Menu: <strong>{{ step.menu }}</strong></span>
+                  }
+                </div>
+
+                <p class="setup-step__summary">{{ step.summary }}</p>
+
+                @if (state === 'done') {
+                  <p class="setup-step__done"><i class="pi pi-check-circle"></i> {{ step.doneLabel(info?.count ?? null) }}</p>
+                } @else if (state === 'locked') {
+                  <p class="setup-step__locked">Finish “{{ blockerTitle(step) }}” first to unlock this step.</p>
+                }
+
+                @if (step.howTo.length && state !== 'locked' && state !== 'done') {
+                  <ol class="setup-step__howto">
+                    @for (line of step.howTo; track line) {
+                      <li>{{ line }}</li>
+                    }
+                  </ol>
+                }
+
+                <div class="setup-step__actions">
+                  @if (step.id === 'workspace' && state !== 'done') {
+                    @if (status.workspaceStatus === 'PROVISIONING_FAILED') {
+                      <p class="setup-step__locked">GeoServer could not be reached when your municipality was registered.</p>
+                      <button pButton type="button" label="Retry workspace setup" icon="pi pi-refresh" class="p-button-sm"
+                        [loading]="busy() === 'workspace'" (click)="retryWorkspace()"></button>
+                    } @else {
+                      <p class="setup-step__locked">Your workspace is being prepared…</p>
+                      <button pButton type="button" label="Check again" icon="pi pi-refresh" class="p-button-sm p-button-outlined"
+                        (click)="reload()"></button>
+                    }
+                  }
+                  @if (step.route && state !== 'locked') {
+                    <a pButton [routerLink]="step.route" [label]="(state === 'done' ? 'Open ' : 'Go to ') + step.menu"
+                      icon="pi pi-arrow-right" iconPos="right" class="p-button-sm"
+                      [class.p-button-text]="state === 'done'"></a>
+                  }
+                  @if (step.id === 'access' && state !== 'done' && state !== 'locked') {
+                    <button pButton type="button" label="Mark as reviewed" icon="pi pi-check" class="p-button-sm p-button-outlined"
+                      [loading]="busy() === 'access'" (click)="acknowledge(step)"></button>
+                  }
+                </div>
+              </div>
+            </li>
+          }
+
+          <li class="setup-step setup-step--final survey-panel" [attr.data-state]="status.setupComplete ? 'done' : 'locked'">
+            <div class="setup-step__marker" aria-hidden="true">
+              <i [class]="status.setupComplete ? 'pi pi-map' : 'pi pi-lock'"></i>
+            </div>
+            <div class="setup-step__body">
+              <div class="setup-step__head">
+                <h2 class="setup-step__title">Start using the Municipal GIS map</h2>
+                <p-tag [severity]="status.setupComplete ? 'success' : 'secondary'" [value]="status.setupComplete ? 'Unlocked' : 'Locked'" />
+              </div>
+              @if (status.setupComplete) {
+                <p class="setup-step__summary">
+                  Setup is complete. The map, the Dashboard and every menu are now available — your published layers are
+                  on the map, ready to query, measure, analyse, print and export.
+                </p>
+                <div class="setup-step__actions">
+                  @if (!status.dismissed) {
+                    <button pButton type="button" label="Finish setup & open the map" icon="pi pi-map" class="p-button-sm"
+                      [loading]="busy() === 'finish'" (click)="finish()"></button>
+                  } @else {
+                    <a pButton routerLink="/gis" label="Open Municipal GIS" icon="pi pi-map" class="p-button-sm"></a>
+                    <button pButton type="button" label="Show the guide in the menu again" class="p-button-sm p-button-text"
+                      (click)="showGuideAgain()"></button>
+                  }
+                  <a pButton routerLink="/dashboard" label="Dashboard" class="p-button-sm p-button-text"></a>
+                </div>
+              } @else {
+                <p class="setup-step__summary">
+                  The interactive map unlocks when every required step above is done.
+                </p>
+              }
+            </div>
+          </li>
+        </ol>
+
+        <aside class="setup-tour survey-panel" aria-label="Platform menus">
+          <h2 class="setup-tour__heading">How the platform is organised</h2>
+          <p class="setup-tour__lede">The menu bar at the top follows the setup order. What each menu is for:</p>
+          <ul class="setup-tour__list">
+            @for (item of menuTour; track item.menu) {
+              <li>
+                <i [class]="item.icon" aria-hidden="true"></i>
+                <div>
+                  <strong>{{ item.menu }}</strong>
+                  <span>{{ item.text }}</span>
+                </div>
+              </li>
+            }
+          </ul>
+          <p class="setup-tour__note">
+            <i class="pi pi-info-circle"></i>
+            Department Heads and Department Users you add never see this guide — they sign in to a municipality that is
+            already set up.
+          </p>
+        </aside>
+      </div>
+    } @else if (!loadError()) {
+      <p class="setup-hero__lede">Loading your setup progress…</p>
+    }
+  </div>
+</main>
+
+<app-site-footer />

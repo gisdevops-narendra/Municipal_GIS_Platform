@@ -13,6 +13,7 @@ import { GisAiModule } from './gis-ai/gis-ai.module';
 import { SettingsModule } from './settings/settings.module';
 import { SystemModule } from './system/system.module';
 import { ModuleAccessModule } from './module-access/module-access.module';
+import { OnboardingModule } from './onboarding/onboarding.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { ModuleAccessModule } from './module-access/module-access.module';
     SettingsModule,
     SystemModule,
     ModuleAccessModule,
+    OnboardingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

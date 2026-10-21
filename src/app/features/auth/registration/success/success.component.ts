@@ -23,12 +23,13 @@ export class SuccessComponent {
   readonly municipality = this.state.municipality;
   readonly owner = this.state.owner;
 
+  /** Mirrors the Getting Started guide the Owner lands on after login. */
   readonly nextSteps: NextStep[] = [
-    { label: 'Configure municipality' },
+    { label: 'Sign in — the Getting Started guide walks you through setup' },
     { label: 'Create departments' },
-    { label: 'Invite users' },
-    { label: 'Configure GIS workspace' },
-    { label: 'Upload GIS data' }
+    { label: 'Add users' },
+    { label: 'Upload and publish your first GIS layer' },
+    { label: 'Open the Municipal GIS map' }
   ];
 
   onGoToLogin(): void {

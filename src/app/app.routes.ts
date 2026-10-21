@@ -2,6 +2,7 @@ import { Routes } from '@angular/router';
 import { reviewStepGuard, successStepGuard } from './core/guards/registration-step.guard';
 import { authGuard } from './core/guards/auth.guard';
 import { staffOnlyGuard } from './core/guards/staff-only.guard';
+import { onboardingGuard, setupPageGuard } from './core/guards/onboarding.guard';
 
 export const routes: Routes = [
   {
@@ -50,8 +51,15 @@ export const routes: Routes = [
     title: 'Municipality Created — Municipal GIS Platform'
   },
   {
+    path: 'setup',
+    canActivate: [authGuard, staffOnlyGuard, setupPageGuard],
+    loadComponent: () =>
+      import('./features/onboarding/getting-started.component').then((m) => m.GettingStartedComponent),
+    title: 'Getting Started — Municipal GIS Platform'
+  },
+  {
     path: 'dashboard',
-    canActivate: [authGuard, staffOnlyGuard],
+    canActivate: [authGuard, staffOnlyGuard, onboardingGuard('complete')],
     data: { reuse: true },
     loadComponent: () =>
       import('./features/dashboard/dashboard-placeholder.component').then(
@@ -61,7 +69,7 @@ export const routes: Routes = [
   },
   {
     path: 'departments',
-    canActivate: [authGuard, staffOnlyGuard],
+    canActivate: [authGuard, staffOnlyGuard, onboardingGuard('departments')],
     data: { reuse: true },
     loadComponent: () =>
       import('./features/departments/departments.component').then((m) => m.DepartmentsComponent),
@@ -69,14 +77,14 @@ export const routes: Routes = [
   },
   {
     path: 'users',
-    canActivate: [authGuard, staffOnlyGuard],
+    canActivate: [authGuard, staffOnlyGuard, onboardingGuard('users')],
     data: { reuse: true },
     loadComponent: () => import('./features/users/users.component').then((m) => m.UsersComponent),
     title: 'Users — Municipal GIS Platform'
   },
   {
     path: 'gis',
-    canActivate: [authGuard],
+    canActivate: [authGuard, onboardingGuard('complete')],
     data: { reuse: true },
     loadComponent: () =>
       import('./features/gis/gis-workspace.component').then((m) => m.GisWorkspaceComponent),
@@ -84,7 +92,7 @@ export const routes: Routes = [
   },
   {
     path: 'collect',
-    canActivate: [authGuard],
+    canActivate: [authGuard, onboardingGuard('complete')],
     loadComponent: () => import('./features/collect/collect.component').then((m) => m.CollectComponent),
     title: 'Field Collection — Municipal GIS Platform'
   },
@@ -98,7 +106,7 @@ export const routes: Routes = [
   },
   {
     path: 'module-access',
-    canActivate: [authGuard, staffOnlyGuard],
+    canActivate: [authGuard, staffOnlyGuard, onboardingGuard('access')],
     data: { reuse: true },
     loadComponent: () =>
       import('./features/module-access/module-access.component').then(
@@ -113,7 +121,7 @@ export const routes: Routes = [
   },
   {
     path: 'gis/layers',
-    canActivate: [authGuard, staffOnlyGuard],
+    canActivate: [authGuard, staffOnlyGuard, onboardingGuard('data')],
     data: { reuse: true },
     loadComponent: () =>
       import('./features/gis/pages/gis-layers/gis-layers.component').then((m) => m.GisLayersComponent),
@@ -121,7 +129,7 @@ export const routes: Routes = [
   },
   {
     path: 'gis/layers/:id/permissions',
-    canActivate: [authGuard, staffOnlyGuard],
+    canActivate: [authGuard, staffOnlyGuard, onboardingGuard('data')],
     data: { reuse: true },
     loadComponent: () =>
       import('./features/gis/pages/gis-layer-permissions/gis-layer-permissions.component').then(

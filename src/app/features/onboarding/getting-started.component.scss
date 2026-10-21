@@ -1,0 +1,266 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
+.setup-shell {
+  flex: 1 0 auto;
+  padding: 40px 0 48px;
+}
+
+.setup-shell__inner {
+  --content-max: 1280px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ---------- hero ---------- */
+.setup-hero {
+  padding: 28px 32px;
+}
+
+.setup-hero__heading {
+  font-size: 24px;
+  margin: 6px 0 8px;
+}
+
+.setup-hero__lede {
+  font-size: 14px;
+  color: var(--color-ink-700);
+  max-width: 72ch;
+  margin: 0;
+}
+
+/* styleClass lands inside <p-message>, so it needs ::ng-deep. */
+:host ::ng-deep .setup-hero__message {
+  display: block;
+  margin-top: 20px;
+}
+
+.setup-progress {
+  margin-top: 20px;
+  max-width: 520px;
+}
+
+.setup-progress__label {
+  font-size: 13px;
+  color: var(--color-ink-700);
+  margin-bottom: 8px;
+}
+
+:host ::ng-deep .setup-progress__bar {
+  height: 8px;
+}
+
+/* ---------- layout ---------- */
+.setup-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 20px;
+  align-items: start;
+}
+
+/* ---------- steps ---------- */
+.setup-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.setup-step {
+  display: flex;
+  gap: 16px;
+  padding: 20px 24px;
+  border-left: 4px solid var(--color-line-strong);
+
+  &[data-state='done'] {
+    border-left-color: var(--color-success-600);
+  }
+
+  &[data-state='current'] {
+    border-left-color: var(--color-primary-600);
+    box-shadow: 0 0 0 1px var(--color-primary-500) inset;
+  }
+
+  &[data-state='locked'] {
+    opacity: 0.7;
+  }
+}
+
+.setup-step__marker {
+  flex: 0 0 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  font-size: 14px;
+  background: var(--color-surface-alt);
+  color: var(--color-ink-700);
+  border: 1px solid var(--color-line);
+
+  [data-state='done'] > & {
+    background: var(--color-success-600);
+    border-color: var(--color-success-600);
+    color: #fff;
+  }
+
+  [data-state='current'] > & {
+    background: var(--color-primary-600);
+    border-color: var(--color-primary-600);
+    color: #fff;
+  }
+}
+
+.setup-step__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.setup-step__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.setup-step__title {
+  font-size: 16px;
+  margin: 0;
+}
+
+.setup-step__menu {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--color-ink-500);
+
+  i {
+    font-size: 11px;
+  }
+}
+
+.setup-step__summary {
+  font-size: 13.5px;
+  color: var(--color-ink-700);
+  margin: 8px 0 0;
+  max-width: 78ch;
+}
+
+.setup-step__done {
+  font-size: 13px;
+  color: var(--color-success-600);
+  margin: 8px 0 0;
+}
+
+.setup-step__locked {
+  font-size: 13px;
+  color: var(--color-ink-500);
+  margin: 8px 0 0;
+  width: 100%;
+}
+
+.setup-step__howto {
+  margin: 12px 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+  color: var(--color-ink-900);
+
+  li + li {
+    margin-top: 4px;
+  }
+}
+
+.setup-step__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+
+  &:empty {
+    display: none;
+  }
+}
+
+/* ---------- platform tour ---------- */
+.setup-tour {
+  padding: 20px 22px;
+  position: sticky;
+  top: 16px;
+}
+
+.setup-tour__heading {
+  font-size: 15px;
+  margin: 0 0 6px;
+}
+
+.setup-tour__lede {
+  font-size: 12.5px;
+  color: var(--color-ink-500);
+  margin: 0 0 12px;
+}
+
+.setup-tour__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  li {
+    display: flex;
+    gap: 10px;
+    font-size: 12.5px;
+  }
+
+  i {
+    color: var(--color-primary-600);
+    margin-top: 2px;
+  }
+
+  div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  span {
+    color: var(--color-ink-500);
+  }
+}
+
+.setup-tour__note {
+  margin: 16px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-line);
+  font-size: 12px;
+  color: var(--color-ink-500);
+}
+
+@media (max-width: 960px) {
+  .setup-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .setup-tour {
+    position: static;
+  }
+}
+
+@media (max-width: 600px) {
+  .setup-hero,
+  .setup-step {
+    padding: 18px 16px;
+  }
+
+  .setup-step__menu {
+    margin-left: 0;
+    width: 100%;
+  }
+}
