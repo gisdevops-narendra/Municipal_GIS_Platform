@@ -678,6 +678,9 @@ export class GisWorkspaceComponent {
     this.mapService.setLayerVisibility(filter.layerId, true);
     this.mapService.setLayerCqlFilter(filter.layerId, filter.cql);
     this.bottomTool.set('attributes');
+    // The panel only renders tools in openedBottomTools — without this the
+    // first query of a session opened an empty Attribute Table.
+    this.rememberOpened(this.openedBottomTools, 'attributes');
     this.refreshMapSize();
   }
 
