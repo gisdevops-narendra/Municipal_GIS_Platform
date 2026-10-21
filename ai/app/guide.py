@@ -103,6 +103,8 @@ def annotate(
         values = [v for v in ([f.value] if f.value is not None else []) + list(f.values or []) if isinstance(v, str)]
         if not values or any(v.lower() in lower for v in values):
             continue  # the user typed it as stored
+        if all(v.strip().lower() in {"yes", "no", "y", "n", "true", "false"} for v in values):
+            continue  # "at a chowk" -> chowk = Yes needs no explaining
         field = next((x for x in target.fields if x.name == f.field), None)
         if field is None or f.op not in ("=", "in"):
             continue
@@ -285,3 +287,69 @@ _DATA_WORDS = re.compile(
 def is_small_talk(message: str, layers: List[LayerInfo]) -> bool:
     from .repair import _mentioned_layers, implied_layers
     return not _DATA_WORDS.search(message) and not _mentioned_layers(message, layers) and not implied_layers(message, layers)
+
+
+# ---------------------------------------------------------------------------
+# Field confidence: is the value really in the column the plan uses?
+
+def field_confidence(
+    message: str, plan: PlanResult, layers: List[LayerInfo], previous: Optional[GisOperation] = None
+) -> PlanResult:
+    """Checks every text condition against where its value is stored.
+
+    * value not in the chosen column but in exactly one other category
+      column -> switch to that column (stated in a note);
+    * value stored in several category columns and the user did not name
+      one ("commercial": type AND subtype) -> ask which, with chips;
+    Name / locality / road / remark columns never compete, and conditions
+    carried over from the previous answer are not re-asked.
+    """
+    from .repair import _NAME_LIKE_FIELD, _tokens as tok
+
+    op = plan.operation
+    if op is None or plan.answer_kind != "gis_operation":
+        return plan
+    target = next((l for l in layers if l.code == op.target_layer), None)
+    if target is None:
+        return plan
+    carried = {(c.field, str(c.value), tuple(c.values or [])) for c in (previous.attribute_filters if previous else [])}
+    words = set(tok(message))
+    category = [
+        f for f in target.fields
+        if f.type == "text" and not _FREE_TEXT_FIELD.search(f.name) and not _NAME_LIKE_FIELD.search(f.name)
+    ]
+    stored = {f.name: {v.lower() for v in f.sample_values if v != "…(more)"} for f in category}
+    notes = list(plan.notes)
+    for index, f in enumerate(list(op.attribute_filters)):
+        if (f.field, str(f.value), tuple(f.values or [])) in carried or f.op not in ("=", "in", "ilike", "like"):
+            continue
+        values = [v for v in ([f.value] if f.value is not None else []) + list(f.values or []) if isinstance(v, str)]
+        values = [v.strip("%").lower() for v in values if v.strip("%")]
+        if not values or any(v in {"yes", "no", "y", "n", "true", "false"} for v in values):
+            continue  # Yes/No belongs to the column the user named ("at a chowk")
+        holders = [name for name, vals in stored.items() if all(v in vals for v in values)]
+        named = [h for h in holders if set(tok(h.replace("_", " "))) & words]
+        if f.field in holders and (len(holders) == 1 or named == [f.field]):
+            continue  # stored where the plan looks, and nothing competes
+        if f.field not in holders and len(holders) == 1:
+            new = holders[0]
+            op = op.model_copy(deep=True)
+            op.attribute_filters[index] = f.model_copy(update={"field": new, "op": "in" if f.values else "="})
+            notes.append(f"Used the field {new} — that is where “{', '.join(f.values or [f.value])}” is stored.")
+            plan = plan.model_copy(update={"operation": op, "notes": notes})
+            continue
+        if len(holders) >= 2 and not named:
+            shown = ", ".join(f.values or [str(f.value)])
+            options = []
+            for h in holders[:5]:
+                changed = op.model_copy(deep=True)
+                changed.attribute_filters[index] = f.model_copy(update={"field": h, "op": "in" if f.values else "="})
+                options.append(ClarifyOption(label=f"{h} = {shown}", operation=changed))
+            return PlanResult(
+                answer_kind="clarification",
+                explanation=plan.explanation,
+                clarification=f"“{shown}” appears in more than one field of {target.name}. Which field do you mean?",
+                options=options,
+                planner=plan.planner,
+            )
+    return plan

@@ -134,5 +134,23 @@ check("glossary", (converse("what is a buffer?", LAYERS) or PlanResult(answer_ki
 check("map question is not conversation", converse("show signals in zone 13", LAYERS) is None)
 check("small talk detected", is_small_talk("how can GIS help my municipality?", LAYERS))
 check("data question is not small talk", not is_small_talk("signals that are Not Working", LAYERS))
+# Field confidence.
+from app.guide import field_confidence
+LM2 = LayerInfo(id="lm2", code="LANDMARKS", name="landmarks", geometry_type="POINT", fields=[
+    LayerField(name="type", type="text", sample_values=["Commercial", "Educational", "Religious"]),
+    LayerField(name="subtype", type="text", sample_values=["ATM", "Commercial", "Temple"]),
+    LayerField(name="name", type="text", sample_values=["Commercial Plaza"])])
+plan_c = PlanResult(answer_kind="gis_operation", explanation="x", operation=GisOperation(
+    kind="select", target_layer="LANDMARKS", attribute_filters=[AttributeFilter(field="type", op="=", value="Commercial")]))
+amb = field_confidence("show commercial landmarks", plan_c, [LM2])
+check("value in two category fields -> asks which field",
+      amb.answer_kind == "clarification" and sorted(o.label for o in amb.options) == ["subtype = Commercial", "type = Commercial"], amb.clarification)
+named = field_confidence("show landmarks whose type is commercial", plan_c, [LM2])
+check("field named by the user -> no question", named.answer_kind == "gis_operation")
+wrong = PlanResult(answer_kind="gis_operation", explanation="x", operation=GisOperation(
+    kind="select", target_layer="LANDMARKS", attribute_filters=[AttributeFilter(field="type", op="=", value="Temple")]))
+sw = field_confidence("show temples", wrong, [LM2])
+check("value only stored elsewhere -> switched with a note",
+      sw.operation.attribute_filters[0].field == "subtype" and sw.notes, sw.notes)
 print(f"\n{sum(results)}/{len(results)} passed")
 raise SystemExit(0 if all(results) else 1)

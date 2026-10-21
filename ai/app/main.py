@@ -28,7 +28,7 @@ from fastapi import FastAPI, HTTPException
 from . import config, db, embeddings, llm, rag
 from .indexer import reindex_municipality
 from .fastpath import fast_plan
-from .guide import annotate, converse, is_small_talk, preflight, remember_near, suggestions
+from .guide import annotate, converse, field_confidence, is_small_talk, preflight, remember_near, suggestions
 from .repair import carry_over, is_follow_up, repair_plan
 from .schema import (
     NarrateRequest,
@@ -115,6 +115,10 @@ async def plan(body: PlanRequest) -> PlanResult:
     message, remembered_note, remembered_options = remember_near(body.message, body.history)
 
     def finish(result: PlanResult) -> PlanResult:
+        # Is each value really in the column the plan uses? Switch or ask.
+        result = field_confidence(message, result, body.layers, previous)
+        if result.answer_kind == "clarification":
+            return result
         result = annotate(message, result, body.layers, previous)
         if remembered_note:
             result = result.model_copy(update={
