@@ -17,8 +17,7 @@ const PHONE_PATTERN = /^[0-9+\-\s()]{7,20}$/;
  * own municipality, never accepted from the client. `role` accepts only
  * DEPARTMENT_HEAD/DEPARTMENT_USER (Task 8) — MUNICIPALITY_OWNER is never
  * accepted from the client, matching the pre-Task-8 rule of never letting
- * a caller assign the owner role to anyone. No `password` field either —
- * see KeycloakAdminService.createUserWithTemporaryPassword.
+ * a caller assign the owner role to anyone.
  */
 export class CreateUserDto {
   @IsString()
@@ -46,4 +45,12 @@ export class CreateUserDto {
   @IsOptional()
   @IsIn(['DEPARTMENT_HEAD', 'DEPARTMENT_USER'])
   role?: 'DEPARTMENT_HEAD' | 'DEPARTMENT_USER';
+
+  /** Set by the Owner and forwarded once to Keycloak as the user's
+   *  (permanent) password. Never persisted in our own database. Same rule
+   *  as the Owner's own password at registration. */
+  @IsString()
+  @MinLength(8)
+  @MaxLength(128)
+  password!: string;
 }

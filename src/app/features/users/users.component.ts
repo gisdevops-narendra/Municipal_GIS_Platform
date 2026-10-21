@@ -12,6 +12,7 @@ import { SelectModule } from 'primeng/select';
 import { TagModule } from 'primeng/tag';
 import { MessageModule } from 'primeng/message';
 import { TooltipModule } from 'primeng/tooltip';
+import { PasswordModule } from 'primeng/password';
 import { PrimeTemplate } from 'primeng/api';
 import { SiteHeaderComponent } from '../../shared/components/site-header/site-header.component';
 import { SiteFooterComponent } from '../../shared/components/site-footer/site-footer.component';
@@ -44,6 +45,7 @@ interface FilterOption {
     TagModule,
     MessageModule,
     TooltipModule,
+    PasswordModule,
     PrimeTemplate,
     SiteHeaderComponent,
     SiteFooterComponent
@@ -111,11 +113,6 @@ export class UsersComponent {
   readonly editingUser = signal<MunicipalityUser | null>(null);
   readonly formSubmitting = signal(false);
   readonly formError = signal<string | null>(null);
-  /** Set once, right after a successful create — shown to the Owner so
-   *  they can share it with the new user. There is no email/invite
-   *  delivery in this task's scope. Cleared as soon as the dialog closes. */
-  readonly createdTemporaryPassword = signal<string | null>(null);
-  readonly passwordCopied = signal(false);
   /** User whose status toggle is in flight (blocks double clicks). */
   readonly togglingId = signal<string | null>(null);
   /** Search is debounced, and only the latest request may update the
@@ -123,13 +120,24 @@ export class UsersComponent {
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
   private loadSeq = 0;
 
-  readonly form = this.fb.nonNullable.group({
-    fullName: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(150)]],
-    email: [''],
-    mobileNumber: ['', [Validators.required, CustomValidators.indianMobile()]],
-    departmentId: [''],
-    role: ['DEPARTMENT_USER' as ManagedRole, Validators.required]
-  });
+  /** email/password/confirmPassword only apply when creating — their
+   *  validators are switched on in openCreateDialog, off in openEditDialog. */
+  readonly form = this.fb.nonNullable.group(
+    {
+      fullName: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(150)]],
+      email: [''],
+      mobileNumber: ['', [Validators.required, CustomValidators.indianMobile()]],
+      departmentId: [''],
+      role: ['DEPARTMENT_USER' as ManagedRole, Validators.required],
+      password: [''],
+      confirmPassword: ['']
+    },
+    { validators: CustomValidators.passwordsMatch('password', 'confirmPassword') }
+  );
+
+  get passwordMismatch(): boolean {
+    return !!this.form.errors?.['passwordMismatch'] && this.f.confirmPassword.touched;
+  }
 
   constructor() {
     const initialDepartment = this.route.snapshot.queryParamMap.get('departmentId');
@@ -241,39 +249,46 @@ export class UsersComponent {
 
   openCreateDialog(): void {
     this.editingUser.set(null);
-    this.createdTemporaryPassword.set(null);
     this.formError.set(null);
-    this.form.reset({ fullName: '', email: '', mobileNumber: '', departmentId: '', role: 'DEPARTMENT_USER' });
+    this.form.reset({
+      fullName: '',
+      email: '',
+      mobileNumber: '',
+      departmentId: '',
+      role: 'DEPARTMENT_USER',
+      password: '',
+      confirmPassword: ''
+    });
     this.f.email.setValidators([Validators.required, Validators.email]);
-    this.f.email.updateValueAndValidity();
+    this.f.password.setValidators([Validators.required, CustomValidators.passwordStrength()]);
+    this.f.confirmPassword.setValidators([Validators.required]);
+    this.updateCreateOnlyValidity();
     this.dialogVisible.set(true);
   }
 
   openEditDialog(user: MunicipalityUser): void {
     this.editingUser.set(user);
-    this.createdTemporaryPassword.set(null);
     this.formError.set(null);
     this.form.reset({
       fullName: user.fullName,
       email: user.email,
       mobileNumber: user.mobileNumber,
       departmentId: user.department?.id ?? '',
-      role: user.systemRole === 'DEPARTMENT_HEAD' ? 'DEPARTMENT_HEAD' : 'DEPARTMENT_USER'
+      role: user.systemRole === 'DEPARTMENT_HEAD' ? 'DEPARTMENT_HEAD' : 'DEPARTMENT_USER',
+      password: '',
+      confirmPassword: ''
     });
     this.f.email.clearValidators();
-    this.f.email.updateValueAndValidity();
+    this.f.password.clearValidators();
+    this.f.confirmPassword.clearValidators();
+    this.updateCreateOnlyValidity();
     this.dialogVisible.set(true);
   }
 
-  closeDialog(): void {
-    // Only a create leaves unseen changes (edits reload on save).
-    const shouldRefresh = this.createdTemporaryPassword() !== null;
-    this.dialogVisible.set(false);
-    this.createdTemporaryPassword.set(null);
-    this.passwordCopied.set(false);
-    if (shouldRefresh) {
-      this.loadUsers();
-    }
+  private updateCreateOnlyValidity(): void {
+    this.f.email.updateValueAndValidity();
+    this.f.password.updateValueAndValidity();
+    this.f.confirmPassword.updateValueAndValidity();
   }
 
   submit(): void {
@@ -316,12 +331,15 @@ export class UsersComponent {
         email: value.email,
         mobileNumber: value.mobileNumber,
         departmentId: value.departmentId || undefined,
-        role: value.role
+        role: value.role,
+        password: value.password
       })
       .subscribe({
-        next: (result) => {
+        next: () => {
           this.formSubmitting.set(false);
-          this.createdTemporaryPassword.set(result.temporaryPassword);
+          this.dialogVisible.set(false);
+          this.notify.success(`${value.fullName} created. Share their password with them securely.`);
+          this.loadUsers();
         },
         error: (error: HttpErrorResponse) => {
           this.formSubmitting.set(false);
@@ -395,13 +413,6 @@ export class UsersComponent {
         });
       }
     });
-  }
-
-  copyTemporaryPassword(password: string): void {
-    navigator.clipboard?.writeText(password).then(
-      () => this.passwordCopied.set(true),
-      () => this.notify.error('Could not copy — select the password and copy it manually.')
-    );
   }
 
   /** Nest validation errors arrive as `message: string[]`. */

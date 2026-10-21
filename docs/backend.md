@@ -300,20 +300,15 @@ compensate pattern as Task 3's municipality registration:
 
 1. Validates the target department belongs to the actor's own municipality
    (404 otherwise) and that the email isn't already registered (409).
-2. Creates the Keycloak user via the Admin API with a **strong, randomly
-   generated temporary password** (`credentials[].temporary: true`,
-   `requiredActions: ['UPDATE_PASSWORD']`) — the Owner does not, and must
-   never, choose another person's password.
-3. Creates the `User` row (role forced to `MUNICIPALITY_USER`) in the same
-   try/catch; if it fails, the Keycloak user is deleted as a compensating
-   action (best-effort, never masks the original error).
-4. Returns the temporary password **once**, in the API response body, for
-   the Owner to share with the new user out of band.
-
-There is no email/invite-link delivery system in this task's scope — that
-is the natural follow-up (replace step 4 with an emailed invite link and
-drop the plaintext password from the response entirely). The password is
-never logged and never persisted in PostgreSQL.
+2. Creates the Keycloak user via the Admin API with the **password the
+   Owner entered** in the Add User form (`credentials[].temporary: false`,
+   min 8 characters — the same rule as the Owner's own registration
+   password). The user signs in with it directly; no forced change.
+3. Creates the `User` row (role `DEPARTMENT_HEAD` or `DEPARTMENT_USER`) in
+   the same try/catch; if it fails, the Keycloak user is deleted as a
+   compensating action (best-effort, never masks the original error).
+4. Returns the created user. The password is never returned, never logged
+   and never persisted in PostgreSQL.
 
 ## 14. GIS Workspace concept
 
@@ -1026,8 +1021,8 @@ npm run test:e2e       # requires a reachable Postgres — see backend/.env.exam
 - Cross-tenant isolation is enforced in application code (every query is
   scoped by the authenticated user's `municipality_id`), not via
   PostgreSQL row-level security. RLS is a future hardening task.
-- Owner-created users get a temporary password returned once in the API
-  response, with no email delivery — see §10.
+- The Owner sets each new user's password and shares it with them out of
+  band; there is no email invite — see §10.
 - Deactivating a user does not disable their Keycloak account, only revokes
   sessions + blocks this API — see §9.
 - GeoServer's data directory is a named Docker volume (`geoserver-data`),

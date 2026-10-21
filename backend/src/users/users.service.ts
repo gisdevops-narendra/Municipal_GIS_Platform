@@ -164,12 +164,12 @@ export class UsersService {
       );
     }
 
-    const { keycloakUserId, temporaryPassword } =
-      await this.keycloakAdmin.createUserWithTemporaryPassword({
-        email: dto.email,
-        fullName: dto.fullName,
-        mobileNumber: dto.mobileNumber,
-      });
+    const { keycloakUserId } = await this.keycloakAdmin.createUser({
+      email: dto.email,
+      fullName: dto.fullName,
+      mobileNumber: dto.mobileNumber,
+      password: dto.password,
+    });
 
     try {
       const user = await this.prisma.user.create({
@@ -186,7 +186,7 @@ export class UsersService {
         include: USER_LIST_INCLUDE,
       });
 
-      return { user: this.toListResponse(user), temporaryPassword };
+      return { user: this.toListResponse(user) };
     } catch (error) {
       await this.keycloakAdmin.deleteUser(keycloakUserId);
 

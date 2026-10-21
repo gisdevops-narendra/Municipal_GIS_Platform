@@ -26,13 +26,12 @@ export interface CreateMunicipalityUserRequest {
   mobileNumber: string;
   departmentId?: string;
   role?: ManagedRole;
+  /** Chosen by the Owner; the user signs in with it directly. */
+  password: string;
 }
 
 export interface CreateMunicipalityUserResponse {
   user: MunicipalityUser;
-  /** Shown to the Owner exactly once — there is no email/invite delivery
-   *  in this task's scope, so the Owner must share it out of band. */
-  temporaryPassword: string;
 }
 
 export interface UpdateMunicipalityUserRequest {

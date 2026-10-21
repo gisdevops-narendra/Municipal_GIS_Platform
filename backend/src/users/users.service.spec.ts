@@ -22,7 +22,7 @@ describe('UsersService', () => {
     department: { findFirst: jest.Mock };
   };
   let keycloakAdmin: {
-    createUserWithTemporaryPassword: jest.Mock;
+    createUser: jest.Mock;
     deleteUser: jest.Mock;
     logoutUserSessions: jest.Mock;
   };
@@ -58,7 +58,7 @@ describe('UsersService', () => {
       department: { findFirst: jest.fn() },
     };
     keycloakAdmin = {
-      createUserWithTemporaryPassword: jest.fn(),
+      createUser: jest.fn(),
       deleteUser: jest.fn(),
       logoutUserSessions: jest.fn(),
     };
@@ -146,14 +146,14 @@ describe('UsersService', () => {
       email: 'rahul@somnath.gov.in',
       mobileNumber: '9876500000',
       departmentId: 'dept-roads',
+      password: 'Rahul@2026',
     };
 
-    it('creates a Keycloak user with a temporary password and an app user assigned DEPARTMENT_USER by default', async () => {
+    it('creates a Keycloak user with the Owner-chosen password and an app user assigned DEPARTMENT_USER by default', async () => {
       prisma.department.findFirst.mockResolvedValue({ id: 'dept-roads' });
       prisma.user.findUnique.mockResolvedValue(null);
-      keycloakAdmin.createUserWithTemporaryPassword.mockResolvedValue({
+      keycloakAdmin.createUser.mockResolvedValue({
         keycloakUserId: 'kc-rahul',
-        temporaryPassword: 'Temp-Pass-1',
       });
       prisma.user.create.mockImplementation(
         ({ data }: { data: Record<string, unknown> }) =>
@@ -180,7 +180,13 @@ describe('UsersService', () => {
           }),
         }),
       );
-      expect(result.temporaryPassword).toBe('Temp-Pass-1');
+      expect(keycloakAdmin.createUser).toHaveBeenCalledWith({
+        email: 'rahul@somnath.gov.in',
+        fullName: 'Rahul Patel',
+        mobileNumber: '9876500000',
+        password: 'Rahul@2026',
+      });
+      expect(result).not.toHaveProperty('temporaryPassword');
       expect(result.user.systemRole).toBe('DEPARTMENT_USER');
     });
 
@@ -191,7 +197,7 @@ describe('UsersService', () => {
         NotFoundException,
       );
       expect(
-        keycloakAdmin.createUserWithTemporaryPassword,
+        keycloakAdmin.createUser,
       ).not.toHaveBeenCalled();
     });
 
@@ -203,16 +209,15 @@ describe('UsersService', () => {
         ConflictException,
       );
       expect(
-        keycloakAdmin.createUserWithTemporaryPassword,
+        keycloakAdmin.createUser,
       ).not.toHaveBeenCalled();
     });
 
     it('rolls back the Keycloak user if the database insert fails', async () => {
       prisma.department.findFirst.mockResolvedValue({ id: 'dept-roads' });
       prisma.user.findUnique.mockResolvedValue(null);
-      keycloakAdmin.createUserWithTemporaryPassword.mockResolvedValue({
+      keycloakAdmin.createUser.mockResolvedValue({
         keycloakUserId: 'kc-rahul',
-        temporaryPassword: 'Temp-Pass-1',
       });
       prisma.user.create.mockRejectedValue(new Error('db exploded'));
 

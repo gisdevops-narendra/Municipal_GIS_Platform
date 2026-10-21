@@ -181,100 +181,119 @@
   [header]="editingUser() ? 'Edit User' : 'Add User'"
   [style]="{ width: '480px' }"
   [breakpoints]="{ '600px': '95vw' }"
-  (onHide)="closeDialog()"
 >
-  @if (createdTemporaryPassword(); as tempPassword) {
-    <div class="users-form">
-      <p-message severity="success" text="User created. Share this temporary password with them securely — it will not be shown again." styleClass="w-full" />
-      <div class="users-form__temp-row">
-        <div class="users-form__temp-password">{{ tempPassword }}</div>
-        <button
-          pButton
-          type="button"
-          [icon]="passwordCopied() ? 'pi pi-check' : 'pi pi-copy'"
-          [label]="passwordCopied() ? 'Copied' : 'Copy'"
-          class="p-button-outlined p-button-sm"
-          (click)="copyTemporaryPassword(tempPassword)"
-        ></button>
+  <form [formGroup]="form" (ngSubmit)="submit()" class="users-form">
+    <div class="users-form__field">
+      <label class="field-label" for="user-name">Full Name</label>
+      <input pInputText id="user-name" formControlName="fullName" class="w-full" />
+      @if (f.fullName.invalid && f.fullName.touched) {
+        <div class="field-error">Full name is required.</div>
+      }
+    </div>
+
+    @if (!editingUser()) {
+      <div class="users-form__field">
+        <label class="field-label" for="user-email">Email</label>
+        <input pInputText id="user-email" formControlName="email" class="w-full" />
+        @if (f.email.invalid && f.email.touched) {
+          <div class="field-error">A valid email is required.</div>
+        }
       </div>
-      <p class="field-hint">
-        They must sign in with this password and will be required to set a new one immediately. There is no automated
-        invitation email in this version — please share it out of band (e.g. in person or a secure message).
-      </p>
-      <div class="users-form__actions">
-        <button pButton type="button" label="Done" (click)="dialogVisible.set(false)"></button>
+
+      <div class="users-form__field">
+        <label class="field-label" for="user-password">Password</label>
+        <p-password
+          inputId="user-password"
+          formControlName="password"
+          [toggleMask]="true"
+          styleClass="w-full"
+          inputStyleClass="w-full"
+          weakLabel="Weak"
+          mediumLabel="Fair"
+          strongLabel="Strong"
+          promptLabel="Choose a password"
+          appendTo="body"
+        />
+        @if (f.password.invalid && f.password.touched) {
+          <div class="field-error">
+            @if (f.password.errors?.['required']) {
+              Password is required.
+            } @else {
+              Use at least 8 characters, with a letter and a number.
+            }
+          </div>
+        } @else {
+          <div class="field-hint">At least 8 characters, including a letter and a number.</div>
+        }
+      </div>
+
+      <div class="users-form__field">
+        <label class="field-label" for="user-confirm-password">Confirm Password</label>
+        <p-password
+          inputId="user-confirm-password"
+          formControlName="confirmPassword"
+          [toggleMask]="true"
+          [feedback]="false"
+          styleClass="w-full"
+          inputStyleClass="w-full"
+        />
+        @if (f.confirmPassword.invalid && f.confirmPassword.touched) {
+          <div class="field-error">Please confirm the password.</div>
+        } @else if (passwordMismatch) {
+          <div class="field-error">Passwords do not match.</div>
+        }
+      </div>
+    }
+
+    <div class="users-form__field">
+      <label class="field-label" for="user-mobile">Mobile Number</label>
+      <input pInputText id="user-mobile" formControlName="mobileNumber" class="w-full" />
+      @if (f.mobileNumber.invalid && f.mobileNumber.touched) {
+        <div class="field-error">Enter a valid mobile number.</div>
+      }
+    </div>
+
+    <div class="users-form__field">
+      <label class="field-label" for="user-department">Department</label>
+      <p-select
+        inputId="user-department"
+        [options]="departmentFormOptions"
+        optionLabel="label"
+        optionValue="value"
+        placeholder="No department"
+        formControlName="departmentId"
+        [showClear]="true"
+        appendTo="body"
+        styleClass="w-full"
+      ></p-select>
+    </div>
+
+    <div class="users-form__field">
+      <label class="field-label" for="user-role">Role</label>
+      <p-select
+        inputId="user-role"
+        [options]="roleOptions"
+        optionLabel="label"
+        optionValue="value"
+        formControlName="role"
+        appendTo="body"
+        styleClass="w-full"
+      ></p-select>
+      <div class="field-hint">
+        Department Head gets VIEW/UPLOAD/APPROVE by default on their department's layers; Department User gets
+        VIEW/UPLOAD. Fine-tune per layer under GIS Layers → Permissions.
       </div>
     </div>
-  } @else {
-    <form [formGroup]="form" (ngSubmit)="submit()" class="users-form">
-      <div class="users-form__field">
-        <label class="field-label" for="user-name">Full Name</label>
-        <input pInputText id="user-name" formControlName="fullName" class="w-full" />
-        @if (f.fullName.invalid && f.fullName.touched) {
-          <div class="field-error">Full name is required.</div>
-        }
-      </div>
 
-      @if (!editingUser()) {
-        <div class="users-form__field">
-          <label class="field-label" for="user-email">Email</label>
-          <input pInputText id="user-email" formControlName="email" class="w-full" />
-          @if (f.email.invalid && f.email.touched) {
-            <div class="field-error">A valid email is required.</div>
-          }
-        </div>
-      }
+    @if (formError(); as message) {
+      <p-message severity="error" [text]="message" styleClass="w-full" />
+    }
 
-      <div class="users-form__field">
-        <label class="field-label" for="user-mobile">Mobile Number</label>
-        <input pInputText id="user-mobile" formControlName="mobileNumber" class="w-full" />
-        @if (f.mobileNumber.invalid && f.mobileNumber.touched) {
-          <div class="field-error">Enter a valid mobile number.</div>
-        }
-      </div>
-
-      <div class="users-form__field">
-        <label class="field-label" for="user-department">Department</label>
-        <p-select
-          inputId="user-department"
-          [options]="departmentFormOptions"
-          optionLabel="label"
-          optionValue="value"
-          placeholder="No department"
-          formControlName="departmentId"
-          [showClear]="true"
-          appendTo="body"
-          styleClass="w-full"
-        ></p-select>
-      </div>
-
-      <div class="users-form__field">
-        <label class="field-label" for="user-role">Role</label>
-        <p-select
-          inputId="user-role"
-          [options]="roleOptions"
-          optionLabel="label"
-          optionValue="value"
-          formControlName="role"
-          appendTo="body"
-          styleClass="w-full"
-        ></p-select>
-        <div class="field-hint">
-          Department Head gets VIEW/UPLOAD/APPROVE by default on their department's layers; Department User gets
-          VIEW/UPLOAD. Fine-tune per layer under GIS Layers → Permissions.
-        </div>
-      </div>
-
-      @if (formError(); as message) {
-        <p-message severity="error" [text]="message" styleClass="w-full" />
-      }
-
-      <div class="users-form__actions">
-        <button pButton type="button" label="Cancel" class="p-button-text" (click)="dialogVisible.set(false)"></button>
-        <button pButton type="submit" [label]="editingUser() ? 'Save Changes' : 'Create User'" [loading]="formSubmitting()"></button>
-      </div>
-    </form>
-  }
+    <div class="users-form__actions">
+      <button pButton type="button" label="Cancel" class="p-button-text" (click)="dialogVisible.set(false)"></button>
+      <button pButton type="submit" [label]="editingUser() ? 'Save Changes' : 'Create User'" [loading]="formSubmitting()"></button>
+    </div>
+  </form>
 </p-dialog>
 
 <app-site-footer />

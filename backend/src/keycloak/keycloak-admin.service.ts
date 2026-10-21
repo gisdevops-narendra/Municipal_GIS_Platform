@@ -5,7 +5,6 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { randomInt } from 'node:crypto';
 
 export interface CreateKeycloakUserInput {
   email: string;
@@ -13,15 +12,6 @@ export interface CreateKeycloakUserInput {
   mobileNumber: string;
   password: string;
 }
-
-export interface CreateKeycloakUserWithTemporaryPasswordInput {
-  email: string;
-  fullName: string;
-  mobileNumber: string;
-}
-
-const TEMP_PASSWORD_CHARS =
-  'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
 
 /**
  * Server-side-only client for the Keycloak Admin REST API.
@@ -58,9 +48,10 @@ export class KeycloakAdminService {
     );
   }
 
-  /** Self-registration path (Task 3): creates a Keycloak user with the
-   *  password the owner chose at registration time. Throws
-   *  ConflictException if the username/email is already taken in Keycloak. */
+  /** Creates a Keycloak user with a permanent password — the one the
+   *  Owner chose at registration, or the one the Owner set for a new
+   *  municipality user. Throws ConflictException if the username/email is
+   *  already taken in Keycloak. */
   async createUser(
     input: CreateKeycloakUserInput,
   ): Promise<{ keycloakUserId: string }> {
@@ -69,30 +60,6 @@ export class KeycloakAdminService {
       value: input.password,
       temporary: false,
     });
-  }
-
-  /**
-   * Owner-initiated user creation (Task 4): the Owner does not know — and
-   * must never choose — another person's password, so this generates a
-   * strong temporary one server-side and marks it `temporary: true`,
-   * forcing Keycloak to require a password change on first login.
-   *
-   * There is no email/notification system in this task's scope, so the
-   * generated password is returned once in the API response for the Owner
-   * to share with the new user out of band. It is never logged or
-   * persisted anywhere. A follow-up task should replace this with a proper
-   * invite-link/email flow.
-   */
-  async createUserWithTemporaryPassword(
-    input: CreateKeycloakUserWithTemporaryPasswordInput,
-  ): Promise<{ keycloakUserId: string; temporaryPassword: string }> {
-    const temporaryPassword = this.generateTemporaryPassword();
-    const { keycloakUserId } = await this.createUserInternal(input, {
-      type: 'password',
-      value: temporaryPassword,
-      temporary: true,
-    });
-    return { keycloakUserId, temporaryPassword };
   }
 
   private async createUserInternal(
@@ -198,14 +165,6 @@ export class KeycloakAdminService {
         error as Error,
       );
     }
-  }
-
-  private generateTemporaryPassword(): string {
-    let password = '';
-    for (let i = 0; i < 14; i++) {
-      password += TEMP_PASSWORD_CHARS[randomInt(TEMP_PASSWORD_CHARS.length)];
-    }
-    return password;
   }
 
   private async getAdminAccessToken(): Promise<string> {
