@@ -56,15 +56,6 @@ def remember_near(message: str, history: List[ChatTurn], rule_m: Optional[float]
 
 def preflight(message: str) -> Optional[PlanResult]:
     text = message.strip()
-    if len(_WITHIN_DISTANCE.findall(text)) >= 2:
-        return PlanResult(
-            answer_kind="unsupported",
-            explanation=(
-                "I can apply only one distance condition per question for now, so I won't "
-                "answer this by silently dropping one. Ask with a single distance, e.g. "
-                "the first part of your question."
-            ),
-        )
     near = _NEAR.search(text)
     if near and not _DISTANCE.search(text) and not _NEAREST.search(text):
         # "near X" -> "within N m of X": the fast path plans that instantly.

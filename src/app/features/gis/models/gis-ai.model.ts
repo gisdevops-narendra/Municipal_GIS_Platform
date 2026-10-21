@@ -38,6 +38,7 @@ export interface AiGisOperation {
   target_layer: string;
   attribute_filters?: AiAttributeFilter[];
   spatial_filter?: AiSpatialFilter | null;
+  spatial_filters?: AiSpatialFilter[];
   limit?: number | null;
   metric?: AiAggregateMetric | null;
   metric_field?: string | null;

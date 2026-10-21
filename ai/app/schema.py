@@ -57,6 +57,8 @@ class GisOperation(BaseModel):
     target_layer: str
     attribute_filters: List[AttributeFilter] = Field(default_factory=list)
     spatial_filter: Optional[SpatialFilter] = None
+    # More spatial conditions, ANDed with spatial_filter.
+    spatial_filters: List[SpatialFilter] = Field(default_factory=list)
     limit: Optional[int] = None
     # select: "the 10 tallest" -> order_by=height, order_desc=True, limit=10
     order_by: Optional[str] = None
@@ -217,6 +219,18 @@ _ATTR_FILTER_SCHEMA = {
     "required": ["field", "op"],
 }
 
+_SPATIAL_FILTER_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "relation": {"type": "string", "enum": list(SpatialRelation.__args__)},  # type: ignore[attr-defined]
+        "reference_layer": {"type": "string"},
+        "distance_meters": {"type": ["number", "null"]},
+        "reference_filters": {"type": "array", "items": _ATTR_FILTER_SCHEMA},
+    },
+    "required": ["relation", "reference_layer"],
+}
+
 PLAN_JSON_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -261,6 +275,7 @@ PLAN_JSON_SCHEMA = {
                     "type": "array",
                     "items": _ATTR_FILTER_SCHEMA,
                 },
+                "spatial_filters": {"type": "array", "items": _SPATIAL_FILTER_SCHEMA},
                 "spatial_filter": {
                     "type": ["object", "null"],
                     "additionalProperties": False,

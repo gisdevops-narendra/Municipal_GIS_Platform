@@ -393,10 +393,11 @@ export class AiChatComponent {
         (f.value2 != null ? `${f.value} … ${f.value2}` : `${f.value ?? ''}`);
       bits.push(`${f.field} ${f.op} ${v}`.trim());
     }
-    if (op.spatial_filter) {
-      const s = op.spatial_filter;
+    for (const s of [op.spatial_filter, ...(op.spatial_filters ?? [])]) {
+      if (!s) continue;
+      const where = (s.reference_filters ?? []).map((f) => `${f.field} ${f.op} ${f.values?.join(', ') ?? f.value}`).join(' and ');
       bits.push(
-        `${s.relation}${s.distance_meters ? ` ${s.distance_meters} m` : ''} of ${s.reference_layer}`,
+        `${s.relation}${s.distance_meters ? ` ${s.distance_meters} m` : ''} of ${s.reference_layer}${where ? ` where ${where}` : ''}`,
       );
     }
     if (op.kind === 'aggregate') {

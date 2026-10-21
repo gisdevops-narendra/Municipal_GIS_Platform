@@ -716,8 +716,9 @@ export class GisQueryCompilerService {
       if (clause === null) return null;
       parts.push(clause);
     }
-    if (operation.spatial_filter) {
-      const clause = this.spatialCql(target, operation.spatial_filter, catalog, opts);
+    for (const sf of [operation.spatial_filter, ...(operation.spatial_filters ?? [])]) {
+      if (!sf) continue;
+      const clause = this.spatialCql(target, sf, catalog, opts);
       if (clause === null) return null;
       parts.push(clause);
     }
@@ -891,10 +892,12 @@ export class GisQueryCompilerService {
       );
     }
 
-    if (operation.spatial_filter) {
-      const sf = operation.spatial_filter;
+    const spatial = [operation.spatial_filter, ...(operation.spatial_filters ?? [])].filter(
+      (sf): sf is NonNullable<AiGisOperation['spatial_filter']> => !!sf,
+    );
+    spatial.forEach((sf, i) => {
       const ref = this.resolveLayer(catalog, sf.reference_layer);
-      const r = 'ref';
+      const r = i === 0 ? 'ref' : `ref${i}`;
 
       const subWhere: string[] = [this.spatialPredicate(t, target, r, ref, sf, bind)];
       for (const filter of sf.reference_filters ?? []) {
@@ -915,7 +918,7 @@ export class GisQueryCompilerService {
           sf.distance_meters ? ` ${sf.distance_meters} m` : ''
         } of ${ref.name}`,
       );
-    }
+    });
     return { where, summaryBits };
   }
 

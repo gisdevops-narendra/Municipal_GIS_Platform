@@ -33,8 +33,12 @@ check("chip re-asks with the distance filled in", picked == "Show signals within
 check("...and that question plans instantly", fast_plan(picked, LAYERS) is not None)
 check("nearest is not 'near'", preflight("Nearest 3 signals to the BRTS") is None)
 check("near with a distance is fine", preflight("signals near the BRTS within 50 m") is None)
-two = preflight("signals within 100 m of BRTS and within 200 m of the zone")
-check("two distance conditions -> unsupported, not silently dropped", two is not None and two.answer_kind == "unsupported")
+two = fast_plan("signals within 100 m of the BRTS and within 200 m of the zone", LAYERS)
+got = two and [(sf.reference_layer, sf.distance_meters) for sf in [two.operation.spatial_filter, *two.operation.spatial_filters]]
+check("two distance conditions -> both kept (ANDed)", got == [("BRTS", 100.0), ("ZONE", 200.0)], got)
+three = fast_plan("Show signals within 100 m of the BRTS and within 300 m of educational landmarks", LAYERS)
+got = three and [(sf.reference_layer, [(f.field, f.value) for f in sf.reference_filters]) for sf in [three.operation.spatial_filter, *three.operation.spatial_filters]]
+check("second condition keeps its own value filter", got == [("BRTS", []), ("LANDMARKS", [("type", "Educational")])], got)
 
 plan = fast_plan("Show signals on Dehu Aalandi Road", LAYERS)
 noted = annotate("Show signals on Dehu Aalandi Road", plan, LAYERS)

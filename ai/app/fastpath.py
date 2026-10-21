@@ -63,9 +63,10 @@ _FOLLOW_WORDS = set(_tokens("now only those these them they ones one same previo
 
 _COUNTING = re.compile(r"^\s*(how many|count|number of)\b", re.I)
 
-# "within 300 m of Pawna River", "within 1.5 km from the BRTS"
-_WITHIN = re.compile(
-    r"\bwithin\s+(?P<num>\d+(?:\.\d+)?)\s*(?P<unit>km|kilomet\w*|m|met\w*)\s+(?:of|from|around)\s+(?P<tail>.+)$",
+# "within 300 m of Pawna River", "within 1.5 km from the BRTS" — each one
+# a spatial condition; several are ANDed.
+_WITHIN_HEAD = re.compile(
+    r"\bwithin\s+(?P<num>\d+(?:\.\d+)?)\s*(?P<unit>km|kilomet\w*|m|met\w*)\s+(?:of|from|around)\s+",
     re.I,
 )
 
@@ -282,7 +283,10 @@ def _negate(m, op: GisOperation, target: LayerInfo) -> Set[str]:
 
 def _value_words(op: GisOperation) -> Set[str]:
     out: Set[str] = set()
-    filters = list(op.attribute_filters) + (op.spatial_filter.reference_filters if op.spatial_filter else [])
+    filters = list(op.attribute_filters)
+    for sf in [op.spatial_filter, *op.spatial_filters]:
+        if sf is not None:
+            filters += sf.reference_filters
     for f in filters:
         for v in ([f.value] if f.value is not None else []) + list(f.values or []):
             if isinstance(v, str):
@@ -360,30 +364,34 @@ def fast_plan(
     counting = bool(_COUNTING.search(text))
     area_words: Set[str] = {t for w, _ in _NUMBERED.findall(text) for t in _tokens(w)}
 
-    # --- "within N m of <layer> [<value>]" ---------------------------------
+    # --- "within N m of <layer> [<value>]", possibly several, ANDed -------
     body = text
-    within_filter: Optional[SpatialFilter] = None
-    ref_code: Optional[str] = None
-    w = _WITHIN.search(text)
-    if w:
-        tail = w.group("tail")
-        refs = [
-            m[0] for m in _mentioned_layers(tail, layers)
-            if not (area_words & set(_tokens(f"{m[0].name} {m[0].code}")))
-        ]
-        if len(refs) != 1:
-            return None
-        ref = refs[0]
-        ref_code = ref.code
-        within_filter = SpatialFilter(
-            relation="within_distance",
-            reference_layer=ref.code,
-            distance_meters=_metres(w.group("num"), w.group("unit")),
-            reference_filters=[value_filter(f, v) for _, f, v in matching_values(tail, [ref])],
-        )
-        explained |= set(_tokens(f"within {w.group('num')} {w.group('unit')} of from around"))
-        explained |= set(_tokens(f"{ref.name} {ref.code}"))
-        body = text[: w.start()] + " " + _strip_ref(tail, ref)
+    within_filters: List[SpatialFilter] = []
+    ref_codes: Set[str] = set()
+    heads = list(_WITHIN_HEAD.finditer(text))
+    if heads:
+        parts = [text[: heads[0].start()]]
+        for i, h in enumerate(heads):
+            tail = text[h.end(): heads[i + 1].start() if i + 1 < len(heads) else len(text)]
+            tail = re.sub(r"[\s,]+(and|or)?\s*$", "", tail)
+            refs = [
+                m[0] for m in _mentioned_layers(tail, layers)
+                if not (area_words & set(_tokens(f"{m[0].name} {m[0].code}")))
+            ]
+            if len(refs) != 1:
+                return None
+            ref = refs[0]
+            ref_codes.add(ref.code)
+            within_filters.append(SpatialFilter(
+                relation="within_distance",
+                reference_layer=ref.code,
+                distance_meters=_metres(h.group("num"), h.group("unit")),
+                reference_filters=[value_filter(f, v) for _, f, v in matching_values(tail, [ref])],
+            ))
+            explained |= set(_tokens(f"within {h.group('num')} {h.group('unit')} of from around"))
+            explained |= set(_tokens(f"{ref.name} {ref.code}"))
+            parts.append(_strip_ref(tail, ref))
+        body = " ".join(parts)
 
     # --- target ------------------------------------------------------------
     if follow_up:
@@ -398,7 +406,7 @@ def fast_plan(
         group_code, _ = _grouping(body, layers, None) if counting else (None, None)
         targets = [
             m[0] for m in _mentioned_layers(body, layers)
-            if m[0].code not in (group_code, ref_code)
+            if m[0].code != group_code and m[0].code not in ref_codes
             and not (area_words & set(_tokens(f"{m[0].name} {m[0].code}")))
         ]
         if not targets:
@@ -406,7 +414,7 @@ def fast_plan(
             # category of exactly one layer -> that layer.
             implied = [
                 l for l in implied_layers(body, layers)
-                if l.code not in (group_code, ref_code)
+                if l.code != group_code and l.code not in ref_codes
                 and not (area_words & set(_tokens(f"{l.name} {l.code}")))
             ]
             targets = implied if len(implied) == 1 else []
@@ -463,10 +471,14 @@ def fast_plan(
         if any(f.field == getattr(_numbered_field(target, word), "name", None) for f in op.attribute_filters):
             explained |= set(_tokens(word)) | _NUMBER_MARKERS | {code.lower()}
 
-    if within_filter is not None:
-        if op.spatial_filter is not None and op.spatial_filter != within_filter:
-            return None  # two spatial conditions: let the model decide
-        op.spatial_filter = within_filter
+    if within_filters:
+        # An area condition already set ("in zone no 13" via the zone
+        # polygon) stays first; the distance conditions are ANDed after it.
+        if op.spatial_filter is None:
+            op.spatial_filter, extra = within_filters[0], within_filters[1:]
+        else:
+            extra = within_filters
+        op.spatial_filters = list(op.spatial_filters) + [sf for sf in extra if sf not in op.spatial_filters]
     value_words = _value_words(op)
     explained |= value_words
     # "cast iron" stands behind the abbreviation 'C.I'.
@@ -499,8 +511,9 @@ def _describe(op: GisOperation, target: LayerInfo) -> str:
         return f"{f.field} {f.op} {value}"
 
     conditions = [cond(f) for f in op.attribute_filters]
-    sf = op.spatial_filter
-    if sf is not None:
+    for sf in [op.spatial_filter, *op.spatial_filters]:
+        if sf is None:
+            continue
         where = f" where {' and '.join(cond(f) for f in sf.reference_filters)}" if sf.reference_filters else ""
         if sf.relation == "within_distance":
             conditions.append(f"within {sf.distance_meters:g} m of {sf.reference_layer}{where}")

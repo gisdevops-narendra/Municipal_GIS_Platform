@@ -70,6 +70,9 @@ export interface AiGisOperation {
   target_layer: string;
   attribute_filters?: AiAttributeFilter[];
   spatial_filter?: AiSpatialFilter | null;
+  /** More spatial conditions, ANDed with spatial_filter ("within 100 m of
+   *  the BRTS and within 200 m of Pawna River"). */
+  spatial_filters?: AiSpatialFilter[];
   limit?: number | null;
   /** select: sort by this column (with `limit` = "the 10 tallest"). */
   order_by?: string | null;

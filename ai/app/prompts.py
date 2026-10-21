@@ -81,7 +81,8 @@ Rules:
   mean").
 - "within N m/km of X" -> spatial_filter within_distance (distance_meters).
   "inside / in / falls within X" -> within. "crosses / passes through X"
-  -> intersects.
+  -> intersects. A SECOND distance/area condition goes in spatial_filters
+  (a list, ANDed with spatial_filter).
 - Prefer an attribute filter when the layer already has the column
   (e.g. ward_no = 5 rather than a spatial "within ward 5" test).
 - Convert to metres / square metres: 1 sq ft = 0.092903, 1 acre = 4046.86,
