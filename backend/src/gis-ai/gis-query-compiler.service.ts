@@ -203,9 +203,12 @@ export class GisQueryCompilerService {
           `"${zones.name}" is not a polygon layer, so it cannot group features by area.`,
         );
       }
-      const labelCol = operation.group_by_layer_field
+      const asked = operation.group_by_layer_field
         ? this.findColumn(zones, operation.group_by_layer_field)
-        : this.labelColumn(zones);
+        : null;
+      // A column with no values (PCMC's zone.name is empty everywhere)
+      // would merge every polygon into one "(blank)" group.
+      const labelCol = asked && this.hasValues(asked) ? asked : this.areaLabelColumn(zones);
       const z = 'zn';
       const zGeom =
         zones.srid === target.srid
@@ -220,14 +223,17 @@ export class GisQueryCompilerService {
       const zWhere = zones.isDemo
         ? `WHERE ${z}."gis_workspace_id" = ${bind(workspaceId)} `
         : '';
+      const pk = `${z}."${zones.pkColumn}"::text`;
       const grp = labelCol
-        ? `${z}."${labelCol.name}"::text`
-        : `${z}."${zones.pkColumn}"::text`;
+        ? `coalesce(nullif(trim(${z}."${labelCol.name}"::text), ''), ${pk})`
+        : pk;
+      // One group per polygon (grouped by its key too), so two zones that
+      // share a label are still counted separately.
       sql =
         `SELECT ${grp} AS grp, ${value} AS val, ${n} AS n ` +
         `FROM "${zones.table}" ${z} LEFT JOIN "${target.table}" ${t} ON ${on.join(' AND ')} ` +
         zWhere +
-        `GROUP BY 1 ORDER BY 2 DESC NULLS LAST, 1 LIMIT ${MAX_GROUPS + 1}`;
+        `GROUP BY ${z}."${zones.pkColumn}", 1 ORDER BY 2 DESC NULLS LAST, 1 LIMIT ${MAX_GROUPS + 1}`;
       groupLabel = `${zones.name}${labelCol ? '.' + labelCol.name : ''}`;
     } else if (operation.group_by) {
       const col = this.findColumn(target, operation.group_by);
@@ -735,10 +741,23 @@ export class GisQueryCompilerService {
     return names.length ? names.join(', ') : 'none';
   }
 
-  /** The column that names a feature ("name", "ward_name", ...), if any. */
-  private labelColumn(layer: LayerCatalogEntry): CatalogColumn | null {
+  /** Text columns are sampled when the catalog is built; none sampled means
+   *  the column is empty. Non-text columns are assumed populated. */
+  private hasValues(col: CatalogColumn): boolean {
+    return col.kind !== 'text' || col.sampleValues.length > 0;
+  }
+
+  /** How people name one area of `layer`: its number column when it has
+   *  one ("zone 13" -> zone_no, "ward 5" -> ward_no), else a populated
+   *  name-like column, else any populated text column. */
+  private areaLabelColumn(layer: LayerCatalogEntry): CatalogColumn | null {
+    const stem = layer.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/s$/, '');
+    const numbered = layer.columns.find((c) =>
+      [`${stem}_no`, `${stem}no`, `${stem}_number`, `${stem}_num`].includes(c.name.toLowerCase()),
+    );
+    if (numbered) return numbered;
     const text = layer.columns.filter(
-      (c) => c.kind === 'text' && c.name !== 'gis_workspace_id',
+      (c) => c.kind === 'text' && c.name !== 'gis_workspace_id' && this.hasValues(c),
     );
     return text.find((c) => LABEL_COLUMN.test(c.name)) ?? text[0] ?? null;
   }

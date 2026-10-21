@@ -16,6 +16,7 @@ from typing import Any, List, Optional, Tuple
 import httpx
 
 from . import config, prompts
+from .repair import mentioned_layer_codes
 from .schema import ChatTurn, LayerInfo, PLAN_JSON_SCHEMA, PlanResult
 from .vectorstore import Retrieved
 
@@ -119,18 +120,7 @@ def generate_plan(
             f"The local model '{config.LLM_MODEL}' is still downloading. Try again shortly."
         )
 
-    messages: list[dict] = [{"role": "system", "content": prompts.SYSTEM_PROMPT}]
-    messages.extend(prompts.FEWSHOT)
-    for turn in history[-6:]:
-        messages.append({"role": turn.role, "content": turn.content})
-    messages.append(
-        {
-            "role": "user",
-            "content": prompts.build_user_message(
-                message, layers, snippets, municipality_name
-            ),
-        }
-    )
+    messages = _fit_messages(message, layers, snippets, history, municipality_name)
 
     def _chat(fmt) -> str:
         payload = {
@@ -172,6 +162,63 @@ def generate_plan(
             explanation=str(data.get("explanation") or "")
             or "I couldn't produce a valid GIS operation for that request.",
         )
+
+
+# Rough chars-per-token for this prompt mix (English + identifiers + JSON);
+# kept low on purpose so the estimate errs on the side of fitting.
+_CHARS_PER_TOKEN = 3.0
+# Room left for the model's JSON answer.
+_OUTPUT_RESERVE_TOKENS = 600
+
+
+def _estimate_tokens(messages: list[dict]) -> int:
+    return int(sum(len(m["content"]) + 8 for m in messages) / _CHARS_PER_TOKEN)
+
+
+def _fit_messages(
+    message: str,
+    layers: List[LayerInfo],
+    snippets: List[Retrieved],
+    history: List[ChatTurn],
+    municipality_name: Optional[str],
+) -> list[dict]:
+    """Builds the chat so it fits LLM_NUM_CTX. Ollama silently drops the
+    START of an over-long prompt — the system rules and examples — and the
+    model then answers with JSON that matches nothing. So step the detail
+    down until it fits: fewer sample values, other layers as one line,
+    no retrieval context, no history, fewer examples."""
+    budget = config.LLM_NUM_CTX - _OUTPUT_RESERVE_TOKENS
+    named = set(mentioned_layer_codes(message, layers))
+    # Layers the request names get full detail; if it names none, start
+    # with every layer in full and fall back to the compact list.
+    focus_options = [named] if named else [None, set()]
+    turns = [{"role": t.role, "content": t.content} for t in history[-6:]]
+    fewshots = [prompts.FEWSHOT, prompts.FEWSHOT[:6]]
+
+    attempt: list[dict] = []
+    for few in fewshots:
+        for keep_history in (True, False):
+            for focus in focus_options:
+                for level in range(len(prompts.DETAIL_LEVELS)):
+                    user = prompts.build_user_message(
+                        message, layers, snippets, municipality_name, focus, level
+                    )
+                    attempt = [
+                        {"role": "system", "content": prompts.SYSTEM_PROMPT},
+                        *few,
+                        *(turns if keep_history else []),
+                        {"role": "user", "content": user},
+                    ]
+                    if _estimate_tokens(attempt) <= budget:
+                        if level or not keep_history or few is not prompts.FEWSHOT:
+                            log.info(
+                                "prompt trimmed to fit %s tokens: level=%s history=%s examples=%s focus=%s",
+                                config.LLM_NUM_CTX, level, keep_history, len(few) // 2,
+                                sorted(focus) if focus else focus,
+                            )
+                        return attempt
+    log.warning("prompt still ~%s tokens over a %s context", _estimate_tokens(attempt), config.LLM_NUM_CTX)
+    return attempt
 
 
 def _parse_json(text: str) -> Optional[dict]:
@@ -219,9 +266,37 @@ def _fact_numbers(value: Any, out: List[float]) -> None:
             _fact_numbers(v, out)
 
 
-def _grounded(text: str, allowed: List[float]) -> bool:
+_NUMBER_WORDS = {
+    w: i for i, w in enumerate(
+        "zero one two three four five six seven eight nine ten eleven twelve thirteen "
+        "fourteen fifteen sixteen seventeen eighteen nineteen twenty".split()
+    )
+}
+_NUMBER_WORD = re.compile(r"\b(" + "|".join(_NUMBER_WORDS) + r")\b", re.I)
+# The fact that answers the question; the wording must state it.
+_HEADLINE_KEYS = ("matched", "totalFeatures", "features", "count")
+
+
+def _headline(facts: dict) -> Optional[float]:
+    for key in _HEADLINE_KEYS:
+        value = facts.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+    return None
+
+
+def _grounded(text: str, allowed: List[float], headline: Optional[float] = None) -> bool:
     """Every number in `text` must be a fact number or a rounding of one —
-    a 1.5b model will otherwise happily invent totals and percentages."""
+    a 1.5b model will otherwise happily invent totals and percentages. Number
+    words count too ("three groups" when there is one), and the main count
+    must appear, or a number-free sentence could claim anything ("all signals
+    are not working")."""
+    if _NUMBER_WORD.search(text):
+        return False
+    if headline is not None and not any(
+        abs(float(raw) - headline) < 1e-9 for raw in _numbers_in(text)
+    ):
+        return False
     for raw in _numbers_in(text):
         n = float(raw)
         decimals = len(raw.split(".")[1]) if "." in raw else 0
@@ -261,7 +336,8 @@ def narrate(kind: str, question: str, facts: dict) -> Tuple[str, bool]:
     allowed: List[float] = []
     _fact_numbers(facts, allowed)
     _fact_numbers(question, allowed)
-    if not text or not _grounded(text, allowed):
+    headline = _headline(facts) if kind == "query" else None
+    if not text or not _grounded(text, allowed, headline):
         log.info("narration rejected (ungrounded or empty): %r", text[:200])
         return text, False
     return text, True

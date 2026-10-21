@@ -343,7 +343,9 @@ export class GisAiService {
       compiledSummary: compiled.summary,
       result,
       answer,
-      facts: { operation: 'select', layer: result.layerName, matched: result.matched },
+      // `query` tells the narrator exactly WHICH features matched, so it
+      // describes them instead of guessing (e.g. "type = Not Working").
+      facts: { operation: 'select', layer: result.layerName, query: compiled.summary, matched: result.matched },
     };
   }
 
@@ -362,6 +364,7 @@ export class GisAiService {
     const facts: Record<string, unknown> = {
       operation: 'aggregate',
       layer,
+      query: compiled.summary,
       statistic: metric,
       field: compiled.metricLabel,
       groupedBy: compiled.groupLabel,

@@ -14,6 +14,12 @@ the plan:
   * "by <field>" -> group_by
   * "nearest 3", "200 m", "2 km" -> count / distance_meters
   * layer names mentioned in the question -> target layer when missing
+  * "show / list / find <layer> ..." with no usable operation -> select
+  * "zone no 13" / "ward 5" -> zone_no = 13 when the target has that
+    column, else `within` the Zone / Ward polygon whose column matches
+  * a filter the request never states — a text value it never mentions,
+    or any number when it contains no number ("in each zone" -> zone_no = 1)
+    — is dropped, unless the request refers back ("those")
 
 It only ever names layers / fields from AVAILABLE LAYERS, and the Node
 backend still validates every field — a wrong repair becomes a
@@ -25,7 +31,7 @@ import logging
 import re
 from typing import List, Optional, Tuple
 
-from .schema import GisOperation, LayerInfo, PlanResult
+from .schema import AttributeFilter, GisOperation, LayerInfo, PlanResult, SpatialFilter
 
 log = logging.getLogger("gis-ai.repair")
 
@@ -42,6 +48,14 @@ _DISTANCE = re.compile(r"(\d+(?:\.\d+)?)\s*(km|kilomet(?:er|re)s?|m|met(?:er|re)
 _GROUP = re.compile(r"\b(?:in each|for each|per|in every|each|by|across|in all)\s+([a-z0-9_ ]+)", re.I)
 _LENGTH = re.compile(r"\b(length|long|km of|kilometres of|kilometers of)\b", re.I)
 _AREA = re.compile(r"\b(area|sq\.? ?m|square met|hectare|acre)\b", re.I)
+_SELECT = re.compile(r"\b(show|display|list|find|get|locate|highlight|which|where|all)\b", re.I)
+# "now only those in ward 5", "of them", "same" — a request that builds on
+# the previous one, so its conditions may legitimately carry over.
+_FOLLOW_UP = re.compile(r"\b(those|these|them|they|same|previous|of them|now only|only those|among)\b", re.I)
+# Values that stand for "has it / doesn't" rather than a named category.
+_FLAG_VALUES = {"yes", "no", "y", "n", "true", "false", "1", "0"}
+# "zone no 13", "ward no. 5", "prabhag number 4", "ward 7", "zone #2"
+_NUMBERED = re.compile(r"\b([a-z]+)\s*(?:no\.?|number|num|#)?\s*[-:]?\s*(\d+)\b", re.I)
 
 
 def _tokens(text: str) -> List[str]:
@@ -82,6 +96,11 @@ def _mentioned_layers(text: str, layers: List[LayerInfo]) -> List[Tuple[LayerInf
             found.append((lyr, score, pos))
     found.sort(key=lambda f: (-f[1], f[2]))
     return found
+
+
+def mentioned_layer_codes(text: str, layers: List[LayerInfo]) -> List[str]:
+    """Codes of the layers a request names, best match first."""
+    return [lyr.code for lyr, _, _ in _mentioned_layers(text, layers)]
 
 
 def _find_layer(layers: List[LayerInfo], ref: Optional[str]) -> Optional[LayerInfo]:
@@ -158,6 +177,98 @@ def _grouping(text: str, layers: List[LayerInfo], target: Optional[LayerInfo]) -
     return None, None
 
 
+def _numbered_field(layer: LayerInfo, word: str):
+    """The column of `layer` that a "<word> no N" phrase refers to:
+    zone -> zone_no / zone_number / zoneno / zone_num / zone."""
+    word = word.lower()
+    wanted = (f"{word}_no", f"{word}no", f"{word}_number", f"{word}_num", f"{word}_id", word)
+    by_name = {f.name.lower(): f for f in layer.fields}
+    for name in wanted:
+        field = by_name.get(name)
+        if field and field.type in ("integer", "number", "text"):
+            return field
+    return None
+
+
+def _numbered_value(field, number: str):
+    return int(number) if field.type == "integer" else float(number) if field.type == "number" else number
+
+
+def _numbered_filters(text: str, op: GisOperation, target: LayerInfo, layers: List[LayerInfo]) -> List[str]:
+    """Adds the filter a "<area> no N" phrase implies, when the plan lacks it:
+    an attribute filter if the target has the column (preferred — cheaper and
+    exactly what the data says), else `within` the polygon layer named by
+    the phrase, filtered on its own column."""
+    notes: List[str] = []
+    have = {f.field.lower() for f in op.attribute_filters}
+    for m in _NUMBERED.finditer(text):
+        word, number = m.group(1), m.group(2)
+        field = _numbered_field(target, word)
+        if field:
+            if field.name.lower() not in have:
+                op.attribute_filters.append(
+                    AttributeFilter(field=field.name, op="=", value=_numbered_value(field, number))
+                )
+                have.add(field.name.lower())
+                notes.append(f"filter {field.name} = {number}")
+            continue
+        if op.spatial_filter is not None:
+            continue
+        for area in layers:
+            if area.code == target.code or (area.geometry_type or "").upper() != "POLYGON":
+                continue
+            if not set(_tokens(word)) & set(_tokens(f"{area.name} {area.code}")):
+                continue
+            area_field = _numbered_field(area, word)
+            if area_field:
+                op.spatial_filter = SpatialFilter(
+                    relation="within",
+                    reference_layer=area.code,
+                    reference_filters=[
+                        AttributeFilter(field=area_field.name, op="=", value=_numbered_value(area_field, number))
+                    ],
+                )
+                notes.append(f"within {area.name} where {area_field.name} = {number}")
+                break
+    return notes
+
+
+def _drop_unasked_filters(text: str, op: GisOperation) -> List[str]:
+    """The small model copies a condition from an earlier chat turn into an
+    unrelated request ("Count signals by type" after "...Not Working" ran as
+    type = 'Not Working'). Drop a text filter whose value the request never
+    mentions — when its field is not mentioned either, or it is the very
+    field being grouped by. Follow-ups ("those", "now only") keep them."""
+    if _FOLLOW_UP.search(text):
+        return []
+    words = set(_tokens(text))
+    has_number = bool(re.search(r"\d", text))
+    kept, notes = [], []
+    for f in op.attribute_filters:
+        values = f.values if f.op in ("in", "not_in") and f.values else [f.value]
+        numbers = [v for v in values if isinstance(v, (int, float)) and not isinstance(v, bool)]
+        if numbers and not has_number:
+            # Unit conversions (2000 sq ft -> 185.8) still need a number in
+            # the request, so no digits at all means the model made it up.
+            notes.append(f"dropped unasked filter {f.field} {f.op} {numbers[0]}")
+            continue
+        texts = [str(v).strip("%").strip() for v in values if isinstance(v, str)]
+        if not texts or any(t.lower() in _FLAG_VALUES for t in texts):
+            kept.append(f)
+            continue
+        value_said = all(
+            set(_tokens(t)) - _GENERIC <= words for t in texts if set(_tokens(t)) - _GENERIC
+        )
+        field_said = bool(set(_tokens(f.field.replace("_", " "))) - _GENERIC <= words)
+        grouped_on = op.kind == "aggregate" and (op.group_by or "").lower() == f.field.lower()
+        if value_said or (field_said and not grouped_on):
+            kept.append(f)
+        else:
+            notes.append(f"dropped unasked filter {f.field} {f.op} {texts[0]!r}")
+    op.attribute_filters = kept
+    return notes
+
+
 _IDENTIFIER = re.compile(r"(^|_)(id|gisid|objectid|fid|gid|code|no|num|number)$", re.I)
 
 
@@ -187,18 +298,24 @@ def repair_plan(message: str, plan: PlanResult, layers: List[LayerInfo]) -> Plan
     mentioned = _mentioned_layers(text, layers)
     target = _find_layer(layers, op.target_layer if op else None)
 
-    # No operation at all, but the request is clearly an aggregate / buffer
-    # over a layer the question names: build it.
+    # No operation at all, but the request clearly asks for an aggregate /
+    # buffer / plain listing of a layer the question names: build it.
     if op is None:
-        if wants not in ("aggregate", "buffer") or not mentioned:
+        kind = wants if wants in ("aggregate", "buffer") else "select" if _SELECT.search(text) and not wants else None
+        if kind is None or not mentioned:
             return plan
         group_layer, _ = _grouping(text, layers, None)
-        candidates = [f for f in mentioned if f[0].code != group_layer]
+        # "signals in zone 13": the numbered area is the filter, not the target.
+        areas = {t for w, _ in _NUMBERED.findall(text) for t in _tokens(w)}
+        candidates = [
+            f for f in mentioned
+            if f[0].code != group_layer and not (areas & set(_tokens(f"{f[0].name} {f[0].code}")))
+        ] or [f for f in mentioned if f[0].code != group_layer]
         if not candidates:
             return plan
         target = candidates[0][0]
-        op = GisOperation(kind=wants, target_layer=target.code)
-        notes.append(f"built a {wants} operation on {target.name} from the question")
+        op = GisOperation(kind=kind, target_layer=target.code)
+        notes.append(f"built a {kind} operation on {target.name} from the question")
 
     if target is None and mentioned:
         target = mentioned[0][0]
@@ -232,6 +349,12 @@ def repair_plan(message: str, plan: PlanResult, layers: List[LayerInfo]) -> Plan
             elif group_field:
                 op.group_by = group_field
                 notes.append(f"group_by -> {group_field}")
+
+    if op.attribute_filters:
+        notes.extend(_drop_unasked_filters(text, op))
+
+    if target is not None and op.kind in ("select", "aggregate"):
+        notes.extend(_numbered_filters(text, op, target, layers))
 
     if op.kind == "nearest" and not op.count and nearest and nearest.group(2):
         op.count = int(nearest.group(2))

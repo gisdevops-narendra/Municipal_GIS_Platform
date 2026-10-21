@@ -6,7 +6,8 @@ prompt-processing time matters. The RAG context + the response JSON schema
 """
 from __future__ import annotations
 
-from typing import List
+import re
+from typing import List, Optional, Set
 
 from .schema import LayerInfo
 from .vectorstore import Retrieved
@@ -65,6 +66,10 @@ Rules:
   user actually stated in words. If the user gave no attribute condition,
   attribute_filters MUST be []. Never invent a filter, a value, a number,
   or a field. A distance ("within 150 m") is NOT an attribute filter.
+- Earlier turns are context only. Carry a condition over from an earlier
+  request ONLY when the new one refers back to it ("those", "them", "now
+  only", "of these"); otherwise build the operation from the new request
+  alone.
 - "show / find / list / which / how many X ..." is a gis_operation, not
   an "answer". Only use "answer" for a question
   about the data itself ("what layers do I have", "what does this field
@@ -79,19 +84,47 @@ Rules:
 """
 
 
-def _layer_block(layers: List[LayerInfo]) -> str:
+# Columns that never help plan a query (ids, export leftovers, shape stats).
+_NOISE_FIELD = re.compile(
+    r"^(ogc_fid|fid|gid|objectid|object_id|globalid|gen_id|gis_remark|remarks?)$|^shape_",
+    re.I,
+)
+
+# Prompt detail levels, richest first; generate_plan steps down until the
+# whole prompt fits the model's context window (see llm.generate_plan).
+#   (sample values per field on focus layers, list other layers' fields)
+DETAIL_LEVELS = [(6, True), (3, False), (0, False)]
+
+
+def _sample(v: object) -> str:
+    text = str(v)
+    return text if len(text) <= 32 else text[:31] + "…"
+
+
+def _layer_block(layers: List[LayerInfo], focus: Optional[Set[str]] = None, level: int = 0) -> str:
+    """Focus layers (the ones the request names) get every useful field with
+    sample values; the rest get a compact line, so a municipality with many
+    wide layers still fits the small model's context window."""
     if not layers:
         return "AVAILABLE LAYERS: none"
+    samples, list_others = DETAIL_LEVELS[min(level, len(DETAIL_LEVELS) - 1)]
     out = ["AVAILABLE LAYERS:"]
     for lyr in layers:
         head = f"- {lyr.name} [{lyr.code}] {lyr.geometry_type or ''}".rstrip()
+        fields = [f for f in lyr.fields if f.type != "id" and not _NOISE_FIELD.search(f.name)]
+        if focus is not None and lyr.code not in focus:
+            if list_others and fields:
+                head += " — fields: " + ", ".join(f.name for f in fields)
+            out.append(head)
+            continue
         if lyr.description:
-            head += f" — {lyr.description}"
+            head += f" — {lyr.description[:120]}"
         out.append(head)
-        for f in lyr.fields:
+        for f in fields:
             line = f"    {f.name} ({f.type})"
-            if f.sample_values:
-                line += " e.g. " + ", ".join(map(str, f.sample_values[:8]))
+            values = [v for v in f.sample_values if v != "…(more)"][:samples]
+            if values:
+                line += " e.g. " + ", ".join(_sample(v) for v in values)
             out.append(line)
     return "\n".join(out)
 
@@ -211,9 +244,12 @@ def build_user_message(
     layers: List[LayerInfo],
     snippets: List[Retrieved],
     municipality_name: str | None,
+    focus: Optional[Set[str]] = None,
+    level: int = 0,
 ) -> str:
-    ctx = _context_block(snippets)
-    parts = [_layer_block(layers)]
+    # Retrieval context is the first thing dropped when space runs out.
+    ctx = _context_block(snippets) if level < len(DETAIL_LEVELS) - 1 else ""
+    parts = [_layer_block(layers, focus, level)]
     if ctx:
         parts.append(ctx)
     parts.append(f"REQUEST: {message}")
@@ -229,6 +265,11 @@ Rules:
 - 1 to 3 plain sentences, no markdown, no lists, no headings.
 - Use ONLY the numbers and names that appear in FACTS. Never estimate,
   round differently, add, or invent a number, place, cause or recommendation.
+- Write every number as digits (3, not "three"). State the main count from
+  FACTS (matched / features / totalFeatures).
+- FACTS.query says exactly which features were selected. Describe them with
+  those conditions only — never widen them ("all", "every", "main roads")
+  or add a meaning the data does not state.
 - Lead with the direct answer to the question, then the most notable
   detail (largest group, nearest item, biggest change).
 - If FACTS show zero results, say so plainly.
