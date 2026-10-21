@@ -8,9 +8,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# No apt-get: the base image already has ca-certificates, and the health
+# check below uses Python instead of curl — so the build never depends on
+# reaching deb.debian.org (blocked/proxied on some office networks).
 
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
@@ -24,6 +24,6 @@ COPY app ./app
 EXPOSE 8000
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=5 \
-    CMD curl -sf http://localhost:8000/health > /dev/null || exit 1
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=4).status == 200 else 1)" || exit 1
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
