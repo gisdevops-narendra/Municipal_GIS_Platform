@@ -2,7 +2,7 @@ import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../environments/environment';
-import { AiGisOperation, GisAiHealth, GisChatResponse } from '../models/gis-ai.model';
+import { AiGisOperation, AiQueryLogEntry, GisAiHealth, GisChatResponse } from '../models/gis-ai.model';
 
 /**
  * Client for the natural-language GIS assistant (`/api/gis/ai/*`). The
@@ -47,6 +47,18 @@ export class GisAiService {
   /** Primes the assistant's model cache so the first question is fast. */
   warm(): Observable<{ ok: true }> {
     return this.http.post<{ ok: true }>(`${this.baseUrl}/warm`, {});
+  }
+
+  /** 👍/👎 on one of the user's own answers. */
+  feedback(logId: string, helpful: boolean): Observable<{ ok: true }> {
+    return this.http.post<{ ok: true }>(`${this.baseUrl}/feedback`, { logId, helpful });
+  }
+
+  /** Owner: the municipality's recent questions (problems = 👎/errors/unanswered). */
+  logs(problemsOnly = false): Observable<AiQueryLogEntry[]> {
+    return this.http.get<AiQueryLogEntry[]>(`${this.baseUrl}/logs`, {
+      params: { problems: String(problemsOnly), limit: '100' },
+    });
   }
 
   health(): Observable<GisAiHealth> {

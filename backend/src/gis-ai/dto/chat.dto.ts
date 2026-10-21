@@ -2,6 +2,8 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
+  IsUUID,
   IsIn,
   IsObject,
   IsOptional,
@@ -85,4 +87,13 @@ export class GisExplainDto {
   @ArrayMaxSize(50)
   @IsObject({ each: true })
   rows?: Record<string, unknown>[];
+}
+
+/** `POST /gis/ai/feedback` — 👍/👎 on one of the caller's own answers. */
+export class GisFeedbackDto {
+  @IsUUID()
+  logId!: string;
+
+  @IsBoolean()
+  helpful!: boolean;
 }

@@ -144,7 +144,8 @@ async def plan(body: PlanRequest) -> PlanResult:
         )
         # The small model often drops the newer operation fields; the
         # question's own words fill them (see repair.py).
-        return repair_plan(body.message, result, body.layers)
+        repaired = repair_plan(body.message, result, body.layers)
+        return repaired.model_copy(update={"planner": "model"})
     except llm.LLMUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:

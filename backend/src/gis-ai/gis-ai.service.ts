@@ -3,7 +3,9 @@ import {
   HttpException,
   Injectable,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AppUser } from '../auth/types/app-user.type';
@@ -40,6 +42,10 @@ export interface GisChatResponse {
   explanation: string;
   clarification?: string;
   usedContext: string[];
+  /** Question-log row of this answer — the client sends it back with 👍/👎. */
+  logId?: string;
+  /** "fast" (answered without the language model) or "model". */
+  planner?: 'fast' | 'model' | null;
   /** Present only for answerKind === 'gis_operation'. */
   operation?: AiGisOperation;
   /** The parameterised SQL the backend compiled and ran — shown to the
@@ -140,7 +146,110 @@ export class GisAiService {
     return { ok: true };
   }
 
+  /** Answers a question and records it in ai_query_logs (question, path,
+   *  plan, result count, time, error) so failures and slow answers can be
+   *  found, and the user can rate the answer. Logging never fails a chat. */
   async chat(appUser: AppUser, dto: GisChatDto): Promise<GisChatResponse> {
+    const started = Date.now();
+    let response: GisChatResponse;
+    try {
+      response = await this.answer(appUser, dto);
+    } catch (error) {
+      await this.logQuestion(appUser, dto.message, started, {
+        answerKind: 'error',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+    const logId = await this.logQuestion(appUser, dto.message, started, {
+      answerKind: response.answerKind,
+      planner: response.planner ?? null,
+      operation: response.operation,
+      explanation: response.answer ?? response.clarification ?? response.explanation,
+      matched: response.result?.matched ?? null,
+    });
+    return { ...response, logId: logId ?? undefined };
+  }
+
+  private async logQuestion(
+    appUser: AppUser,
+    question: string,
+    started: number,
+    entry: {
+      answerKind: string;
+      planner?: string | null;
+      operation?: AiGisOperation;
+      explanation?: string;
+      matched?: number | null;
+      error?: string;
+    },
+  ): Promise<string | null> {
+    try {
+      const row = await this.prisma.aiQueryLog.create({
+        data: {
+          municipalityId: appUser.municipalityId,
+          userId: appUser.id,
+          question: question.slice(0, 2000),
+          answerKind: entry.answerKind,
+          planner: entry.planner ?? null,
+          operation: entry.operation ? (entry.operation as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
+          explanation: entry.explanation?.slice(0, 1000) ?? null,
+          matched: entry.matched ?? null,
+          durationMs: Date.now() - started,
+          error: entry.error?.slice(0, 1000) ?? null,
+        },
+        select: { id: true },
+      });
+      return row.id;
+    } catch (err) {
+      this.logger.warn(`Could not log AI question: ${(err as Error).message}`);
+      return null;
+    }
+  }
+
+  /** 👍/👎 on the caller's own answer. */
+  async feedback(appUser: AppUser, logId: string, helpful: boolean): Promise<{ ok: true }> {
+    const { count } = await this.prisma.aiQueryLog.updateMany({
+      where: { id: logId, userId: appUser.id, municipalityId: appUser.municipalityId },
+      data: { feedback: helpful ? 1 : -1, feedbackAt: new Date() },
+    });
+    if (count === 0) throw new NotFoundException('That answer was not found.');
+    return { ok: true };
+  }
+
+  /** Owner: the municipality's recent questions, newest first. */
+  async logs(appUser: AppUser, onlyProblems: boolean, limit: number) {
+    const rows = await this.prisma.aiQueryLog.findMany({
+      where: {
+        municipalityId: appUser.municipalityId,
+        ...(onlyProblems
+          ? { OR: [{ feedback: -1 }, { answerKind: { in: ['error', 'clarification', 'unsupported'] } }] }
+          : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(Math.max(limit, 1), 200),
+    });
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: [...new Set(rows.map((r) => r.userId))] } },
+      select: { id: true, fullName: true },
+    });
+    const names = new Map(users.map((u) => [u.id, u.fullName]));
+    return rows.map((r) => ({
+      id: r.id,
+      createdAt: r.createdAt,
+      user: names.get(r.userId) ?? null,
+      question: r.question,
+      answerKind: r.answerKind,
+      planner: r.planner,
+      matched: r.matched,
+      durationMs: r.durationMs,
+      explanation: r.explanation,
+      error: r.error,
+      feedback: r.feedback,
+    }));
+  }
+
+  private async answer(appUser: AppUser, dto: GisChatDto): Promise<GisChatResponse> {
     const municipality = await this.prisma.municipality.findUnique({
       where: { id: appUser.municipalityId },
       select: { name: true },
@@ -167,12 +276,14 @@ export class GisAiService {
 
     const usedContext = plan.used_context ?? [];
 
+    const planner = plan.planner ?? null;
     if (plan.answer_kind !== 'gis_operation' || !plan.operation) {
       return {
         answerKind: plan.answer_kind,
         explanation: plan.explanation,
         clarification: plan.clarification ?? undefined,
         usedContext,
+        planner,
       };
     }
 
@@ -185,7 +296,7 @@ export class GisAiService {
       };
     }
 
-    return this.runOperation(
+    const response = await this.runOperation(
       appUser,
       plan.operation,
       catalogEntries,
@@ -193,6 +304,7 @@ export class GisAiService {
       plan.explanation,
       usedContext,
     );
+    return { ...response, planner };
   }
 
   /**

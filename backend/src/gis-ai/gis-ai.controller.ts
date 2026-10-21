@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import {
   RequireMunicipalityMember,
   RequireMunicipalityOwner,
@@ -7,7 +7,7 @@ import { RequireAiAssistant } from './ai-assistant.guard';
 import { CurrentAppUser } from '../auth/decorators/current-app-user.decorator';
 import type { AppUser } from '../auth/types/app-user.type';
 import { GisAiService } from './gis-ai.service';
-import { GisChatDto, GisExplainDto, GisNarrateDto } from './dto/chat.dto';
+import { GisChatDto, GisExplainDto, GisFeedbackDto, GisNarrateDto } from './dto/chat.dto';
 import type { AiGisOperation } from './ai-plan.types';
 
 /**
@@ -43,6 +43,25 @@ export class GisAiController {
   @Post('warm')
   warm(@CurrentAppUser() appUser: AppUser) {
     return this.gisAi.warm(appUser);
+  }
+
+  /** 👍/👎 on the caller's own answer. */
+  @RequireAiAssistant()
+  @Post('feedback')
+  feedback(@CurrentAppUser() appUser: AppUser, @Body() dto: GisFeedbackDto) {
+    return this.gisAi.feedback(appUser, dto.logId, dto.helpful);
+  }
+
+  /** Owner: recent questions of the municipality; `problems=true` keeps
+   *  only 👎, errors, clarifications and unsupported ones. */
+  @RequireMunicipalityOwner()
+  @Get('logs')
+  logs(
+    @CurrentAppUser() appUser: AppUser,
+    @Query('problems') problems?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.gisAi.logs(appUser, problems === 'true', Number(limit) || 100);
   }
 
   @RequireAiAssistant()

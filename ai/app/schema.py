@@ -88,6 +88,9 @@ class PlanResult(BaseModel):
     clarification: Optional[str] = None
     # titles of the RAG snippets that informed the plan (for transparency)
     used_context: List[str] = Field(default_factory=list)
+    # Which path produced the plan: "fast" (no LLM) or "model". Set by the
+    # service, never by the model (not in PLAN_JSON_SCHEMA).
+    planner: Optional[Literal["fast", "model"]] = None
 
 
 # ---- request bodies -------------------------------------------------------

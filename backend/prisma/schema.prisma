@@ -699,3 +699,29 @@ model GISLayerSnapshot {
   @@index([layerId])
   @@map("gis_layer_snapshots")
 }
+
+/// AI Assistant question log: one row per /api/gis/ai/chat call, so the
+/// Owner can see which questions fail or are slow, and users can rate
+/// answers (feedback). The question text is the user's own words.
+model AiQueryLog {
+  id             String    @id @default(uuid())
+  municipalityId String    @map("municipality_id")
+  userId         String    @map("user_id")
+  question       String
+  /// gis_operation | clarification | answer | unsupported | error
+  answerKind     String    @map("answer_kind")
+  /// fast (no LLM) | model — null when the AI service failed.
+  planner        String?
+  operation      Json?
+  explanation    String?
+  matched        Int?
+  durationMs     Int       @map("duration_ms")
+  error          String?
+  /// 1 = helpful, -1 = not helpful, null = not rated.
+  feedback       Int?
+  feedbackAt     DateTime? @map("feedback_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@index([municipalityId, createdAt])
+  @@map("ai_query_logs")
+}

@@ -401,7 +401,7 @@ def fast_plan(
     # A misspelt value word ("Aalandi") is accounted for by the value it matched.
     if any(t not in explained and not _has_word(t, value_words) for t in words):
         return None
-    return PlanResult(answer_kind="gis_operation", explanation=_describe(op, target), operation=op)
+    return PlanResult(answer_kind="gis_operation", explanation=_describe(op, target), operation=op, planner="fast")
 
 
 def _strip_ref(tail: str, ref: LayerInfo) -> str:

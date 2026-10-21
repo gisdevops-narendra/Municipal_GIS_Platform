@@ -25,6 +25,9 @@ const DEFAULT_ROWS = 2000;
 // The map highlight uses the same capped set so it matches the Attribute
 // Table exactly.
 const MAX_RENDERED = 450;
+/** Keeps the CQL_FILTER of a WFS/WMS GET request well under GeoServer's
+ *  ~8 KB request-line limit (the rest of the URL needs room too). */
+const MAX_CQL_CHARS = 3500;
 const MAX_DISTANCE_M = 50000;
 const MAX_BUFFER_M = 10000;
 const MAX_BUFFER_SOURCES = 5000;
@@ -620,13 +623,39 @@ export class GisQueryCompilerService {
    *  nothing matched. */
   buildCql(target: LayerCatalogEntry, ids: (number | string)[]): string | null {
     if (ids.length === 0) return null;
-    const list = ids
-      .map(
-        (id) =>
-          `'${target.geoserverLayer}.${String(id).replace(/'/g, "''")}'`,
-      )
-      .join(',');
-    return `IN (${list})`;
+    // Numeric keys: filter on the key column with ranges ("ogc_fid BETWEEN
+    // 1 AND 450 OR ogc_fid IN (512,530)"). The feature-id form below costs
+    // ~16 characters per id, and 450 ids made the WFS/WMS GET URL ~8 KB —
+    // over GeoServer's limit, so the Attribute Table and the map highlight
+    // failed with "Could not reach the GIS server".
+    const numeric = ids.map((id) => Number(id));
+    if (numeric.every((n) => Number.isInteger(n))) {
+      const sorted = [...new Set(numeric)].sort((a, b) => a - b);
+      const ranges: string[] = [];
+      const singles: number[] = [];
+      for (let i = 0; i < sorted.length; ) {
+        let j = i;
+        while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] + 1) j++;
+        if (j - i >= 2) ranges.push(`"${target.pkColumn}" BETWEEN ${sorted[i]} AND ${sorted[j]}`);
+        else for (let k = i; k <= j; k++) singles.push(sorted[k]);
+        i = j + 1;
+      }
+      const parts = [...ranges];
+      if (singles.length) parts.push(`"${target.pkColumn}" IN (${singles.join(',')})`);
+      const cql = parts.join(' OR ');
+      if (cql.length <= MAX_CQL_CHARS) return cql;
+    }
+    // Feature ids, as many as fit in a safe URL length (the rest are still
+    // on the map highlight and in the answer's count).
+    const list: string[] = [];
+    let length = 5;
+    for (const id of ids) {
+      const item = `'${target.geoserverLayer}.${String(id).replace(/'/g, "''")}'`;
+      if (length + item.length + 1 > MAX_CQL_CHARS) break;
+      list.push(item);
+      length += item.length + 1;
+    }
+    return `IN (${list.join(',')})`;
   }
 
   // --------------------------------------------------------------------

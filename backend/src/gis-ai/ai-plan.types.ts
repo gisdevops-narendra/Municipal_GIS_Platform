@@ -98,4 +98,6 @@ export interface AiPlanResult {
   operation?: AiGisOperation | null;
   clarification?: string | null;
   used_context?: string[];
+  /** Which path produced the plan: the no-LLM fast path or the model. */
+  planner?: 'fast' | 'model' | null;
 }

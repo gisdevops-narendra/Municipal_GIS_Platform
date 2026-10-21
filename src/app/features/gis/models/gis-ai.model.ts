@@ -67,6 +67,10 @@ export interface AiChatResult {
 export interface GisChatResponse {
   answerKind: AiAnswerKind;
   explanation: string;
+  /** Question-log row — sent back with 👍/👎. */
+  logId?: string;
+  /** "fast" = answered without the language model. */
+  planner?: 'fast' | 'model' | null;
   clarification?: string;
   usedContext: string[];
   operation?: AiGisOperation;
@@ -128,4 +132,21 @@ export interface ChatMessage {
   narrating?: boolean;
   pending?: boolean;
   error?: boolean;
+  /** The user's rating of this answer: 1 helpful, -1 not helpful. */
+  feedback?: 1 | -1;
+}
+
+/** One row of GET /api/gis/ai/logs (Owner). */
+export interface AiQueryLogEntry {
+  id: string;
+  createdAt: string;
+  user: string | null;
+  question: string;
+  answerKind: string;
+  planner: 'fast' | 'model' | null;
+  matched: number | null;
+  durationMs: number;
+  explanation: string | null;
+  error: string | null;
+  feedback: 1 | -1 | null;
 }

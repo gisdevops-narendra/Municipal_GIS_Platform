@@ -8,16 +8,19 @@ import {
   inject,
   signal,
 } from '@angular/core';
+import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { MessageModule } from 'primeng/message';
+import { DialogModule } from 'primeng/dialog';
+import { CurrentUserService } from '../../../../core/services/current-user.service';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { MapService } from '../../services/map.service';
 import { GisAiService } from '../../services/gis-ai.service';
 import { AttributeExternalFilter } from '../attribute-table/attribute-table.component';
-import { ChatMessage, GisChatResponse } from '../../models/gis-ai.model';
+import { AiQueryLogEntry, ChatMessage, GisChatResponse } from '../../models/gis-ai.model';
 
 const EXAMPLES = [
   'Show buildings within 50m of roads.',
@@ -43,7 +46,7 @@ const nf = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 });
 @Component({
   selector: 'app-ai-chat',
   standalone: true,
-  imports: [FormsModule, ButtonModule, InputTextModule, MessageModule],
+  imports: [DatePipe, FormsModule, ButtonModule, InputTextModule, MessageModule, DialogModule],
   templateUrl: './ai-chat.component.html',
   styleUrl: './ai-chat.component.scss',
 })
@@ -67,10 +70,57 @@ export class AiChatComponent {
   private chatSub?: Subscription;
   private readonly narrateSubs = new Set<Subscription>();
 
+  /** Owner only: the question log (what failed, what was slow, 👎). */
+  readonly isOwner = signal(false);
+  readonly logVisible = signal(false);
+  readonly logRows = signal<AiQueryLogEntry[]>([]);
+  readonly logLoading = signal(false);
+  readonly logProblemsOnly = signal(false);
+
   constructor() {
     // The panel is created when first opened: prime the model's prompt
     // cache now, while the user types (best effort, fire and forget).
     this.aiService.warm().subscribe({ error: () => undefined });
+    inject(CurrentUserService)
+      .getMe()
+      .subscribe({ next: (me) => this.isOwner.set(me.systemRole === 'MUNICIPALITY_OWNER'), error: () => undefined });
+  }
+
+  /** 👍/👎 — stored against the answer's question-log row. */
+  rate(index: number, helpful: boolean): void {
+    const msg = this.messages()[index];
+    const logId = msg?.response?.logId;
+    if (!logId || msg.feedback) return;
+    const feedback: 1 | -1 = helpful ? 1 : -1;
+    this.messages.update((list) => list.map((m, i) => (i === index ? { ...m, feedback } : m)));
+    this.aiService.feedback(logId, helpful).subscribe({
+      // Undo the optimistic mark so the user can try again.
+      error: () => this.messages.update((list) => list.map((m, i) => (i === index ? { ...m, feedback: undefined } : m))),
+    });
+  }
+
+  openLog(): void {
+    this.logVisible.set(true);
+    this.loadLog();
+  }
+
+  toggleLogProblems(): void {
+    this.logProblemsOnly.update((v) => !v);
+    this.loadLog();
+  }
+
+  private loadLog(): void {
+    this.logLoading.set(true);
+    this.aiService.logs(this.logProblemsOnly()).subscribe({
+      next: (rows) => {
+        this.logRows.set(rows);
+        this.logLoading.set(false);
+      },
+      error: () => {
+        this.logRows.set([]);
+        this.logLoading.set(false);
+      },
+    });
   }
 
   readonly hasResult = computed(() =>

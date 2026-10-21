@@ -124,6 +124,22 @@
               }
             </details>
           }
+
+          @if (msg.response?.logId) {
+            <div class="aic__rate">
+              @if (msg.feedback) {
+                <span>{{ msg.feedback === 1 ? 'Thanks — marked helpful.' : 'Thanks — the Owner can review this answer.' }}</span>
+              } @else {
+                <span>Helpful?</span>
+                <button type="button" class="aic__rate-btn" aria-label="Helpful" (click)="rate($index, true)">
+                  <i class="pi pi-thumbs-up" aria-hidden="true"></i>
+                </button>
+                <button type="button" class="aic__rate-btn" aria-label="Not helpful" (click)="rate($index, false)">
+                  <i class="pi pi-thumbs-down" aria-hidden="true"></i>
+                </button>
+              }
+            </div>
+          }
         }
       </div>
     }
@@ -146,7 +162,68 @@
     <button pButton type="submit" icon="pi pi-send" [disabled]="sending() || !draft.trim()" aria-label="Send"></button>
   </form>
 
-  @if (messages().length > 0) {
-    <button type="button" class="aic__reset" (click)="reset()">Clear conversation</button>
-  }
+  <div class="aic__footer">
+    @if (messages().length > 0) {
+      <button type="button" class="aic__reset" (click)="reset()">Clear conversation</button>
+    }
+    @if (isOwner()) {
+      <button type="button" class="aic__reset" (click)="openLog()">Question log</button>
+    }
+  </div>
 </div>
+
+<p-dialog
+  [visible]="logVisible()"
+  (visibleChange)="logVisible.set($event)"
+  [modal]="true"
+  header="AI Assistant — question log"
+  [style]="{ width: '980px' }"
+  [breakpoints]="{ '1020px': '95vw' }"
+  appendTo="body"
+>
+  <div class="aic-log__bar">
+    <span>The municipality's latest questions. Look at 👎, errors and unanswered ones to see what to improve.</span>
+    <button
+      pButton
+      type="button"
+      class="p-button-sm"
+      [class.p-button-outlined]="!logProblemsOnly()"
+      [label]="logProblemsOnly() ? 'Showing problems only' : 'Problems only'"
+      (click)="toggleLogProblems()"
+    ></button>
+  </div>
+  @if (logLoading()) {
+    <p class="aic-log__empty">Loading…</p>
+  } @else if (logRows().length === 0) {
+    <p class="aic-log__empty">No questions yet.</p>
+  } @else {
+    <div class="aic-log__wrap">
+      <table class="aic-log">
+        <thead>
+          <tr><th>When</th><th>Who</th><th>Question</th><th>Outcome</th><th>Path</th><th>Time</th><th>Rating</th></tr>
+        </thead>
+        <tbody>
+          @for (row of logRows(); track row.id) {
+            <tr [class.is-problem]="row.feedback === -1 || row.answerKind === 'error'">
+              <td class="aic-log__nowrap">{{ row.createdAt | date: 'd MMM, h:mm a' }}</td>
+              <td>{{ row.user || '—' }}</td>
+              <td>{{ row.question }}</td>
+              <td [title]="row.error || row.explanation || ''">
+                @switch (row.answerKind) {
+                  @case ('gis_operation') { {{ row.matched ?? 0 }} found }
+                  @case ('error') { Error }
+                  @case ('clarification') { Asked to clarify }
+                  @case ('unsupported') { Not supported }
+                  @default { {{ row.answerKind }} }
+                }
+              </td>
+              <td>{{ row.planner === 'fast' ? 'Instant' : row.planner === 'model' ? 'AI model' : '—' }}</td>
+              <td class="aic-log__nowrap">{{ (row.durationMs / 1000).toFixed(1) }} s</td>
+              <td>{{ row.feedback === 1 ? '👍' : row.feedback === -1 ? '👎' : '' }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+</p-dialog>
