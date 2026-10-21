@@ -28,6 +28,7 @@ from .repair import (
     _drop_redundant_area_filter,
     _find_layer,
     _grouping,
+    _has_word,
     _mentioned_layers,
     _numbered_field,
     _numbered_filters,
@@ -231,9 +232,11 @@ def fast_plan(
         if op.spatial_filter is not None and op.spatial_filter != within_filter:
             return None  # two spatial conditions: let the model decide
         op.spatial_filter = within_filter
-    explained |= _value_words(op)
+    value_words = _value_words(op)
+    explained |= value_words
 
-    if any(t not in explained for t in words):
+    # A misspelt value word ("Aalandi") is accounted for by the value it matched.
+    if any(t not in explained and not _has_word(t, value_words) for t in words):
         return None
     return PlanResult(answer_kind="gis_operation", explanation=_describe(op, target), operation=op)
 

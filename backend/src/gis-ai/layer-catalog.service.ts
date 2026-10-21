@@ -68,8 +68,9 @@ const TEXTISH = new Set([
   'citext',
 ]);
 const INTERNAL_COLUMNS = new Set(['ogc_fid', 'fid', 'gis_workspace_id']);
-const MATCH_SCAN_LIMIT = 400;
 const MATCHES_PER_COLUMN = 15;
+const DISTINCT_PER_COLUMN = 5000;
+const DISTINCT_CACHE_MS = 10 * 60 * 1000;
 
 /** Words common to every request — they would match half of any column. */
 const QUESTION_STOPWORDS = new Set(
@@ -88,6 +89,37 @@ function questionWords(question: string): string[] {
     out.add(raw.length > 4 && raw.endsWith('s') && !raw.endsWith('ss') ? raw.slice(0, -1) : raw);
   }
   return [...out].slice(0, 8);
+}
+
+/** Letter-triple sets, padded so word starts/ends count: "road" -> " ro", "roa", "oad", "ad ". */
+function trigrams(word: string): Set<string> {
+  const padded = `  ${word} `;
+  const out = new Set<string>();
+  for (let i = 0; i < padded.length - 2; i++) out.add(padded.slice(i, i + 3));
+  return out;
+}
+
+/** Trigram (Jaccard) similarity of two words, 0..1 — the same idea as
+ *  PostgreSQL's pg_trgm, used here for typo tolerance ("aalandi"/"alandi"). */
+function similarity(a: string, b: string): number {
+  const ta = trigrams(a);
+  const tb = trigrams(b);
+  let shared = 0;
+  for (const t of ta) if (tb.has(t)) shared++;
+  return shared / (ta.size + tb.size - shared);
+}
+
+/** How many question words a stored value contains, exactly or as a close
+ *  spelling (words of 5+ letters only, so short words never match loosely). */
+function matchScore(value: string, words: string[]): number {
+  const lower = value.toLowerCase();
+  const tokens = lower.split(/[^a-z0-9]+/).filter((t) => t.length >= 4);
+  let n = 0;
+  for (const w of words) {
+    if (lower.includes(w)) n++;
+    else if (w.length >= 5 && tokens.some((t) => similarity(w, t) >= 0.5)) n++;
+  }
+  return n;
 }
 const SAMPLE_LIMIT = 25;
 
@@ -173,47 +205,36 @@ export class LayerCatalogService {
     return out;
   }
 
+  /** Distinct text values per layer table, cached so a question does not
+   *  scan every table. Uploaded tables are created at publish time, so a
+   *  per-column database index is not an option; a short TTL keeps edits
+   *  visible within minutes. Keyed by table (+ workspace for demo tables). */
+  private readonly distinctCache = new Map<string, { at: number; values: Map<string, string[]> }>();
+
   /**
    * Per-question value lookup. The catalog only samples the first 25
    * distinct values of each text column (alphabetically), so "signals on
    * Dehu Alandi Road" names a value the model never sees. This finds the
-   * values of the caller's own layers that contain the question's words and
-   * puts them first in each column's sample list — the AI service's value
-   * matching, fast path and prompt hints then use the exact stored value.
+   * values of the caller's own layers that contain the question's words —
+   * or a close spelling of them ("Aalandi" -> Alandi) — and puts them first
+   * in each column's sample list; the AI service's value matching, fast
+   * path and prompt hints then use the exact stored value.
    * Mutates `entries` (a fresh catalog built for this request).
    */
   async addMatchingValues(entries: LayerCatalogEntry[], question: string): Promise<void> {
     const words = questionWords(question);
     if (words.length === 0) return;
-    const patterns = words.map((w) => `%${w}%`);
     await Promise.all(
       entries.map(async (entry) => {
         const textCols = entry.columns.filter(
           (c) => c.kind === 'text' && !INTERNAL_COLUMNS.has(c.name),
         );
         if (textCols.length === 0) return;
-        // `table` is whitelisted at catalog build; column names come from
-        // information_schema; the words are bound parameters.
-        const scope = entry.isDemo ? `WHERE "gis_workspace_id" = $2` : '';
-        const union = textCols
-          .map(
-            (c) =>
-              `SELECT '${c.name.replace(/'/g, "''")}' AS c, "${c.name.replace(/"/g, '')}"::text AS v FROM "${entry.table}" ${scope}`,
-          )
-          .join(' UNION ALL ');
-        const sql = `SELECT c, v FROM (${union}) x WHERE v ILIKE ANY($1::text[]) GROUP BY c, v LIMIT ${MATCH_SCAN_LIMIT}`;
-        let rows: { c: string; v: string }[] = [];
-        try {
-          rows = entry.isDemo
-            ? await this.prisma.$queryRawUnsafe(sql, patterns, entry.workspaceId)
-            : await this.prisma.$queryRawUnsafe(sql, patterns);
-        } catch {
-          return; // best effort — the plan still works without the hint
-        }
+        const distinct = await this.distinctValues(entry, textCols);
         for (const col of textCols) {
-          const hits = rows
-            .filter((r) => r.c === col.name && r.v)
-            .map((r) => ({ v: r.v, n: words.filter((w) => r.v.toLowerCase().includes(w)).length }))
+          const hits = (distinct.get(col.name) ?? [])
+            .map((v) => ({ v, n: matchScore(v, words) }))
+            .filter((h) => h.n > 0)
             .sort((a, b) => b.n - a.n || a.v.length - b.v.length)
             .slice(0, MATCHES_PER_COLUMN)
             .map((h) => h.v);
@@ -223,6 +244,44 @@ export class LayerCatalogService {
         }
       }),
     );
+  }
+
+  private async distinctValues(
+    entry: LayerCatalogEntry,
+    textCols: CatalogColumn[],
+  ): Promise<Map<string, string[]>> {
+    const key = entry.isDemo ? `${entry.table}:${entry.workspaceId}` : entry.table;
+    const cached = this.distinctCache.get(key);
+    if (cached && Date.now() - cached.at < DISTINCT_CACHE_MS) return cached.values;
+
+    // `table` is whitelisted at catalog build; column names come from
+    // information_schema; nothing here comes from the question.
+    const scope = entry.isDemo ? `AND "gis_workspace_id" = $1` : '';
+    const union = textCols
+      .map((c) => {
+        const col = c.name.replace(/"/g, '');
+        return (
+          `(SELECT '${c.name.replace(/'/g, "''")}' AS c, v FROM (SELECT DISTINCT "${col}"::text AS v ` +
+          `FROM "${entry.table}" WHERE "${col}" IS NOT NULL ${scope} LIMIT ${DISTINCT_PER_COLUMN}) d)`
+        );
+      })
+      .join(' UNION ALL ');
+    const values = new Map<string, string[]>();
+    try {
+      const rows: { c: string; v: string }[] = entry.isDemo
+        ? await this.prisma.$queryRawUnsafe(union, entry.workspaceId)
+        : await this.prisma.$queryRawUnsafe(union);
+      for (const r of rows) {
+        if (!r.v) continue;
+        const list = values.get(r.c) ?? [];
+        list.push(r.v);
+        values.set(r.c, list);
+      }
+    } catch {
+      return values; // best effort — the plan still works without the hint
+    }
+    this.distinctCache.set(key, { at: Date.now(), values });
+    return values;
   }
 
   toAiLayerInfo(entries: LayerCatalogEntry[]): AiLayerInfo[] {

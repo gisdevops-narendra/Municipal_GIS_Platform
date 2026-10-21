@@ -19,7 +19,8 @@ LAYERS = [
               fields=[LayerField(name="zone_no", type="integer"), LayerField(name="zone_name", type="text")]),
     LayerInfo(id="l", code="LANDMARKS", name="landmarks", geometry_type="POINT",
               fields=[LayerField(name="name", type="text"),
-                      LayerField(name="type", type="text", sample_values=["Educational", "Health Services", "Religious"])]),
+                      LayerField(name="type", type="text", sample_values=["Commercial", "Educational", "Health Services", "Religious"]),
+                      LayerField(name="subtype", type="text", sample_values=["ATM", "Commercial", "Hospital", "…(more)"])]),
     LayerInfo(id="r", code="RIVER", name="river", geometry_type="POLYGON",
               fields=[LayerField(name="waterbody_", type="text", sample_values=["Indrayani River", "Mutha River", "Pawna River"])]),
     LayerInfo(id="b", code="BRTS", name="brts", geometry_type="POLYGON", fields=[]),
@@ -91,6 +92,11 @@ results = [
     check("Show signals on Dehu Alandi Road",
           sel(filters=[("road_name", "in", ("Dehu - Alandi Road", "Dehu Alandi Road"))])),
     check("show signals on dehu alandi", sel(filters=[("road_name", "in", ("Dehu - Alandi Road", "Dehu Alandi Road"))])),
+    # the same word in two columns filters on the more category-like one only
+    check("commercial landmarks", sel(target="LANDMARKS", filters=[eq("type", "Commercial")])),
+    # typos in value words still match (5+ letters)
+    check("Show signals on Dehu Aalandi Road", sel(filters=[("road_name", "in", ("Dehu - Alandi Road", "Dehu Alandi Road"))])),
+    check("Show traffic-actuatd signals", sel(filters=[TA])),
     # distance to another layer / a named feature of it
     check("Find signals within 100 m of the BRTS", sel(within=("BRTS", 100.0))),
     check("signals within 1.5 km of the BRTS in zone 13", sel(filters=[eq("zone_no", 13)], within=("BRTS", 1500.0))),

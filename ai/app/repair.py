@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import logging
 import re
+from difflib import SequenceMatcher
 from typing import List, Optional, Tuple
 
 from .schema import AttributeFilter, GisOperation, LayerInfo, PlanResult, SpatialFilter
@@ -81,6 +82,21 @@ def _tokens(text: str) -> List[str]:
             t = t[:-1]
         out.append(t)
     return out
+
+
+def _similar(a: str, b: str) -> bool:
+    """Same word, or a close spelling of a longer one ("aalandi" ~ "alandi",
+    "motorss" ~ "motor"). Short words must match exactly — "ward"/"word"
+    are different things."""
+    if a == b:
+        return True
+    if min(len(a), len(b)) < 5:
+        return False
+    return SequenceMatcher(None, a, b).ratio() >= 0.8
+
+
+def _has_word(word: str, words) -> bool:
+    return word in words or any(_similar(word, w) for w in words)
 
 
 _GENERIC = {"layer", "data", "proposed", "existing", "gis", "map", "the", "of", "and"}
@@ -378,7 +394,7 @@ def matching_values(text: str, layers: List[LayerInfo]) -> List[Tuple[LayerInfo,
                 if value == "…(more)" or value.strip().lower() in _FLAG_VALUES:
                     continue
                 core = _value_core(value)
-                if not core or set(core) <= layer_words or not set(core) <= words:
+                if not core or set(core) <= layer_words or not all(_has_word(c, words) for c in core):
                     continue
                 if len(core) == 1 and (len(core[0]) < 4 or core[0].isdigit()):
                     continue
@@ -407,11 +423,22 @@ def _value_phrase_filters(text: str, op: GisOperation, target: LayerInfo) -> Lis
     field wins ("not working" picks "Not Working" over "Working")."""
     have = {f.field.lower() for f in op.attribute_filters}
     notes: List[str] = []
-    for _, field, values in matching_values(text, [target]):
+    # Most category-like column first (fewest sampled values; a truncated
+    # sample list counts as many). The same words matching a second column
+    # — "commercial" is both type and subtype — must not add a second,
+    # narrowing condition (type = 'Commercial' AND subtype = 'Commercial'
+    # matched nothing).
+    size = {f.name: (len(f.sample_values) + (1000 if "…(more)" in f.sample_values else 0)) for f in target.fields}
+    used_words: set = set()
+    for _, field, values in sorted(matching_values(text, [target]), key=lambda m: size.get(m[1], 0)):
         if field.lower() in have:
             continue
         if (op.group_by or "").lower() == field.lower():
             continue  # "count signals by type" groups on it, never filters
+        words = {w for v in values for w in _value_core(v)}
+        if words and words <= used_words:
+            continue
+        used_words |= words
         op.attribute_filters.append(value_filter(field, values))
         have.add(field.lower())
         notes.append(f"filter {field} = {values!r} from the request's words")
