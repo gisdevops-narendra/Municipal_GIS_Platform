@@ -27,6 +27,11 @@ export interface CatalogColumn {
   dataType: string;
   kind: FieldKind;
   sampleValues: string[];
+  /** From ai_field_metadata (profiled at upload, Owner-editable). */
+  role?: string;
+  unit?: string | null;
+  description?: string | null;
+  aliases?: string[];
 }
 
 /** Everything the query compiler needs to safely build SQL for one layer. */
@@ -173,6 +178,7 @@ export class LayerCatalogService {
     });
 
     const wsSrid = this.parseSrid(workspace.defaultCrs) ?? 32643;
+    const metadata = await this.fieldMetadata(rows.map((r) => r.id));
     const out: LayerCatalogEntry[] = [];
     for (const row of rows) {
       const isDemo = !row.postgisTable;
@@ -188,6 +194,10 @@ export class LayerCatalogService {
         wsSrid,
       );
       if (!described) continue;
+      for (const col of described.columns) {
+        const meta = metadata.get(`${row.id}:${col.name}`);
+        if (meta) Object.assign(col, meta);
+      }
 
       out.push({
         layerId: row.id,
@@ -207,6 +217,42 @@ export class LayerCatalogService {
       });
     }
     return out;
+  }
+
+  /** What each column means, learned by the AI service at upload; keyed
+   *  `layerId:field`. Empty when the table is missing (not migrated yet). */
+  private async fieldMetadata(
+    layerIds: string[],
+  ): Promise<Map<string, Pick<CatalogColumn, 'role' | 'unit' | 'description' | 'aliases'>>> {
+    const out = new Map<string, Pick<CatalogColumn, 'role' | 'unit' | 'description' | 'aliases'>>();
+    if (layerIds.length === 0) return out;
+    try {
+      const rows = await this.prisma.aiFieldMetadata.findMany({ where: { layerId: { in: layerIds } } });
+      for (const r of rows) {
+        out.set(`${r.layerId}:${r.field}`, {
+          role: r.role,
+          unit: r.unit,
+          description: r.description,
+          aliases: [...new Set([...r.learnedAliases, ...r.aliases])],
+        });
+      }
+    } catch {
+      // best effort — the planner falls back to column-name rules
+    }
+    return out;
+  }
+
+  /** Remembers that users call `field` of `layerId` by `alias` (their
+   *  answer to "which field did you mean?"), so the next question needs
+   *  no clarification. Survives re-profiling. */
+  async learnAlias(layerId: string, field: string, alias: string): Promise<void> {
+    const words = alias.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    if (words.length < 3 || words === field.toLowerCase().replace(/_/g, ' ')) return;
+    await this.prisma.$executeRaw`
+      UPDATE ai_field_metadata
+         SET learned_aliases = array_append(learned_aliases, ${words}), updated_at = now()
+       WHERE layer_id = ${layerId} AND field = ${field}
+         AND NOT (${words} = ANY(learned_aliases))`.catch(() => undefined);
   }
 
   /** Distinct text values per layer table, cached so a question does not
@@ -301,6 +347,10 @@ export class LayerCatalogService {
           name: c.name,
           type: c.kind,
           sample_values: c.sampleValues,
+          role: c.role,
+          unit: c.unit,
+          description: c.description,
+          aliases: c.aliases ?? [],
         })),
     }));
   }

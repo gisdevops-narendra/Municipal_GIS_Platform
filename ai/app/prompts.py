@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from typing import List, Optional, Set
 
+from .metadata import RoleRule
 from .repair import _FOLLOW_UP, matching_values
 from .schema import GisOperation, LayerInfo
 from .vectorstore import Retrieved
@@ -92,12 +93,16 @@ Rules:
 
 
 # Columns that never help plan a query (ids, export leftovers, shape stats).
-_NOISE_FIELD = re.compile(
-    r"^(ogc_fid|fid|gid|objectid|object_id|globalid|gen_id|gis_remark|remarks?)$|^shape_",
-    re.I,
+# The profiled role (metadata.py) decides when known; the name is the fallback.
+_NOISE_FIELD = RoleRule(
+    re.compile(r"^(ogc_fid|fid|gid|objectid|object_id|globalid|gen_id|gis_remark|remarks?)$|^shape_", re.I),
+    yes={"hidden"}, no={"name", "category", "measure", "flag", "date"},
 )
 
-_ID_FIELD = re.compile(r"(^|_)(id|code|uuid)$", re.I)
+_ID_FIELD = RoleRule(
+    re.compile(r"(^|_)(id|code|uuid)$", re.I),
+    yes={"id"}, no={"name", "category", "measure", "free_text", "flag", "date"},
+)
 
 
 def _sample(v: object) -> str:
@@ -107,6 +112,13 @@ def _sample(v: object) -> str:
 
 def _useful_fields(lyr: LayerInfo):
     return [f for f in lyr.fields if f.type != "id" and not _NOISE_FIELD.search(f.name)]
+
+
+def _field_note(f) -> str:
+    """`number, m; aka building height` — type, unit and the first alias."""
+    note = f.type + (f", {f.unit}" if f.unit else "")
+    alias = next((a for a in f.aliases if a.replace(" ", "_") != f.name.lower()), None)
+    return note + (f"; aka {alias}" if alias else "")
 
 
 def catalog_block(layers: List[LayerInfo], compact: bool = False) -> str:
@@ -127,7 +139,7 @@ def catalog_block(layers: List[LayerInfo], compact: bool = False) -> str:
         if lyr.description:
             head += f" — {lyr.description[:120]}"
         out.append(head)
-        out.extend(f"    {f.name} ({f.type})" for f in fields)
+        out.extend(f"    {f.name} ({_field_note(f)})" for f in fields)
     return "\n".join(out)
 
 

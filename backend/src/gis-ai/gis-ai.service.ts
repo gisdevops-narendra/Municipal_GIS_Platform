@@ -438,9 +438,15 @@ export class GisAiService {
       if (!workspace) {
         return { answerKind: 'unsupported', explanation: 'This municipality has no GIS workspace yet.', usedContext: [] };
       }
+      const { learn_alias: learn, ...resolved } = dto.resolvedOperation as unknown as AiGisOperation;
+      if (learn?.layer_id && learn.field && learn.alias) {
+        // The user told us what they call this field: no need to ask again.
+        await this.catalog.learnAlias(learn.layer_id, learn.field, learn.alias);
+        void this.ai.reindex(appUser.municipalityId).catch(() => undefined);
+      }
       const chosen = await this.runOperation(
         appUser,
-        dto.resolvedOperation as unknown as AiGisOperation,
+        resolved as AiGisOperation,
         catalogEntries,
         workspace.id,
         'Your choice.',
@@ -1009,7 +1015,12 @@ function fieldChoices(operation: AiGisOperation, error: UnknownFieldError): AiCl
   const value = filter?.value ?? filter?.values?.[0];
   const wantText = typeof value === 'string' && Number.isNaN(Number(value));
   const columns = error.layer.columns.filter(
-    (c) => c.kind !== 'geometry' && c.kind !== 'id' && !/(^|_)(gis_remark|gen_id|objectid)$/i.test(c.name),
+    (c) =>
+      c.kind !== 'geometry' &&
+      c.kind !== 'id' &&
+      c.role !== 'hidden' &&
+      c.role !== 'id' &&
+      !/(^|_)(gis_remark|gen_id|objectid)$/i.test(c.name),
   );
   const ranked = [...columns].sort((a, b) => {
     const kind = (c: typeof a) => (wantText ? (c.kind === 'text' ? 0 : 1) : c.kind === 'text' ? 1 : 0);
@@ -1019,7 +1030,10 @@ function fieldChoices(operation: AiGisOperation, error: UnknownFieldError): AiCl
     label: c.sampleValues.length
       ? `${c.name} — e.g. ${c.sampleValues.filter((v) => v !== '…(more)').slice(0, 3).join(', ')}`
       : c.name,
-    operation: swapField(operation, bad, c.name),
+    operation: {
+      ...swapField(operation, bad, c.name),
+      learn_alias: { layer_id: error.layer.layerId, field: c.name, alias: bad.replace(/_/g, ' ') },
+    },
   }));
 }
 

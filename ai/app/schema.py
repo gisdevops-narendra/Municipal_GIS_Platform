@@ -133,6 +133,11 @@ class LayerField(BaseModel):
     name: str
     type: str                     # 'text'|'integer'|'number'|'date'|'boolean'|'id'
     sample_values: List[str] = Field(default_factory=list)
+    # learned from the data at upload (see metadata.py); absent = unknown
+    role: Optional[str] = None    # id|name|category|measure|free_text|date|flag|hidden
+    unit: Optional[str] = None
+    description: Optional[str] = None
+    aliases: List[str] = Field(default_factory=list)
 
 
 class LayerInfo(BaseModel):

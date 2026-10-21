@@ -10,6 +10,11 @@ export interface AiLayerField {
   name: string;
   type: string;
   sample_values: string[];
+  /** Learned from the data at upload (ai_field_metadata); absent = unknown. */
+  role?: string;
+  unit?: string | null;
+  description?: string | null;
+  aliases?: string[];
 }
 
 export interface AiLayerInfo {

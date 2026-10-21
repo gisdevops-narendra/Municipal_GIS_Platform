@@ -68,6 +68,22 @@ async def ensure_schema() -> None:
     """
     async with acquire() as conn:
         await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        # authoritative: Prisma migration 20261021180000_ai_field_metadata
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ai_field_metadata (
+                layer_id TEXT NOT NULL, field TEXT NOT NULL,
+                municipality_id TEXT NOT NULL, role TEXT NOT NULL,
+                unit TEXT, description TEXT,
+                aliases TEXT[] NOT NULL DEFAULT '{}',
+                learned_aliases TEXT[] NOT NULL DEFAULT '{}',
+                stats JSONB NOT NULL DEFAULT '{}',
+                source TEXT NOT NULL DEFAULT 'auto',
+                updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (layer_id, field)
+            )
+            """
+        )
         await conn.execute(
             f"""
             CREATE TABLE IF NOT EXISTS rag_documents (

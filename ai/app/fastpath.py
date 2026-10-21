@@ -48,6 +48,7 @@ from .repair import (
     matching_values,
     value_filter,
 )
+from .metadata import alias_words, role_of
 from .schema import AttributeFilter, GisOperation, LayerInfo, PlanResult, SpatialFilter
 
 # Words that carry no condition of their own.
@@ -161,7 +162,10 @@ def _metres(num: str, unit: Optional[str]) -> float:
 def _numeric_fields(layer: LayerInfo):
     return [
         f for f in layer.fields
-        if f.type in ("integer", "number") and not re.search(r"(^|_)(id|no|num|number|fid|gid)$", f.name, re.I)
+        if f.type in ("integer", "number")
+        and (role_of(f.name) in ("measure", "category") or (
+            role_of(f.name) is None and not re.search(r"(^|_)(id|no|num|number|fid|gid)$", f.name, re.I)
+        ))
     ]
 
 
@@ -174,6 +178,12 @@ def _comparison_field(layer: LayerInfo, hints: List[str]):
         parts = [p for p in re.split(r"[_\W]+", f.name.lower()) if len(p) >= 3]
         if any(h[:3] == p[:3] for h in hints if len(h) >= 3 for p in parts):
             found.append(f)
+    if not found:
+        # the column's aliases: "height" -> bldg_ht, "storey" -> floors_cnt
+        found = [
+            f for f in _numeric_fields(layer)
+            if any(h == a or (len(h) >= 5 and a.startswith(h[:5])) for h in hints if len(h) >= 3 for a in alias_words(f))
+        ]
     return found[0] if len(found) == 1 else None
 
 

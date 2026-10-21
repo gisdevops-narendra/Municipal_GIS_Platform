@@ -4,10 +4,12 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GISLayer, GISWorkspace, GisPermission, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { AiClientService } from '../gis-ai/ai-client.service';
 import { GeoServerService } from './geoserver.service';
 import { GisAuthorizationService } from './gis-authorization.service';
 import { StorageService } from './storage.service';
@@ -119,6 +121,8 @@ export class GisLayersService {
     private readonly styleService: StyleService,
     private readonly fieldStats: FieldStatsService,
     private readonly moduleAccess: ModuleAccessService,
+    /** Optional so unit tests need not stub it. */
+    @Optional() private readonly ai?: AiClientService,
   ) {}
 
   /**
@@ -466,6 +470,7 @@ export class GisLayersService {
     }
     const layer = await this.findLayerInMunicipality(appUser.municipalityId, layerId);
     await this.prisma.gISLayer.update({ where: { id: layer.id }, data: { name } });
+    this.refreshAiIndex(appUser.municipalityId);
     return { id: layer.id, name };
   }
 
@@ -580,6 +585,14 @@ export class GisLayersService {
           ),
         );
     }
+    // The AI assistant must forget the layer (its index docs + metadata).
+    this.refreshAiIndex(appUser.municipalityId);
+  }
+
+  /** Re-indexes the AI assistant's knowledge of this municipality's layers
+   *  in the background (fire-and-forget; the AI service may be down). */
+  private refreshAiIndex(municipalityId: string): void {
+    void this.ai?.reindex(municipalityId).catch(() => undefined);
   }
 
   private async findLayerInMunicipality(

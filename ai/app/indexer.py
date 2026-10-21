@@ -12,11 +12,15 @@ from __future__ import annotations
 import glob
 import os
 import re
+import logging
 from typing import List
 
-from . import config, embeddings
+from . import config, db, embeddings
 from .catalog import LayerCatalog, load_municipality_catalog
+from .metadata import learn_layers
 from .vectorstore import RagDoc, replace_scope
+
+log = logging.getLogger("gis-ai")
 
 
 def _layer_doc(layer: LayerCatalog) -> RagDoc:
@@ -45,10 +49,18 @@ def _layer_doc(layer: LayerCatalog) -> RagDoc:
 def _field_docs(layer: LayerCatalog) -> List[RagDoc]:
     docs: List[RagDoc] = []
     for col in layer.columns:
+        if col.role == "hidden":
+            continue
         parts = [
             f'Field "{col.name}" on layer "{layer.name}" (code {layer.code}).',
             f"Data type: {col.data_type} ({col.kind}).",
         ]
+        if col.description:
+            parts.append(f"Meaning: {col.description}.")
+        if col.role:
+            parts.append(f"Role: {col.role}" + (f", unit {col.unit}." if col.unit else "."))
+        if col.aliases:
+            parts.append("Also called: " + ", ".join(col.aliases) + ".")
         if col.sample_values:
             shown = ", ".join(repr(v) for v in col.sample_values[:20])
             parts.append(f"Example values: {shown}.")
@@ -92,6 +104,13 @@ def _knowledge_docs() -> List[RagDoc]:
 
 async def reindex_municipality(municipality_id: str) -> dict:
     layers = await load_municipality_catalog(municipality_id)
+    # Learn what each column means (role, unit, aliases, description) and
+    # keep it in ai_field_metadata; the field docs below then carry it.
+    try:
+        async with db.acquire() as conn:
+            await learn_layers(conn, municipality_id, layers)
+    except Exception:
+        log.exception("metadata profiling failed; indexing without it")
 
     layer_docs: List[RagDoc] = []
     for layer in layers:

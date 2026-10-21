@@ -28,6 +28,7 @@ import threading
 from fastapi import FastAPI, HTTPException, Request
 
 from . import config, db, embeddings, llm, rag
+from .metadata import use_layers
 from .indexer import reindex_municipality
 from .fastpath import fast_plan
 from .guide import annotate, apply_instructions, converse, field_confidence, parse_instruction, is_small_talk, preflight, remember_near, suggestions
@@ -131,6 +132,8 @@ async def plan(body: PlanRequest, request: Request) -> PlanResult:
 
 
 async def _plan(body: PlanRequest, cancel: threading.Event) -> PlanResult:
+    # Field roles / aliases learned at upload (metadata.py) for this request.
+    use_layers(body.layers)
     # Simple requests whose every word maps onto a plan piece need no model
     # call at all (~1 s instead of ~7-40 s on CPU). See fastpath.py.
     # Follow the conversation: a refinement ("which are in prabhag no C")
@@ -232,6 +235,7 @@ async def _plan(body: PlanRequest, cancel: threading.Event) -> PlanResult:
 @app.post("/suggest", response_model=list[str])
 async def suggest(body: SuggestRequest) -> list[str]:
     """Example questions from the real layers, each one plannable."""
+    use_layers(body.layers)
     return suggestions(body.layers)
 
 

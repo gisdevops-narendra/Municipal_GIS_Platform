@@ -44,6 +44,7 @@ import re
 from difflib import SequenceMatcher
 from typing import List, Optional, Tuple
 
+from .metadata import RoleRule, alias_phrases, alias_words, role_of
 from .schema import AttributeFilter, GisOperation, LayerInfo, PlanResult, SpatialFilter
 
 log = logging.getLogger("gis-ai.repair")
@@ -88,7 +89,11 @@ def implied_layers(message: str, layers: List[LayerInfo]) -> List[LayerInfo]:
 
 # Columns that NAME things (a locality "Temple Chowk", a road "Temple Road")
 # never decide which layer a request means.
-_NAME_LIKE_FIELD = re.compile(r"(^|_)(name|locality|address|location|road|street|area)(_|$)|road_name", re.I)
+# The profiled role (metadata.py) decides when known; the name is the fallback.
+_NAME_LIKE_FIELD = RoleRule(
+    re.compile(r"(^|_)(name|locality|address|location|road|street|area)(_|$)|road_name", re.I),
+    yes={"name"}, no={"free_text", "id", "measure", "flag", "date"},
+)
 
 
 def is_follow_up(message: str, layers: List[LayerInfo], previous: Optional[GisOperation]) -> bool:
@@ -255,6 +260,11 @@ def _measure_field(text: str, target: Optional[LayerInfo]) -> Optional[str]:
                 parts = [p for p in _tokens(f.name) if len(p) > 2]
                 if parts and all(p in words or any(w.startswith(p) for w in words) for p in parts):
                     return f.name
+        # "storey height" -> bldg_ht via its learned/auto aliases
+        for f in target.fields:
+            if f.type in ("integer", "number") and role_of(f.name) not in ("id", "hidden"):
+                if any(a.split() and all(w in words for w in a.split()) for a in alias_phrases(f)):
+                    return f.name
     geom = (target.geometry_type or "").upper() if target else ""
     if _LENGTH.search(text) and geom in ("LINE", ""):
         return "length"
@@ -283,6 +293,13 @@ def _grouping(text: str, layers: List[LayerInfo], target: Optional[LayerInfo]) -
                 hits = sum(1 for p in parts if p in words or any(w.startswith(p[:4]) for w in words))
                 if hits > best[0]:
                     best = (hits, fld.name)
+            if best[1] is None:
+                for fld in target.fields:
+                    if fld.type != "text" or _is_identifier(fld.name):
+                        continue
+                    hits = sum(1 for p in alias_words(fld) if p in words)
+                    if hits > best[0]:
+                        best = (hits, fld.name)
             if best[1]:
                 return None, best[1]
     return None, None
@@ -297,6 +314,10 @@ def _numbered_field(layer: LayerInfo, word: str):
     for name in wanted:
         field = by_name.get(name)
         if field and field.type in ("integer", "number", "text"):
+            return field
+    # "prabhag no 5" -> ward_no when "prabhag" is a (learned) alias of it
+    for field in layer.fields:
+        if field.type in ("integer", "number", "text") and word in alias_words(field):
             return field
     return None
 
@@ -482,7 +503,10 @@ def _numbered_filters(text: str, op: GisOperation, target: LayerInfo, layers: Li
     return notes
 
 
-_FREE_TEXT_FIELD = re.compile(r"remark|note|comment|desc|detail|observation", re.I)
+_FREE_TEXT_FIELD = RoleRule(
+    re.compile(r"remark|note|comment|desc|detail|observation", re.I),
+    yes={"free_text"}, no={"id", "name", "category", "measure", "flag", "date"},
+)
 
 _NEEDS_VALUE = {"=", "!=", ">", ">=", "<", "<=", "like", "ilike"}
 
@@ -711,6 +735,9 @@ _IDENTIFIER = re.compile(r"(^|_)(id|gisid|objectid|fid|gid|code|no|num|number)$"
 
 def _is_identifier(field: str) -> bool:
     """valve_id, gisid, ... — one value per feature, never a useful grouping."""
+    role = role_of(field)
+    if role:
+        return role == "id"
     return bool(_IDENTIFIER.search(field))
 
 

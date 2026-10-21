@@ -747,3 +747,27 @@ model AiConversation {
   @@index([userId, updatedAt])
   @@map("ai_conversations")
 }
+
+/// What one layer column means, for the AI assistant. Profiled from the
+/// data on every upload / re-index (ai/app/metadata.py); an Owner edit
+/// (`source` = 'owner') is never overwritten; `learnedAliases` come from
+/// users' clarification answers.
+model AiFieldMetadata {
+  layerId        String   @map("layer_id")
+  field          String
+  municipalityId String   @map("municipality_id")
+  /// id | name | category | measure | free_text | date | flag | hidden
+  role           String
+  unit           String?
+  description    String?
+  aliases        String[] @default([])
+  learnedAliases String[] @default([]) @map("learned_aliases")
+  /// { rows, distinct, nulls, min, max, avg_len }
+  stats          Json     @default("{}")
+  source         String   @default("auto")
+  updatedAt      DateTime @default(now()) @map("updated_at")
+
+  @@id([layerId, field])
+  @@index([municipalityId])
+  @@map("ai_field_metadata")
+}

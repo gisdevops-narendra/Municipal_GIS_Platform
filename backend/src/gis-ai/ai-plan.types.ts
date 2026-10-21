@@ -66,6 +66,9 @@ export type AggregateMetric = 'count' | 'sum' | 'avg' | 'min' | 'max';
  * features the operation starts from.
  */
 export interface AiGisOperation {
+  /** Set only on a "which field did you mean?" choice: the word the user
+   *  used for `field`, remembered as an alias once they pick it. */
+  learn_alias?: { layer_id: string; field: string; alias: string } | null;
   kind: OperationKind;
   target_layer: string;
   attribute_filters?: AiAttributeFilter[];

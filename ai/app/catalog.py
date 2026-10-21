@@ -34,6 +34,11 @@ class Column:
     data_type: str
     kind: str                       # text|integer|number|date|boolean|id|geometry
     sample_values: List[str] = field(default_factory=list)
+    # learned by metadata.learn_layers at re-index
+    role: Optional[str] = None
+    unit: Optional[str] = None
+    description: Optional[str] = None
+    aliases: List[str] = field(default_factory=list)
 
 
 @dataclass
