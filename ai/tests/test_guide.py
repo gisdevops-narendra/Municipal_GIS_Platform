@@ -120,5 +120,19 @@ check("top 3 zones by number of signals", step("top 3 zones by number of signals
       ("aggregate", "SIGNAL", "ZONE", None, None, 3, True, []), step("top 3 zones by number of signals"))
 check("which zone has the fewest Not Working signals", step("which zone has the fewest Not Working signals") ==
       ("aggregate", "SIGNAL", "ZONE", None, None, 1, False, [("type", "Not Working")]), step("which zone has the fewest Not Working signals"))
+# Conversation that is not a map query.
+from app.guide import converse, is_small_talk
+hi = converse("hello", LAYERS)
+check("greeting answered with working suggestion chips", hi and hi.answer_kind == "answer" and hi.options)
+lay = converse("what layers do I have?", LAYERS)
+check("lists the real layers", lay and "signal" in lay.explanation and "landmarks" in lay.explanation)
+flds = converse("what fields does signal have?", LAYERS)
+check("lists a layer's fields with sample values", flds and "type (text)" in flds.explanation and "Not Working" in flds.explanation, flds and flds.explanation[:80])
+vals = converse("what values does type have in landmarks?", LAYERS)
+check("lists a field's values", vals and "Educational" in vals.explanation, vals and vals.explanation)
+check("glossary", (converse("what is a buffer?", LAYERS) or PlanResult(answer_kind="answer", explanation="")).explanation.startswith("A buffer"))
+check("map question is not conversation", converse("show signals in zone 13", LAYERS) is None)
+check("small talk detected", is_small_talk("how can GIS help my municipality?", LAYERS))
+check("data question is not small talk", not is_small_talk("signals that are Not Working", LAYERS))
 print(f"\n{sum(results)}/{len(results)} passed")
 raise SystemExit(0 if all(results) else 1)

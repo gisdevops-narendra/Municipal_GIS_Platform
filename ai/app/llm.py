@@ -224,6 +224,37 @@ def _fit_messages(
     return attempt
 
 
+CHAT_SYSTEM = """You are the AI Assistant of a municipal GIS platform{where}.
+Reply in 1-3 short, friendly sentences, in the user's language.
+You do not see the map data in this reply: NEVER state numbers, places,
+feature names or results. If the user wants data, tell them how to ask,
+e.g. "Show signals in ward 5" or "How many landmarks are there in each zone?".
+Available layers: {layers}."""
+
+
+def chat_reply(message: str, history: List[ChatTurn], layers: List[LayerInfo], municipality_name: Optional[str]) -> str:
+    """Free conversation that is not a map question ("how can GIS help my
+    city?"). Short, grounded in what the platform can do; no data claims."""
+    if not available():
+        raise LLMUnavailable(f"The local model '{config.LLM_MODEL}' is not ready yet.")
+    system = CHAT_SYSTEM.format(
+        where=f" for {municipality_name}" if municipality_name else "",
+        layers=", ".join(l.name for l in layers) or "none",
+    )
+    messages = [{"role": "system", "content": system}]
+    messages += [{"role": t.role, "content": t.content} for t in history[-4:]]
+    messages.append({"role": "user", "content": message})
+    try:
+        resp = _http().post("/api/chat", json={
+            "model": config.LLM_MODEL, "messages": messages, "stream": False, "keep_alive": -1,
+            "options": {"temperature": 0.3, "num_ctx": config.LLM_NUM_CTX, "num_predict": 160},
+        })
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise LLMUnavailable(f"Local LLM request failed: {exc}") from exc
+    return ((resp.json().get("message", {}) or {}).get("content", "") or "").strip()
+
+
 def prime_plan_cache(layers: List[LayerInfo], municipality_name: Optional[str]) -> None:
     """Reads this municipality's plan prompt prefix (rules + layer list +
     examples) into Ollama's cache with a 1-token reply, so the user's first

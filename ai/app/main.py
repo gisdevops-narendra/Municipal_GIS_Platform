@@ -28,7 +28,7 @@ from fastapi import FastAPI, HTTPException
 from . import config, db, embeddings, llm, rag
 from .indexer import reindex_municipality
 from .fastpath import fast_plan
-from .guide import annotate, preflight, remember_near, suggestions
+from .guide import annotate, converse, is_small_talk, preflight, remember_near, suggestions
 from .repair import carry_over, is_follow_up, repair_plan
 from .schema import (
     NarrateRequest,
@@ -123,6 +123,13 @@ async def plan(body: PlanRequest) -> PlanResult:
             })
         return result
 
+    # Conversation that is not a map query: greetings, help, questions about
+    # the layers / fields / values, GIS terms — answered from the catalog.
+    if not follow:
+        talked = converse(message, body.layers)
+        if talked is not None:
+            return talked
+
     # Ask instead of guessing; refuse what would silently drop a condition.
     asked = preflight(message)
     if asked is not None:
@@ -140,6 +147,13 @@ async def plan(body: PlanRequest) -> PlanResult:
                 "(Ollama still starting or downloading the model). Try again shortly."
             ),
         )
+
+    if not follow and is_small_talk(message, body.layers):
+        try:
+            reply = await asyncio.to_thread(llm.chat_reply, message, body.history, body.layers, body.municipality_name)
+        except llm.LLMUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        return PlanResult(answer_kind="answer", explanation=reply or "I can help with questions about your GIS layers.", planner="model")
 
     try:
         if await rag_count(body.municipality_id) == 0:

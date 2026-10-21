@@ -372,3 +372,8 @@
   gap: 6px;
   margin-top: 8px;
 }
+
+/* Layer / field lists in conversational answers are multi-line. */
+.aic__msg-text {
+  white-space: pre-line;
+}
