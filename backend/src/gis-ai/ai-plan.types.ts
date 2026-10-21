@@ -74,6 +74,9 @@ export interface AiGisOperation {
    *  the BRTS and within 200 m of Pawna River"). */
   spatial_filters?: AiSpatialFilter[];
   limit?: number | null;
+  /** nearest: one answer per reference feature ("nearest pumping station
+   *  to each lake") instead of the nearest to all of them together. */
+  per_reference?: boolean | null;
   /** select: sort by this column (with `limit` = "the 10 tallest"). */
   order_by?: string | null;
   order_desc?: boolean | null;

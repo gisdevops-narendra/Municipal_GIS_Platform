@@ -802,6 +802,10 @@ def repair_plan(message: str, plan: PlanResult, layers: List[LayerInfo], follow_
             if not names_a_layer and not any(f.field.lower() == field.lower() for f in op.attribute_filters):
                 return _value_choice(plan, op, target, field, value)
 
+    if op.kind == "nearest" and not op.per_reference and re.search(r"\b(each|every)\b", text, re.I):
+        op.per_reference = True
+        notes.append("nearest per reference feature (each / every)")
+
     if op.kind == "nearest" and not op.count and nearest and nearest.group(2):
         op.count = int(nearest.group(2))
         notes.append(f"count -> {op.count}")

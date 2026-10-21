@@ -14,6 +14,7 @@ import { AiClientService } from './ai-client.service';
 import { LayerCatalogService } from './layer-catalog.service';
 import {
   GisQueryCompilerService,
+  type CompiledNearest,
   DistanceNeededError,
   PlanValidationError,
   UnknownFieldError,
@@ -794,6 +795,7 @@ export class GisAiService {
 
   private async runNearest(op: AiGisOperation, catalogEntries: Catalog, ws: string) {
     const compiled = this.compiler.compileNearest(op, catalogEntries, ws);
+    if (compiled.perReference) return this.runNearestPerReference(compiled);
     const { reference, rows } = await this.compiler.runNearest(compiled);
     const layer = compiled.target.name;
     const refName = reference.count === 1 && reference.label
@@ -833,6 +835,54 @@ export class GisAiService {
         items,
       },
       overlays: reference.geometry ? [reference.geometry] : [],
+    };
+  }
+
+  /** "Nearest X to each Y": one line per Y, the nearest X on the map. */
+  private async runNearestPerReference(compiled: CompiledNearest) {
+    const [pairs, total] = await Promise.all([
+      this.compiler.runNearestPerReference(compiled),
+      this.compiler.referenceCount(compiled),
+    ]);
+    const layer = compiled.target.name;
+    const refs = new Set(pairs.map((p) => String(p.refId))).size;
+    const scope = total > refs ? `the first ${fmt(refs)} of ${fmt(total)}` : fmt(refs);
+    const name = (label: string | null, id: number | string) => label ?? `#${id}`;
+    const lines = pairs.map((p) => `${name(p.refLabel, p.refId)} → ${name(p.label, p.id)} (${fmtDist(p.distanceM)})`);
+    const answer = pairs.length
+      ? `Nearest ${layer} to each of ${scope} ${compiled.reference.name} feature${refs === 1 ? '' : 's'}` +
+        (total > refs ? ' (add a condition to narrow them)' : '') + ': ' +
+        lines.slice(0, 10).join('; ') + (lines.length > 10 ? `; … (${fmt(lines.length - 10)} more in the list).` : '.')
+      : `No ${layer} features match, so none could be paired.`;
+    const targetIds = [...new Map(pairs.map((p) => [String(p.id), p.id])).values()];
+    const geometries = [...new Map(pairs.map((p) => [String(p.id), p.geometry])).values()].filter((g): g is Geo => g !== null);
+    const result: GisChatSelection = {
+      layerId: compiled.target.layerId,
+      layerCode: compiled.target.code,
+      layerName: layer,
+      geometryType: compiled.target.geometryType,
+      matched: targetIds.length,
+      truncated: false,
+      cql: this.compiler.buildCql(compiled.target, targetIds),
+      geometries,
+    };
+    return {
+      compiledSql: compiled.sql,
+      compiledSummary: compiled.summary,
+      result,
+      answer,
+      facts: { operation: 'nearest_each', layer, pairs: pairs.length },
+      nearest: {
+        referenceLayer: compiled.reference.name,
+        referenceLabel: null,
+        referenceCount: refs,
+        items: pairs.map((p) => ({
+          id: p.id,
+          label: `${name(p.refLabel, p.refId)} → ${name(p.label, p.id)}`,
+          distanceM: p.distanceM,
+        })),
+      },
+      overlays: pairs.map((p) => p.refGeometry).filter((g): g is Geo => g !== null).slice(0, 450),
     };
   }
 

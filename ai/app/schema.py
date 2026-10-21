@@ -60,6 +60,8 @@ class GisOperation(BaseModel):
     # More spatial conditions, ANDed with spatial_filter.
     spatial_filters: List[SpatialFilter] = Field(default_factory=list)
     limit: Optional[int] = None
+    # nearest: one answer per reference feature ("nearest X to each Y")
+    per_reference: Optional[bool] = None
     # select: "the 10 tallest" -> order_by=height, order_desc=True, limit=10
     order_by: Optional[str] = None
     order_desc: Optional[bool] = None
@@ -253,6 +255,7 @@ PLAN_JSON_SCHEMA = {
                 "target_layer": {"type": "string"},
                 "limit": {"type": ["integer", "null"]},
                 "order_by": {"type": ["string", "null"]},
+                "per_reference": {"type": ["boolean", "null"]},
                 "order_desc": {"type": ["boolean", "null"]},
                 "metric": {
                     "type": ["string", "null"],

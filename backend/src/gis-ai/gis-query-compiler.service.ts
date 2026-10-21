@@ -52,6 +52,8 @@ const MAX_BUFFER_M = 10000;
 const MAX_BUFFER_SOURCES = 5000;
 const MAX_GROUPS = 200;
 const MAX_NEAREST = 50;
+/** "nearest X to each Y": at most this many Y features are answered. */
+const MAX_PER_REFERENCE = 200;
 /** metric_field names a small model uses for "road length" / "plot area"
  *  when the layer has no such column — computed from the geometry. */
 const GEOMETRY_LENGTH = /^(shape_)?(length|len)(_m|_km|_metres|_meters)?$/i;
@@ -107,6 +109,14 @@ export interface CompiledNearest extends CompiledQuery {
   refSql: string;
   refParams: unknown[];
   reference: LayerCatalogEntry;
+  /** One result set per reference feature (see compileNearest). */
+  perReference?: boolean;
+}
+
+export interface NearestPairRow extends NearestRow {
+  refId: number | string;
+  refLabel: string | null;
+  refGeometry: Record<string, unknown> | null;
 }
 
 export interface NearestRow {
@@ -392,6 +402,10 @@ export class GisQueryCompilerService {
       (refWhere2.length ? ` WHERE ${refWhere2.join(' AND ')}` : '') +
       ')';
 
+    if (operation.per_reference) {
+      return this.compileNearestPerReference(operation, catalog, workspaceId, target, reference, k, refSql, refQ.params);
+    }
+
     const t = 'tgt';
     const { where, summaryBits } = this.selectionWhere(
       t,
@@ -534,6 +548,89 @@ export class GisQueryCompilerService {
       })),
       truncated: rows.length > MAX_GROUPS,
     };
+  }
+
+  /** "Nearest pumping station to each lake": for every (filtered)
+   *  reference feature, its own k nearest targets — a LATERAL KNN join, so
+   *  each reference uses the spatial index. Distances in metres. */
+  private compileNearestPerReference(
+    operation: AiGisOperation,
+    catalog: LayerCatalogEntry[],
+    workspaceId: string,
+    target: LayerCatalogEntry,
+    reference: LayerCatalogEntry,
+    k: number,
+    refSql: string,
+    refParams: unknown[],
+  ): CompiledNearest {
+    const { params, bind } = this.binder();
+    const s = 'src';
+    const t = 'tgt';
+    const srcWhere = this.referenceWhere(s, reference, operation, workspaceId, bind);
+    const { where, summaryBits } = this.selectionWhere(t, target, operation, catalog, workspaceId, bind);
+    const srcGeom =
+      reference.srid === target.srid
+        ? `${s}."${reference.geomColumn}"`
+        : `ST_Transform(${s}."${reference.geomColumn}", ${target.srid})`;
+    const tGeom = `${t}."${target.geomColumn}"`;
+    if (target.table === reference.table) {
+      where.push(`${t}."${target.pkColumn}" <> ${s}."${reference.pkColumn}"`);
+    }
+    const dist =
+      target.srid !== 4326
+        ? `ST_Distance(${tGeom}, ${srcGeom})`
+        : `ST_Distance(${tGeom}::geography, ${srcGeom}::geography)`;
+    const sql =
+      `SELECT ${s}."${reference.pkColumn}" AS __ref_id, ` +
+      `coalesce(${this.labelExpr(s, reference)}, ${s}."${reference.pkColumn}"::text) AS __ref_label, ` +
+      `ST_AsGeoJSON(ST_Transform(${s}."${reference.geomColumn}", 4326), 6) AS __ref_geojson, n.* ` +
+      `FROM "${reference.table}" ${s} CROSS JOIN LATERAL (` +
+      `SELECT ${t}."${target.pkColumn}" AS __id, ST_AsGeoJSON(ST_Transform(${tGeom}, 4326), 6) AS __geojson, ` +
+      `${this.labelExpr(t, target)} AS __label, ${dist}::float8 AS __dist ` +
+      `FROM "${target.table}" ${t} ` +
+      (where.length ? `WHERE ${where.join(' AND ')} ` : '') +
+      `ORDER BY ${tGeom} <-> ${srcGeom} LIMIT ${k}) n ` +
+      (srcWhere.length ? `WHERE ${srcWhere.join(' AND ')} ` : '') +
+      `ORDER BY 2, n.__dist LIMIT ${MAX_PER_REFERENCE * k}`;
+    return {
+      sql,
+      params,
+      refSql,
+      refParams,
+      target,
+      reference,
+      perReference: true,
+      summary: `${k} nearest ${target.name} to each ${reference.name}${
+        summaryBits.length ? ' where ' + summaryBits.join(' and ') : ''
+      }.`,
+    };
+  }
+
+  /** How many reference features match (to state a capped answer honestly). */
+  async referenceCount(compiled: CompiledNearest): Promise<number> {
+    const [row] = await this.readOnly<{ n: number }>(compiled.refSql, compiled.refParams);
+    return Number(row?.n ?? 0);
+  }
+
+  async runNearestPerReference(compiled: CompiledNearest): Promise<NearestPairRow[]> {
+    const rows = await this.readOnly<{
+      __ref_id: number | string;
+      __ref_label: string | null;
+      __ref_geojson: string | null;
+      __id: number | string;
+      __geojson: string;
+      __label: string | null;
+      __dist: number;
+    }>(compiled.sql, compiled.params);
+    return rows.map((r) => ({
+      refId: r.__ref_id,
+      refLabel: r.__ref_label,
+      refGeometry: this.parseGeo(r.__ref_geojson),
+      id: r.__id,
+      label: r.__label,
+      distanceM: Number(r.__dist),
+      geometry: this.parseGeo(r.__geojson),
+    }));
   }
 
   async runNearest(compiled: CompiledNearest): Promise<{

@@ -47,6 +47,7 @@ KINDS (target_layer + attribute_filters + spatial_filter pick the features):
   "top 3 wards by number of X": limit 3 (order_desc false for fewest).
 - nearest: "nearest / closest N X to Y". target_layer = X,
   reference_layer + reference_filters = Y, count = N (default 1).
+  "nearest X to EACH Y": also per_reference true.
 - buffer: "buffer / zone of N m around X". target_layer = X,
   distance_meters = N.
 - route: "route / path / road distance from A to B". target_layer +

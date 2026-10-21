@@ -170,5 +170,14 @@ check("rule not applied to another layer", [f.field for f in other.operation.att
 check("near rule", parse_instruction("always use 200 m for near", LAYERS).instruction.near_m == 200)
 check("clear rules", parse_instruction("forget my instructions", LAYERS).instruction_action == "clear")
 check("normal question is not an instruction", parse_instruction("show signals in zone 13", LAYERS) is None)
+# Nearest per feature.
+ne = fast_plan("nearest signal to each educational landmarks", LAYERS)
+got = ne and (ne.operation.kind, ne.operation.target_layer, ne.operation.reference_layer, ne.operation.per_reference,
+              ne.operation.count, [(f.field, f.value) for f in ne.operation.reference_filters])
+check("nearest X to each Y (with Y's own condition)",
+      got == ("nearest", "SIGNAL", "LANDMARKS", True, 1, [("type", "Educational")]), got)
+ne2 = fast_plan("for each zone, the nearest 2 Not Working signals", LAYERS)
+got = ne2 and (ne2.operation.count, ne2.operation.reference_layer, [(f.field, f.value) for f in ne2.operation.attribute_filters])
+check("for each Y, the nearest N X (with X's condition)", got == (2, "ZONE", [("type", "Not Working")]), got)
 print(f"\n{sum(results)}/{len(results)} passed")
 raise SystemExit(0 if all(results) else 1)

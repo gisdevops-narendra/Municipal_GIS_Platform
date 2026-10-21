@@ -318,6 +318,38 @@ _AREA_MOST = re.compile(
 )
 
 
+_NEAREST_EACH = re.compile(
+    r"^\s*(?:show|find|get|list)?\s*(?:me\s+)?(?:the\s+)?(?:nearest|closest)\s+(?:(?P<n>\d+)\s+)?(?P<target>.+?)\s+"
+    r"(?:to|from|for|of)\s+(?:each|every|all the|all)\s+(?P<ref>.+?)\s*$"
+    r"|^\s*(?:for\s+)?(?:each|every)\s+(?P<ref2>.+?)[,]?\s+(?:show\s+|find\s+)?(?:the\s+)?(?:nearest|closest)\s+"
+    r"(?:(?P<n2>\d+)\s+)?(?P<target2>.+?)\s*$",
+    re.I,
+)
+
+
+def _nearest_each(text: str, layers: List[LayerInfo]) -> Optional[PlanResult]:
+    """"nearest pumping station to each lake", "for each school, the nearest
+    2 signals": both sides are planned by the fast path itself, so each may
+    carry its own conditions ("educational landmarks")."""
+    m = _NEAREST_EACH.search(text)
+    if not m:
+        return None
+    target_text, ref_text = m.group("target") or m.group("target2"), m.group("ref") or m.group("ref2")
+    n = m.group("n") or m.group("n2")
+    t = fast_plan(f"show {target_text}", layers)
+    r = fast_plan(f"show {ref_text}", layers)
+    if t is None or r is None or t.operation.kind != "select" or r.operation.kind != "select":
+        return None
+    op = t.operation.model_copy(deep=True)
+    op.kind, op.per_reference, op.count = "nearest", True, int(n) if n else 1
+    op.reference_layer = r.operation.target_layer
+    op.reference_filters = list(r.operation.attribute_filters)
+    target = next(l for l in layers if l.code == op.target_layer)
+    explanation = f"Nearest {op.count} {target.name} to each {op.reference_layer}" + (
+        " where " + " and ".join(f"{f.field} {f.op} {f.value}" for f in op.reference_filters) if op.reference_filters else "") + "."
+    return PlanResult(answer_kind="gis_operation", explanation=explanation, operation=op, planner="fast")
+
+
 def _area_step(text: str, layers: List[LayerInfo]) -> Optional[PlanResult]:
     """"wards with more than 100 signals", "top 3 zones by number of
     signals", "which ward has the most Not Working signals": count the
@@ -353,7 +385,7 @@ def fast_plan(
     text = message.strip().rstrip("?.! ")
     if not text:
         return None
-    stepped = _area_step(text, layers)
+    stepped = _area_step(text, layers) or _nearest_each(text, layers)
     if stepped is not None:
         return stepped
     follow_up = is_follow_up(text, layers, previous)
