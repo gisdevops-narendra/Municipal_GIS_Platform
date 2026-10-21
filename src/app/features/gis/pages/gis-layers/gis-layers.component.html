@@ -439,20 +439,31 @@
 
 <p-dialog
   [visible]="!!styleLayer()"
-  (visibleChange)="!$event ? styleLayer.set(null) : null"
+  (visibleChange)="!$event ? closeStyle() : null"
   [modal]="true"
   [header]="'Style · ' + (styleLayer()?.name ?? '')"
-  [style]="{ width: '460px' }"
-  [breakpoints]="{ '560px': '95vw' }"
+  [style]="{ width: '1080px' }"
+  [breakpoints]="{ '1120px': '95vw' }"
 >
   @if (styleLayer(); as layer) {
-    <app-style-editor
-      [target]="{ kind: 'layer', id: layer.id }"
-      [geometry]="styleGeometryOf(layer)"
-      [layerName]="layer.name"
-      (applied)="onStyleSaved()"
-      (removed)="onStyleSaved()"
-    />
+    <div class="layers-style">
+      <div class="layers-style__editor">
+        <app-style-editor
+          [target]="{ kind: 'layer', id: layer.id }"
+          [geometry]="styleGeometryOf(layer)"
+          [layerName]="layer.name"
+          [live]="true"
+          (applied)="onStyleApplied()"
+          (removed)="onStyleApplied()"
+        />
+      </div>
+      <div class="layers-style__preview">
+        <span class="layers-style__caption">
+          <i class="pi pi-eye" aria-hidden="true"></i> Live preview — changes are applied to the layer as you edit
+        </span>
+        <app-layer-preview-map class="layers-style__map" [layer]="layer" [refreshKey]="stylePreviewKey()" />
+      </div>
+    </div>
   }
 </p-dialog>
 

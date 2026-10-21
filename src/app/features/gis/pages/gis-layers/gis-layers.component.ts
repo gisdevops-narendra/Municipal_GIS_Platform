@@ -32,6 +32,7 @@ import { blobErrorMessage, downloadBlob } from '../../../../core/utils/download-
 import { StyleGeometry } from '../../../../core/models/layer-style.model';
 import { StyleEditorComponent } from '../../components/style-editor/style-editor.component';
 import { UploadWizardComponent } from '../../components/upload-wizard/upload-wizard.component';
+import { LayerPreviewMapComponent } from '../../components/layer-preview-map/layer-preview-map.component';
 
 /** Uploads are fetched in full (the backend caps a page at 100) so each
  *  layer row can carry its own upload history. */
@@ -120,7 +121,8 @@ interface LayerRow {
     SiteHeaderComponent,
     SiteFooterComponent,
     StyleEditorComponent,
-    UploadWizardComponent
+    UploadWizardComponent,
+    LayerPreviewMapComponent
   ],
   templateUrl: './gis-layers.component.html',
   styleUrl: './gis-layers.component.scss'
@@ -147,6 +149,9 @@ export class GisLayersComponent {
   readonly exporting = signal<string | null>(null);
   readonly deleting = signal<string | null>(null);
   readonly styleLayer = signal<GisLayer | null>(null);
+  /** Bumped after each live style apply — reloads the preview map image. */
+  readonly stylePreviewKey = signal(0);
+  private styleChanged = false;
 
   readonly wizardVisible = signal(false);
   readonly detailUpload = signal<GisUpload | null>(null);
@@ -438,7 +443,21 @@ export class GisLayersComponent {
   }
 
   openStyle(layer: GisLayer): void {
+    this.styleChanged = false;
     this.styleLayer.set(layer);
+  }
+
+  /** The editor runs in live mode: every change is applied to GeoServer
+   *  (debounced) and the preview map reloads to show it. */
+  onStyleApplied(): void {
+    this.styleChanged = true;
+    this.stylePreviewKey.set(Date.now());
+  }
+
+  closeStyle(): void {
+    this.styleLayer.set(null);
+    // Picks up the layer's new hasCustomStyle/styleName.
+    if (this.styleChanged) this.loadAll();
   }
 
   styleGeometryOf(layer: GisLayer): StyleGeometry {
@@ -446,11 +465,6 @@ export class GisLayersComponent {
     if (layer.geometryType === 'POINT') return 'point';
     if (layer.geometryType === 'LINE') return 'line';
     return 'polygon';
-  }
-
-  onStyleSaved(): void {
-    this.styleLayer.set(null);
-    this.loadAll();
   }
 
   /** Hard delete — unpublishes the layer from GeoServer and permanently

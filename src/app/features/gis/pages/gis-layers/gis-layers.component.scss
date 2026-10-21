@@ -282,6 +282,47 @@ app-site-footer {
   }
 }
 
+/* ---------- style dialog: editor + live preview map ---------- */
+.layers-style {
+  display: grid;
+  grid-template-columns: 400px minmax(0, 1fr);
+  gap: 20px;
+  align-items: stretch;
+}
+
+.layers-style__editor {
+  min-width: 0;
+}
+
+.layers-style__preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 460px;
+  position: sticky;
+  top: 0;
+}
+
+.layers-style__caption {
+  font-size: 12px;
+  color: var(--color-ink-500);
+}
+
+.layers-style__map {
+  flex: 1;
+}
+
+@media (max-width: 820px) {
+  .layers-style {
+    grid-template-columns: 1fr;
+  }
+
+  .layers-style__preview {
+    position: static;
+    min-height: 320px;
+  }
+}
+
 /* ---------- reject dialog ---------- */
 .layers-reject {
   display: flex;
