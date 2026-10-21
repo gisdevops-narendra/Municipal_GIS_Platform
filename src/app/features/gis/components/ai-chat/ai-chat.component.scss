@@ -355,3 +355,20 @@
 .aic-log__nowrap {
   white-space: nowrap;
 }
+
+.aic__note {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  color: var(--color-ink-500);
+
+  .pi {
+    font-size: 11px;
+  }
+}
+
+.aic__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}

@@ -79,6 +79,14 @@ class GisOperation(BaseModel):
     network_layer: Optional[str] = None
 
 
+class ClarifyOption(BaseModel):
+    """A clickable choice: re-ask with `message`, or run `operation` as is
+    (the backend validates it like any plan)."""
+    label: str
+    message: Optional[str] = None
+    operation: Optional[GisOperation] = None
+
+
 class PlanResult(BaseModel):
     answer_kind: AnswerKind
     # short, user-facing natural-language explanation of what will run / why not
@@ -91,6 +99,11 @@ class PlanResult(BaseModel):
     # Which path produced the plan: "fast" (no LLM) or "model". Set by the
     # service, never by the model (not in PLAN_JSON_SCHEMA).
     planner: Optional[Literal["fast", "model"]] = None
+    # Clickable choices (clarification, "Did you mean ...") and plain notes
+    # about how the question was read (fuzzy corrections). Set by the
+    # service, never by the model.
+    options: List[ClarifyOption] = Field(default_factory=list)
+    notes: List[str] = Field(default_factory=list)
 
 
 # ---- request bodies -------------------------------------------------------
@@ -124,6 +137,10 @@ class PlanRequest(BaseModel):
     # The plan of the previous answer, so a follow-up ("now only those in
     # ward 5") extends the exact operation instead of re-reading prose.
     previous_operation: Optional[GisOperation] = None
+
+
+class SuggestRequest(BaseModel):
+    layers: List[LayerInfo] = Field(default_factory=list)
 
 
 class ReindexRequest(BaseModel):

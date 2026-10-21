@@ -20,14 +20,10 @@ import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { MapService } from '../../services/map.service';
 import { GisAiService } from '../../services/gis-ai.service';
 import { AttributeExternalFilter } from '../attribute-table/attribute-table.component';
-import { AiQueryLogEntry, ChatMessage, GisChatResponse } from '../../models/gis-ai.model';
+import { AiClarifyOption, AiGisOperation, AiQueryLogEntry, ChatMessage, GisChatResponse } from '../../models/gis-ai.model';
 
-const EXAMPLES = [
-  'Show buildings within 50m of roads.',
-  'How many signals are there in each zone?',
-  'Nearest 3 hospitals to ward 5.',
-  'Make a 200 m buffer around the lakes.',
-];
+/** Shown only until the real-layer suggestions arrive. */
+const EXAMPLES: string[] = [];
 
 const nf = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 });
 
@@ -60,7 +56,9 @@ export class AiChatComponent {
   @Output() queryRun = new EventEmitter<AttributeExternalFilter>();
   @Output() queryCleared = new EventEmitter<void>();
 
-  readonly examples = EXAMPLES;
+  /** Generated from the user's real layers; the static list only shows
+   *  until they arrive (or if the AI service is down). */
+  readonly examples = signal<string[]>(EXAMPLES);
   readonly messages = signal<ChatMessage[]>([]);
   readonly sending = signal(false);
   readonly serviceError = signal<string | null>(null);
@@ -81,6 +79,10 @@ export class AiChatComponent {
     // The panel is created when first opened: prime the model's prompt
     // cache now, while the user types (best effort, fire and forget).
     this.aiService.warm().subscribe({ error: () => undefined });
+    this.aiService.suggestions().subscribe({
+      next: (list) => list.length && this.examples.set(list.slice(0, 6)),
+      error: () => undefined,
+    });
     inject(CurrentUserService)
       .getMe()
       .subscribe({ next: (me) => this.isOwner.set(me.systemRole === 'MUNICIPALITY_OWNER'), error: () => undefined });
@@ -144,8 +146,20 @@ export class AiChatComponent {
     this.send();
   }
 
-  send(): void {
-    const text = this.draft.trim();
+  /** A clarification / "Did you mean" chip: re-ask with the filled-in
+   *  question, or run the option's ready plan — no retyping. */
+  choose(option: AiClarifyOption): void {
+    if (this.sending()) return;
+    if (option.operation) {
+      this.send(option.label.replace(/^Did you mean\s*/i, '').replace(/\?$/, ''), option.operation);
+    } else if (option.message) {
+      this.draft = option.message;
+      this.send();
+    }
+  }
+
+  send(display?: string, resolvedOperation?: AiGisOperation): void {
+    const text = (display ?? this.draft).trim();
     if (!text || this.sending()) return;
 
     this.serviceError.set(null);
@@ -163,7 +177,7 @@ export class AiChatComponent {
     ]);
     this.sending.set(true);
 
-    this.chatSub = this.aiService.chat(text, priorHistory, this.activeLayerId, previousOperation).subscribe({
+    this.chatSub = this.aiService.chat(text, priorHistory, this.activeLayerId, previousOperation, resolvedOperation).subscribe({
       next: (response) => {
         this.sending.set(false);
         const wantsWording = !!response.answer && !!response.facts;

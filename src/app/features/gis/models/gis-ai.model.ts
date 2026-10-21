@@ -69,13 +69,24 @@ export interface AiChatResult {
   bbox?: [number, number, number, number] | null;
 }
 
+/** A clickable choice: re-ask with `message`, or run `operation` as is. */
+export interface AiClarifyOption {
+  label: string;
+  message?: string | null;
+  operation?: AiGisOperation | null;
+}
+
 export interface GisChatResponse {
   answerKind: AiAnswerKind;
   explanation: string;
   /** Question-log row — sent back with 👍/👎. */
   logId?: string;
-  /** "fast" = answered without the language model. */
-  planner?: 'fast' | 'model' | null;
+  /** "fast" = answered without the language model; "choice" = a clicked option. */
+  planner?: 'fast' | 'model' | 'choice' | null;
+  /** Clickable choices (clarification, "Did you mean …"). */
+  options?: AiClarifyOption[];
+  /** How the question was read, e.g. a corrected spelling. */
+  notes?: string[];
   clarification?: string;
   usedContext: string[];
   operation?: AiGisOperation;

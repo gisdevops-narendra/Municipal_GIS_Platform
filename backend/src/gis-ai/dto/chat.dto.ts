@@ -44,6 +44,12 @@ export class GisChatDto {
   @IsOptional()
   @IsObject()
   previousOperation?: Record<string, unknown>;
+
+  /** A clicked option's plan ("Did you mean …", field choice): run as is,
+   *  no model call — validated by the compiler like any plan. */
+  @IsOptional()
+  @IsObject()
+  resolvedOperation?: Record<string, unknown>;
 }
 
 /** `POST /gis/ai/narrate` — the question plus the `facts` a chat answer

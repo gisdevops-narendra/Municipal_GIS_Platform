@@ -20,12 +20,14 @@ export class GisAiService {
     history: { role: 'user' | 'assistant'; content: string }[] = [],
     activeLayerId?: string | null,
     previousOperation?: AiGisOperation,
+    resolvedOperation?: AiGisOperation,
   ): Observable<GisChatResponse> {
     return this.http.post<GisChatResponse>(`${this.baseUrl}/chat`, {
       message,
       history,
       activeLayerId: activeLayerId ?? undefined,
       previousOperation,
+      resolvedOperation,
     });
   }
 
@@ -47,6 +49,11 @@ export class GisAiService {
   /** Primes the assistant's model cache so the first question is fast. */
   warm(): Observable<{ ok: true }> {
     return this.http.post<{ ok: true }>(`${this.baseUrl}/warm`, {});
+  }
+
+  /** Example questions built from the user's real layers (each one works). */
+  suggestions(): Observable<string[]> {
+    return this.http.get<string[]>(`${this.baseUrl}/suggestions`);
   }
 
   /** 👍/👎 on one of the user's own answers. */

@@ -93,6 +93,16 @@ export class AiClientService {
 
   /** Semantic layer search over this municipality's RAG layer/field docs.
    *  Embedding only (no LLM), so it is fast; `[]` on any failure. */
+  /** Example questions built from the caller's real layers. */
+  async suggest(layers: AiLayerInfo[]): Promise<string[]> {
+    try {
+      const raw = await this.request('POST', '/suggest', { layers }, 8000, true);
+      return Array.isArray(raw) ? (raw as unknown as string[]) : [];
+    } catch {
+      return [];
+    }
+  }
+
   async searchLayers(municipalityId: string, query: string, timeoutMs = 4000): Promise<AiSearchHit[]> {
     try {
       const raw = await this.request(

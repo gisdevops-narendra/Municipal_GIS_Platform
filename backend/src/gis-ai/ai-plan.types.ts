@@ -100,4 +100,14 @@ export interface AiPlanResult {
   used_context?: string[];
   /** Which path produced the plan: the no-LLM fast path or the model. */
   planner?: 'fast' | 'model' | null;
+  options?: AiClarifyOption[];
+  notes?: string[];
+}
+
+/** A clickable choice: re-ask with `message`, or run `operation` as is
+ *  (validated like any plan). */
+export interface AiClarifyOption {
+  label: string;
+  message?: string | null;
+  operation?: AiGisOperation | null;
 }

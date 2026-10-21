@@ -45,6 +45,13 @@ export class GisAiController {
     return this.gisAi.warm(appUser);
   }
 
+  /** Example questions from the caller's real layers (each one works). */
+  @RequireAiAssistant()
+  @Get('suggestions')
+  suggestions(@CurrentAppUser() appUser: AppUser) {
+    return this.gisAi.suggestions(appUser);
+  }
+
   /** 👍/👎 on the caller's own answer. */
   @RequireAiAssistant()
   @Post('feedback')

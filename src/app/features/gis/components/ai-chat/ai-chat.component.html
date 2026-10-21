@@ -5,10 +5,10 @@
     appear on the map and in the Attribute Table.
   </p>
 
-  @if (messages().length === 0) {
+  @if (messages().length === 0 && examples().length) {
     <div class="aic__examples">
       <span class="aic__examples-label">Try</span>
-      @for (ex of examples; track ex) {
+      @for (ex of examples(); track ex) {
         <button type="button" class="aic__chip" (click)="useExample(ex)">{{ ex }}</button>
       }
     </div>
@@ -31,6 +31,16 @@
 
           @if (msg.response?.answerKind === 'clarification' && msg.response?.clarification) {
             <p-message severity="warn" [text]="msg.response!.clarification!" styleClass="w-full" />
+          }
+          @for (note of msg.response?.notes ?? []; track note) {
+            <p class="aic__note"><i class="pi pi-info-circle" aria-hidden="true"></i> {{ note }}</p>
+          }
+          @if (msg.response?.options?.length) {
+            <div class="aic__choices">
+              @for (option of msg.response!.options!; track option.label) {
+                <button type="button" class="aic__chip" [disabled]="sending()" (click)="choose(option)">{{ option.label }}</button>
+              }
+            </div>
           }
 
           @if (msg.response?.aggregate; as agg) {

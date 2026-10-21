@@ -28,6 +28,7 @@ from fastapi import FastAPI, HTTPException
 from . import config, db, embeddings, llm, rag
 from .indexer import reindex_municipality
 from .fastpath import fast_plan
+from .guide import annotate, preflight, suggestions
 from .repair import repair_plan
 from .schema import (
     NarrateRequest,
@@ -37,6 +38,7 @@ from .schema import (
     ReindexRequest,
     SearchHit,
     SearchRequest,
+    SuggestRequest,
 )
 from .vectorstore import count as rag_count, search_layer_docs
 
@@ -106,10 +108,14 @@ async def reindex(body: ReindexRequest):
 async def plan(body: PlanRequest) -> PlanResult:
     # Simple requests whose every word maps onto a plan piece need no model
     # call at all (~1 s instead of ~7-40 s on CPU). See fastpath.py.
+    # Ask instead of guessing; refuse what would silently drop a condition.
+    asked = preflight(body.message)
+    if asked is not None:
+        return asked
     quick = fast_plan(body.message, body.layers, body.previous_operation)
     if quick is not None:
         log.info("fast path (%s): %s", body.message[:80], quick.explanation)
-        return quick
+        return annotate(body.message, quick, body.layers)
 
     if not llm.available():
         raise HTTPException(
@@ -145,12 +151,18 @@ async def plan(body: PlanRequest) -> PlanResult:
         # The small model often drops the newer operation fields; the
         # question's own words fill them (see repair.py).
         repaired = repair_plan(body.message, result, body.layers)
-        return repaired.model_copy(update={"planner": "model"})
+        return annotate(body.message, repaired.model_copy(update={"planner": "model"}), body.layers)
     except llm.LLMUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:
         log.exception("plan generation failed")
         raise HTTPException(status_code=502, detail=f"Local LLM error: {exc}")
+
+
+@app.post("/suggest", response_model=list[str])
+async def suggest(body: SuggestRequest) -> list[str]:
+    """Example questions from the real layers, each one plannable."""
+    return suggestions(body.layers)
 
 
 @app.post("/warm")

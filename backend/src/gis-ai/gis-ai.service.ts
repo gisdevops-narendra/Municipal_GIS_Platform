@@ -14,9 +14,11 @@ import { AiClientService } from './ai-client.service';
 import { LayerCatalogService } from './layer-catalog.service';
 import {
   GisQueryCompilerService,
+  DistanceNeededError,
   PlanValidationError,
+  UnknownFieldError,
 } from './gis-query-compiler.service';
-import type { AggregateMetric, AiGisOperation } from './ai-plan.types';
+import type { AggregateMetric, AiClarifyOption, AiGisOperation } from './ai-plan.types';
 import type { GisChatDto, GisExplainDto, GisNarrateDto } from './dto/chat.dto';
 
 type Catalog = Awaited<ReturnType<LayerCatalogService['buildForUser']>>;
@@ -50,8 +52,13 @@ export interface GisChatResponse {
   usedContext: string[];
   /** Question-log row of this answer — the client sends it back with 👍/👎. */
   logId?: string;
-  /** "fast" (answered without the language model) or "model". */
-  planner?: 'fast' | 'model' | null;
+  /** "fast" (answered without the language model), "model", or "choice"
+   *  (a clicked option). */
+  planner?: 'fast' | 'model' | 'choice' | null;
+  /** Clickable choices: clarification answers, "Did you mean …". */
+  options?: AiClarifyOption[];
+  /** How the question was read (e.g. a corrected spelling). */
+  notes?: string[];
   /** Present only for answerKind === 'gis_operation'. */
   operation?: AiGisOperation;
   /** The parameterised SQL the backend compiled and ran — shown to the
@@ -246,6 +253,12 @@ export class GisAiService {
     return { ok: true };
   }
 
+  /** Example questions from the caller's real layers, each one plannable. */
+  async suggestions(appUser: AppUser): Promise<string[]> {
+    const catalogEntries = await this.catalog.buildForUser(appUser);
+    return this.ai.suggest(this.catalog.toAiLayerInfo(catalogEntries));
+  }
+
   /** Owner: the municipality's recent questions, newest first. */
   async logs(appUser: AppUser, onlyProblems: boolean, limit: number) {
     const rows = await this.prisma.aiQueryLog.findMany({
@@ -289,6 +302,23 @@ export class GisAiService {
     });
 
     const catalogEntries = await this.catalog.buildForUser(appUser);
+
+    // A clicked option carries its plan: run it, no model call.
+    if (dto.resolvedOperation) {
+      if (!workspace) {
+        return { answerKind: 'unsupported', explanation: 'This municipality has no GIS workspace yet.', usedContext: [] };
+      }
+      const chosen = await this.runOperation(
+        appUser,
+        dto.resolvedOperation as unknown as AiGisOperation,
+        catalogEntries,
+        workspace.id,
+        'Your choice.',
+        [],
+      );
+      return { ...chosen, planner: 'choice' };
+    }
+
     await this.catalog.addMatchingValues(catalogEntries, dto.message);
 
     const plan = await this.ai.plan({
@@ -306,6 +336,7 @@ export class GisAiService {
     const usedContext = plan.used_context ?? [];
 
     const planner = plan.planner ?? null;
+    const guidance = { options: plan.options ?? [], notes: plan.notes ?? [] };
     if (plan.answer_kind !== 'gis_operation' || !plan.operation) {
       return {
         answerKind: plan.answer_kind,
@@ -313,6 +344,7 @@ export class GisAiService {
         clarification: plan.clarification ?? undefined,
         usedContext,
         planner,
+        ...guidance,
       };
     }
 
@@ -333,7 +365,13 @@ export class GisAiService {
       plan.explanation,
       usedContext,
     );
-    return { ...response, planner };
+    return {
+      ...response,
+      planner,
+      // Options from validation (field / distance choice) win over hints.
+      options: response.options?.length ? response.options : guidance.options,
+      notes: guidance.notes,
+    };
   }
 
   /**
@@ -455,6 +493,12 @@ export class GisAiService {
           );
       }
     } catch (error) {
+      if (error instanceof UnknownFieldError) {
+        return { ...base, answerKind: 'clarification', clarification: error.message, options: fieldChoices(operation, error) };
+      }
+      if (error instanceof DistanceNeededError) {
+        return { ...base, answerKind: 'clarification', clarification: error.message, options: distanceChoices(operation) };
+      }
       if (error instanceof PlanValidationError) {
         return { ...base, answerKind: 'clarification', clarification: error.message };
       }
@@ -763,4 +807,70 @@ export class GisAiService {
       overlays,
     };
   }
+}
+
+/** The layer's real fields as choices: same kind of data as the unknown
+ *  field's value first, each with sample values, each a ready-to-run plan
+ *  with the field swapped in. */
+function fieldChoices(operation: AiGisOperation, error: UnknownFieldError): AiClarifyOption[] {
+  const bad = error.field;
+  const filter = [
+    ...(operation.attribute_filters ?? []),
+    ...(operation.spatial_filter?.reference_filters ?? []),
+  ].find((f) => f.field === bad);
+  const value = filter?.value ?? filter?.values?.[0];
+  const wantText = typeof value === 'string' && Number.isNaN(Number(value));
+  const columns = error.layer.columns.filter(
+    (c) => c.kind !== 'geometry' && c.kind !== 'id' && !/(^|_)(gis_remark|gen_id|objectid)$/i.test(c.name),
+  );
+  const ranked = [...columns].sort((a, b) => {
+    const kind = (c: typeof a) => (wantText ? (c.kind === 'text' ? 0 : 1) : c.kind === 'text' ? 1 : 0);
+    return kind(a) - kind(b) || similarity(bad, b.name) - similarity(bad, a.name);
+  });
+  return ranked.slice(0, 5).map((c) => ({
+    label: c.sampleValues.length
+      ? `${c.name} — e.g. ${c.sampleValues.filter((v) => v !== '…(more)').slice(0, 3).join(', ')}`
+      : c.name,
+    operation: swapField(operation, bad, c.name),
+  }));
+}
+
+function distanceChoices(operation: AiGisOperation): AiClarifyOption[] {
+  return [50, 100, 250, 500].map((d) => ({
+    label: `${d} m`,
+    operation: {
+      ...operation,
+      spatial_filter: operation.spatial_filter ? { ...operation.spatial_filter, distance_meters: d } : null,
+    },
+  }));
+}
+
+function swapField(operation: AiGisOperation, from: string, to: string): AiGisOperation {
+  const op = JSON.parse(JSON.stringify(operation)) as AiGisOperation;
+  const swap = (f: { field: string }) => {
+    if (f.field === from) f.field = to;
+  };
+  (op.attribute_filters ?? []).forEach(swap);
+  (op.reference_filters ?? []).forEach(swap);
+  (op.to_filters ?? []).forEach(swap);
+  (op.spatial_filter?.reference_filters ?? []).forEach(swap);
+  for (const key of ['metric_field', 'group_by', 'group_by_layer_field', 'order_by'] as const) {
+    if (op[key] === from) op[key] = to;
+  }
+  return op;
+}
+
+/** Shared-letter-pair similarity of two names, 0..1 ("material" ~ "constructi" is low, "dia" ~ "pipe_dia_i" high). */
+function similarity(a: string, b: string): number {
+  const pairs = (s: string) => {
+    const t = s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const out = new Set<string>();
+    for (let i = 0; i < t.length - 1; i++) out.add(t.slice(i, i + 2));
+    return out;
+  };
+  const pa = pairs(a);
+  const pb = pairs(b);
+  let shared = 0;
+  for (const p of pa) if (pb.has(p)) shared++;
+  return pa.size + pb.size ? (2 * shared) / (pa.size + pb.size) : 0;
 }

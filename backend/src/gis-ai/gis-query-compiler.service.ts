@@ -18,6 +18,24 @@ import type {
  */
 export class PlanValidationError extends Error {}
 
+/** The plan names a field the layer does not have — the chat offers the
+ *  layer's real fields as clickable choices instead of guessing. */
+export class UnknownFieldError extends PlanValidationError {
+  constructor(
+    readonly layer: LayerCatalogEntry,
+    readonly field: string,
+  ) {
+    super(`"${layer.name}" has no field "${field}". Which field did you mean?`);
+  }
+}
+
+/** "near" with no distance to a point/line layer — never guessed. */
+export class DistanceNeededError extends PlanValidationError {
+  constructor(readonly referenceName: string) {
+    super(`How close to ${referenceName} counts as “near”?`);
+  }
+}
+
 const HARD_MAX_ROWS = 5000;
 const DEFAULT_ROWS = 2000;
 // Matched feature ids go into a GeoServer CQL_FILTER carried on a WMS/WFS
@@ -1023,11 +1041,7 @@ export class GisQueryCompilerService {
       layer.columns.find((c) => c.name.toLowerCase() === needle) ??
       layer.columns.find((c) => c.name.toLowerCase().replace(/_/g, '') === needle.replace(/_/g, ''));
     if (!col) {
-      throw new PlanValidationError(
-        `Layer "${layer.name}" has no field "${fieldName}". Available fields: ${layer.columns
-          .map((c) => c.name)
-          .join(', ')}.`,
-      );
+      throw new UnknownFieldError(layer, fieldName);
     }
     return col;
   }
@@ -1142,6 +1156,10 @@ export class GisQueryCompilerService {
     // distance when the user means plain containment ("signals in zone 12").
     // Treat that as `within` rather than rejecting it.
     if (sf.relation === 'within_distance' && !hasDistance) {
+      // "in zone 12" said as within_distance: containment is right for a
+      // polygon reference. For points / lines ST_Within is almost always
+      // empty ("signals near landmarks" returned 0) — ask for a distance.
+      if (ref.geometryType !== 'POLYGON') throw new DistanceNeededError(ref.name);
       return `ST_Within(${tGeom}, ${rGeom})`;
     }
 
