@@ -179,5 +179,15 @@ check("nearest X to each Y (with Y's own condition)",
 ne2 = fast_plan("for each zone, the nearest 2 Not Working signals", LAYERS)
 got = ne2 and (ne2.operation.count, ne2.operation.reference_layer, [(f.field, f.value) for f in ne2.operation.attribute_filters])
 check("for each Y, the nearest N X (with X's condition)", got == (2, "ZONE", [("type", "Not Working")]), got)
+# Function words never fuzzy-match a value; examples come from real layers.
+from app.repair import matching_values
+APT = LayerInfo(id="a", code="LANDMARKS", name="landmarks", geometry_type="POINT", fields=[
+    LayerField(name="type", type="text", sample_values=["Other", "Others", "Residential"]),
+    LayerField(name="subtype", type="text", sample_values=["Apartment", "ATM", "Temple"])])
+apt = fast_plan("how many appartment are there", [APT])
+got = apt and [(f.field, f.value) for f in apt.operation.attribute_filters]
+check("'are there' is not the type 'Other'; 'appartment' -> Apartment", got == [("subtype", "Apartment")], got)
+help_text = converse("what can you do?", [APT]).explanation
+check("help examples come from the real layers", "landmarks" in help_text and "signals that are Not Working" not in help_text)
 print(f"\n{sum(results)}/{len(results)} passed")
 raise SystemExit(0 if all(results) else 1)

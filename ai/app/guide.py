@@ -187,12 +187,12 @@ _VALUES_OF = re.compile(r"\b(what|which)\s+(values|types|kinds|categories)\b.*?\
 _MEANS = re.compile(r"\bwhat\s+(does|is)\s+(the\s+)?(field\s+)?[\"“']?(?P<field>[a-z][a-z0-9_]*)[\"”']?\s+(mean|contain|stand for|field)\b", re.I)
 
 GLOSSARY = {
-    "buffer": "A buffer is the area within a set distance of features — e.g. a 200 m buffer around lakes. Try: “Make a 200 m buffer around the lakes”.",
-    "crs": "A CRS (coordinate reference system) defines how coordinates map to places on Earth. Your layers are stored in a metric CRS, so distances are in metres.",
-    "layer": "A layer is one set of map features of the same kind (signals, wards, pipelines) with the same attribute fields.",
-    "attribute": "Attributes are the columns of a layer (type, ward_no, height…). You can filter by them: “signals where type is Not Working”.",
-    "polygon": "Polygons are area features (wards, zones, lakes); points are single locations (signals); lines are networks (pipelines, roads).",
-    "spatial join": "A spatial join combines layers by location — e.g. counting signals inside each ward: “How many signals are there in each ward?”.",
+    "buffer": "A buffer is the area within a set distance of features. Ask e.g. “Make a 200 m buffer around <layer>”.",
+    "crs": "A CRS (coordinate reference system) defines how coordinates map to places on Earth. Distances here are measured in metres.",
+    "layer": "A layer is one set of map features of the same kind, all with the same attribute fields. Ask “what layers do I have?” to see yours.",
+    "attribute": "Attributes are the columns of a layer. Ask “what fields does <layer> have?” to see them and their values.",
+    "polygon": "Polygons are area features, points are single locations and lines are networks. Ask “what layers do I have?” to see each layer's type.",
+    "spatial join": "A spatial join combines layers by location — e.g. counting point features inside each area of a polygon layer.",
     "gis": "GIS (Geographic Information System) stores and analyses data by location. Here you can ask about your municipality's layers in plain language and see results on the map.",
 }
 _GLOSSARY = re.compile(r"^\s*what\s+(is|are|does)\s+(an?\s+)?(?P<term>buffer|crs|coordinate reference system|layer|attribute|polygon|spatial join|gis)\b", re.I)
@@ -224,13 +224,15 @@ def converse(message: str, layers: List[LayerInfo]) -> Optional[PlanResult]:
     if _THANKS.search(text):
         return PlanResult(answer_kind="answer", explanation="You're welcome! Ask another question any time.", options=ask(sugg[:2]))
     if _HELP.search(text):
+        # Examples are generated from THIS municipality's layers (and only
+        # ones that plan), never fixed layer names.
+        examples = "; ".join(f"“{q}”" for q in suggestions(layers, limit=6))
         return PlanResult(answer_kind="answer", explanation=(
             "I answer questions about your municipality's GIS layers and show the results on the map and in the "
-            "Attribute Table. I can: find features by their values (“signals that are Not Working”), count and "
-            "group them (“signals by type”, “in each ward”), filter and rank areas (“wards with more than 100 "
-            "signals”), measure distance to other layers (“within 100 m of the BRTS”), find the nearest features, "
-            "make buffers, and follow up on a previous answer (“only those in ward 5”). I can also tell you which "
-            "layers, fields and values you have."), options=ask(sugg))
+            "Attribute Table: find features by their values, count and group them, filter and rank areas, "
+            "measure distance to other layers, find the nearest features, make buffers, and follow up on a "
+            "previous answer (“only those in …”). I can also tell you which layers, fields and values you have."
+            + (f" Examples that work on your data: {examples}." if examples else "")), options=ask(sugg))
 
     term = _GLOSSARY.search(text)
     if term:
@@ -363,6 +365,12 @@ _NEAR_RULE = re.compile(r"\b(?:use|treat|take|consider)?\s*(?P<d>\d+(?:\.\d+)?)\
 _RULE_LEAD = re.compile(r"^\s*(?:only\s+show|show\s+only|only|just|show|use|consider|include\s+only)\s+", re.I)
 
 
+def _rule_example(layers: List[LayerInfo]) -> Optional[str]:
+    """A rule example from the real data: "show signal that are Fixed time"."""
+    q = next((q for q in suggestions(layers, limit=8) if " that are " in q), None)
+    return q[0].lower() + q[1:] if q else None
+
+
 def parse_instruction(message: str, layers: List[LayerInfo]) -> Optional[PlanResult]:
     """Turns "from now on ..." / "always ..." / "forget my instructions"
     into a saved rule (or clears them). The rule part is planned by the
@@ -389,8 +397,9 @@ def parse_instruction(message: str, layers: List[LayerInfo]) -> Optional[PlanRes
             answer_kind="clarification",
             explanation="Rule not understood.",
             clarification=(
-                "I couldn't turn that into a rule. Use a layer and a condition, e.g. "
-                "“From now on only show signals that are Working” or “Always use 200 m for near”."
+                "I couldn't turn that into a rule. Use a layer and a condition"
+                + (f", e.g. “From now on only {_rule_example(layers)}”" if _rule_example(layers) else "")
+                + " or “Always use 200 m for near”."
             ),
         )
     op = plan.operation

@@ -161,10 +161,10 @@ async def _plan(body: PlanRequest, cancel: threading.Event) -> PlanResult:
 
     # Conversation that is not a map query: greetings, help, questions about
     # the layers / fields / values, GIS terms — answered from the catalog.
-    if not follow:
-        talked = converse(message, body.layers)
-        if talked is not None:
-            return talked
+    # Checked even right after an answer: "what can you do?" never refines it.
+    talked = converse(message, body.layers)
+    if talked is not None:
+        return talked
 
     # Ask instead of guessing; refuse what would silently drop a condition.
     asked = preflight(message)

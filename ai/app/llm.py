@@ -250,8 +250,7 @@ def _fit_messages(
 CHAT_SYSTEM = """You are the AI Assistant of a municipal GIS platform{where}.
 Reply in 1-3 short, friendly sentences, in the user's language.
 You do not see the map data in this reply: NEVER state numbers, places,
-feature names or results. If the user wants data, tell them how to ask,
-e.g. "Show signals in ward 5" or "How many landmarks are there in each zone?".
+feature names or results. If the user wants data, tell them how to ask{examples}.
 Available layers: {layers}."""
 
 
@@ -266,9 +265,12 @@ def chat_reply(
     city?"). Short, grounded in what the platform can do; no data claims."""
     if not available():
         raise LLMUnavailable(f"The local model '{config.LLM_MODEL}' is not ready yet.")
+    from .guide import suggestions  # examples from THIS municipality's layers
+    examples = suggestions(layers, limit=2)
     system = CHAT_SYSTEM.format(
         where=f" for {municipality_name}" if municipality_name else "",
         layers=", ".join(l.name for l in layers) or "none",
+        examples=", e.g. " + " or ".join(f'"{q}"' for q in examples) if examples else "",
     )
     messages = [{"role": "system", "content": system}]
     messages += [{"role": t.role, "content": t.content} for t in history[-4:]]

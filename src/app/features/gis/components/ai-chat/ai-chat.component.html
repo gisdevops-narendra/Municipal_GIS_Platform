@@ -177,7 +177,7 @@
       [(ngModel)]="draft"
       name="draft"
       autocomplete="off"
-      placeholder="e.g. schools within 1 km of hospitals"
+      [placeholder]="examples().length ? 'e.g. ' + examples()[0] : 'Ask about your GIS layers…'"
       [disabled]="sending()"
     />
     @if (sending()) {

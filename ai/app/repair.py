@@ -156,13 +156,22 @@ def _similar(a: str, b: str) -> bool:
     are different things."""
     if a == b:
         return True
-    if min(len(a), len(b)) < 5:
-        return False
+    if min(len(a), len(b)) < 5 or a[0] != b[0]:
+        return False  # typos rarely change the first letter ("there" is not "other")
     return SequenceMatcher(None, a, b).ratio() >= 0.8
 
 
+# Question words that are never a misspelt data value: "how many apartment
+# are there" must not read "there" as the landmark type "Other".
+_FUNCTION_WORDS = frozenset(
+    "there where here their these those which whose whom what when while many much "
+    "about above below after before other others every each some any all show find "
+    "count number total list give tell please".split()
+)
+
+
 def _has_word(word: str, words) -> bool:
-    return word in words or any(_similar(word, w) for w in words)
+    return word in words or any(_similar(word, w) for w in words if w not in _FUNCTION_WORDS)
 
 
 _GENERIC = {"layer", "data", "proposed", "existing", "gis", "map", "the", "of", "and"}
