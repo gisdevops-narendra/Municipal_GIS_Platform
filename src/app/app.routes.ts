@@ -107,14 +107,9 @@ export const routes: Routes = [
     title: 'Module Access — Municipal GIS Platform'
   },
   {
+    // Uploads are managed on the GIS Layers page now; keep old links working.
     path: 'gis/uploads',
-    canActivate: [authGuard, staffOnlyGuard],
-    data: { reuse: true },
-    loadComponent: () =>
-      import('./features/gis/pages/gis-uploads/gis-uploads.component').then(
-        (m) => m.GisUploadsComponent
-      ),
-    title: 'GIS Data — Municipal GIS Platform'
+    redirectTo: 'gis/layers'
   },
   {
     path: 'gis/layers',

@@ -8,13 +8,20 @@
           <span class="eyebrow">GIS</span>
           <h1 class="layers-card__heading">GIS Layers</h1>
         </div>
+        @if (canUpload) {
+          <button pButton type="button" icon="pi pi-upload" label="Upload Data" (click)="openWizard()"></button>
+        }
       </div>
 
-      @if (layers().length > 0) {
+      @if (rows().length > 0) {
         <div class="layers-card__stats">
           <div class="layers-stat">
-            <span class="layers-stat__value">{{ totalLayers() }}</span>
-            <span class="layers-stat__label">Total Layers</span>
+            <span class="layers-stat__value">{{ publishedCount() }}</span>
+            <span class="layers-stat__label">Published Layers</span>
+          </div>
+          <div class="layers-stat">
+            <span class="layers-stat__value">{{ actionCount() }}</span>
+            <span class="layers-stat__label">Needs Action</span>
           </div>
           <div class="layers-stat">
             <span class="layers-stat__value">{{ departmentLayerCount() }}</span>
@@ -35,23 +42,34 @@
             [ngModel]="searchTerm()"
             (ngModelChange)="onSearchChange($event)"
           />
+          <p-selectbutton
+            [options]="statusOptions"
+            optionLabel="label"
+            optionValue="value"
+            [allowEmpty]="false"
+            [ngModel]="statusFilter()"
+            (ngModelChange)="onStatusFilterChange($event)"
+          />
         </div>
       }
 
       @if (pageError(); as message) {
         <p-message severity="error" [text]="message" styleClass="w-full layers-card__message" />
       }
+      @if (uploadsError(); as message) {
+        <p-message severity="warn" [text]="message" styleClass="w-full layers-card__message" />
+      }
 
-      @if (loading()) {
+      @if (loading() && !hasLoaded()) {
         <p class="layers-card__lede">Loading layers…</p>
-      } @else if (layers().length === 0) {
-        <p class="layers-card__lede">No GIS layers are visible to you yet.</p>
-      } @else if (filteredLayers().length === 0) {
-        <p class="layers-card__lede">No layers match "{{ searchTerm() }}".</p>
+      } @else if (rows().length === 0) {
+        <p class="layers-card__lede">No GIS layers yet.{{ canUpload ? ' Click "Upload Data" to add your first layer.' : '' }}</p>
+      } @else if (filteredRows().length === 0) {
+        <p class="layers-card__lede">No layers match the current search or filter.</p>
       } @else {
         <div class="layers-card__table">
           <p-table
-            [value]="pagedLayers()"
+            [value]="pagedRows()"
             styleClass="layers-table"
             [rowHover]="true"
             [scrollable]="true"
@@ -62,84 +80,124 @@
               <th>Layer Name</th>
               <th>Department</th>
               <th>Ownership</th>
-              <th>Geometry Type</th>
-              <th>Status</th>
+              <th>Geometry</th>
               <th>Version</th>
+              <th>Status</th>
+              <th>Last Activity</th>
               <th>Actions</th>
             </tr>
           </ng-template>
-          <ng-template pTemplate="body" let-layer>
+          <ng-template pTemplate="body" let-row>
             <tr>
-              <td>{{ layer.name }}</td>
-              <td>{{ layer.departmentName || '—' }}</td>
+              <td>{{ row.name }}</td>
+              <td>{{ row.departmentName || '—' }}</td>
               <td>
                 <p-tag
-                  [severity]="layer.ownershipType === 'CANONICAL' ? 'info' : 'success'"
-                  [value]="layer.ownershipType === 'CANONICAL' ? 'Canonical' : 'Department'"
+                  [severity]="row.ownershipType === 'CANONICAL' ? 'info' : 'success'"
+                  [value]="row.ownershipType === 'CANONICAL' ? 'Canonical' : 'Department'"
                 ></p-tag>
               </td>
-              <td>{{ geometryLabel(layer) }}</td>
-              <td><p-tag severity="success" value="Published"></p-tag></td>
-              <td>v{{ layer.version }}</td>
-              <td class="layers-table__actions">
-                <button
-                  pButton
-                  type="button"
-                  icon="pi pi-eye"
-                  class="p-button-text p-button-sm p-button-rounded"
-                  aria-label="View"
-                  pTooltip="View"
-                  tooltipPosition="top"
-                  (click)="viewDetail(layer)"
-                ></button>
-                @if (canManage(layer)) {
-                  @if (canStyle()) {
-                  <button
-                    pButton
-                    type="button"
-                    icon="pi pi-palette"
-                    class="p-button-text p-button-sm p-button-rounded"
-                    aria-label="Style"
-                    pTooltip="Style"
-                    tooltipPosition="top"
-                    (click)="openStyle(layer)"
-                  ></button>
+              <td>{{ geometryLabel(row) }}</td>
+              <td>{{ row.layer ? 'v' + row.layer.version : '—' }}</td>
+              <td>
+                <div class="layers-table__status">
+                  @if (row.layer) {
+                    <p-tag severity="success" value="Published"></p-tag>
+                  }
+                  @if (row.pending; as pending) {
+                    <p-tag
+                      [severity]="statusSeverity(pending.status)"
+                      [value]="(row.layer ? 'Update: ' : '') + statusLabel(pending.status)"
+                      [pTooltip]="pending.errorMessage || pending.review.rejectionReason || pending.filename"
+                      tooltipPosition="top"
+                    ></p-tag>
+                  }
+                </div>
+              </td>
+              <td class="layers-table__nowrap">{{ row.lastActivity ? (row.lastActivity | date: 'd MMM y, h:mm a') : '—' }}</td>
+              <td>
+                <div class="layers-table__actions">
+                  @if (row.pending; as pending) {
+                    @if (canValidate(pending)) {
+                      <button pButton type="button" label="Retry Validate" class="p-button-text p-button-sm"
+                        [loading]="isBusy(pending, 'validate')" (click)="retryValidate(pending)"></button>
+                    }
+                    @if (canSubmitForReview(pending)) {
+                      <button pButton type="button" label="Submit for Review" class="p-button-text p-button-sm"
+                        [loading]="isBusy(pending, 'submit')" (click)="submitForReview(pending)"></button>
+                    }
+                    @if (canApproveOrReject(pending)) {
+                      <button pButton type="button" label="Approve" class="p-button-text p-button-sm"
+                        [loading]="isBusy(pending, 'approve')" (click)="approve(pending)"></button>
+                      <button pButton type="button" label="Reject" class="p-button-text p-button-sm p-button-danger"
+                        (click)="openRejectDialog(pending)"></button>
+                    }
+                    @if (canPublish(pending)) {
+                      <button pButton type="button" label="Publish" class="p-button-text p-button-sm"
+                        [loading]="isBusy(pending, 'publish')" (click)="publish(pending)"></button>
+                    }
                   }
                   <button
                     pButton
                     type="button"
-                    icon="pi pi-shield"
+                    icon="pi pi-eye"
                     class="p-button-text p-button-sm p-button-rounded"
-                    aria-label="Permissions"
-                    pTooltip="Permissions"
+                    aria-label="View"
+                    pTooltip="View details & upload history"
                     tooltipPosition="top"
-                    (click)="openPermissions(layer)"
+                    (click)="viewDetail(row)"
                   ></button>
-                  <button
-                    pButton
-                    type="button"
-                    icon="pi pi-download"
-                    class="p-button-text p-button-sm p-button-rounded"
-                    aria-label="Export"
-                    pTooltip="Export"
-                    tooltipPosition="top"
-                    [loading]="exporting() === layer.id"
-                    (click)="openExportMenu($event, layer)"
-                  ></button>
-                }
-                @if (isOwner) {
-                  <button
-                    pButton
-                    type="button"
-                    icon="pi pi-trash"
-                    class="p-button-text p-button-sm p-button-rounded p-button-danger"
-                    aria-label="Delete"
-                    pTooltip="Delete"
-                    tooltipPosition="top"
-                    [loading]="deleting() === layer.id"
-                    (click)="deleteLayer(layer)"
-                  ></button>
-                }
+                  @if (row.layer; as layer) {
+                    @if (canManage(row)) {
+                      @if (canStyle()) {
+                        <button
+                          pButton
+                          type="button"
+                          icon="pi pi-palette"
+                          class="p-button-text p-button-sm p-button-rounded"
+                          aria-label="Style"
+                          pTooltip="Style"
+                          tooltipPosition="top"
+                          (click)="openStyle(layer)"
+                        ></button>
+                      }
+                      <button
+                        pButton
+                        type="button"
+                        icon="pi pi-shield"
+                        class="p-button-text p-button-sm p-button-rounded"
+                        aria-label="Permissions"
+                        pTooltip="Permissions"
+                        tooltipPosition="top"
+                        (click)="openPermissions(layer)"
+                      ></button>
+                      <button
+                        pButton
+                        type="button"
+                        icon="pi pi-download"
+                        class="p-button-text p-button-sm p-button-rounded"
+                        aria-label="Export"
+                        pTooltip="Export"
+                        tooltipPosition="top"
+                        [loading]="exporting() === layer.id"
+                        (click)="openExportMenu($event, layer)"
+                      ></button>
+                    }
+                    @if (isOwner) {
+                      <button
+                        pButton
+                        type="button"
+                        icon="pi pi-trash"
+                        class="p-button-text p-button-sm p-button-rounded p-button-danger"
+                        aria-label="Delete"
+                        pTooltip="Delete"
+                        tooltipPosition="top"
+                        [loading]="deleting() === layer.id"
+                        (click)="deleteLayer(layer)"
+                      ></button>
+                    }
+                  }
+                </div>
               </td>
             </tr>
           </ng-template>
@@ -147,7 +205,7 @@
         </div>
         <p-paginator
           [rows]="pageSize()"
-          [totalRecords]="filteredLayers().length"
+          [totalRecords]="filteredRows().length"
           [first]="first()"
           [rowsPerPageOptions]="pageSizes"
           [alwaysShow]="false"
@@ -159,50 +217,225 @@
   </div>
 </main>
 
+<!-- Layer details + upload history -->
 <p-dialog
-  [visible]="!!detailLayer()"
+  [visible]="!!detailRow()"
   (visibleChange)="!$event ? closeDetail() : null"
   [modal]="true"
   header="Layer Details"
-  [style]="{ width: '480px' }"
+  [style]="{ width: '620px' }"
+  [breakpoints]="{ '680px': '95vw' }"
 >
-  @if (detailLayer(); as layer) {
+  @if (detailRow(); as row) {
     <dl class="layers-detail">
       <div class="layers-detail__row">
         <dt>Name</dt>
-        <dd>{{ layer.name }} <span class="layers-detail__mono">({{ layer.code }})</span></dd>
+        <dd>{{ row.name }} <span class="layers-detail__mono">({{ row.code }})</span></dd>
       </div>
       <div class="layers-detail__row">
         <dt>Ownership</dt>
-        <dd>{{ layer.ownershipType === 'CANONICAL' ? 'Canonical' : 'Department' }}</dd>
+        <dd>{{ row.ownershipType === 'CANONICAL' ? 'Canonical' : 'Department' }}</dd>
       </div>
-      @if (layer.departmentName) {
+      @if (row.departmentName) {
         <div class="layers-detail__row">
           <dt>Department</dt>
-          <dd>{{ layer.departmentName }}</dd>
+          <dd>{{ row.departmentName }}</dd>
         </div>
       }
       <div class="layers-detail__row">
         <dt>Geometry</dt>
-        <dd>{{ geometryLabel(layer) }}</dd>
+        <dd>{{ geometryLabel(row) }}</dd>
       </div>
-      <div class="layers-detail__row">
-        <dt>Version</dt>
-        <dd>v{{ layer.version }}</dd>
-      </div>
-      <div class="layers-detail__row">
-        <dt>GeoServer</dt>
-        <dd class="layers-detail__mono">{{ layer.geoserverWorkspace }}:{{ layer.geoserverLayer }}</dd>
-      </div>
-      @if (layer.description) {
+      @if (row.layer; as layer) {
         <div class="layers-detail__row">
-          <dt>Description</dt>
-          <dd>{{ layer.description }}</dd>
+          <dt>Version</dt>
+          <dd>v{{ layer.version }}</dd>
+        </div>
+        <div class="layers-detail__row">
+          <dt>GeoServer</dt>
+          <dd class="layers-detail__mono">{{ layer.geoserverWorkspace }}:{{ layer.geoserverLayer }}</dd>
+        </div>
+        @if (layer.description) {
+          <div class="layers-detail__row">
+            <dt>Description</dt>
+            <dd>{{ layer.description }}</dd>
+          </div>
+        }
+      } @else {
+        <div class="layers-detail__row">
+          <dt>Status</dt>
+          <dd>Not published yet</dd>
         </div>
       }
     </dl>
+
+    <h3 class="layers-history__heading">Upload History</h3>
+    @if (row.uploads.length === 0) {
+      <p class="layers-card__lede">No uploads — this layer was not created through an upload.</p>
+    } @else {
+      <ul class="layers-history">
+        @for (upload of row.uploads; track upload.id) {
+          <li class="layers-history__item">
+            <div class="layers-history__main">
+              <span class="layers-history__file" [title]="upload.filename">{{ upload.filename }}</span>
+              <span class="layers-history__meta">
+                {{ formatLabel(upload.fileFormat) }} · {{ upload.validation.featureCount ?? '—' }} features ·
+                {{ upload.createdAt | date: 'd MMM y, h:mm a' }}
+              </span>
+            </div>
+            <p-tag [severity]="statusSeverity(upload.status)" [value]="statusLabel(upload.status)"></p-tag>
+            <button pButton type="button" label="Details" class="p-button-text p-button-sm" (click)="viewUpload(upload)"></button>
+          </li>
+        }
+      </ul>
+    }
   }
 </p-dialog>
+
+<!-- Single upload: validation + automated review -->
+<p-dialog
+  [visible]="!!detailUpload()"
+  (visibleChange)="!$event ? closeUpload() : null"
+  [modal]="true"
+  header="Upload Details"
+  [style]="{ width: '560px' }"
+  [breakpoints]="{ '600px': '95vw' }"
+>
+  @if (detailUpload(); as upload) {
+    <dl class="layers-detail">
+      <div class="layers-detail__row">
+        <dt>File</dt>
+        <dd class="layers-detail__break">{{ upload.filename }} ({{ formatLabel(upload.fileFormat) }}, {{ fileSizeLabel(upload.fileSize) }})</dd>
+      </div>
+      <div class="layers-detail__row">
+        <dt>Layer</dt>
+        <dd>{{ upload.layer.name }} <span class="layers-detail__mono">({{ upload.layer.code }})</span></dd>
+      </div>
+      <div class="layers-detail__row">
+        <dt>Status</dt>
+        <dd><p-tag [severity]="statusSeverity(upload.status)" [value]="statusLabel(upload.status)"></p-tag></dd>
+      </div>
+      @if (upload.errorMessage) {
+        <div class="layers-detail__row">
+          <dt>Error</dt>
+          <dd>{{ upload.errorMessage }}</dd>
+        </div>
+      }
+      @if (upload.validation.summary; as summary) {
+        <div class="layers-detail__row">
+          <dt>CRS</dt>
+          <dd>{{ summary.sourceCrs || '—' }} → {{ summary.targetCrs }}</dd>
+        </div>
+        <div class="layers-detail__row">
+          <dt>Geometry</dt>
+          <dd>{{ summary.geometryType || '—' }} ({{ summary.featureCount }} features)</dd>
+        </div>
+        @if (summary.warnings.length > 0) {
+          <div class="layers-detail__row">
+            <dt>Warnings</dt>
+            <dd>
+              <ul class="layers-detail__list">
+                @for (warning of summary.warnings; track warning) {
+                  <li>{{ warning }}</li>
+                }
+              </ul>
+            </dd>
+          </div>
+        }
+      }
+      @if (reviewLoading()) {
+        <div class="layers-detail__row">
+          <dt>Automated review</dt>
+          <dd class="layers-review__muted"><i class="pi pi-spin pi-spinner"></i> Checking geometry, location, schema and duplicates…</dd>
+        </div>
+      } @else if (reviewError()) {
+        <div class="layers-detail__row">
+          <dt>Automated review</dt>
+          <dd class="layers-review__muted">{{ reviewError() }}</dd>
+        </div>
+      } @else {
+        @if (review(); as report) {
+          <div class="layers-detail__row">
+            <dt>Automated review</dt>
+            <dd>
+              <div class="layers-review__head">
+                <p-tag [severity]="riskSeverity(report.riskLevel)" [value]="'Risk ' + report.riskLevel + ' · ' + report.riskScore + '/100'"></p-tag>
+                <span>{{ report.summary }}</span>
+              </div>
+              @if (report.findings.length) {
+                <ul class="layers-review__list">
+                  @for (f of report.findings; track f.check + $index) {
+                    <li class="layers-review__item" [attr.data-severity]="f.severity">
+                      <strong>{{ f.title }}</strong>
+                      <span>{{ f.detail }}</span>
+                    </li>
+                  }
+                </ul>
+              }
+            </dd>
+          </div>
+        }
+      }
+      @if (upload.review.rejectionReason) {
+        <div class="layers-detail__row">
+          <dt>Rejection Reason</dt>
+          <dd>{{ upload.review.rejectionReason }}</dd>
+        </div>
+      }
+      <div class="layers-detail__row">
+        <dt>Uploaded</dt>
+        <dd>{{ upload.createdAt | date: 'd MMM y, h:mm a' }}</dd>
+      </div>
+    </dl>
+  }
+</p-dialog>
+
+<p-dialog
+  [visible]="!!rejectTarget()"
+  (visibleChange)="!$event ? rejectTarget.set(null) : null"
+  [modal]="true"
+  header="Reject Upload"
+  [style]="{ width: '440px' }"
+  [breakpoints]="{ '600px': '95vw' }"
+>
+  @if (rejectTarget(); as target) {
+    <div class="layers-reject">
+      <p class="layers-card__lede">Reject "{{ target.layer.name }}"? Provide a reason so the uploader knows what to fix.</p>
+      <textarea
+        pTextarea
+        class="w-full"
+        rows="3"
+        [ngModel]="rejectionReason()"
+        (ngModelChange)="rejectionReason.set($event)"
+        placeholder="Reason for rejection"
+      ></textarea>
+      <div class="layers-reject__actions">
+        <button pButton type="button" label="Cancel" class="p-button-text" (click)="rejectTarget.set(null)"></button>
+        <button
+          pButton
+          type="button"
+          label="Reject"
+          class="p-button-danger"
+          [disabled]="rejectionReason().trim().length < 3"
+          (click)="confirmReject()"
+        ></button>
+      </div>
+    </div>
+  }
+</p-dialog>
+
+@if (wizardVisible() && currentUser(); as user) {
+  <p-dialog
+    [visible]="wizardVisible()"
+    (visibleChange)="wizardVisible.set($event)"
+    [modal]="true"
+    header="Upload GIS Data"
+    [style]="{ width: 'auto', maxWidth: '95vw' }"
+    [breakpoints]="{ '600px': '95vw' }"
+  >
+    <app-upload-wizard [currentUser]="user" (closed)="onWizardClosed()" (submittedForReview)="onWizardSubmitted()" />
+  </p-dialog>
+}
 
 <p-dialog
   [visible]="!!styleLayer()"

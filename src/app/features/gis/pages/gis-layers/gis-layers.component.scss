@@ -174,6 +174,127 @@ app-site-footer {
   color: var(--color-ink-500);
 }
 
+.layers-detail__break {
+  overflow-wrap: anywhere;
+}
+
+.layers-detail__list {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.layers-table__status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.layers-table__nowrap {
+  white-space: nowrap;
+}
+
+/* ---------- upload history (layer details dialog) ---------- */
+.layers-history__heading {
+  font-size: 14px;
+  margin: 22px 0 10px;
+}
+
+.layers-history {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--color-line);
+}
+
+.layers-history__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.layers-history__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.layers-history__file {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layers-history__meta {
+  font-size: 11.5px;
+  color: var(--color-ink-500);
+}
+
+/* ---------- automated review ---------- */
+.layers-review__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.layers-review__muted {
+  color: var(--color-ink-500);
+}
+
+.layers-review__list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.layers-review__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0 6px 10px;
+  border-left: 3px solid var(--color-line-strong);
+  font-size: 0.85rem;
+
+  & + & {
+    margin-top: 6px;
+  }
+
+  span {
+    color: var(--color-ink-700);
+  }
+
+  &[data-severity='high'] {
+    border-left-color: var(--color-error-600);
+  }
+
+  &[data-severity='medium'] {
+    border-left-color: var(--color-accent-600);
+  }
+
+  &[data-severity='low'] {
+    border-left-color: var(--color-primary-500);
+  }
+}
+
+/* ---------- reject dialog ---------- */
+.layers-reject {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.layers-reject__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 @media (max-width: 720px) {
   .layers-card {
     padding: 24px 18px 28px;
