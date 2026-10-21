@@ -1,200 +1,253 @@
 <div class="aic">
-  <p class="aic__lede">
-    Ask a question about your GIS data in plain language — find features,
-    count or total them per ward, find the nearest, buffer, or route. Results
-    appear on the map and in the Attribute Table.
-  </p>
-
-  @if (messages().length === 0 && examples().length) {
-    <div class="aic__examples">
-      <span class="aic__examples-label">Try</span>
-      @for (ex of examples(); track ex) {
-        <button type="button" class="aic__chip" (click)="useExample(ex)">{{ ex }}</button>
+  <div class="aic__bar">
+    <span class="aic__status" [class.is-busy]="sending()">
+      <span class="aic__status-dot" aria-hidden="true"></span>
+      {{ sending() ? 'Working…' : 'Ready' }}
+    </span>
+    <div class="aic__bar-actions">
+      @if (isOwner()) {
+        <button type="button" class="aic__icon-btn" title="Question log" aria-label="Question log" (click)="openLog()">
+          <i class="pi pi-list" aria-hidden="true"></i>
+        </button>
       }
+      <button type="button" class="aic__icon-btn" title="Your chats" aria-label="Your chats" (click)="openHistory()">
+        <i class="pi pi-history" aria-hidden="true"></i>
+      </button>
+      <button type="button" class="aic__new" [disabled]="messages().length === 0 || sending()" (click)="reset()">
+        <i class="pi pi-plus" aria-hidden="true"></i> New chat
+      </button>
     </div>
-  }
+  </div>
 
-  <div class="aic__thread">
-    @for (msg of messages(); track $index) {
-      <div class="aic__msg" [class.aic__msg--user]="msg.role === 'user'" [class.aic__msg--error]="msg.error">
-        @if (msg.pending) {
-          <span class="aic__typing"><i class="pi pi-spin pi-spinner"></i> Thinking…</span>
-        } @else {
-          <p class="aic__msg-text">{{ msg.role === 'assistant' ? mainText(msg) : msg.content }}</p>
-          @if (msg.narrating) {
-            <span class="aic__wording"><i class="pi pi-spin pi-spinner"></i> Writing a summary…</span>
-          } @else if (msg.narration) {
-            <span class="aic__wording" title="Worded by the local AI model from the computed numbers; every number was checked against them.">
-              <i class="pi pi-sparkles"></i> AI-worded from the computed result
-            </span>
-          }
-
-          @if (msg.response?.answerKind === 'clarification' && msg.response?.clarification) {
-            <p-message severity="warn" [text]="msg.response!.clarification!" styleClass="w-full" />
-          }
-          @for (note of msg.response?.notes ?? []; track note) {
-            <p class="aic__note"><i class="pi pi-info-circle" aria-hidden="true"></i> {{ note }}</p>
-          }
-          @if (msg.response?.options?.length) {
-            <div class="aic__choices">
-              @for (option of msg.response!.options!; track option.label) {
-                <button type="button" class="aic__chip" [disabled]="sending()" (click)="choose(option)">{{ option.label }}</button>
-              }
-            </div>
-          }
-
-          @if (msg.response?.aggregate; as agg) {
-            <div class="aic__agg">
-              <div class="aic__agg-head">
-                <span>{{ agg.groupLabel ?? 'All features' }}</span>
-                <span>{{ metricTitle(msg.response!) }}</span>
-              </div>
-              @for (row of agg.rows.slice(0, 15); track $index) {
-                <div class="aic__agg-row">
-                  <span class="aic__agg-label" [title]="row.group ?? '(blank)'">{{ agg.groupLabel ? (row.group ?? '(blank)') : 'Total' }}</span>
-                  <span class="aic__agg-bar"><span [style.width.%]="barWidth(msg.response!, row.value)"></span></span>
-                  <span class="aic__agg-value">{{ num(row.value) }}</span>
-                </div>
-              }
-              @if (agg.rows.length > 15 || agg.truncated) {
-                <span class="aic__trunc">+ {{ agg.rows.length - 15 > 0 ? agg.rows.length - 15 : '' }} more group(s)</span>
-              }
-            </div>
-          }
-
-          @if (msg.response?.nearest; as near) {
-            <ol class="aic__list">
-              @for (item of near.items; track item.id) {
-                <li><span>{{ item.label ?? '#' + item.id }}</span><strong>{{ dist(item.distanceM) }}</strong></li>
-              }
-            </ol>
-            <span class="aic__trunc">Straight-line distance from {{ near.referenceLabel && near.referenceCount === 1 ? near.referenceLabel : num(near.referenceCount) + ' ' + near.referenceLayer + ' features' }}</span>
-          }
-
-          @if (msg.response?.buffer; as buf) {
-            <ul class="aic__stats">
-              <li><span>Buffer width</span><strong>{{ dist(buf.distanceM) }}</strong></li>
-              <li><span>Features buffered</span><strong>{{ num(buf.sources) }}</strong></li>
-              <li><span>Area covered</span><strong>{{ area(buf.areaM2) }}</strong></li>
-            </ul>
-          }
-
-          @if (msg.response?.route; as rt) {
-            <ul class="aic__stats">
-              <li><span>From</span><strong>{{ rt.from.label }}</strong></li>
-              <li><span>To</span><strong>{{ rt.to.label }}</strong></li>
-              <li><span>Road distance</span><strong>{{ dist(rt.lengthM) }}</strong></li>
-              <li><span>Network</span><strong>{{ rt.networkLayer }}</strong></li>
-            </ul>
-          }
-
-          @if (msg.response?.serviceArea; as sa) {
-            <ul class="aic__stats">
-              <li><span>From</span><strong>{{ sa.origin.label }}</strong></li>
-              <li><span>Reach</span><strong>{{ dist(sa.distanceM) }} by road</strong></li>
-              <li><span>Roads reachable</span><strong>{{ dist(sa.roadLengthM) }}</strong></li>
-            </ul>
-          }
-
-          @if (msg.response?.result; as result) {
-            <div class="aic__result">
-              <div class="aic__result-head">
-                <span class="aic__count">{{ result.matched }}</span>
-                <span>{{ result.matched === 1 ? 'feature' : 'features' }} in
-                  <strong>{{ result.layerName }}</strong>
-                  @if (result.truncated) { <span class="aic__trunc">(showing first {{ result.geometries.length }})</span> }
-                </span>
-              </div>
-              @if (result.matched > 0) {
-                <div class="aic__result-actions">
-                  <span class="aic__result-hint">Open in the Attribute Table below</span>
-                  <button pButton type="button" class="p-button-text p-button-sm" icon="pi pi-times" label="Clear" (click)="clearResults()"></button>
-                </div>
-              }
-            </div>
-          }
-
-          @if (msg.response?.operation) {
-            <details class="aic__detail">
-              <summary>How this was interpreted</summary>
-              @if (msg.response?.answer && msg.response?.explanation) {
-                <p class="aic__ctx">Plan: {{ msg.response!.explanation }}</p>
-              }
-              <ul class="aic__op">
-                @for (bit of operationSummary(msg.response!); track bit) {
-                  <li>{{ bit }}</li>
-                }
-              </ul>
-              @if (msg.response?.compiledSql) {
-                <p class="aic__sql-label">Query the platform compiled and ran (read-only):</p>
-                <pre class="aic__sql">{{ msg.response!.compiledSql }}</pre>
-              }
-              @if (msg.response?.usedContext?.length) {
-                <p class="aic__ctx">Grounded in: {{ msg.response!.usedContext.join(' · ') }}</p>
-              }
-            </details>
-          }
-
-          @if (msg.response?.logId) {
-            <div class="aic__rate">
-              @if (msg.feedback) {
-                <span>{{ msg.feedback === 1 ? 'Thanks — marked helpful.' : 'Thanks — the Owner can review this answer.' }}</span>
-              } @else {
-                <span>Helpful?</span>
-                <button type="button" class="aic__rate-btn" aria-label="Helpful" (click)="rate($index, true)">
-                  <i class="pi pi-thumbs-up" aria-hidden="true"></i>
-                </button>
-                <button type="button" class="aic__rate-btn" aria-label="Not helpful" (click)="rate($index, false)">
-                  <i class="pi pi-thumbs-down" aria-hidden="true"></i>
-                </button>
-              }
-            </div>
-          }
+  <div class="aic__thread" #thread>
+    @if (messages().length === 0) {
+      <div class="aic__welcome">
+        <span class="aic__welcome-mark" aria-hidden="true"><i class="pi pi-sparkles"></i></span>
+        <h3 class="aic__welcome-title">Ask your GIS data</h3>
+        <p class="aic__welcome-text">
+          Find features, count or total them per ward, find the nearest, buffer or route —
+          in plain language. Results appear on the map and in the Attribute Table.
+        </p>
+        @if (examples().length) {
+          <span class="aic__section-label">Try asking</span>
+          <div class="aic__suggestions">
+            @for (ex of examples(); track ex) {
+              <button type="button" class="aic__suggestion" (click)="useExample(ex)">
+                <i class="pi pi-search" aria-hidden="true"></i>
+                <span>{{ ex }}</span>
+                <i class="pi pi-arrow-right aic__suggestion-go" aria-hidden="true"></i>
+              </button>
+            }
+          </div>
         }
       </div>
     }
+
+    @for (msg of messages(); track $index) {
+      @if (msg.role === 'user') {
+        <div class="aic__row aic__row--user">
+          <p class="aic__bubble aic__bubble--user">{{ msg.content }}</p>
+        </div>
+      } @else {
+        <div class="aic__row">
+          <span class="aic__avatar" [class.is-error]="msg.error" aria-hidden="true">
+            <i class="pi" [class.pi-sparkles]="!msg.error" [class.pi-exclamation-triangle]="msg.error"></i>
+          </span>
+          <div class="aic__bubble" [class.aic__bubble--error]="msg.error">
+            @if (msg.pending) {
+              <span class="aic__typing" aria-label="Thinking">
+                <span></span><span></span><span></span>
+              </span>
+            } @else {
+              <p class="aic__msg-text">{{ mainText(msg) }}</p>
+              @if (msg.narrating) {
+                <span class="aic__wording"><i class="pi pi-spin pi-spinner"></i> Writing a summary…</span>
+              } @else if (msg.narration) {
+                <span class="aic__wording" title="Worded by the local AI model from the computed numbers; every number was checked against them.">
+                  <i class="pi pi-sparkles"></i> AI-worded from the computed result
+                </span>
+              }
+
+              @if (msg.response?.answerKind === 'clarification' && msg.response?.clarification) {
+                <div class="aic__callout">
+                  <i class="pi pi-question-circle" aria-hidden="true"></i>
+                  <span>{{ msg.response!.clarification }}</span>
+                </div>
+              }
+              @for (note of msg.response?.notes ?? []; track note) {
+                <p class="aic__note"><i class="pi pi-info-circle" aria-hidden="true"></i> {{ note }}</p>
+              }
+              @if (msg.response?.options?.length) {
+                <div class="aic__choices">
+                  @for (option of msg.response!.options!; track option.label) {
+                    <button type="button" class="aic__chip" [disabled]="sending()" (click)="choose(option)">{{ option.label }}</button>
+                  }
+                </div>
+              }
+
+              @if (msg.response?.aggregate; as agg) {
+                <div class="aic__card">
+                  <div class="aic__agg-head">
+                    <span>{{ agg.groupLabel ?? 'All features' }}</span>
+                    <span>{{ metricTitle(msg.response!) }}</span>
+                  </div>
+                  @for (row of agg.rows.slice(0, 15); track $index) {
+                    <div class="aic__agg-row">
+                      <span class="aic__agg-label" [title]="row.group ?? '(blank)'">{{ agg.groupLabel ? (row.group ?? '(blank)') : 'Total' }}</span>
+                      <span class="aic__agg-bar"><span [style.width.%]="barWidth(msg.response!, row.value)"></span></span>
+                      <span class="aic__agg-value">{{ num(row.value) }}</span>
+                    </div>
+                  }
+                  @if (agg.rows.length > 15 || agg.truncated) {
+                    <span class="aic__trunc">+ {{ agg.rows.length - 15 > 0 ? agg.rows.length - 15 : '' }} more group(s)</span>
+                  }
+                </div>
+              }
+
+              @if (msg.response?.nearest; as near) {
+                <div class="aic__card">
+                  <ol class="aic__list">
+                    @for (item of near.items; track item.id) {
+                      <li><span>{{ item.label ?? '#' + item.id }}</span><strong>{{ dist(item.distanceM) }}</strong></li>
+                    }
+                  </ol>
+                  <span class="aic__trunc">Straight-line distance from {{ near.referenceLabel && near.referenceCount === 1 ? near.referenceLabel : num(near.referenceCount) + ' ' + near.referenceLayer + ' features' }}</span>
+                </div>
+              }
+
+              @if (msg.response?.buffer; as buf) {
+                <ul class="aic__card aic__stats">
+                  <li><span>Buffer width</span><strong>{{ dist(buf.distanceM) }}</strong></li>
+                  <li><span>Features buffered</span><strong>{{ num(buf.sources) }}</strong></li>
+                  <li><span>Area covered</span><strong>{{ area(buf.areaM2) }}</strong></li>
+                </ul>
+              }
+
+              @if (msg.response?.route; as rt) {
+                <ul class="aic__card aic__stats">
+                  <li><span>From</span><strong>{{ rt.from.label }}</strong></li>
+                  <li><span>To</span><strong>{{ rt.to.label }}</strong></li>
+                  <li><span>Road distance</span><strong>{{ dist(rt.lengthM) }}</strong></li>
+                  <li><span>Network</span><strong>{{ rt.networkLayer }}</strong></li>
+                </ul>
+              }
+
+              @if (msg.response?.serviceArea; as sa) {
+                <ul class="aic__card aic__stats">
+                  <li><span>From</span><strong>{{ sa.origin.label }}</strong></li>
+                  <li><span>Reach</span><strong>{{ dist(sa.distanceM) }} by road</strong></li>
+                  <li><span>Roads reachable</span><strong>{{ dist(sa.roadLengthM) }}</strong></li>
+                </ul>
+              }
+
+              @if (msg.response?.result; as result) {
+                <div class="aic__result" [class.is-empty]="result.matched === 0">
+                  <span class="aic__result-icon" aria-hidden="true"><i class="pi pi-map-marker"></i></span>
+                  <div class="aic__result-body">
+                    <span class="aic__result-count">
+                      {{ num(result.matched) }} {{ result.matched === 1 ? 'feature' : 'features' }}
+                    </span>
+                    <span class="aic__result-layer">
+                      in {{ result.layerName }}
+                      @if (result.truncated) { · showing first {{ result.geometries.length }} }
+                    </span>
+                    @if (result.matched > 0) {
+                      <span class="aic__result-hint">On the map and in the Attribute Table</span>
+                    }
+                  </div>
+                  @if (result.matched > 0) {
+                    <button type="button" class="aic__icon-btn" title="Clear from map" aria-label="Clear results" (click)="clearResults()">
+                      <i class="pi pi-times" aria-hidden="true"></i>
+                    </button>
+                  }
+                </div>
+              }
+
+              @if (msg.response?.operation) {
+                <details class="aic__detail">
+                  <summary><i class="pi pi-chevron-right" aria-hidden="true"></i> How this was interpreted</summary>
+                  @if (msg.response?.answer && msg.response?.explanation) {
+                    <p class="aic__ctx">Plan: {{ msg.response!.explanation }}</p>
+                  }
+                  <ul class="aic__op">
+                    @for (bit of operationSummary(msg.response!); track bit) {
+                      <li>{{ bit }}</li>
+                    }
+                  </ul>
+                  @if (msg.response?.compiledSql) {
+                    <p class="aic__sql-label">Query the platform compiled and ran (read-only):</p>
+                    <pre class="aic__sql">{{ msg.response!.compiledSql }}</pre>
+                  }
+                  @if (msg.response?.usedContext?.length) {
+                    <p class="aic__ctx">Grounded in: {{ msg.response!.usedContext.join(' · ') }}</p>
+                  }
+                </details>
+              }
+
+              <div class="aic__actions">
+                <button type="button" class="aic__icon-btn" [title]="copiedIndex() === $index ? 'Copied' : 'Copy answer'" aria-label="Copy answer" (click)="copy($index)">
+                  <i class="pi" [class.pi-copy]="copiedIndex() !== $index" [class.pi-check]="copiedIndex() === $index" aria-hidden="true"></i>
+                </button>
+                @if (msg.response?.logId) {
+                  @if (msg.feedback) {
+                    <span class="aic__rated">{{ msg.feedback === 1 ? 'Marked helpful' : 'Sent for review' }}</span>
+                  } @else {
+                    <button type="button" class="aic__icon-btn" title="Helpful" aria-label="Helpful" (click)="rate($index, true)">
+                      <i class="pi pi-thumbs-up" aria-hidden="true"></i>
+                    </button>
+                    <button type="button" class="aic__icon-btn" title="Not helpful" aria-label="Not helpful" (click)="rate($index, false)">
+                      <i class="pi pi-thumbs-down" aria-hidden="true"></i>
+                    </button>
+                  }
+                }
+              </div>
+            }
+          </div>
+        </div>
+      }
+    }
   </div>
 
-  @if (serviceError()) {
-    <p-message severity="error" [text]="serviceError()!" styleClass="w-full" />
-  }
+  <div class="aic__dock">
+    @if (serviceError()) {
+      <p-message severity="error" [text]="serviceError()!" styleClass="w-full" />
+    }
 
-  @if (instructions().length) {
-    <div class="aic__rules">
-      <span class="aic__rules-label">Your instructions:</span>
-      @for (rule of instructions(); track $index) {
-        <span class="aic__rule">{{ rule.text }}
-          <button type="button" aria-label="Remove instruction" (click)="removeInstruction($index)"><i class="pi pi-times" aria-hidden="true"></i></button>
-        </span>
+    @if (instructions().length) {
+      <div class="aic__rules">
+        <span class="aic__rules-label"><i class="pi pi-bookmark" aria-hidden="true"></i> Instructions</span>
+        @for (rule of instructions(); track $index) {
+          <span class="aic__rule">{{ rule.text }}
+            <button type="button" aria-label="Remove instruction" (click)="removeInstruction($index)"><i class="pi pi-times" aria-hidden="true"></i></button>
+          </span>
+        }
+      </div>
+    }
+
+    <form class="aic__composer" [class.is-busy]="sending()" (ngSubmit)="send()">
+      <textarea
+        #input
+        class="aic__textarea"
+        rows="1"
+        [(ngModel)]="draft"
+        name="draft"
+        autocomplete="off"
+        [placeholder]="examples().length ? 'e.g. ' + examples()[0] : 'Ask about your GIS layers…'"
+        [disabled]="sending()"
+        (input)="autoGrow(input)"
+        (keydown.enter)="onEnter($any($event), input)"
+      ></textarea>
+      @if (sending()) {
+        <button type="button" class="aic__send aic__send--stop" aria-label="Stop" title="Stop" (click)="stop()">
+          <i class="pi pi-stop" aria-hidden="true"></i>
+        </button>
+      } @else {
+        <button type="submit" class="aic__send" [disabled]="!draft.trim()" aria-label="Send" title="Send">
+          <i class="pi pi-arrow-up" aria-hidden="true"></i>
+        </button>
       }
-    </div>
-  }
-
-  <form class="aic__input" (ngSubmit)="send()">
-    <input
-      pInputText
-      class="w-full"
-      [(ngModel)]="draft"
-      name="draft"
-      autocomplete="off"
-      [placeholder]="examples().length ? 'e.g. ' + examples()[0] : 'Ask about your GIS layers…'"
-      [disabled]="sending()"
-    />
-    @if (sending()) {
-      <button pButton type="button" icon="pi pi-stop" class="p-button-danger" aria-label="Stop" title="Stop" (click)="stop()"></button>
-    } @else {
-      <button pButton type="submit" icon="pi pi-send" [disabled]="!draft.trim()" aria-label="Send"></button>
-    }
-  </form>
-
-  <div class="aic__footer">
-    @if (messages().length > 0) {
-      <button type="button" class="aic__reset" (click)="reset()">New chat</button>
-    }
-    <button type="button" class="aic__reset" (click)="openHistory()">History</button>
-    @if (isOwner()) {
-      <button type="button" class="aic__reset" (click)="openLog()">Question log</button>
-    }
+    </form>
+    <p class="aic__hint">Enter to send · Shift + Enter for a new line · answers are computed from your layers</p>
   </div>
 </div>
 
@@ -215,7 +268,7 @@
         <li class="aic-history__item" [class.is-current]="chat.id === conversationId()" (click)="openConversation(chat.id)">
           <span class="aic-history__title">{{ chat.title }}</span>
           <span class="aic-history__date">{{ chat.updatedAt | date: 'd MMM, h:mm a' }}</span>
-          <button type="button" class="aic__rate-btn" aria-label="Delete chat" (click)="deleteConversation(chat.id, $event)">
+          <button type="button" class="aic__icon-btn" aria-label="Delete chat" (click)="deleteConversation(chat.id, $event)">
             <i class="pi pi-trash" aria-hidden="true"></i>
           </button>
         </li>

@@ -1,10 +1,13 @@
 import { Subscription } from 'rxjs';
 import {
   Component,
+  ElementRef,
   EventEmitter,
   Input,
   Output,
+  ViewChild,
   computed,
+  effect,
   inject,
   signal,
 } from '@angular/core';
@@ -12,7 +15,6 @@ import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
 import { ButtonModule } from 'primeng/button';
-import { InputTextModule } from 'primeng/inputtext';
 import { MessageModule } from 'primeng/message';
 import { DialogModule } from 'primeng/dialog';
 import { CurrentUserService } from '../../../../core/services/current-user.service';
@@ -50,7 +52,7 @@ const nf = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 });
 @Component({
   selector: 'app-ai-chat',
   standalone: true,
-  imports: [DatePipe, FormsModule, ButtonModule, InputTextModule, MessageModule, DialogModule],
+  imports: [DatePipe, FormsModule, ButtonModule, MessageModule, DialogModule],
   templateUrl: './ai-chat.component.html',
   styleUrl: './ai-chat.component.scss',
 })
@@ -89,7 +91,22 @@ export class AiChatComponent {
   readonly logLoading = signal(false);
   readonly logProblemsOnly = signal(false);
 
+  @ViewChild('thread') private thread?: ElementRef<HTMLElement>;
+  @ViewChild('input') private input?: ElementRef<HTMLTextAreaElement>;
+
+  /** Answer whose text was just copied (shows a tick for a moment). */
+  readonly copiedIndex = signal<number | null>(null);
+
   constructor() {
+    // Keep the newest turn in view; shrink the composer back once sent.
+    effect(() => {
+      this.messages();
+      queueMicrotask(() => {
+        const el = this.thread?.nativeElement;
+        if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+        if (!this.draft && this.input) this.autoGrow(this.input.nativeElement);
+      });
+    });
     // The panel is created when first opened: prime the model's prompt
     // cache now, while the user types (best effort, fire and forget).
     this.aiService.warm().subscribe({ error: () => undefined });
@@ -197,6 +214,29 @@ export class AiChatComponent {
    *  computed answer, else the plan's explanation. */
   mainText(msg: ChatMessage): string {
     return msg.narration ?? msg.response?.answer ?? msg.content;
+  }
+
+  /** Enter sends; Shift+Enter is a new line. */
+  onEnter(event: KeyboardEvent, el: HTMLTextAreaElement): void {
+    if (event.shiftKey || event.isComposing) return;
+    event.preventDefault();
+    this.send();
+    this.autoGrow(el);
+  }
+
+  /** The composer grows with its text, up to a few lines. */
+  autoGrow(el: HTMLTextAreaElement): void {
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+  }
+
+  copy(index: number): void {
+    const msg = this.messages()[index];
+    if (!msg) return;
+    navigator.clipboard?.writeText(this.mainText(msg)).then(() => {
+      this.copiedIndex.set(index);
+      setTimeout(() => this.copiedIndex.update((i) => (i === index ? null : i)), 1500);
+    });
   }
 
   useExample(text: string): void {

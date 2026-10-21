@@ -185,6 +185,7 @@
    only while they are the *visible* panel (others are kept mounted but
    carry .gis-ws__panel--hidden). */
 .gis-ws__left:has(app-layer-panel:not(.gis-ws__panel--hidden)) .gis-ws__panel-body,
+.gis-ws__left:has(app-ai-chat:not(.gis-ws__panel--hidden)) .gis-ws__panel-body,
 .gis-ws__bottom:has(app-attribute-table:not(.gis-ws__panel--hidden)) .gis-ws__panel-body {
   padding: 0;
   overflow: hidden;
