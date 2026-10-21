@@ -290,6 +290,57 @@ def _value_words(op: GisOperation) -> Set[str]:
     return out
 
 
+# Step 1 count per area, step 2 filter / rank the areas.
+_AREA_CMP = {
+    "more than": ">", "over": ">", "above": ">", "at least": ">=", "less than": "<",
+    "fewer than": "<", "under": "<", "below": "<", "at most": "<=", "exactly": "=",
+}
+_AREA_HAVING = re.compile(
+    r"^\s*(?:which|show|list|find|get)?\s*(?:me\s+)?(?:the\s+|all\s+)?(?P<area>[a-z_ ]+?)\s+"
+    r"(?:with|having|that have|which have|where there are|containing)\s+"
+    r"(?P<cmp>more than|over|above|at least|less than|fewer than|under|below|at most|exactly)\s+"
+    r"(?P<n>\d+)\s+(?P<target>.+?)\s*$",
+    re.I,
+)
+_AREA_TOP = re.compile(
+    r"^\s*(?:show\s+|list\s+)?(?:me\s+)?(?:the\s+)?(?P<dir>top|bottom)\s+(?P<n>\d+)\s+(?P<area>[a-z_ ]+?)\s+"
+    r"by\s+(?:the\s+)?(?:number of|count of|no\.? of)?\s*(?P<target>.+?)\s*$",
+    re.I,
+)
+_AREA_MOST = re.compile(
+    r"^\s*which\s+(?P<area>[a-z_ ]+?)\s+(?:has|have)\s+(?:the\s+)?"
+    r"(?P<sup>most|highest number of|fewest|least|lowest number of)\s+(?P<target>.+?)\s*$",
+    re.I,
+)
+
+
+def _area_step(text: str, layers: List[LayerInfo]) -> Optional[PlanResult]:
+    """"wards with more than 100 signals", "top 3 zones by number of
+    signals", "which ward has the most Not Working signals": count the
+    target per polygon, then keep / rank the polygons. The target part is
+    planned by the fast path itself, so it may carry its own conditions."""
+    m = _AREA_HAVING.search(text) or _AREA_TOP.search(text) or _AREA_MOST.search(text)
+    if not m:
+        return None
+    areas = [a for a, _, _ in _mentioned_layers(m.group("area"), layers) if (a.geometry_type or "").upper() == "POLYGON"]
+    if len(areas) != 1:
+        return None
+    inner = fast_plan(f"show {m.group('target')}", [l for l in layers if l.code != areas[0].code])
+    if inner is None or inner.operation.kind != "select" or inner.operation.limit or inner.operation.order_by:
+        return None
+    op = inner.operation.model_copy(deep=True)
+    op.kind, op.metric, op.group_by_layer = "aggregate", "count", areas[0].code
+    groups = m.groupdict()
+    if groups.get("cmp"):
+        op.having_op, op.having_value = _AREA_CMP[groups["cmp"].lower()], float(groups["n"])
+    elif groups.get("dir"):
+        op.limit, op.order_desc = int(groups["n"]), groups["dir"].lower() == "top"
+    else:
+        op.limit, op.order_desc = 1, groups["sup"].lower() in ("most", "highest number of")
+    target = next(l for l in layers if l.code == op.target_layer)
+    return PlanResult(answer_kind="gis_operation", explanation=_describe(op, target), operation=op, planner="fast")
+
+
 def fast_plan(
     message: str,
     layers: List[LayerInfo],
@@ -298,6 +349,9 @@ def fast_plan(
     text = message.strip().rstrip("?.! ")
     if not text:
         return None
+    stepped = _area_step(text, layers)
+    if stepped is not None:
+        return stepped
     follow_up = is_follow_up(text, layers, previous)
     if _FOLLOW_UP.search(text) and not follow_up:
         return None  # "those" with nothing to refer back to
@@ -455,6 +509,10 @@ def _describe(op: GisOperation, target: LayerInfo) -> str:
     if op.kind == "aggregate":
         group = op.group_by_layer or op.group_by
         what = f"Count of {target.name}" + (f" per {group}" if group else "")
+        if op.having_op:
+            what += f", keeping {group} with a count {op.having_op} {op.having_value:g}"
+        elif op.limit:
+            what += f", {'top' if op.order_desc is not False else 'lowest'} {op.limit}"
     else:
         what = f"{target.name} features"
     if op.order_by:

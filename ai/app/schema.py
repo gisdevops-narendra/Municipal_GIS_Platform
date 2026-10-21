@@ -67,6 +67,10 @@ class GisOperation(BaseModel):
     group_by: Optional[str] = None
     group_by_layer: Optional[str] = None
     group_by_layer_field: Optional[str] = None
+    # aggregate step 2: keep groups passing a threshold ("wards with more
+    # than 100 signals"); `limit` + `order_desc` keep the top / lowest N.
+    having_op: Optional[Literal[">", ">=", "<", "<=", "="]] = None
+    having_value: Optional[float] = None
     # nearest
     reference_layer: Optional[str] = None
     reference_filters: List[AttributeFilter] = Field(default_factory=list)
@@ -229,6 +233,8 @@ PLAN_JSON_SCHEMA = {
                 "group_by": {"type": ["string", "null"]},
                 "group_by_layer": {"type": ["string", "null"]},
                 "group_by_layer_field": {"type": ["string", "null"]},
+                "having_op": {"type": ["string", "null"], "enum": [">", ">=", "<", "<=", "=", None]},
+                "having_value": {"type": ["number", "null"]},
                 "reference_layer": {"type": ["string", "null"]},
                 "reference_filters": {"type": "array", "items": _ATTR_FILTER_SCHEMA},
                 "count": {"type": ["integer", "null"]},

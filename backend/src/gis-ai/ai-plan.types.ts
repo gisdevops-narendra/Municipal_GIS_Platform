@@ -80,6 +80,10 @@ export interface AiGisOperation {
   group_by?: string | null;
   group_by_layer?: string | null;
   group_by_layer_field?: string | null;
+  /** aggregate, step 2: keep only groups whose value passes this ("wards
+   *  with more than 100 signals"). */
+  having_op?: '>' | '>=' | '<' | '<=' | '=' | null;
+  having_value?: number | null;
   // nearest
   reference_layer?: string | null;
   reference_filters?: AiAttributeFilter[];

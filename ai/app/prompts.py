@@ -43,6 +43,8 @@ KINDS (target_layer + attribute_filters + spatial_filter pick the features):
   count), group_by: a column of target_layer to group by, OR
   group_by_layer + group_by_layer_field: a polygon layer and its label
   column to count features falling inside each polygon ("per ward").
+  "wards with more than 100 X": also having_op ">" and having_value 100.
+  "top 3 wards by number of X": limit 3 (order_desc false for fewest).
 - nearest: "nearest / closest N X to Y". target_layer = X,
   reference_layer + reference_filters = Y, count = N (default 1).
 - buffer: "buffer / zone of N m around X". target_layer = X,

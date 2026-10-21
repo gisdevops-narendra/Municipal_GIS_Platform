@@ -117,6 +117,14 @@ const METRIC_WORD: Record<AggregateMetric, string> = {
   max: 'maximum',
 };
 
+const HAVING_WORD: Record<string, string> = {
+  '>': 'above',
+  '>=': 'of at least',
+  '<': 'below',
+  '<=': 'of at most',
+  '=': 'of exactly',
+};
+
 @Injectable()
 export class GisAiService {
   private readonly logger = new Logger(GisAiService.name);
@@ -623,8 +631,14 @@ export class GisAiService {
       const bottom = valued[valued.length - 1];
       const zeroes = rows.filter((r) => r.count === 0).length;
       const groupName = compiled.groupLabel;
-      answer =
-        `${metric === 'count' ? 'Counted' : `Computed the ${METRIC_WORD[metric]} ${compiled.metricLabel} for`} ` +
+      answer = op.limit && !op.having_op
+        ? `${op.order_desc === false ? 'Fewest' : 'Most'} ${layer} features by ${groupName}: ` +
+          `${valued.map((r) => `${r.group ?? '(blank)'} (${fmt(r.value)})`).join(', ')}.`
+        : op.having_op
+        ? `${fmt(rows.length)} group${rows.length === 1 ? '' : 's'} of ${groupName} ${rows.length === 1 ? 'has' : 'have'} ` +
+          `${metric === 'count' ? 'a count' : `a ${METRIC_WORD[metric]}`} ${HAVING_WORD[op.having_op] ?? op.having_op} ${fmt(op.having_value ?? 0)}` +
+          (rows.length ? `: ${valued.slice(0, 10).map((r) => `${r.group ?? '(blank)'} (${fmt(r.value)})`).join(', ')}${rows.length > 10 ? ', …' : ''}.` : '.')
+        : `${metric === 'count' ? 'Counted' : `Computed the ${METRIC_WORD[metric]} ${compiled.metricLabel} for`} ` +
         `${fmt(total)} ${layer} feature${total === 1 ? '' : 's'} across ${fmt(rows.length)}${truncated ? '+' : ''} group${rows.length === 1 ? '' : 's'} of ${groupName}.` +
         (top ? ` Highest: ${top.group ?? '(blank)'} (${fmt(top.value)}).` : '') +
         (bottom && bottom !== top ? ` Lowest: ${bottom.group ?? '(blank)'} (${fmt(bottom.value)}).` : '') +

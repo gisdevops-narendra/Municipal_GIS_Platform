@@ -108,5 +108,17 @@ got = sorted((f.field, f.op) for f in fixed.operation.attribute_filters)
 check("model's stacked conditions -> one per word", got == [("subtype", "="), ("ward_no", "=")], got)
 check("value of another layer is a new question, not a follow-up",
       not is_follow_up("show me all temples in ward 3", [SIG, LM], prev))
+# Multi-step: count per area, then filter / rank the areas.
+def step(q):
+    p = fast_plan(q, LAYERS)
+    o = p.operation if p else None
+    return o and (o.kind, o.target_layer, o.group_by_layer, o.having_op, o.having_value, o.limit, o.order_desc,
+                  [(f.field, f.value) for f in o.attribute_filters])
+check("zones with more than 100 signals", step("zones with more than 100 signals") ==
+      ("aggregate", "SIGNAL", "ZONE", ">", 100.0, None, None, []), step("zones with more than 100 signals"))
+check("top 3 zones by number of signals", step("top 3 zones by number of signals") ==
+      ("aggregate", "SIGNAL", "ZONE", None, None, 3, True, []), step("top 3 zones by number of signals"))
+check("which zone has the fewest Not Working signals", step("which zone has the fewest Not Working signals") ==
+      ("aggregate", "SIGNAL", "ZONE", None, None, 1, False, [("type", "Not Working")]), step("which zone has the fewest Not Working signals"))
 print(f"\n{sum(results)}/{len(results)} passed")
 raise SystemExit(0 if all(results) else 1)

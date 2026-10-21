@@ -47,6 +47,7 @@ const MAX_RENDERED = 450;
  *  ~8 KB request-line limit (the rest of the URL needs room too). */
 const MAX_CQL_CHARS = 3500;
 const MAX_DISTANCE_M = 50000;
+const HAVING_OPS: Record<string, string> = { '>': '>', '>=': '>=', '<': '<', '<=': '<=', '=': '=' };
 const MAX_BUFFER_M = 10000;
 const MAX_BUFFER_SOURCES = 5000;
 const MAX_GROUPS = 200;
@@ -287,19 +288,25 @@ export class GisQueryCompilerService {
         : pk;
       // One group per polygon (grouped by its key too), so two zones that
       // share a label are still counted separately.
-      sql =
+      sql = this.groupStep(
         `SELECT ${grp} AS grp, ${value} AS val, ${n} AS n ` +
-        `FROM "${zones.table}" ${z} LEFT JOIN "${target.table}" ${t} ON ${on.join(' AND ')} ` +
-        zWhere +
-        `GROUP BY ${z}."${zones.pkColumn}", 1 ORDER BY 2 DESC NULLS LAST, 1 LIMIT ${MAX_GROUPS + 1}`;
+          `FROM "${zones.table}" ${z} LEFT JOIN "${target.table}" ${t} ON ${on.join(' AND ')} ` +
+          zWhere +
+          `GROUP BY ${z}."${zones.pkColumn}", 1`,
+        operation,
+        bind,
+      );
       groupLabel = `${zones.name}${labelCol ? '.' + labelCol.name : ''}`;
     } else if (operation.group_by) {
       const col = this.findColumn(target, operation.group_by);
-      sql =
+      sql = this.groupStep(
         `SELECT ${t}."${col.name}"::text AS grp, ${value} AS val, ${n} AS n ` +
-        `FROM "${target.table}" ${t} ` +
-        (where.length ? `WHERE ${where.join(' AND ')} ` : '') +
-        `GROUP BY 1 ORDER BY 2 DESC NULLS LAST, 1 LIMIT ${MAX_GROUPS + 1}`;
+          `FROM "${target.table}" ${t} ` +
+          (where.length ? `WHERE ${where.join(' AND ')} ` : '') +
+          `GROUP BY 1`,
+        operation,
+        bind,
+      );
       groupLabel = col.name;
     } else {
       sql =
@@ -317,8 +324,28 @@ export class GisQueryCompilerService {
       groupLabel,
       summary: `${metric}${metricLabel ? ' of ' + metricLabel : ''} of ${target.name}${
         groupLabel ? ' per ' + groupLabel : ''
-      }${summaryBits.length ? ' where ' + summaryBits.join(' and ') : ''}.`,
+      }${summaryBits.length ? ' where ' + summaryBits.join(' and ') : ''}${
+        groupLabel && operation.having_op ? `, keeping groups with ${metric} ${operation.having_op} ${operation.having_value}` : ''
+      }${groupLabel && operation.limit ? `, ${operation.order_desc === false ? 'lowest' : 'top'} ${operation.limit}` : ''}.`,
     };
+  }
+
+  /** Second step over grouped rows: keep the groups that pass the plan's
+   *  threshold ("wards with more than 100 signals"), sort, and keep the
+   *  top / lowest N ("top 3 zones", "ward with the fewest"). */
+  private groupStep(grouped: string, operation: AiGisOperation, bind: Bind): string {
+    let having = '';
+    if (operation.having_op != null || operation.having_value != null) {
+      const op = HAVING_OPS[String(operation.having_op)];
+      const v = Number(operation.having_value);
+      if (!op || !Number.isFinite(v)) {
+        throw new PlanValidationError('A group threshold needs a comparison and a number, e.g. "more than 100".');
+      }
+      having = `WHERE g.val ${op} ${bind(v)} `;
+    }
+    const dir = operation.order_desc === false ? 'ASC' : 'DESC';
+    const limit = operation.limit ? Math.min(Math.max(1, Math.trunc(operation.limit)), MAX_GROUPS) : MAX_GROUPS + 1;
+    return `SELECT g.grp, g.val, g.n FROM (${grouped}) g ${having}ORDER BY g.val ${dir} NULLS LAST, g.grp LIMIT ${limit}`;
   }
 
   /** The N selected features closest (straight line) to the reference
