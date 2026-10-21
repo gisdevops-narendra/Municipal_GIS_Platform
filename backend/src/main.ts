@@ -18,7 +18,13 @@ async function bootstrap() {
   );
   app.useGlobalFilters(new AllExceptionsFilter());
   app.enableCors({
-    origin: config.get<string>('CORS_ORIGIN', 'http://localhost:4200'),
+    // Comma-separated, e.g. "http://localhost:4200,http://192.168.20.53:4200"
+    // for a LAN demo.
+    origin: config
+      .get<string>('CORS_ORIGIN', 'http://localhost:4200')
+      .split(',')
+      .map((o) => o.trim())
+      .filter(Boolean),
     credentials: true,
     // Content-Disposition: so the Print Layout panel can read the
     // suggested download filename off the streamed PDF/PNG response.

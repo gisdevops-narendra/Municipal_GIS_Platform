@@ -226,6 +226,9 @@ services:
       # two must be allowed to differ.
       KEYCLOAK_URL: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8180}
       KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      # Extra browser-facing Keycloak origins to accept tokens from (LAN
+      # demo by IP), comma-separated. Empty = only KEYCLOAK_URL.
+      KEYCLOAK_EXTRA_PUBLIC_URLS: ${KEYCLOAK_EXTRA_PUBLIC_URLS:-}
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-municipal-gis}
       KEYCLOAK_FRONTEND_CLIENT_ID: ${KEYCLOAK_FRONTEND_CLIENT_ID:-municipal-gis-frontend}
       KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-municipal-gis-backend}

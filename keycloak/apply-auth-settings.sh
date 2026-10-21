@@ -13,6 +13,9 @@
 #                                      Keycloak login page + reset flow
 #   - smtpServer                    -> points at the `mailpit` container so
 #                                      Keycloak can actually send the email
+#   - frontend client redirect URIs / web origins / post-logout URIs
+#                                   -> every app origin in CORS_ORIGIN (.env),
+#                                      e.g. localhost AND a LAN IP for a demo
 #
 # Usage:  bash keycloak/apply-auth-settings.sh
 
@@ -49,3 +52,36 @@ kcadm update "realms/$REALM" \
   -s 'smtpServer={"host":"mailpit","port":"1025","from":"no-reply@municipal-gis.local","fromDisplayName":"Municipal GIS Platform","ssl":"false","starttls":"false","auth":"false"}'
 
 echo "   applied: resetPasswordAllowed=true + SMTP -> mailpit:1025"
+
+# App origins the browser opens the app from (localhost, and a LAN IP for a
+# demo) — the same list the backend allows in CORS_ORIGIN. Keycloak must
+# redirect back to each of them after sign-in / sign-out.
+ENV_FILE="$(dirname "$0")/../.env"
+CORS_ORIGIN_VALUE="${CORS_ORIGIN:-}"
+if [ -z "$CORS_ORIGIN_VALUE" ] && [ -f "$ENV_FILE" ]; then
+  CORS_ORIGIN_VALUE="$(sed -n 's/^CORS_ORIGIN=//p' "$ENV_FILE" | head -n1 | tr -d '\r')"
+fi
+CORS_ORIGIN_VALUE="${CORS_ORIGIN_VALUE:-http://localhost:4200}"
+FRONTEND_CLIENT="${KEYCLOAK_FRONTEND_CLIENT_ID:-municipal-gis-frontend}"
+
+redirects=""; origins=""; logout=""
+IFS=',' read -ra APP_ORIGINS <<< "$CORS_ORIGIN_VALUE"
+for origin in "${APP_ORIGINS[@]}"; do
+  origin="$(echo "$origin" | tr -d '[:space:]')"
+  origin="${origin%/}"
+  [ -z "$origin" ] && continue
+  redirects="$redirects${redirects:+,}\"$origin/*\""
+  origins="$origins${origins:+,}\"$origin\""
+  logout="$logout${logout:+##}$origin/*"
+done
+
+CLIENT_UUID="$(kcadm get clients -r "$REALM" -q clientId="$FRONTEND_CLIENT" --fields id --format csv --noquotes | tr -d '\r' | head -n1)"
+if [ -n "$CLIENT_UUID" ]; then
+  kcadm update "clients/$CLIENT_UUID" -r "$REALM" \
+    -s "redirectUris=[$redirects]" \
+    -s "webOrigins=[$origins]" \
+    -s "attributes.\"post.logout.redirect.uris\"=$logout"
+  echo "   applied: $FRONTEND_CLIENT redirects -> $CORS_ORIGIN_VALUE"
+else
+  echo "   skipped: client $FRONTEND_CLIENT not found in realm $REALM" >&2
+fi

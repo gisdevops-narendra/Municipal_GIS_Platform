@@ -54,7 +54,15 @@ export class KeycloakJwtStrategy extends PassportStrategy(
     const keycloakInternalUrl =
       config.get<string>('KEYCLOAK_INTERNAL_URL') ?? keycloakUrl;
     const realm = config.getOrThrow<string>('KEYCLOAK_REALM');
-    const issuer = `${keycloakUrl}/realms/${realm}`;
+    // Keycloak (start-dev, no fixed hostname) stamps `iss` with whatever
+    // origin the browser used, so a LAN demo (http://192.168.x.y:8180)
+    // needs that origin accepted too: KEYCLOAK_EXTRA_PUBLIC_URLS, comma-
+    // separated. Default: only KEYCLOAK_URL, exactly as before.
+    const extra = (config.get<string>('KEYCLOAK_EXTRA_PUBLIC_URLS') ?? '')
+      .split(',')
+      .map((u) => u.trim().replace(/\/+$/, ''))
+      .filter(Boolean);
+    const issuer = [keycloakUrl, ...extra].map((u) => `${u}/realms/${realm}`);
 
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
