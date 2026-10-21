@@ -50,6 +50,11 @@ export class GisChatDto {
   @IsOptional()
   @IsObject()
   resolvedOperation?: Record<string, unknown>;
+
+  /** Chat this question belongs to; omitted = start a new chat. */
+  @IsOptional()
+  @IsUUID()
+  conversationId?: string;
 }
 
 /** `POST /gis/ai/narrate` — the question plus the `facts` a chat answer

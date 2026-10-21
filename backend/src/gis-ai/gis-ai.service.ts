@@ -18,7 +18,7 @@ import {
   PlanValidationError,
   UnknownFieldError,
 } from './gis-query-compiler.service';
-import type { AggregateMetric, AiClarifyOption, AiGisOperation } from './ai-plan.types';
+import type { AggregateMetric, AiClarifyOption, AiGisOperation, AiInstruction } from './ai-plan.types';
 import type { GisChatDto, GisExplainDto, GisNarrateDto } from './dto/chat.dto';
 
 type Catalog = Awaited<ReturnType<LayerCatalogService['buildForUser']>>;
@@ -59,6 +59,10 @@ export interface GisChatResponse {
   options?: AiClarifyOption[];
   /** How the question was read (e.g. a corrected spelling). */
   notes?: string[];
+  /** Server-side chat this answer belongs to. */
+  conversationId?: string;
+  /** Standing instructions now in force in that chat. */
+  instructions?: AiInstruction[];
   /** Present only for answerKind === 'gis_operation'. */
   operation?: AiGisOperation;
   /** The parameterised SQL the backend compiled and ran — shown to the
@@ -193,26 +197,134 @@ export class GisAiService {
   /** Answers a question and records it in ai_query_logs (question, path,
    *  plan, result count, time, error) so failures and slow answers can be
    *  found, and the user can rate the answer. Logging never fails a chat. */
-  async chat(appUser: AppUser, dto: GisChatDto): Promise<GisChatResponse> {
+  async chat(appUser: AppUser, dto: GisChatDto, signal?: AbortSignal): Promise<GisChatResponse> {
     const started = Date.now();
-    let response: GisChatResponse;
+    // Server-side memory: the chat's own turns give the history and the
+    // previous plan, so follow-ups work after a reload too.
+    const conversation = await this.openConversation(appUser, dto.conversationId, dto.message);
+    const memory = await this.conversationMemory(conversation.id);
+    const request: GisChatDto = {
+      ...dto,
+      history: memory.history.length ? memory.history : dto.history,
+      previousOperation: (memory.previous as Record<string, unknown> | null) ?? dto.previousOperation,
+    };
+    let instructions = (conversation.instructions as unknown as AiInstruction[]) ?? [];
+    let response: GisChatResponse & { instructionAction?: 'add' | 'clear'; instructionAdded?: AiInstruction };
     try {
-      response = await this.answer(appUser, dto);
+      response = await this.answer(appUser, request, instructions, signal);
     } catch (error) {
       await this.logQuestion(appUser, dto.message, started, {
-        answerKind: 'error',
+        answerKind: signal?.aborted ? 'cancelled' : 'error',
         error: error instanceof Error ? error.message : String(error),
+        conversationId: conversation.id,
       });
       throw error;
     }
+    if (response.instructionAction) {
+      instructions = response.instructionAction === 'clear' ? [] : [...instructions, response.instructionAdded!];
+      await this.prisma.aiConversation.update({
+        where: { id: conversation.id },
+        data: { instructions: instructions as unknown as Prisma.InputJsonValue },
+      });
+    } else {
+      await this.prisma.aiConversation.update({ where: { id: conversation.id }, data: { updatedAt: new Date() } });
+    }
+    const { instructionAction: _a, instructionAdded: _b, ...shown } = response;
     const logId = await this.logQuestion(appUser, dto.message, started, {
       answerKind: response.answerKind,
       planner: response.planner ?? null,
       operation: response.operation,
       explanation: response.answer ?? response.clarification ?? response.explanation,
       matched: response.result?.matched ?? null,
+      conversationId: conversation.id,
+      response: stripForStorage(shown),
     });
-    return { ...response, logId: logId ?? undefined };
+    return { ...shown, logId: logId ?? undefined, conversationId: conversation.id, instructions };
+  }
+
+  /** The caller's chat, or a new one titled by its first question. */
+  private async openConversation(appUser: AppUser, id: string | undefined, firstQuestion: string) {
+    if (id) {
+      const found = await this.prisma.aiConversation.findFirst({
+        where: { id, userId: appUser.id, municipalityId: appUser.municipalityId },
+      });
+      if (found) return found;
+    }
+    return this.prisma.aiConversation.create({
+      data: { municipalityId: appUser.municipalityId, userId: appUser.id, title: firstQuestion.slice(0, 120) },
+    });
+  }
+
+  /** Last turns as chat history + the last operation that ran. */
+  private async conversationMemory(conversationId: string) {
+    const rows = await this.prisma.aiQueryLog.findMany({
+      where: { conversationId },
+      orderBy: { createdAt: 'desc' },
+      take: 6,
+      select: { question: true, explanation: true, operation: true, answerKind: true },
+    });
+    const history: { role: 'user' | 'assistant'; content: string }[] = [];
+    for (const r of [...rows].reverse()) {
+      history.push({ role: 'user', content: r.question });
+      if (r.explanation) history.push({ role: 'assistant', content: r.explanation });
+    }
+    const previous = rows.find((r) => r.answerKind === 'gis_operation' && r.operation)?.operation ?? null;
+    return { history: history.slice(-6), previous };
+  }
+
+  /** The user's chats, newest first. */
+  async conversations(appUser: AppUser) {
+    const rows = await this.prisma.aiConversation.findMany({
+      where: { userId: appUser.id, municipalityId: appUser.municipalityId },
+      orderBy: { updatedAt: 'desc' },
+      take: 50,
+      select: { id: true, title: true, updatedAt: true },
+    });
+    return rows;
+  }
+
+  /** One chat with its turns, to reopen it. */
+  async conversation(appUser: AppUser, id: string) {
+    const conversation = await this.prisma.aiConversation.findFirst({
+      where: { id, userId: appUser.id, municipalityId: appUser.municipalityId },
+    });
+    if (!conversation) throw new NotFoundException('That chat was not found.');
+    const turns = await this.prisma.aiQueryLog.findMany({
+      where: { conversationId: id },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, question: true, response: true, feedback: true, answerKind: true, error: true },
+    });
+    return {
+      id: conversation.id,
+      title: conversation.title,
+      instructions: conversation.instructions,
+      turns: turns.map((t) => ({
+        question: t.question,
+        response: t.response ?? { answerKind: t.answerKind, explanation: t.error ?? '', usedContext: [] },
+        logId: t.id,
+        feedback: t.feedback,
+      })),
+    };
+  }
+
+  async deleteConversation(appUser: AppUser, id: string) {
+    const { count } = await this.prisma.aiConversation.deleteMany({
+      where: { id, userId: appUser.id, municipalityId: appUser.municipalityId },
+    });
+    if (count === 0) throw new NotFoundException('That chat was not found.');
+    await this.prisma.aiQueryLog.updateMany({ where: { conversationId: id }, data: { conversationId: null, response: Prisma.DbNull } });
+    return { ok: true };
+  }
+
+  /** Remove one standing instruction (the chip's ✕). */
+  async removeInstruction(appUser: AppUser, id: string, index: number) {
+    const conversation = await this.prisma.aiConversation.findFirst({
+      where: { id, userId: appUser.id, municipalityId: appUser.municipalityId },
+    });
+    if (!conversation) throw new NotFoundException('That chat was not found.');
+    const list = ((conversation.instructions as unknown as AiInstruction[]) ?? []).filter((_, i) => i !== index);
+    await this.prisma.aiConversation.update({ where: { id }, data: { instructions: list as unknown as Prisma.InputJsonValue } });
+    return { instructions: list };
   }
 
   private async logQuestion(
@@ -226,6 +338,8 @@ export class GisAiService {
       explanation?: string;
       matched?: number | null;
       error?: string;
+      conversationId?: string;
+      response?: Prisma.InputJsonValue;
     },
   ): Promise<string | null> {
     try {
@@ -241,6 +355,8 @@ export class GisAiService {
           matched: entry.matched ?? null,
           durationMs: Date.now() - started,
           error: entry.error?.slice(0, 1000) ?? null,
+          conversationId: entry.conversationId ?? null,
+          response: entry.response ?? Prisma.DbNull,
         },
         select: { id: true },
       });
@@ -299,7 +415,12 @@ export class GisAiService {
     }));
   }
 
-  private async answer(appUser: AppUser, dto: GisChatDto): Promise<GisChatResponse> {
+  private async answer(
+    appUser: AppUser,
+    dto: GisChatDto,
+    instructions: AiInstruction[] = [],
+    signal?: AbortSignal,
+  ): Promise<GisChatResponse & { instructionAction?: 'add' | 'clear'; instructionAdded?: AiInstruction }> {
     const municipality = await this.prisma.municipality.findUnique({
       where: { id: appUser.municipalityId },
       select: { name: true },
@@ -339,7 +460,8 @@ export class GisAiService {
         content: t.content,
       })),
       previous_operation: dto.previousOperation,
-    });
+      instructions,
+    }, signal);
 
     const usedContext = plan.used_context ?? [];
 
@@ -353,6 +475,8 @@ export class GisAiService {
         usedContext,
         planner,
         ...guidance,
+        instructionAction: plan.instruction_action ?? undefined,
+        instructionAdded: plan.instruction ?? undefined,
       };
     }
 
@@ -887,4 +1011,13 @@ function similarity(a: string, b: string): number {
   let shared = 0;
   for (const p of pa) if (pb.has(p)) shared++;
   return pa.size + pb.size ? (2 * shared) / (pa.size + pb.size) : 0;
+}
+
+/** The answer as stored for reopening a chat: no geometries / overlays
+ *  (they can be large and are re-derived from the plan on demand). */
+function stripForStorage(response: GisChatResponse): Prisma.InputJsonValue {
+  const copy = { ...response } as Record<string, unknown>;
+  delete copy['overlays'];
+  if (response.result) copy['result'] = { ...response.result, geometries: [] };
+  return JSON.parse(JSON.stringify(copy)) as Prisma.InputJsonValue;
 }

@@ -106,6 +106,17 @@ export interface AiPlanResult {
   planner?: 'fast' | 'model' | null;
   options?: AiClarifyOption[];
   notes?: string[];
+  /** A standing instruction to save ("add") or "clear" them all. */
+  instruction?: AiInstruction | null;
+  instruction_action?: 'add' | 'clear' | null;
+}
+
+/** Standing instruction for the rest of a chat. */
+export interface AiInstruction {
+  text: string;
+  layer?: string | null;
+  filters?: AiAttributeFilter[];
+  near_m?: number | null;
 }
 
 /** A clickable choice: re-ask with `message`, or run `operation` as is

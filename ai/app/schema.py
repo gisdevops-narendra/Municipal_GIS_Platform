@@ -91,6 +91,16 @@ class ClarifyOption(BaseModel):
     operation: Optional[GisOperation] = None
 
 
+class Instruction(BaseModel):
+    """A standing instruction for the rest of the chat ("from now on only
+    show working signals" -> layer SIGNAL, type = Working; "use 200 m for
+    near" -> near_m 200)."""
+    text: str
+    layer: Optional[str] = None
+    filters: List[AttributeFilter] = Field(default_factory=list)
+    near_m: Optional[float] = None
+
+
 class PlanResult(BaseModel):
     answer_kind: AnswerKind
     # short, user-facing natural-language explanation of what will run / why not
@@ -108,6 +118,9 @@ class PlanResult(BaseModel):
     # service, never by the model.
     options: List[ClarifyOption] = Field(default_factory=list)
     notes: List[str] = Field(default_factory=list)
+    # A new standing instruction to save ("add"), or "clear" all of them.
+    instruction: Optional[Instruction] = None
+    instruction_action: Optional[Literal["add", "clear"]] = None
 
 
 # ---- request bodies -------------------------------------------------------
@@ -141,6 +154,8 @@ class PlanRequest(BaseModel):
     # The plan of the previous answer, so a follow-up ("now only those in
     # ward 5") extends the exact operation instead of re-reading prose.
     previous_operation: Optional[GisOperation] = None
+    # Standing instructions saved in this conversation.
+    instructions: List[Instruction] = Field(default_factory=list)
 
 
 class SuggestRequest(BaseModel):

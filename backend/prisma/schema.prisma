@@ -721,7 +721,29 @@ model AiQueryLog {
   feedback       Int?
   feedbackAt     DateTime? @map("feedback_at")
   createdAt      DateTime  @default(now()) @map("created_at")
+  /// Chat this question belongs to (server-side conversation memory).
+  conversationId String?   @map("conversation_id")
+  /// The answer as shown (no geometries) — to reopen the chat later.
+  response       Json?
 
   @@index([municipalityId, createdAt])
+  @@index([conversationId, createdAt])
   @@map("ai_query_logs")
+}
+
+/// AI Assistant chat: its turns are the ai_query_logs rows with this id.
+/// Owned by one user; standing instructions ("from now on only working
+/// signals") apply to every later question in it.
+model AiConversation {
+  id             String   @id @default(uuid())
+  municipalityId String   @map("municipality_id")
+  userId         String   @map("user_id")
+  title          String
+  /// [{ text, layer, filters: [...], near_m }]
+  instructions   Json     @default("[]")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@index([userId, updatedAt])
+  @@map("ai_conversations")
 }

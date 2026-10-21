@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, ParseUUIDPipe, Post, Query, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import {
   RequireMunicipalityMember,
   RequireMunicipalityOwner,
@@ -32,8 +33,48 @@ export class GisAiController {
 
   @RequireAiAssistant()
   @Post('chat')
-  chat(@CurrentAppUser() appUser: AppUser, @Body() dto: GisChatDto) {
-    return this.gisAi.chat(appUser, dto);
+  chat(
+    @CurrentAppUser() appUser: AppUser,
+    @Body() dto: GisChatDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    // The user cancelled (Stop / closed the panel): the connection closes
+    // before the answer is sent -> abort the AI call, which stops the model.
+    const cancel = new AbortController();
+    res.on('close', () => {
+      if (!res.writableFinished) cancel.abort();
+    });
+    return this.gisAi.chat(appUser, dto, cancel.signal);
+  }
+
+  /** The user's AI chats (history panel). */
+  @RequireAiAssistant()
+  @Get('conversations')
+  conversations(@CurrentAppUser() appUser: AppUser) {
+    return this.gisAi.conversations(appUser);
+  }
+
+  @RequireAiAssistant()
+  @Get('conversations/:id')
+  conversation(@CurrentAppUser() appUser: AppUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.gisAi.conversation(appUser, id);
+  }
+
+  @RequireAiAssistant()
+  @Delete('conversations/:id')
+  deleteConversation(@CurrentAppUser() appUser: AppUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.gisAi.deleteConversation(appUser, id);
+  }
+
+  /** Remove one standing instruction from a chat. */
+  @RequireAiAssistant()
+  @Delete('conversations/:id/instructions/:index')
+  removeInstruction(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('index', ParseIntPipe) index: number,
+  ) {
+    return this.gisAi.removeInstruction(appUser, id, index);
   }
 
   /** Friendlier wording of a chat answer from its computed facts (any

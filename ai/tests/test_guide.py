@@ -152,5 +152,19 @@ wrong = PlanResult(answer_kind="gis_operation", explanation="x", operation=GisOp
 sw = field_confidence("show temples", wrong, [LM2])
 check("value only stored elsewhere -> switched with a note",
       sw.operation.attribute_filters[0].field == "subtype" and sw.notes, sw.notes)
+# Standing instructions.
+from app.guide import apply_instructions, parse_instruction
+rule = parse_instruction("From now on only show signals that are Not Working", LAYERS)
+check("instruction parsed into a real rule",
+      rule and rule.instruction_action == "add" and rule.instruction.layer == "SIGNAL"
+      and [(f.field, f.value) for f in rule.instruction.filters] == [("type", "Not Working")], rule and rule.instruction)
+later = apply_instructions(fast_plan("show signals in zone 13", LAYERS), [rule.instruction])
+check("rule applied to a later question on that layer",
+      sorted(f.field for f in later.operation.attribute_filters) == ["type", "zone_no"] and later.notes)
+other = apply_instructions(fast_plan("show landmarks that are Educational", LAYERS), [rule.instruction])
+check("rule not applied to another layer", [f.field for f in other.operation.attribute_filters] == ["type"] and not other.notes)
+check("near rule", parse_instruction("always use 200 m for near", LAYERS).instruction.near_m == 200)
+check("clear rules", parse_instruction("forget my instructions", LAYERS).instruction_action == "clear")
+check("normal question is not an instruction", parse_instruction("show signals in zone 13", LAYERS) is None)
 print(f"\n{sum(results)}/{len(results)} passed")
 raise SystemExit(0 if all(results) else 1)

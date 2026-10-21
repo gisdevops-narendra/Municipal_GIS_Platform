@@ -4,7 +4,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { AiPlanResult } from './ai-plan.types';
+import type { AiInstruction, AiPlanResult } from './ai-plan.types';
 
 export interface AiLayerField {
   name: string;
@@ -28,6 +28,7 @@ export interface AiPlanRequest {
   layers: AiLayerInfo[];
   history: { role: 'user' | 'assistant'; content: string }[];
   previous_operation?: Record<string, unknown>;
+  instructions?: AiInstruction[];
 }
 
 export interface AiNarrateRequest {
@@ -71,10 +72,12 @@ export class AiClientService {
     return this.request('GET', '/health', undefined, 5000);
   }
 
-  async plan(body: AiPlanRequest): Promise<AiPlanResult> {
+  async plan(body: AiPlanRequest, signal?: AbortSignal): Promise<AiPlanResult> {
     // A local CPU model can take 30-120 s for a full structured response;
     // the Python side caps itself at GIS_AI_LLM_TIMEOUT_S (default 180).
-    const raw = await this.request('POST', '/plan', body, 240000);
+    // `signal`: the user cancelled — closing this request makes the AI
+    // service stop the model (see ai/app/main.py).
+    const raw = await this.request('POST', '/plan', body, 240000, false, signal);
     return raw as unknown as AiPlanResult;
   }
 
@@ -133,9 +136,14 @@ export class AiClientService {
     body: unknown,
     timeoutMs: number,
     quiet = false,
+    external?: AbortSignal,
   ): Promise<Record<string, unknown>> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    if (external) {
+      if (external.aborted) controller.abort();
+      else external.addEventListener('abort', () => controller.abort(), { once: true });
+    }
     try {
       const response = await fetch(`${this.baseUrl}${path}`, {
         method,
@@ -155,6 +163,10 @@ export class AiClientService {
     } catch (error) {
       if (error instanceof ServiceUnavailableException) {
         throw error;
+      }
+      if (external?.aborted) {
+        // The user pressed Stop: expected, not a failure.
+        throw new ServiceUnavailableException('Cancelled.');
       }
       if (!quiet) this.logger.error(
         `AI service call ${method} ${path} failed: ${(error as Error).message}`,

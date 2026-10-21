@@ -69,6 +69,27 @@ export interface AiChatResult {
   bbox?: [number, number, number, number] | null;
 }
 
+/** "From now on only show working signals" -> a rule for the chat. */
+export interface AiInstruction {
+  text: string;
+  layer?: string | null;
+  near_m?: number | null;
+}
+
+/** One saved chat (history panel). */
+export interface AiConversationSummary {
+  id: string;
+  title: string;
+  updatedAt: string;
+}
+
+export interface AiConversationDetail {
+  id: string;
+  title: string;
+  instructions: AiInstruction[];
+  turns: { question: string; response: GisChatResponse; logId: string; feedback: 1 | -1 | null }[];
+}
+
 /** A clickable choice: re-ask with `message`, or run `operation` as is. */
 export interface AiClarifyOption {
   label: string;
@@ -87,6 +108,10 @@ export interface GisChatResponse {
   options?: AiClarifyOption[];
   /** How the question was read, e.g. a corrected spelling. */
   notes?: string[];
+  /** Server-side chat this answer belongs to. */
+  conversationId?: string;
+  /** Standing instructions in force in that chat. */
+  instructions?: AiInstruction[];
   clarification?: string;
   usedContext: string[];
   operation?: AiGisOperation;

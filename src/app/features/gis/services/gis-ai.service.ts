@@ -2,7 +2,15 @@ import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../environments/environment';
-import { AiGisOperation, AiQueryLogEntry, GisAiHealth, GisChatResponse } from '../models/gis-ai.model';
+import {
+  AiConversationDetail,
+  AiConversationSummary,
+  AiGisOperation,
+  AiInstruction,
+  AiQueryLogEntry,
+  GisAiHealth,
+  GisChatResponse,
+} from '../models/gis-ai.model';
 
 /**
  * Client for the natural-language GIS assistant (`/api/gis/ai/*`). The
@@ -21,6 +29,7 @@ export class GisAiService {
     activeLayerId?: string | null,
     previousOperation?: AiGisOperation,
     resolvedOperation?: AiGisOperation,
+    conversationId?: string | null,
   ): Observable<GisChatResponse> {
     return this.http.post<GisChatResponse>(`${this.baseUrl}/chat`, {
       message,
@@ -28,6 +37,7 @@ export class GisAiService {
       activeLayerId: activeLayerId ?? undefined,
       previousOperation,
       resolvedOperation,
+      conversationId: conversationId ?? undefined,
     });
   }
 
@@ -49,6 +59,22 @@ export class GisAiService {
   /** Primes the assistant's model cache so the first question is fast. */
   warm(): Observable<{ ok: true }> {
     return this.http.post<{ ok: true }>(`${this.baseUrl}/warm`, {});
+  }
+
+  conversations(): Observable<AiConversationSummary[]> {
+    return this.http.get<AiConversationSummary[]>(`${this.baseUrl}/conversations`);
+  }
+
+  conversation(id: string): Observable<AiConversationDetail> {
+    return this.http.get<AiConversationDetail>(`${this.baseUrl}/conversations/${id}`);
+  }
+
+  deleteConversation(id: string): Observable<{ ok: true }> {
+    return this.http.delete<{ ok: true }>(`${this.baseUrl}/conversations/${id}`);
+  }
+
+  removeInstruction(id: string, index: number): Observable<{ instructions: AiInstruction[] }> {
+    return this.http.delete<{ instructions: AiInstruction[] }>(`${this.baseUrl}/conversations/${id}/instructions/${index}`);
   }
 
   /** Example questions built from the user's real layers (each one works). */

@@ -377,3 +377,71 @@
 .aic__msg-text {
   white-space: pre-line;
 }
+
+.aic__rules {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--color-ink-500);
+}
+
+.aic__rule {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 999px;
+  background: var(--color-primary-100);
+  color: var(--color-primary-700);
+
+  button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: inherit;
+    padding: 0 2px;
+  }
+
+  .pi {
+    font-size: 9px;
+  }
+}
+
+.aic-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.aic-history__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--color-line);
+  cursor: pointer;
+  font-size: 13px;
+
+  &:hover,
+  &.is-current {
+    background: var(--color-surface-alt);
+  }
+}
+
+.aic-history__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aic-history__date {
+  font-size: 11px;
+  color: var(--color-ink-500);
+  white-space: nowrap;
+}

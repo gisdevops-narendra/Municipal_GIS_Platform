@@ -23,12 +23,14 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+import threading
+
+from fastapi import FastAPI, HTTPException, Request
 
 from . import config, db, embeddings, llm, rag
 from .indexer import reindex_municipality
 from .fastpath import fast_plan
-from .guide import annotate, converse, field_confidence, is_small_talk, preflight, remember_near, suggestions
+from .guide import annotate, apply_instructions, converse, field_confidence, parse_instruction, is_small_talk, preflight, remember_near, suggestions
 from .repair import carry_over, is_follow_up, repair_plan
 from .schema import (
     NarrateRequest,
@@ -104,15 +106,44 @@ async def reindex(body: ReindexRequest):
         raise HTTPException(status_code=500, detail=f"Reindex failed: {exc}")
 
 
+async def _watch_disconnect(request: Request, cancel: threading.Event) -> None:
+    """Sets `cancel` when the backend closes this request (the user
+    pressed Stop or left), so the model call stops streaming."""
+    while not cancel.is_set():
+        if await request.is_disconnected():
+            cancel.set()
+            return
+        await asyncio.sleep(0.5)
+
+
 @app.post("/plan", response_model=PlanResult)
-async def plan(body: PlanRequest) -> PlanResult:
+async def plan(body: PlanRequest, request: Request) -> PlanResult:
+    cancel = threading.Event()
+    watcher = asyncio.create_task(_watch_disconnect(request, cancel))
+    try:
+        return await _plan(body, cancel)
+    except llm.Cancelled:
+        log.info("plan cancelled by the user: %s", body.message[:80])
+        raise HTTPException(status_code=499, detail="Cancelled.")
+    finally:
+        cancel.set()
+        watcher.cancel()
+
+
+async def _plan(body: PlanRequest, cancel: threading.Event) -> PlanResult:
     # Simple requests whose every word maps onto a plan piece need no model
     # call at all (~1 s instead of ~7-40 s on CPU). See fastpath.py.
     # Follow the conversation: a refinement ("which are in prabhag no C")
     # builds on the previous answer; a remembered "near" distance is reused.
     follow = is_follow_up(body.message, body.layers, body.previous_operation)
     previous = body.previous_operation if follow else None
-    message, remembered_note, remembered_options = remember_near(body.message, body.history)
+    near_rule = next((r.near_m for r in reversed(body.instructions) if r.near_m), None)
+    message, remembered_note, remembered_options = remember_near(body.message, body.history, near_rule)
+
+    # "From now on only show working signals" / "forget my instructions".
+    ruled = parse_instruction(body.message, body.layers)
+    if ruled is not None:
+        return ruled
 
     def finish(result: PlanResult) -> PlanResult:
         # Is each value really in the column the plan uses? Switch or ask.
@@ -120,6 +151,7 @@ async def plan(body: PlanRequest) -> PlanResult:
         if result.answer_kind == "clarification":
             return result
         result = annotate(message, result, body.layers, previous)
+        result = apply_instructions(result, body.instructions)
         if remembered_note:
             result = result.model_copy(update={
                 "notes": [remembered_note, *result.notes],
@@ -154,7 +186,7 @@ async def plan(body: PlanRequest) -> PlanResult:
 
     if not follow and is_small_talk(message, body.layers):
         try:
-            reply = await asyncio.to_thread(llm.chat_reply, message, body.history, body.layers, body.municipality_name)
+            reply = await asyncio.to_thread(llm.chat_reply, message, body.history, body.layers, body.municipality_name, cancel)
         except llm.LLMUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc))
         return PlanResult(answer_kind="answer", explanation=reply or "I can help with questions about your GIS layers.", planner="model")
@@ -180,6 +212,7 @@ async def plan(body: PlanRequest) -> PlanResult:
             body.history,
             body.municipality_name,
             previous,
+            cancel,
         )
         # The small model often drops the newer operation fields; the
         # question's own words fill them (see repair.py).
@@ -189,6 +222,8 @@ async def plan(body: PlanRequest) -> PlanResult:
         return finish(repaired.model_copy(update={"planner": "model"}))
     except llm.LLMUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+    except llm.Cancelled:
+        raise
     except Exception as exc:
         log.exception("plan generation failed")
         raise HTTPException(status_code=502, detail=f"Local LLM error: {exc}")

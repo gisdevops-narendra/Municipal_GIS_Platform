@@ -16,7 +16,7 @@ from typing import List, Optional
 
 from .fastpath import fast_plan
 from .repair import _DISTANCE, _FREE_TEXT_FIELD, _NEAREST, _tokens, _value_core, _has_word
-from .schema import AttributeFilter, ChatTurn, ClarifyOption, GisOperation, LayerInfo, PlanResult
+from .schema import AttributeFilter, ChatTurn, ClarifyOption, GisOperation, Instruction, LayerInfo, PlanResult
 
 # "near / close to / next to / around / adjacent to <X>" with no distance.
 _NEAR = re.compile(r"\b(near(?:by)?|close to|next to|adjacent to|around|surrounding)\b", re.I)
@@ -29,7 +29,7 @@ _NEAR_CHOICES = (50, 100, 250, 500)
 _CHOSEN_DISTANCE = re.compile(r"\bwithin\s+(\d+(?:\.\d+)?)\s*m\s+of\b", re.I)
 
 
-def remember_near(message: str, history: List[ChatTurn]):
+def remember_near(message: str, history: List[ChatTurn], rule_m: Optional[float] = None):
     """Follow the user's earlier choice: once they picked how close "near"
     is (or asked "within N m of" themselves) in this chat, a later "near"
     uses that distance instead of asking again — stated in a note, with
@@ -37,6 +37,10 @@ def remember_near(message: str, history: List[ChatTurn]):
     near = _NEAR.search(message)
     if not near or _DISTANCE.search(message) or _NEAREST.search(message):
         return message, None, []
+    if rule_m:
+        d = f"{rule_m:g}"
+        rewritten = (message[: near.start()] + f"within {d} m of" + message[near.end():]).strip()
+        return rewritten, f"Used {d} m for “near”, as you asked.", []
     for turn in reversed(history):
         if turn.role != "user":
             continue
@@ -353,3 +357,81 @@ def field_confidence(
                 planner=plan.planner,
             )
     return plan
+
+
+# ---------------------------------------------------------------------------
+# Standing instructions: "from now on only show working signals".
+
+_INSTRUCTION = re.compile(
+    r"^\s*(?:from now on|going forward|for all (?:the )?next questions|by default|always)[,:]?\s+(?P<rest>.+?)\s*[.!]?\s*$"
+    r"|^\s*(?P<rest2>.+?)\s+(?:from now on|going forward|by default)\s*[.!]?\s*$",
+    re.I,
+)
+_CLEAR = re.compile(r"\b(forget|clear|remove|stop applying|reset|delete)\b.*\b(instructions?|rules?|filters?|settings?)\b", re.I)
+_NEAR_RULE = re.compile(r"\b(?:use|treat|take|consider)?\s*(?P<d>\d+(?:\.\d+)?)\s*m(?:etres?|eters?)?\s+(?:for|as)\s+(?:“|\")?near|near\s+(?:means|is|=)\s+(?P<d2>\d+(?:\.\d+)?)\s*m", re.I)
+_RULE_LEAD = re.compile(r"^\s*(?:only\s+show|show\s+only|only|just|show|use|consider|include\s+only)\s+", re.I)
+
+
+def parse_instruction(message: str, layers: List[LayerInfo]) -> Optional[PlanResult]:
+    """Turns "from now on ..." / "always ..." / "forget my instructions"
+    into a saved rule (or clears them). The rule part is planned by the
+    fast path, so it is a real layer + real values — or it is refused."""
+    text = message.strip()
+    if _CLEAR.search(text):
+        return PlanResult(
+            answer_kind="answer", instruction_action="clear",
+            explanation="Done — I've removed your standing instructions for this chat.",
+        )
+    m = _INSTRUCTION.search(text)
+    near = _NEAR_RULE.search(text)
+    if not m and not near:
+        return None
+    if near:
+        d = float(near.group("d") or near.group("d2"))
+        rule = Instruction(text=f"“near” means {d:g} m", near_m=d)
+        return PlanResult(answer_kind="answer", instruction_action="add", instruction=rule,
+                          explanation=f"Got it — from now on “near” means {d:g} m in this chat.")
+    rest = _RULE_LEAD.sub("", (m.group("rest") or m.group("rest2")))
+    plan = fast_plan(f"show {rest}", layers)
+    if plan is None or plan.operation.kind != "select" or not (plan.operation.attribute_filters or plan.operation.spatial_filter):
+        return PlanResult(
+            answer_kind="clarification",
+            explanation="Rule not understood.",
+            clarification=(
+                "I couldn't turn that into a rule. Use a layer and a condition, e.g. "
+                "“From now on only show signals that are Working” or “Always use 200 m for near”."
+            ),
+        )
+    op = plan.operation
+    target = next(l for l in layers if l.code == op.target_layer)
+    conditions = " and ".join(f"{f.field} {f.op} {', '.join(map(str, f.values)) if f.values else f.value}" for f in op.attribute_filters)
+    rule = Instruction(text=f"{target.name}: {conditions}" if conditions else f"{target.name}: {rest}",
+                       layer=op.target_layer, filters=op.attribute_filters)
+    return PlanResult(
+        answer_kind="answer", instruction_action="add", instruction=rule,
+        explanation=f"Got it — from now on, questions about {target.name} will only include {conditions or rest}. "
+                    "Say “forget my instructions” to remove it.",
+    )
+
+
+def apply_instructions(plan: PlanResult, instructions: List["Instruction"]) -> PlanResult:
+    """Adds standing-instruction conditions to a plan on the same layer
+    (unless the question already sets that field), with a note."""
+    op = plan.operation
+    if op is None or plan.answer_kind != "gis_operation" or not instructions:
+        return plan
+    have = {f.field.lower() for f in op.attribute_filters}
+    added, notes = [], list(plan.notes)
+    for rule in instructions:
+        if rule.layer != op.target_layer:
+            continue
+        new = [f for f in rule.filters if f.field.lower() not in have]
+        if new:
+            added += new
+            have |= {f.field.lower() for f in new}
+            notes.append(f"Applying your instruction: {rule.text}.")
+    if not added:
+        return plan
+    op = op.model_copy(deep=True)
+    op.attribute_filters = op.attribute_filters + added
+    return plan.model_copy(update={"operation": op, "notes": notes})

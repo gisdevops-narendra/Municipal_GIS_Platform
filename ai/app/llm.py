@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 from typing import Any, List, Optional, Tuple
 
 import httpx
@@ -27,6 +28,32 @@ _client: Optional[httpx.Client] = None
 
 class LLMUnavailable(RuntimeError):
     pass
+
+
+class Cancelled(RuntimeError):
+    """The caller went away (the user pressed Stop) — the model was stopped."""
+
+
+def _stream_chat(payload: dict, cancel: Optional[threading.Event]) -> str:
+    """POST /api/chat streaming, checking `cancel` between chunks. Closing
+    the stream makes Ollama stop generating, so a cancelled question frees
+    the (single, CPU) model at once instead of running to the end."""
+    parts: List[str] = []
+    try:
+        with _http().stream("POST", "/api/chat", json={**payload, "stream": True}) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if cancel is not None and cancel.is_set():
+                    raise Cancelled("cancelled by the user")
+                if not line:
+                    continue
+                chunk = json.loads(line)
+                parts.append((chunk.get("message") or {}).get("content", ""))
+                if chunk.get("done"):
+                    break
+    except httpx.HTTPError as exc:
+        raise LLMUnavailable(f"Local LLM request failed: {exc}") from exc
+    return "".join(parts).strip()
 
 
 def _http() -> httpx.Client:
@@ -111,6 +138,7 @@ def generate_plan(
     history: List[ChatTurn],
     municipality_name: Optional[str],
     previous: Optional[GisOperation] = None,
+    cancel: Optional[threading.Event] = None,
 ) -> PlanResult:
     if not reachable():
         raise LLMUnavailable(
@@ -133,12 +161,7 @@ def generate_plan(
         }
         if fmt is not None:
             payload["format"] = fmt
-        try:
-            resp = _http().post("/api/chat", json=payload)
-            resp.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise LLMUnavailable(f"Local LLM request failed: {exc}") from exc
-        return (resp.json().get("message", {}) or {}).get("content", "").strip()
+        return _stream_chat(payload, cancel)
 
     mode = config.LLM_FORMAT_MODE
     primary = (
@@ -232,7 +255,13 @@ e.g. "Show signals in ward 5" or "How many landmarks are there in each zone?".
 Available layers: {layers}."""
 
 
-def chat_reply(message: str, history: List[ChatTurn], layers: List[LayerInfo], municipality_name: Optional[str]) -> str:
+def chat_reply(
+    message: str,
+    history: List[ChatTurn],
+    layers: List[LayerInfo],
+    municipality_name: Optional[str],
+    cancel: Optional[threading.Event] = None,
+) -> str:
     """Free conversation that is not a map question ("how can GIS help my
     city?"). Short, grounded in what the platform can do; no data claims."""
     if not available():
@@ -244,15 +273,10 @@ def chat_reply(message: str, history: List[ChatTurn], layers: List[LayerInfo], m
     messages = [{"role": "system", "content": system}]
     messages += [{"role": t.role, "content": t.content} for t in history[-4:]]
     messages.append({"role": "user", "content": message})
-    try:
-        resp = _http().post("/api/chat", json={
-            "model": config.LLM_MODEL, "messages": messages, "stream": False, "keep_alive": -1,
-            "options": {"temperature": 0.3, "num_ctx": config.LLM_NUM_CTX, "num_predict": 160},
-        })
-        resp.raise_for_status()
-    except httpx.HTTPError as exc:
-        raise LLMUnavailable(f"Local LLM request failed: {exc}") from exc
-    return ((resp.json().get("message", {}) or {}).get("content", "") or "").strip()
+    return _stream_chat({
+        "model": config.LLM_MODEL, "messages": messages, "keep_alive": -1,
+        "options": {"temperature": 0.3, "num_ctx": config.LLM_NUM_CTX, "num_predict": 160},
+    }, cancel)
 
 
 def prime_plan_cache(layers: List[LayerInfo], municipality_name: Optional[str]) -> None:

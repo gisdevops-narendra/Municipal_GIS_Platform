@@ -159,6 +159,17 @@
     <p-message severity="error" [text]="serviceError()!" styleClass="w-full" />
   }
 
+  @if (instructions().length) {
+    <div class="aic__rules">
+      <span class="aic__rules-label">Your instructions:</span>
+      @for (rule of instructions(); track $index) {
+        <span class="aic__rule">{{ rule.text }}
+          <button type="button" aria-label="Remove instruction" (click)="removeInstruction($index)"><i class="pi pi-times" aria-hidden="true"></i></button>
+        </span>
+      }
+    </div>
+  }
+
   <form class="aic__input" (ngSubmit)="send()">
     <input
       pInputText
@@ -169,18 +180,49 @@
       placeholder="e.g. schools within 1 km of hospitals"
       [disabled]="sending()"
     />
-    <button pButton type="submit" icon="pi pi-send" [disabled]="sending() || !draft.trim()" aria-label="Send"></button>
+    @if (sending()) {
+      <button pButton type="button" icon="pi pi-stop" class="p-button-danger" aria-label="Stop" title="Stop" (click)="stop()"></button>
+    } @else {
+      <button pButton type="submit" icon="pi pi-send" [disabled]="!draft.trim()" aria-label="Send"></button>
+    }
   </form>
 
   <div class="aic__footer">
     @if (messages().length > 0) {
-      <button type="button" class="aic__reset" (click)="reset()">Clear conversation</button>
+      <button type="button" class="aic__reset" (click)="reset()">New chat</button>
     }
+    <button type="button" class="aic__reset" (click)="openHistory()">History</button>
     @if (isOwner()) {
       <button type="button" class="aic__reset" (click)="openLog()">Question log</button>
     }
   </div>
 </div>
+
+<p-dialog
+  [visible]="historyVisible()"
+  (visibleChange)="historyVisible.set($event)"
+  [modal]="true"
+  header="AI Assistant — your chats"
+  [style]="{ width: '560px' }"
+  [breakpoints]="{ '600px': '95vw' }"
+  appendTo="body"
+>
+  @if (historyRows().length === 0) {
+    <p class="aic-log__empty">No saved chats yet.</p>
+  } @else {
+    <ul class="aic-history">
+      @for (chat of historyRows(); track chat.id) {
+        <li class="aic-history__item" [class.is-current]="chat.id === conversationId()" (click)="openConversation(chat.id)">
+          <span class="aic-history__title">{{ chat.title }}</span>
+          <span class="aic-history__date">{{ chat.updatedAt | date: 'd MMM, h:mm a' }}</span>
+          <button type="button" class="aic__rate-btn" aria-label="Delete chat" (click)="deleteConversation(chat.id, $event)">
+            <i class="pi pi-trash" aria-hidden="true"></i>
+          </button>
+        </li>
+      }
+    </ul>
+  }
+</p-dialog>
 
 <p-dialog
   [visible]="logVisible()"

@@ -20,7 +20,15 @@ import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { MapService } from '../../services/map.service';
 import { GisAiService } from '../../services/gis-ai.service';
 import { AttributeExternalFilter } from '../attribute-table/attribute-table.component';
-import { AiClarifyOption, AiGisOperation, AiQueryLogEntry, ChatMessage, GisChatResponse } from '../../models/gis-ai.model';
+import {
+  AiClarifyOption,
+  AiConversationSummary,
+  AiGisOperation,
+  AiInstruction,
+  AiQueryLogEntry,
+  ChatMessage,
+  GisChatResponse,
+} from '../../models/gis-ai.model';
 
 /** Shown only until the real-layer suggestions arrive. */
 const EXAMPLES: string[] = [];
@@ -68,6 +76,12 @@ export class AiChatComponent {
   private chatSub?: Subscription;
   private readonly narrateSubs = new Set<Subscription>();
 
+  /** Server-side chat: memory survives reloads; instructions live there. */
+  readonly conversationId = signal<string | null>(null);
+  readonly instructions = signal<AiInstruction[]>([]);
+  readonly historyVisible = signal(false);
+  readonly historyRows = signal<AiConversationSummary[]>([]);
+
   /** Owner only: the question log (what failed, what was slow, 👎). */
   readonly isOwner = signal(false);
   readonly logVisible = signal(false);
@@ -99,6 +113,50 @@ export class AiChatComponent {
       // Undo the optimistic mark so the user can try again.
       error: () => this.messages.update((list) => list.map((m, i) => (i === index ? { ...m, feedback: undefined } : m))),
     });
+  }
+
+  openHistory(): void {
+    this.historyVisible.set(true);
+    this.aiService.conversations().subscribe({ next: (rows) => this.historyRows.set(rows), error: () => this.historyRows.set([]) });
+  }
+
+  /** Reopen a saved chat: its turns, memory and instructions. */
+  openConversation(id: string): void {
+    this.aiService.conversation(id).subscribe({
+      next: (chat) => {
+        this.reset();
+        this.conversationId.set(chat.id);
+        this.instructions.set(chat.instructions ?? []);
+        this.messages.set(
+          chat.turns.flatMap((t) => [
+            { role: 'user' as const, content: t.question },
+            {
+              role: 'assistant' as const,
+              content: t.response.explanation,
+              response: { ...t.response, logId: t.logId },
+              feedback: t.feedback ?? undefined,
+            },
+          ]),
+        );
+        this.historyVisible.set(false);
+      },
+    });
+  }
+
+  deleteConversation(id: string, event: Event): void {
+    event.stopPropagation();
+    this.aiService.deleteConversation(id).subscribe({
+      next: () => {
+        this.historyRows.update((rows) => rows.filter((r) => r.id !== id));
+        if (this.conversationId() === id) this.reset();
+      },
+    });
+  }
+
+  removeInstruction(index: number): void {
+    const id = this.conversationId();
+    if (!id) return;
+    this.aiService.removeInstruction(id, index).subscribe({ next: ({ instructions }) => this.instructions.set(instructions) });
   }
 
   openLog(): void {
@@ -177,9 +235,11 @@ export class AiChatComponent {
     ]);
     this.sending.set(true);
 
-    this.chatSub = this.aiService.chat(text, priorHistory, this.activeLayerId, previousOperation, resolvedOperation).subscribe({
+    this.chatSub = this.aiService.chat(text, priorHistory, this.activeLayerId, previousOperation, resolvedOperation, this.conversationId()).subscribe({
       next: (response) => {
         this.sending.set(false);
+        if (response.conversationId) this.conversationId.set(response.conversationId);
+        if (response.instructions) this.instructions.set(response.instructions);
         const wantsWording = !!response.answer && !!response.facts;
         const index = this.applyAssistant({
           role: 'assistant',
@@ -273,7 +333,20 @@ export class AiChatComponent {
     this.queryCleared.emit();
   }
 
+  /** Stop: cancels the request — the backend and AI service then stop the
+   *  model instead of finishing an answer nobody will read. */
+  stop(): void {
+    if (!this.sending()) return;
+    this.chatSub?.unsubscribe();
+    this.chatSub = undefined;
+    this.sending.set(false);
+    this.applyAssistant({ role: 'assistant', content: 'Stopped.', error: true });
+  }
+
+  /** New chat: a fresh server-side conversation (no memory, no rules). */
   reset(): void {
+    this.conversationId.set(null);
+    this.instructions.set([]);
     this.chatSub?.unsubscribe();
     this.chatSub = undefined;
     this.narrateSubs.forEach((sub) => sub.unsubscribe());
