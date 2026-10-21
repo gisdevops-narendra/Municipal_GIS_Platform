@@ -33,8 +33,14 @@ export interface GisChatSelection {
    *  shape). Null when nothing matched. */
   cql: string | null;
   /** Matched geometries (EPSG:4326 GeoJSON), capped, for the map
-   *  highlight overlay. */
+   *  highlight overlay. Empty when `exact` — GeoServer draws the filtered
+   *  layer itself. */
   geometries: Geo[];
+  /** true: `cql` is the plan's own conditions (every match shows on the
+   *  map and in the Attribute Table); false: an id list of the first rows. */
+  exact?: boolean;
+  /** EPSG:4326 [minX, minY, maxX, maxY] of every match, to zoom to. */
+  bbox?: [number, number, number, number] | null;
 }
 
 export interface GisChatResponse {
@@ -123,6 +129,29 @@ export class GisAiService {
 
   async reindex(appUser: AppUser): Promise<Record<string, unknown>> {
     return this.ai.reindex(appUser.municipalityId);
+  }
+
+  private queryLayerCheck: { at: number; available: boolean } | null = null;
+
+  /** Whether GeoServer has the querylayer extension (queryCollection /
+   *  collectGeometries in CQL), needed to filter by distance to another
+   *  layer. Read from its WFS capabilities, cached for 10 minutes. */
+  private async geoServerHasQueryLayer(): Promise<boolean> {
+    if (this.queryLayerCheck && Date.now() - this.queryLayerCheck.at < 10 * 60 * 1000) {
+      return this.queryLayerCheck.available;
+    }
+    let available = false;
+    try {
+      const base = this.config.getOrThrow<string>('GEOSERVER_URL').replace(/\/+$/, '');
+      const response = await fetch(`${base}/ows?service=WFS&version=1.1.0&request=GetCapabilities`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      available = response.ok && /<[^>]*FunctionName[^>]*>\s*queryCollection\s*</i.test(await response.text());
+    } catch {
+      available = false;
+    }
+    this.queryLayerCheck = { at: Date.now(), available };
+    return available;
   }
 
   /** Called when the AI Assistant panel opens: primes the local model's
@@ -459,6 +488,27 @@ export class GisAiService {
     workspaceId: string,
   ) {
     const compiled = this.compiler.compile(operation, catalogEntries, workspaceId);
+    // Preferred: GeoServer filters the layer by the plan's own conditions —
+    // all matches on the map / in the table, no geometries sent.
+    const exactCql = this.compiler.conditionCql(operation, catalogEntries, {
+      queryLayer: await this.geoServerHasQueryLayer(),
+    });
+    if (exactCql) {
+      const { matched, bbox } = await this.compiler.summarize(compiled);
+      const result: GisChatSelection = {
+        layerId: compiled.target.layerId,
+        layerCode: compiled.target.code,
+        layerName: compiled.target.name,
+        geometryType: compiled.target.geometryType,
+        matched,
+        truncated: false,
+        cql: matched > 0 ? exactCql : null,
+        geometries: [],
+        exact: true,
+        bbox,
+      };
+      return { compiled, result };
+    }
     const execution = await this.compiler.execute(compiled);
     const result: GisChatSelection = {
       layerId: compiled.target.layerId,
@@ -469,6 +519,7 @@ export class GisAiService {
       truncated: execution.truncated,
       cql: this.compiler.buildCql(compiled.target, execution.ids),
       geometries: execution.geometries,
+      exact: false,
     };
     return { compiled, result };
   }

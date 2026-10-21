@@ -16,7 +16,7 @@ LAYERS = [
                       LayerField(name="chowk", type="text", sample_values=["No", "Yes"]),
                       LayerField(name="gis_remark", type="text", sample_values=["Not Working", "Shifted"]),
                       LayerField(name="road_name", type="text", sample_values=[
-                          "Dehu - Alandi Road", "Dehu Alandi Road", "Spine Road", "…(more)"])]),
+                          "Aalandi Road", "Dehu - Alandi Road", "Dehu Alandi Road", "Spine Road", "…(more)"])]),
     LayerInfo(id="z", code="ZONE", name="zone", geometry_type="POLYGON",
               fields=[LayerField(name="zone_no", type="integer"), LayerField(name="zone_name", type="text")]),
     LayerInfo(id="l", code="LANDMARKS", name="landmarks", geometry_type="POINT",

@@ -233,15 +233,18 @@ export class AiChatComponent {
     const features = result?.geometries ?? [];
     const shapes = [...overlays, ...features];
 
-    if (shapes.length === 0) {
-      this.mapService.clearQueryHighlight();
-      return;
-    }
     if (result && result.matched > 0) {
       this.mapService.setLayerVisibility(result.layerId, true);
     }
-    this.mapService.setQueryHighlight(shapes);
-    this.mapService.zoomToGeometries(shapes);
+    if (shapes.length > 0) {
+      this.mapService.setQueryHighlight(shapes);
+      this.mapService.zoomToGeometries(shapes);
+    } else {
+      // Exact answers send no geometries: GeoServer draws the layer
+      // filtered by the question's conditions (cql below) — just zoom.
+      this.mapService.clearQueryHighlight();
+      if (result?.bbox && result.matched > 0) this.mapService.zoomToBbox4326(result.bbox);
+    }
     if (result?.cql) {
       this.queryRun.emit({
         layerId: result.layerId,

@@ -36,6 +36,8 @@ export interface LayerCatalogEntry {
   name: string;
   description: string | null;
   geometryType: string | null;
+  /** GeoServer workspace + layer: "{geoserverWorkspace}:{geoserverLayer}". */
+  geoserverWorkspace: string;
   geoserverLayer: string;
   /** Physical PostGIS table — an app-generated `layer_<uuid>` or a fixed
    *  `gis_demo_*` name; never derived from user/LLM input. */
@@ -163,6 +165,7 @@ export class LayerCatalogService {
         name: true,
         description: true,
         geometryType: true,
+        geoserverWorkspace: true,
         geoserverLayer: true,
         postgisTable: true,
       },
@@ -192,6 +195,7 @@ export class LayerCatalogService {
         name: row.name,
         description: row.description,
         geometryType: row.geometryType,
+        geoserverWorkspace: row.geoserverWorkspace,
         geoserverLayer: row.geoserverLayer,
         table,
         geomColumn: described.geomColumn,

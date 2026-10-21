@@ -60,6 +60,9 @@ export interface CompiledQuery {
   /** select only: counts every match, run when the row limit is hit so the
    *  answer reports the true total, not the cut-off (2,000). */
   countSql?: string;
+  /** select only: count + EPSG:4326 extent of every match, for answers
+   *  that filter the map layer in GeoServer instead of sending geometries. */
+  extentSql?: string;
   /** select only: the LIMIT applied; `limitAsked` = the plan asked for it
    *  ("the 10 tallest"), so the rows ARE the answer. */
   limit?: number;
@@ -177,6 +180,12 @@ export class GisQueryCompilerService {
       countSql:
         `SELECT count(*)::int AS n FROM "${target.table}" ${t} ` +
         (where.length ? `WHERE ${where.join(' AND ')}` : ''),
+      extentSql:
+        `SELECT n, ST_XMin(e) AS minx, ST_YMin(e) AS miny, ST_XMax(e) AS maxx, ST_YMax(e) AS maxy FROM (` +
+        `SELECT count(*)::int AS n, ST_Extent(ST_Transform(${t}."${target.geomColumn}", 4326)) AS e ` +
+        `FROM "${target.table}" ${t} ` +
+        (where.length ? `WHERE ${where.join(' AND ')}` : '') +
+        `) x`,
       limit,
       limitAsked: operation.limit != null,
     };
@@ -621,6 +630,133 @@ export class GisQueryCompilerService {
    *  `IN ('<layer>.<fid>', ...)` feature-id form (the PK is consumed as the
    *  feature id and is not exposed as a queryable attribute). `null` when
    *  nothing matched. */
+  /** Count + extent of an exact (condition-filtered) selection. */
+  async summarize(
+    compiled: CompiledQuery,
+  ): Promise<{ matched: number; bbox: [number, number, number, number] | null }> {
+    if (!compiled.extentSql) throw new Error('summarize() needs a select compiled by compile()');
+    const [row] = await this.readOnly<{ n: number; minx: number | null; miny: number | null; maxx: number | null; maxy: number | null }>(
+      compiled.extentSql,
+      compiled.params,
+    );
+    const bbox =
+      row && row.minx != null && row.miny != null && row.maxx != null && row.maxy != null
+        ? ([row.minx, row.miny, row.maxx, row.maxy] as [number, number, number, number])
+        : null;
+    return { matched: row?.n ?? 0, bbox };
+  }
+
+  /**
+   * The plan's selection as an ECQL filter GeoServer applies itself — on
+   * the WMS map layer and the Attribute Table's WFS — so every match shows
+   * (not the first 450 ids) and no geometries travel to the browser.
+   * Field names are validated against the catalog and values coerced and
+   * quoted exactly like the SQL path. Returns null whenever the result
+   * would not be EXACTLY the SQL selection (an explicit limit / sort, a
+   * demo table, a distance filter without GeoServer's querylayer
+   * extension or across CRSs, "within" on non-point layers); the caller
+   * then falls back to the id filter.
+   */
+  conditionCql(
+    operation: AiGisOperation,
+    catalog: LayerCatalogEntry[],
+    opts: { queryLayer: boolean },
+  ): string | null {
+    if (operation.limit != null || operation.order_by) return null;
+    const target = this.resolveLayer(catalog, operation.target_layer);
+    if (target.isDemo) return null;
+    const parts: string[] = [];
+    for (const filter of operation.attribute_filters ?? []) {
+      const clause = this.attrCql(target, filter);
+      if (clause === null) return null;
+      parts.push(clause);
+    }
+    if (operation.spatial_filter) {
+      const clause = this.spatialCql(target, operation.spatial_filter, catalog, opts);
+      if (clause === null) return null;
+      parts.push(clause);
+    }
+    return parts.length ? parts.map((p) => `(${p})`).join(' AND ') : 'INCLUDE';
+  }
+
+  private cqlValue(col: CatalogColumn, raw: unknown): string {
+    const v = this.coerce(col, raw, col.name);
+    if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+    return `'${String(v).replace(/'/g, "''")}'`;
+  }
+
+  private attrCql(layer: LayerCatalogEntry, filter: AiAttributeFilter): string | null {
+    const col = this.findColumn(layer, filter.field);
+    const name = `"${col.name}"`;
+    if (filter.op === 'is_null') return `${name} IS NULL`;
+    if (filter.op === 'is_not_null') return `${name} IS NOT NULL`;
+    if (filter.op === 'in' || filter.op === 'not_in') {
+      const list = this.valueList(filter);
+      if (list.length === 0) return null;
+      const inList = `${name} IN (${list.map((v) => this.cqlValue(col, v)).join(', ')})`;
+      // SQL's NOT IN never matches NULL; GeoServer's would — keep them equal.
+      return filter.op === 'in' ? inList : `NOT (${inList}) AND ${name} IS NOT NULL`;
+    }
+    if (filter.op === 'between') {
+      if (filter.value == null || filter.value2 == null) return null;
+      return `${name} BETWEEN ${this.cqlValue(col, filter.value)} AND ${this.cqlValue(col, filter.value2)}`;
+    }
+    if (filter.op === 'like' || filter.op === 'ilike') {
+      if (col.kind !== 'text') return null; // the SQL casts to text; ECQL cannot
+      const raw = String(filter.value ?? '');
+      const pattern = raw.includes('%') ? raw : `%${raw}%`;
+      return `${name} ${filter.op === 'ilike' ? 'ILIKE' : 'LIKE'} '${pattern.replace(/'/g, "''")}'`;
+    }
+    const op = COMPARISON[filter.op];
+    if (!op || filter.value == null) return null;
+    // SQL's <> never matches NULL; GeoServer's would (3,120 vs 3,119).
+    if (op === '<>') return `${name} <> ${this.cqlValue(col, filter.value)} AND ${name} IS NOT NULL`;
+    return `${name} ${op} ${this.cqlValue(col, filter.value)}`;
+  }
+
+  /** Distance to / overlap with ANOTHER layer, evaluated by GeoServer:
+   *  collectGeometries(queryCollection(...)) needs the querylayer
+   *  extension. DWITHIN (distance) is used for every relation because
+   *  it handles a geometry collection reliably; a distance of 0 is
+   *  "touches or overlaps", which equals "within" only for points. */
+  private spatialCql(
+    target: LayerCatalogEntry,
+    sf: NonNullable<AiGisOperation['spatial_filter']>,
+    catalog: LayerCatalogEntry[],
+    opts: { queryLayer: boolean },
+  ): string | null {
+    if (!opts.queryLayer) return null;
+    const ref = this.resolveLayer(catalog, sf.reference_layer);
+    if (ref.isDemo || ref.srid !== target.srid || target.srid === 4326) return null;
+    const inner: string[] = [];
+    for (const filter of sf.reference_filters ?? []) {
+      const clause = this.attrCql(ref, filter);
+      if (clause === null) return null;
+      inner.push(clause);
+    }
+    const innerCql = inner.length ? inner.join(' AND ') : 'INCLUDE';
+    const collection =
+      `collectGeometries(queryCollection('${ref.geoserverWorkspace}:${ref.geoserverLayer}', ` +
+      `'${ref.geomColumn}', '${innerCql.replace(/'/g, "''")}'))`;
+    const geom = `"${target.geomColumn}"`;
+    const d = Number(sf.distance_meters);
+    const hasDistance = Number.isFinite(d) && d > 0;
+    if (hasDistance && d > MAX_DISTANCE_M) return null;
+    switch (sf.relation) {
+      case 'within_distance':
+        if (hasDistance) return `DWITHIN(${geom}, ${collection}, ${d}, meters)`;
+        return target.geometryType === 'POINT' ? `DWITHIN(${geom}, ${collection}, 0, meters)` : null;
+      case 'within':
+        return target.geometryType === 'POINT' ? `DWITHIN(${geom}, ${collection}, 0, meters)` : null;
+      case 'intersects':
+        return `DWITHIN(${geom}, ${collection}, 0, meters)`;
+      case 'disjoint':
+        return `NOT DWITHIN(${geom}, ${collection}, ${hasDistance ? d : 0}, meters)`;
+      default:
+        return null;
+    }
+  }
+
   buildCql(target: LayerCatalogEntry, ids: (number | string)[]): string | null {
     if (ids.length === 0) return null;
     // Numeric keys: filter on the key column with ranges ("ogc_fid BETWEEN

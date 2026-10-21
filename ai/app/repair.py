@@ -405,10 +405,17 @@ def matching_values(text: str, layers: List[LayerInfo]) -> List[Tuple[LayerInfo,
             # Keep every value not contained in a longer match: "Pedestrian
             # or Fixed time" keeps both, "not working" drops "Working" for
             # "Not Working"; spelling variants (same words) are all kept.
-            best = [v for v, c in found if not any(c < other for _, other in found)]
+            best = [v for v, c in found if not any(_inside(c, other) for _, other in found)]
             if best:
                 out.append((lyr, field.name, best))
     return out
+
+
+def _inside(words: set, other: set) -> bool:
+    """`words` is a weaker match than `other`: fewer words, each the same
+    as or a close spelling of one of `other`'s — 'Aalandi Road' (aalandi)
+    is inside 'Dehu - Alandi Road' (dehu, alandi)."""
+    return len(words) < len(other) and all(any(_similar(w, o) for o in other) for w in words)
 
 
 def value_filter(field: str, values: List[str]) -> AttributeFilter:

@@ -62,6 +62,11 @@ export interface AiChatResult {
   truncated: boolean;
   cql: string | null;
   geometries: GeoJsonGeometry[];
+  /** true: `cql` is the question's own conditions — GeoServer filters the
+   *  layer itself, so every match shows and no geometries are sent. */
+  exact?: boolean;
+  /** EPSG:4326 [minX, minY, maxX, maxY] of every match. */
+  bbox?: [number, number, number, number] | null;
 }
 
 export interface GisChatResponse {

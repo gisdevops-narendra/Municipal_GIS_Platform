@@ -99,8 +99,14 @@ services:
       # downloads geoserver-2.25.2-ysld-plugin.zip on start (needs
       # internet, one-time ~few MB) so GeoServer can store/serve YSLD
       # styles the app authors.
-      STABLE_EXTENSIONS: ${GEOSERVER_STABLE_EXTENSIONS:-ysld-plugin}
+      # querylayer: queryCollection()/collectGeometries() in CQL, so the AI
+      # Assistant can filter a layer on the map by distance to ANOTHER
+      # layer ("signals within 100 m of the BRTS") entirely in GeoServer.
+      STABLE_EXTENSIONS: ${GEOSERVER_STABLE_EXTENSIONS:-ysld-plugin,querylayer-plugin}
       FORCE_DOWNLOAD_STABLE_EXTENSIONS: "true"
+      # querylayer safety limits (defaults 1000 features / 10000 coordinates
+      # are too small for municipal river / BRTS polygons).
+      ADDITIONAL_JAVA_STARTUP_OPTIONS: "-DQUERY_LAYER_MAX_FEATURES=5000 -DGEOMETRY_COLLECT_MAX_COORDINATES=1000000"
     ports:
       # Host port 8080 is commonly taken; GeoServer listens on 8080
       # internally, serving under the /geoserver context path.
