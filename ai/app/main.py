@@ -27,6 +27,7 @@ from fastapi import FastAPI, HTTPException
 
 from . import config, db, embeddings, llm, rag
 from .indexer import reindex_municipality
+from .fastpath import fast_plan
 from .repair import repair_plan
 from .schema import (
     NarrateRequest,
@@ -103,6 +104,13 @@ async def reindex(body: ReindexRequest):
 
 @app.post("/plan", response_model=PlanResult)
 async def plan(body: PlanRequest) -> PlanResult:
+    # Simple requests whose every word maps onto a plan piece need no model
+    # call at all (~1 s instead of ~7-40 s on CPU). See fastpath.py.
+    quick = fast_plan(body.message, body.layers, body.previous_operation)
+    if quick is not None:
+        log.info("fast path (%s): %s", body.message[:80], quick.explanation)
+        return quick
+
     if not llm.available():
         raise HTTPException(
             status_code=503,
@@ -132,6 +140,7 @@ async def plan(body: PlanRequest) -> PlanResult:
             snippets,
             body.history,
             body.municipality_name,
+            body.previous_operation,
         )
         # The small model often drops the newer operation fields; the
         # question's own words fill them (see repair.py).
@@ -141,6 +150,13 @@ async def plan(body: PlanRequest) -> PlanResult:
     except Exception as exc:
         log.exception("plan generation failed")
         raise HTTPException(status_code=502, detail=f"Local LLM error: {exc}")
+
+
+@app.post("/warm")
+async def warm(body: PlanRequest) -> dict:
+    """Pre-loads this municipality's plan prompt into the model cache."""
+    await asyncio.to_thread(llm.prime_plan_cache, body.layers, body.municipality_name)
+    return {"ok": True}
 
 
 @app.post("/narrate", response_model=NarrateResult)

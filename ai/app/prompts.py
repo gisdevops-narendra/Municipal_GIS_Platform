@@ -9,7 +9,8 @@ from __future__ import annotations
 import re
 from typing import List, Optional, Set
 
-from .schema import LayerInfo
+from .repair import _FOLLOW_UP, matching_values
+from .schema import GisOperation, LayerInfo
 from .vectorstore import Retrieved
 
 SYSTEM_PROMPT = """\
@@ -54,11 +55,12 @@ KINDS (target_layer + attribute_filters + spatial_filter pick the features):
 
 The examples below show the OUTPUT FORMAT only. Their layer names
 (BUILDINGS, PLOTS, ROADS, PARCELS, ...) are NOT real — never copy a layer
-or field name from an example. Use only names from AVAILABLE LAYERS in the
-user message, and answer the user's ACTUAL request.
+or field name from an example. Use only names from AVAILABLE LAYERS (end
+of this message), and answer the user's ACTUAL request.
 
 Rules:
-- Use ONLY layers from AVAILABLE LAYERS and ONLY their listed fields/values.
+- Use ONLY layers from AVAILABLE LAYERS and ONLY their listed fields. For a
+  category value, copy it exactly from VALUES in the user message.
   If a layer the request needs is missing -> answer_kind "unsupported"
   (name what IS available). If which field/value the user means is unclear
   -> "clarification".
@@ -90,10 +92,7 @@ _NOISE_FIELD = re.compile(
     re.I,
 )
 
-# Prompt detail levels, richest first; generate_plan steps down until the
-# whole prompt fits the model's context window (see llm.generate_plan).
-#   (sample values per field on focus layers, list other layers' fields)
-DETAIL_LEVELS = [(6, True), (3, False), (0, False)]
+_ID_FIELD = re.compile(r"(^|_)(id|code|uuid)$", re.I)
 
 
 def _sample(v: object) -> str:
@@ -101,31 +100,61 @@ def _sample(v: object) -> str:
     return text if len(text) <= 32 else text[:31] + "…"
 
 
-def _layer_block(layers: List[LayerInfo], focus: Optional[Set[str]] = None, level: int = 0) -> str:
-    """Focus layers (the ones the request names) get every useful field with
-    sample values; the rest get a compact line, so a municipality with many
-    wide layers still fits the small model's context window."""
+def _useful_fields(lyr: LayerInfo):
+    return [f for f in lyr.fields if f.type != "id" and not _NOISE_FIELD.search(f.name)]
+
+
+def catalog_block(layers: List[LayerInfo], compact: bool = False) -> str:
+    """Every layer and its fields — no sample values, nothing that depends
+    on the question — so the system message is identical for every request
+    of a municipality and Ollama re-uses its cached prompt (on CPU, reading
+    ~3k uncached tokens costs ~35 s; cached, ~1 s). `compact` lists fields
+    on one line per layer when space is short."""
     if not layers:
         return "AVAILABLE LAYERS: none"
-    samples, list_others = DETAIL_LEVELS[min(level, len(DETAIL_LEVELS) - 1)]
     out = ["AVAILABLE LAYERS:"]
     for lyr in layers:
         head = f"- {lyr.name} [{lyr.code}] {lyr.geometry_type or ''}".rstrip()
-        fields = [f for f in lyr.fields if f.type != "id" and not _NOISE_FIELD.search(f.name)]
-        if focus is not None and lyr.code not in focus:
-            if list_others and fields:
-                head += " — fields: " + ", ".join(f.name for f in fields)
-            out.append(head)
+        fields = _useful_fields(lyr)
+        if compact:
+            out.append(head + (" — fields: " + ", ".join(f.name for f in fields) if fields else ""))
             continue
         if lyr.description:
             head += f" — {lyr.description[:120]}"
         out.append(head)
-        for f in fields:
-            line = f"    {f.name} ({f.type})"
-            values = [v for v in f.sample_values if v != "…(more)"][:samples]
-            if values:
-                line += " e.g. " + ", ".join(_sample(v) for v in values)
-            out.append(line)
+        out.extend(f"    {f.name} ({f.type})" for f in fields)
+    return "\n".join(out)
+
+
+def build_system_prompt(layers: List[LayerInfo], compact: bool = False) -> str:
+    return SYSTEM_PROMPT + "\n" + catalog_block(layers, compact)
+
+
+def _values_block(message: str, layers: List[LayerInfo], focus: Set[str], samples: int) -> str:
+    """Question-specific values: real values matching the request's words,
+    then a few samples of each text field of the layers it names."""
+    out: List[str] = []
+    matches = matching_values(message, layers)
+    if matches:
+        out.append("VALUES MATCHING THE REQUEST:")
+        out.extend(
+            f"- {lyr.code}.{field} = " + " or ".join(repr(v) for v in values[:4])
+            for lyr, field, values in matches[:8]
+        )
+    if samples:
+        lines = []
+        for lyr in layers:
+            if lyr.code not in focus:
+                continue
+            for f in _useful_fields(lyr):
+                if _ID_FIELD.search(f.name):
+                    continue  # code-like ids invite "id = 13" for "zone 13"
+                values = [v for v in f.sample_values if v != "…(more)"][:samples]
+                if f.type == "text" and values:
+                    lines.append(f"- {lyr.code}.{f.name} e.g. " + ", ".join(_sample(v) for v in values))
+        if lines:
+            out.append("VALUES (samples):")
+            out.extend(lines)
     return "\n".join(out)
 
 
@@ -133,8 +162,8 @@ def _context_block(snippets: List[Retrieved]) -> str:
     if not snippets:
         return ""
     out = ["CONTEXT (cite titles you use in used_context):"]
-    for s in snippets[:8]:
-        out.append(f"[{s.title}] {s.content}")
+    for s in snippets[:3]:
+        out.append(f"[{s.title}] {s.content[:200]}")
     return "\n".join(out)
 
 
@@ -243,13 +272,24 @@ def build_user_message(
     message: str,
     layers: List[LayerInfo],
     snippets: List[Retrieved],
-    municipality_name: str | None,
-    focus: Optional[Set[str]] = None,
-    level: int = 0,
+    focus: Set[str],
+    samples: int = 3,
+    with_context: bool = True,
+    previous: Optional[GisOperation] = None,
 ) -> str:
-    # Retrieval context is the first thing dropped when space runs out.
-    ctx = _context_block(snippets) if level < len(DETAIL_LEVELS) - 1 else ""
-    parts = [_layer_block(layers, focus, level)]
+    """Only what depends on this question — kept small, since it is the
+    part Ollama has to read fresh every time."""
+    parts = []
+    if previous is not None and _FOLLOW_UP.search(message):
+        parts.append(
+            "PREVIOUS OPERATION (the request builds on it — keep its layer and "
+            "conditions, then apply the request's change):\n"
+            + previous.model_dump_json(exclude_none=True, exclude_defaults=True)
+        )
+    values = _values_block(message, layers, focus, samples)
+    if values:
+        parts.append(values)
+    ctx = _context_block(snippets) if with_context else ""
     if ctx:
         parts.append(ctx)
     parts.append(f"REQUEST: {message}")

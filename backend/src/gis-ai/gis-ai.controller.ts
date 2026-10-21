@@ -37,6 +37,13 @@ export class GisAiController {
 
   /** Friendlier wording of a chat answer from its computed facts (any
    *  member; the caller already holds the deterministic sentence). */
+  /** Primes the local model's prompt cache; returns immediately. */
+  @RequireMunicipalityMember()
+  @Post('warm')
+  warm(@CurrentAppUser() appUser: AppUser) {
+    return this.gisAi.warm(appUser);
+  }
+
   @RequireMunicipalityMember()
   @Post('narrate')
   narrate(@CurrentAppUser() appUser: AppUser, @Body() dto: GisNarrateDto) {

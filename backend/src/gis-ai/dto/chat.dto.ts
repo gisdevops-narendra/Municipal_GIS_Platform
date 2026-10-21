@@ -36,6 +36,12 @@ export class GisChatDto {
   @ValidateNested({ each: true })
   @Type(() => ChatTurnDto)
   history?: ChatTurnDto[];
+
+  /** The operation the previous answer ran, so a follow-up ("now only
+   *  those in ward 5") extends it. Re-validated like any plan. */
+  @IsOptional()
+  @IsObject()
+  previousOperation?: Record<string, unknown>;
 }
 
 /** `POST /gis/ai/narrate` — the question plus the `facts` a chat answer

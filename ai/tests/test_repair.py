@@ -62,8 +62,11 @@ results = [
 # leaving an `unsupported` plan with no operation.
 AREA_LAYERS = [
     LayerInfo(id="s", code="SIGNAL", name="signal", geometry_type="POINT",
-              fields=[LayerField(name="type", type="text"), LayerField(name="ward_no", type="integer"),
-                      LayerField(name="zone_no", type="integer")]),
+              fields=[LayerField(name="type", type="text", sample_values=[
+                          "Fixed time", "Manually operated", "Not Working", "Pedestrian", "Traffic Control",
+                          "Traffic actuated (automatic)", "Working"]),
+                      LayerField(name="ward_no", type="integer"), LayerField(name="zone_no", type="integer"),
+                      LayerField(name="height", type="number")]),
     LayerInfo(id="z", code="ZONE", name="zone", geometry_type="POLYGON",
               fields=[LayerField(name="zone_no", type="integer"), LayerField(name="zone_name", type="text")]),
     LayerInfo(id="l", code="LANDMARKS", name="landmarks", geometry_type="POINT",
@@ -114,6 +117,39 @@ results += [
 results.append(check_area("invented zone_no dropped from a per-zone count", "How many signals are there in each zone?",
     plan("aggregate", target_layer="SIGNAL", metric="count", group_by_layer="ZONE",
          attribute_filters=flt("zone_no", 1)), attribute_filters=[], group_by_layer="ZONE"))
+# Real chat: the model kept zone_no = 13 but dropped "traffic-actuated" and
+# added `within ZONE where id = '13-0-0-0-0-4'` (a zone id sample) -> 0 rows.
+results += [
+    check_area("named category added, made-up spatial filter dropped", "Show traffic-actuated signals in zone no. 13.",
+               plan("select", target_layer="SIGNAL", attribute_filters=flt("zone_no", 13),
+                    spatial_filter=SpatialFilter(relation="within", reference_layer="ZONE",
+                                                 reference_filters=[AttributeFilter(field="id", op="=", value="13-0-0-0-0-4")])),
+               attribute_filters=flt("zone_no", 13) + flt("type", "Traffic actuated (automatic)"), spatial_filter=None),
+    check_area("half-written filter dropped", "What is the average height of all signals?",
+               plan("aggregate", target_layer="SIGNAL", metric="avg", metric_field="height",
+                    attribute_filters=[AttributeFilter(field="height", op="=")]),
+               attribute_filters=[], metric="avg", metric_field="height"),
+    check_area("'not working' picks Not Working, not Working", "show signals that are not working",
+               plan(), kind="select", target_layer="SIGNAL", attribute_filters=flt("type", "Not Working")),
+]
+# Real chat: "within 100 m of the BRTS" came back as kind nearest with
+# prabhag_no = 'BRTS' (prabhag_no only holds A-H) -> "Nearest to what?".
+BRTS_LAYERS = AREA_LAYERS + [LayerInfo(id="b", code="BRTS", name="brts", geometry_type="POLYGON", fields=[])]
+BRTS_LAYERS[0] = BRTS_LAYERS[0].model_copy(update={"fields": BRTS_LAYERS[0].fields + [
+    LayerField(name="prabhag_no", type="text", sample_values=list("ABCDEFGH"))]})
+brts = repair_plan("Find signals within 100 m of the BRTS", plan(
+    "nearest", target_layer="SIGNALS", attribute_filters=[AttributeFilter(field="prabhag_no", op="=", value="BRTS")],
+    spatial_filter=SpatialFilter(relation="within_distance", reference_layer="BRTS", distance_meters=100)), BRTS_LAYERS)
+ok = brts.operation.kind == "select" and brts.operation.attribute_filters == [] and brts.operation.spatial_filter is not None
+results.append(ok)
+print(f"{'PASS' if ok else 'FAIL'}  nearest -> select, impossible prabhag value dropped: "
+      f"{brts.operation.kind} {brts.operation.attribute_filters}")
+road = repair_plan("Find signals within 100 m of the BRTS", plan(
+    "select", target_layer="SIGNAL", attribute_filters=[AttributeFilter(field="road_name", op="ilike", value="BRTS")],
+    spatial_filter=SpatialFilter(relation="within_distance", reference_layer="BRTS", distance_meters=100)), BRTS_LAYERS)
+ok = road.operation.attribute_filters == []
+results.append(ok)
+print(f"{'PASS' if ok else 'FAIL'}  value that only names the reference layer dropped: {road.operation.attribute_filters}")
 asked = repair_plan("Show all signals that are Not Working",
                     plan("select", target_layer="SIGNAL", attribute_filters=list(nw)), AREA_LAYERS)
 ok = asked.operation.attribute_filters == nw

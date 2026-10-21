@@ -119,6 +119,27 @@ export class GisAiService {
     return this.ai.reindex(appUser.municipalityId);
   }
 
+  /** Called when the AI Assistant panel opens: primes the local model's
+   *  prompt cache with exactly the prefix /chat will send, so the first
+   *  question doesn't pay the cold read (~40 s on CPU). Returns at once. */
+  async warm(appUser: AppUser): Promise<{ ok: true }> {
+    const municipality = await this.prisma.municipality.findUnique({
+      where: { id: appUser.municipalityId },
+      select: { name: true },
+    });
+    const catalogEntries = await this.catalog.buildForUser(appUser);
+    void this.ai
+      .warm({
+        message: '',
+        municipality_id: appUser.municipalityId,
+        municipality_name: municipality?.name,
+        layers: this.catalog.toAiLayerInfo(catalogEntries),
+        history: [],
+      })
+      .catch((err: Error) => this.logger.warn(`AI warm-up failed: ${err.message}`));
+    return { ok: true };
+  }
+
   async chat(appUser: AppUser, dto: GisChatDto): Promise<GisChatResponse> {
     const municipality = await this.prisma.municipality.findUnique({
       where: { id: appUser.municipalityId },
@@ -130,6 +151,7 @@ export class GisAiService {
     });
 
     const catalogEntries = await this.catalog.buildForUser(appUser);
+    await this.catalog.addMatchingValues(catalogEntries, dto.message);
 
     const plan = await this.ai.plan({
       message: dto.message,
@@ -140,6 +162,7 @@ export class GisAiService {
         role: t.role,
         content: t.content,
       })),
+      previous_operation: dto.previousOperation,
     });
 
     const usedContext = plan.used_context ?? [];
@@ -213,6 +236,13 @@ export class GisAiService {
    * failed or introduced a number that is not in the facts.
    */
   async narrate(appUser: AppUser, dto: GisNarrateDto): Promise<{ text: string | null }> {
+    // Off by default: on a CPU-only host the wording call takes 3-14 s and
+    // evicts the plan prompt from Ollama's cache, so the NEXT question
+    // re-reads ~3k tokens (~35 s instead of ~7 s). The computed answer is
+    // exact anyway. GIS_AI_QUERY_NARRATION=true turns it back on (e.g. GPU).
+    if (this.config.get<string>('GIS_AI_QUERY_NARRATION') !== 'true') {
+      return { text: null };
+    }
     return this.narrateFacts(appUser, 'query', dto.question, dto.facts);
   }
 

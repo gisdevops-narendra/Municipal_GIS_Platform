@@ -17,7 +17,7 @@ import httpx
 
 from . import config, prompts
 from .repair import mentioned_layer_codes
-from .schema import ChatTurn, LayerInfo, PLAN_JSON_SCHEMA, PlanResult
+from .schema import ChatTurn, GisOperation, LayerInfo, PLAN_JSON_SCHEMA, PlanResult
 from .vectorstore import Retrieved
 
 log = logging.getLogger("gis-ai.llm")
@@ -110,6 +110,7 @@ def generate_plan(
     snippets: List[Retrieved],
     history: List[ChatTurn],
     municipality_name: Optional[str],
+    previous: Optional[GisOperation] = None,
 ) -> PlanResult:
     if not reachable():
         raise LLMUnavailable(
@@ -120,7 +121,7 @@ def generate_plan(
             f"The local model '{config.LLM_MODEL}' is still downloading. Try again shortly."
         )
 
-    messages = _fit_messages(message, layers, snippets, history, municipality_name)
+    messages = _fit_messages(message, layers, snippets, history, municipality_name, previous)
 
     def _chat(fmt) -> str:
         payload = {
@@ -181,44 +182,69 @@ def _fit_messages(
     snippets: List[Retrieved],
     history: List[ChatTurn],
     municipality_name: Optional[str],
+    previous: Optional[GisOperation] = None,
 ) -> list[dict]:
-    """Builds the chat so it fits LLM_NUM_CTX. Ollama silently drops the
-    START of an over-long prompt — the system rules and examples — and the
-    model then answers with JSON that matches nothing. So step the detail
-    down until it fits: fewer sample values, other layers as one line,
-    no retrieval context, no history, fewer examples."""
-    budget = config.LLM_NUM_CTX - _OUTPUT_RESERVE_TOKENS
-    named = set(mentioned_layer_codes(message, layers))
-    # Layers the request names get full detail; if it names none, start
-    # with every layer in full and fall back to the compact list.
-    focus_options = [named] if named else [None, set()]
-    turns = [{"role": t.role, "content": t.content} for t in history[-6:]]
-    fewshots = [prompts.FEWSHOT, prompts.FEWSHOT[:6]]
+    """Builds the chat so it fits LLM_NUM_CTX AND re-uses Ollama's prompt
+    cache. Order: [system: rules + every layer/field] [examples] — identical
+    for every request of a municipality, so cached — then [history] and
+    [question-specific values + request], the only part read fresh.
 
+    Ollama silently drops the START of an over-long prompt (the rules), so
+    when it does not fit, trim the per-question parts first (retrieval
+    context, history, samples); the cached layer list goes compact and the
+    examples shrink only as a last resort."""
+    budget = config.LLM_NUM_CTX - _OUTPUT_RESERVE_TOKENS
+    focus = set(mentioned_layer_codes(message, layers))
+    turns = [{"role": t.role, "content": t.content} for t in history[-6:]]
+    # (compact layer list, examples, keep history, samples, retrieval context)
+    steps = [
+        (False, prompts.FEWSHOT, True, 3, True),
+        (False, prompts.FEWSHOT, True, 3, False),
+        (False, prompts.FEWSHOT, False, 3, False),
+        (False, prompts.FEWSHOT, False, 0, False),
+        (True, prompts.FEWSHOT, False, 3, False),
+        (True, prompts.FEWSHOT[:6], False, 0, False),
+    ]
     attempt: list[dict] = []
-    for few in fewshots:
-        for keep_history in (True, False):
-            for focus in focus_options:
-                for level in range(len(prompts.DETAIL_LEVELS)):
-                    user = prompts.build_user_message(
-                        message, layers, snippets, municipality_name, focus, level
-                    )
-                    attempt = [
-                        {"role": "system", "content": prompts.SYSTEM_PROMPT},
-                        *few,
-                        *(turns if keep_history else []),
-                        {"role": "user", "content": user},
-                    ]
-                    if _estimate_tokens(attempt) <= budget:
-                        if level or not keep_history or few is not prompts.FEWSHOT:
-                            log.info(
-                                "prompt trimmed to fit %s tokens: level=%s history=%s examples=%s focus=%s",
-                                config.LLM_NUM_CTX, level, keep_history, len(few) // 2,
-                                sorted(focus) if focus else focus,
-                            )
-                        return attempt
+    for i, (compact, few, keep_history, samples, with_ctx) in enumerate(steps):
+        attempt = [
+            {"role": "system", "content": prompts.build_system_prompt(layers, compact)},
+            *few,
+            *(turns if keep_history else []),
+            {"role": "user", "content": prompts.build_user_message(message, layers, snippets, focus, samples, with_ctx, previous)},
+        ]
+        if _estimate_tokens(attempt) <= budget:
+            if i:
+                log.info(
+                    "prompt trimmed to fit %s tokens: compact=%s examples=%s history=%s samples=%s context=%s",
+                    config.LLM_NUM_CTX, compact, len(few) // 2, keep_history, samples, with_ctx,
+                )
+            return attempt
     log.warning("prompt still ~%s tokens over a %s context", _estimate_tokens(attempt), config.LLM_NUM_CTX)
     return attempt
+
+
+def prime_plan_cache(layers: List[LayerInfo], municipality_name: Optional[str]) -> None:
+    """Reads this municipality's plan prompt prefix (rules + layer list +
+    examples) into Ollama's cache with a 1-token reply, so the user's first
+    real question re-uses it (~7 s) instead of reading it cold (~40 s on
+    CPU). Called when the AI Assistant panel opens."""
+    if not available():
+        return
+    messages = _fit_messages("", layers, [], [], municipality_name)
+    try:
+        _http().post(
+            "/api/chat",
+            json={
+                "model": config.LLM_MODEL,
+                "messages": messages,
+                "stream": False,
+                "keep_alive": -1,
+                "options": {"temperature": 0, "num_ctx": config.LLM_NUM_CTX, "num_predict": 1},
+            },
+        )
+    except httpx.HTTPError as exc:
+        log.warning("plan cache warm-up failed: %s", exc)
 
 
 def _parse_json(text: str) -> Optional[dict]:

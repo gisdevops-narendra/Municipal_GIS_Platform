@@ -115,6 +115,9 @@ class PlanRequest(BaseModel):
     municipality_name: Optional[str] = None
     layers: List[LayerInfo] = Field(default_factory=list)
     history: List[ChatTurn] = Field(default_factory=list)
+    # The plan of the previous answer, so a follow-up ("now only those in
+    # ward 5") extends the exact operation instead of re-reading prose.
+    previous_operation: Optional[GisOperation] = None
 
 
 class ReindexRequest(BaseModel):

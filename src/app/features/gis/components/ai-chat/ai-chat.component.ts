@@ -67,6 +67,12 @@ export class AiChatComponent {
   private chatSub?: Subscription;
   private readonly narrateSubs = new Set<Subscription>();
 
+  constructor() {
+    // The panel is created when first opened: prime the model's prompt
+    // cache now, while the user types (best effort, fire and forget).
+    this.aiService.warm().subscribe({ error: () => undefined });
+  }
+
   readonly hasResult = computed(() =>
     this.messages().some((m) => m.response?.answerKind === 'gis_operation'),
   );
@@ -95,6 +101,10 @@ export class AiChatComponent {
     this.serviceError.set(null);
     this.draft = '';
     const priorHistory = this.history();
+    // The last operation that actually ran — a follow-up builds on it.
+    const previousOperation = [...this.messages()]
+      .reverse()
+      .find((m) => m.response?.answerKind === 'gis_operation' && m.response.operation)?.response?.operation;
 
     this.messages.update((list) => [
       ...list,
@@ -103,7 +113,7 @@ export class AiChatComponent {
     ]);
     this.sending.set(true);
 
-    this.chatSub = this.aiService.chat(text, priorHistory, this.activeLayerId).subscribe({
+    this.chatSub = this.aiService.chat(text, priorHistory, this.activeLayerId, previousOperation).subscribe({
       next: (response) => {
         this.sending.set(false);
         const wantsWording = !!response.answer && !!response.facts;

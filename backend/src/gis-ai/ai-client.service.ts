@@ -27,6 +27,7 @@ export interface AiPlanRequest {
   municipality_name?: string;
   layers: AiLayerInfo[];
   history: { role: 'user' | 'assistant'; content: string }[];
+  previous_operation?: Record<string, unknown>;
 }
 
 export interface AiNarrateRequest {
@@ -75,6 +76,12 @@ export class AiClientService {
     // the Python side caps itself at GIS_AI_LLM_TIMEOUT_S (default 180).
     const raw = await this.request('POST', '/plan', body, 240000);
     return raw as unknown as AiPlanResult;
+  }
+
+  /** Reads the municipality's plan prompt into the model's cache (~40 s on
+   *  CPU the first time) so the next /plan is fast. Best effort. */
+  async warm(body: AiPlanRequest): Promise<void> {
+    await this.request('POST', '/warm', body, 240000, true);
   }
 
   /** One extra local-LLM call (~10-60 s on CPU) — always optional for the
