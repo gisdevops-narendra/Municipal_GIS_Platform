@@ -256,7 +256,8 @@ def _measure_field(text: str, target: Optional[LayerInfo]) -> Optional[str]:
     if target:
         words = _tokens(text)
         for f in target.fields:
-            if f.type in ("integer", "number") and f.name.lower() not in ("ogc_fid", "id", "objectid"):
+            if f.type in ("integer", "number") and f.name.lower() not in ("ogc_fid", "id", "objectid") \
+                    and role_of(f.name) not in ("id", "hidden"):
                 parts = [p for p in _tokens(f.name) if len(p) > 2]
                 if parts and all(p in words or any(w.startswith(p) for w in words) for p in parts):
                     return f.name
@@ -265,12 +266,190 @@ def _measure_field(text: str, target: Optional[LayerInfo]) -> Optional[str]:
             if f.type in ("integer", "number") and role_of(f.name) not in ("id", "hidden"):
                 if any(a.split() and all(w in words for w in a.split()) for a in alias_phrases(f)):
                     return f.name
+    if target:
+        # "length" on a layer whose length column is empty -> shape_leng
+        hint = ["length"] if _LENGTH.search(text) else ["area"] if _AREA.search(text) else []
+        field = comparison_field(target, hint) if hint else None
+        if field is not None:
+            return field.name
     geom = (target.geometry_type or "").upper() if target else ""
     if _LENGTH.search(text) and geom in ("LINE", ""):
         return "length"
     if _AREA.search(text) and geom in ("POLYGON", ""):
         return "area"
     return None
+
+
+def numeric_fields(layer: LayerInfo):
+    """Numeric columns a question can compare or rank on: measures and
+    numeric categories; never ids or hidden ones (incl. constant columns)."""
+    return [
+        f for f in layer.fields
+        if f.type in ("integer", "number")
+        and (role_of(f.name) in ("measure", "category") or (
+            role_of(f.name) is None and not re.search(r"(^|_)(id|no|num|number|fid|gid)$", f.name, re.I)
+        ))
+    ]
+
+
+def comparison_field(layer: LayerInfo, hints: List[str]):
+    """The numeric column a comparison / ranking is about: a hint word
+    sharing its first 3 letters with a part of the column name ("diameter"
+    -> pipe_dia_i, "length" -> shape_leng), else one of its aliases. None
+    when no column fits, or several equally well."""
+    found = []
+    for f in numeric_fields(layer):
+        parts = [p for p in re.split(r"[_\W]+", f.name.lower()) if len(p) >= 3]
+        if any(h[:3] == p[:3] for h in hints if len(h) >= 3 for p in parts):
+            found.append(f)
+    if not found:
+        # the column's aliases: "height" -> bldg_ht, "storey" -> floors_cnt
+        found = [
+            f for f in numeric_fields(layer)
+            if any(h == a or (len(h) >= 5 and a.startswith(h[:5])) for h in hints if len(h) >= 3 for a in alias_words(f))
+        ]
+    if len(found) > 1:
+        # a column named exactly by the hint wins ("area" -> area over area_ha)
+        found = [f for f in found if f.name.lower() in hints] or found
+    return found[0] if len(found) == 1 else None
+
+
+# "the longest river", "which lake is the biggest", "3 tallest buildings"
+_RANKED = re.compile(
+    r"\b(?:top\s+)?(?:(?P<n>\d+)\s+)?(?P<sup>tallest|highest|largest|biggest|longest|widest|deepest|"
+    r"shortest|smallest|lowest|narrowest)\b",
+    re.I,
+)
+SUP_DESC = {"tallest", "highest", "largest", "biggest", "longest", "widest", "deepest"}
+SUP_IMPLIES = {
+    "tallest": "height", "highest": "height", "lowest": "height",
+    "longest": "length", "widest": "width", "narrowest": "width", "deepest": "depth",
+}
+# A value question, not "which feature": "maximum length", "average height",
+# "longest road in each ward".
+_STATISTIC = re.compile(
+    r"\b(maximum|minimum|max|min|average|avg|mean|total|sum|how many|count|number of)\b|\b(each|every|per)\b",
+    re.I,
+)
+
+
+def rank_hints(sup: str, target: LayerInfo) -> List[str]:
+    """The measure a superlative is about: "longest" -> length; "largest" /
+    "smallest" -> area of polygons, length of lines."""
+    sup = sup.lower()
+    if sup in SUP_IMPLIES:
+        return [SUP_IMPLIES[sup]]
+    if sup == "shortest":
+        return ["length", "height"]  # shortest road / shortest building
+    geom = (target.geometry_type or "").upper()
+    return ["area"] if geom == "POLYGON" else ["length"] if geom == "LINE" else []
+
+
+def rank_field(target: LayerInfo, hints: List[str]) -> Optional[str]:
+    """Column to rank on, else the geometry's own length / area (the
+    compiler measures it) when the layer's shape has one."""
+    field = comparison_field(target, hints) if hints else None
+    if field is not None:
+        return field.name
+    geom = (target.geometry_type or "").upper()
+    if "length" in hints and geom == "LINE":
+        return "length"
+    if "area" in hints and geom == "POLYGON":
+        return "area"
+    return None
+
+
+def ranked_request(text: str, target: Optional[LayerInfo]) -> Optional[Tuple[Optional[str], bool, int]]:
+    """(field or None, descending, n) for "which <layer> is the <superlative>";
+    None when the question has no superlative or asks for a statistic."""
+    m = _RANKED.search(text)
+    if not m or target is None or _STATISTIC.search(text):
+        return None
+    sup = m.group("sup").lower()
+    return rank_measure(sup, target, _tokens(text)), sup in SUP_DESC, int(m.group("n") or 1)
+
+
+def rank_measure(sup: str, target: LayerInfo, words: List[str]) -> Optional[str]:
+    """The field a superlative ranks on: its implied measure, or — for one
+    implying none — a numeric field the question names."""
+    hints = rank_hints(sup, target)
+    if not hints:
+        return rank_field(target, words)
+    return next((f for h in hints if (f := rank_field(target, [h]))), None)
+
+
+def rank_choice(plan: PlanResult, op: GisOperation, target: LayerInfo, desc: bool) -> PlanResult:
+    """No measure fits the superlative: ask which field, each chip running
+    the ranking on that column. The plan stays attached, so a typed reply
+    ("yes, use length") completes it."""
+    from .schema import ClarifyOption  # local: schema imports nothing from here
+
+    options = []
+    for f in numeric_fields(target)[:6]:
+        changed = op.model_copy(deep=True)
+        changed.order_by = f.name
+        options.append(ClarifyOption(label=f.name, operation=changed))
+    return plan.model_copy(update={
+        "answer_kind": "clarification",
+        "operation": op,
+        "clarification": f"Which field of {target.name} should I rank by ({'highest' if desc else 'lowest'} first)?",
+        "options": options,
+    })
+
+
+# "yes length", "yes, use length", "by shape_leng", "use area instead"
+_FIELD_REPLY = re.compile(
+    r"^\s*(?:(?:yes|yeah|yep|ok|okay|sure|right|correct)\b[\s,.!-]*)?"
+    r"(?:(?:please\s+)?(?:use|using|by|with|on|take|pick|choose|sort by|order by|rank by|based on)\s+)?"
+    r"(?:the\s+)?(?P<field>[a-z][a-z0-9_ ]*?)(?:\s+(?:field|column|value|values|instead|please))*\s*[.!?]*\s*$",
+    re.I,
+)
+
+
+def field_reply(text: str, previous: GisOperation, target: LayerInfo) -> Optional[GisOperation]:
+    """A reply naming only a field modifies the previous plan: the ranking
+    column of "the longest river", or the measure of an aggregate."""
+    m = _FIELD_REPLY.match(text)
+    if not m:
+        return None
+    words = m.group("field").strip().lower()
+    numeric = numeric_fields(target)
+    norm = lambda s: s.lower().replace("_", "").replace(" ", "")  # noqa: E731
+    field = next((f for f in numeric if norm(f.name) == norm(words)), None)
+    if field is None:
+        # every word must name the field ("length" -> shape_leng), so "in
+        # ward 5" is never read as "rank by ward_no"
+        tokens = _tokens(words)
+        if not tokens or any(len(t) < 3 or t.isdigit() for t in tokens):
+            return None
+        field = comparison_field(target, tokens)
+        if field is None:
+            name = rank_field(target, tokens) if tokens in (["length"], ["area"]) else None
+            if name is None:
+                return None
+        else:
+            parts = [p for p in re.split(r"[_\W]+", field.name.lower()) if len(p) >= 3]
+            if not all(any(t[:3] == p[:3] for p in parts) or t in alias_words(field) for t in tokens):
+                return None
+            name = field.name
+    else:
+        name = field.name
+    op = previous.model_copy(deep=True)
+    if op.kind == "select" and (op.order_by or op.order_desc is not None):
+        op.order_by = name
+    elif op.kind == "aggregate" and op.metric in ("max", "min") and not (op.group_by or op.group_by_layer):
+        # "display the longest river" read as max(?) -> the river itself
+        op = GisOperation(
+            kind="select", target_layer=op.target_layer,
+            attribute_filters=op.attribute_filters, spatial_filter=op.spatial_filter,
+            spatial_filters=op.spatial_filters,
+            order_by=name, order_desc=op.metric == "max", limit=op.limit or 1,
+        )
+    elif op.kind == "aggregate" and op.metric not in (None, "count"):
+        op.metric_field = name
+    else:
+        return None
+    return op
 
 
 def _grouping(text: str, layers: List[LayerInfo], target: Optional[LayerInfo]) -> Tuple[Optional[str], Optional[str]]:
@@ -742,7 +921,7 @@ def _is_identifier(field: str) -> bool:
 
 
 def repair_plan(message: str, plan: PlanResult, layers: List[LayerInfo], follow_up: bool = False) -> PlanResult:
-    if plan.answer_kind == "clarification" and plan.operation is None:
+    if plan.answer_kind == "clarification" and plan.operation is None and not _RANKED.search(message):
         return plan
     text = message
     notes: List[str] = []
@@ -750,6 +929,10 @@ def repair_plan(message: str, plan: PlanResult, layers: List[LayerInfo], follow_
 
     metric = _metric(text)
     nearest = _NEAREST.search(text)
+    # "which river is the longest": the river itself (sorted, LIMIT 1), not
+    # max(length) — the model reads superlatives as an aggregate.
+    if not nearest and _RANKED.search(text) and not _STATISTIC.search(text):
+        metric = None
     wants = (
         "nearest" if nearest
         else "route" if _ROUTE.search(text)
@@ -765,7 +948,8 @@ def repair_plan(message: str, plan: PlanResult, layers: List[LayerInfo], follow_
     # No operation at all, but the request clearly asks for an aggregate /
     # buffer / plain listing of a layer the question names: build it.
     if op is None:
-        kind = wants if wants in ("aggregate", "buffer") else "select" if _SELECT.search(text) and not wants else None
+        kind = wants if wants in ("aggregate", "buffer") else "select" if (
+            _SELECT.search(text) or _RANKED.search(text)) and not wants else None
         if kind is None or not mentioned:
             return plan
         group_layer, _ = _grouping(text, layers, None)
@@ -785,6 +969,19 @@ def repair_plan(message: str, plan: PlanResult, layers: List[LayerInfo], follow_
         target = mentioned[0][0]
         op.target_layer = target.code
         notes.append(f"target layer -> {target.name}")
+
+    ranked = ranked_request(text, target) if not nearest and op.kind in ("select", "aggregate") else None
+    if ranked is not None:
+        field, desc, n = ranked
+        if op.kind != "select" or op.order_by != field or op.limit != n:
+            notes.append(f"superlative -> {'highest' if desc else 'lowest'} {field or '?'} first, top {n}")
+        op = GisOperation(
+            kind="select", target_layer=op.target_layer,
+            attribute_filters=op.attribute_filters, spatial_filter=op.spatial_filter,
+            spatial_filters=op.spatial_filters, order_by=field, order_desc=desc, limit=n,
+        )
+        if field is None:
+            return rank_choice(plan, op, target, desc)
 
     if op.kind == "nearest" and not nearest and op.spatial_filter is not None:
         notes.append("kind nearest -> select (no nearest/closest in the request)")

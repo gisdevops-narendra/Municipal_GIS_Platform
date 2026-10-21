@@ -37,6 +37,9 @@ _FREE_TEXT_LEN = 40
 _SYSTEM_COLUMN = re.compile(
     r"^(ogc_fid|fid|gid|objectid|object_id|globalid|gen_id|gis_workspace_id)$|^shape_", re.I
 )
+# A numeric column within this relative distance of the geometry's own
+# length / area (on average) holds that measure, whatever it is called.
+_GEOMETRY_TOLERANCE = 0.05
 _ID_NAME = re.compile(r"(^|_)(id|gisid|uid|uuid|code|fid|gid|key)$", re.I)
 
 # Common abbreviations in GIS column names -> the word users say.
@@ -106,11 +109,18 @@ def classify(field: str, kind: str, stats: dict, samples: List[str]) -> Profile:
     words = name_words(field)
     plain = " ".join(words)
     unique = filled >= 20 and distinct >= 0.95 * filled
+    geometry = stats.get("geometry") if kind in ("integer", "number") else None
 
-    if _SYSTEM_COLUMN.search(field) or kind in ("id", "geometry"):
+    if stats.get("same_as"):
+        role = "hidden"  # an exact copy of another column
+    elif geometry:
+        role = "measure"  # the feature's own length / area (shape_leng)
+    elif _SYSTEM_COLUMN.search(field) or kind in ("id", "geometry"):
         role = "hidden"
     elif rows >= 20 and filled <= 0.02 * rows:
         role = "hidden"  # (almost) always empty
+    elif kind in ("integer", "number") and rows >= 3 and filled and distinct <= 1:
+        role = "hidden"  # always the same number (length = 0 everywhere): ranks nothing
     elif kind == "boolean":
         role = "flag"
     elif kind == "date":
@@ -137,10 +147,14 @@ def classify(field: str, kind: str, stats: dict, samples: List[str]) -> Profile:
 
     high = _num(stats.get("max"))
     unit = _guess_unit(field, high) if role == "measure" else None
+    if geometry and stats.get("metric") and role == "measure":
+        unit = "m" if geometry == "length" else "sq m"
 
     aliases: List[str] = []
     if plain and plain != field.lower():
         aliases.append(plain)
+    if geometry and role == "measure" and geometry not in words:
+        aliases.append(geometry)
     if unit and words and words[-1] in (unit, "m", "mm", "km", "ft", "cm"):
         bare = " ".join(words[:-1])
         if bare and bare not in aliases:
@@ -155,8 +169,14 @@ def classify(field: str, kind: str, stats: dict, samples: List[str]) -> Profile:
         parts[0] += f" ({plain})"
     if unit:
         parts.append(f"in {unit}")
-    if role in ("measure", "date") and stats.get("min") is not None:
+    if stats.get("same_as"):
+        parts[0] = f"Same measure as {stats['same_as']} ({plain})"
+    elif role == "hidden" and kind in ("integer", "number") and filled and distinct <= 1 and rows >= 3:
+        parts[0] = f"Constant ({plain}), always {stats.get('max')}; carries no information"
+    elif role in ("measure", "date") and stats.get("min") is not None:
         parts.append(f"from {stats['min']} to {stats['max']}")
+    if geometry and role == "measure":
+        parts.append(f"equal to the feature's {geometry}")
     if role in ("category", "name", "flag") and distinct:
         parts.append(f"{distinct} distinct values")
         shown = [s for s in samples if s != "…(more)"][:4]
@@ -167,11 +187,26 @@ def classify(field: str, kind: str, stats: dict, samples: List[str]) -> Profile:
 
 # ---------------------------------------------------------------- profiling
 
-async def _profile_stats(conn, table: str, columns, scope_sql: str, params: list) -> Dict[str, dict]:
+def _geometry_measures(layer) -> Dict[str, str]:
+    """SQL for the geometry's own measures, in metres when the CRS is
+    projected: a line's length; a polygon's perimeter (what GIS exports
+    store as its "length") and area."""
+    g = '"' + layer.geom_column.replace('"', '""') + '"'
+    g = g if layer.srid != 4326 else f"{g}::geography"
+    shape = (layer.geometry_type or "").upper()
+    if shape == "LINE":
+        return {"length": f"ST_Length({g})"}
+    if shape == "POLYGON":
+        return {"length": f"ST_Perimeter({g})", "area": f"ST_Area({g})"}
+    return {}
+
+
+async def _profile_stats(conn, table: str, columns, scope_sql: str, params: list, layer=None) -> Dict[str, dict]:
     """One aggregate query for every column of a table (sampled if big)."""
     est = await conn.fetchval(
         "SELECT reltuples::bigint FROM pg_class WHERE oid = to_regclass($1)", table
     ) or 0
+    measures = _geometry_measures(layer) if layer is not None else {}
     sample = ""
     if est > _PROFILE_ROWS:
         sample = f"TABLESAMPLE SYSTEM ({max(0.01, round(100.0 * _PROFILE_ROWS / est, 4))})"
@@ -181,6 +216,9 @@ async def _profile_stats(conn, table: str, columns, scope_sql: str, params: list
         selects += [f"count({q}) AS f{i}", f"count(DISTINCT {q}) AS d{i}"]
         if c.kind in ("integer", "number", "date"):
             selects += [f"min({q})::text AS lo{i}", f"max({q})::text AS hi{i}"]
+        if c.kind in ("integer", "number"):
+            for k, expr in enumerate(measures.values()):
+                selects.append(f"avg(abs({q}::float8 - {expr}) / nullif({expr}, 0)) AS m{k}_{i}")
         if c.kind == "text":
             selects += [
                 f"avg(length({q}::text)) AS l{i}",
@@ -199,10 +237,66 @@ async def _profile_stats(conn, table: str, columns, scope_sql: str, params: list
             stats["avg_len"] = float(row[f"l{i}"] or 0)
             stats["spaced"] = float(row[f"s{i}"] or 0)
             stats["digits"] = float(row[f"g{i}"] or 0)
+        for k, measure in enumerate(measures):
+            off = row[f"m{k}_{i}"] if f"m{k}_{i}" in row.keys() else None
+            if off is not None and off <= _GEOMETRY_TOLERANCE and "geometry" not in stats:
+                stats["geometry"], stats["metric"] = measure, layer.srid != 4326
+                stats["geometry_off"] = float(off)
         if sample:
             stats["sampled"] = True
         out[c.name] = stats
+    try:
+        await _mark_copies(conn, table, columns, out, sample, scope_sql, params)
+    except Exception:
+        pass  # best effort: without it, copies just stay visible
+    # Several columns hold the same geometry measure (area_sqm, shape_area):
+    # the one closest to the real geometry answers "area"; the others step back.
+    for measure in measures:
+        same = [c.name for c in columns if out[c.name].get("geometry") == measure and not out[c.name].get("same_as")]
+        same.sort(key=lambda n: out[n]["geometry_off"])
+        for other in same[1:]:
+            out[other]["same_as"] = same[0]
     return out
+
+
+async def _mark_copies(conn, table: str, columns, stats: Dict[str, dict], sample: str, scope_sql: str, params: list) -> None:
+    """Numeric columns holding exactly the same values (area_sqm and the
+    exported shape_area): all but one get `same_as`, so a question about
+    "area" has one column to use. Only columns whose stats already agree
+    are compared row by row."""
+    close = lambda a, b: a is not None and b is not None and abs(a - b) <= 1e-6 * max(abs(a), 1)  # noqa: E731
+    candidates = [
+        c for c in columns
+        if c.kind in ("integer", "number") and (stats[c.name].get("distinct") or 0) >= 3
+        and stats[c.name].get("min") != stats[c.name].get("max")
+    ]
+    # same fill and (numerically) the same range: worth a row-by-row look
+    groups: List[list] = []
+    for c in candidates:
+        st = stats[c.name]
+        for g in groups:
+            first = stats[g[0].name]
+            if first.get("filled") == st.get("filled") and close(_num(first.get("min")), _num(st.get("min"))) \
+                    and close(_num(first.get("max")), _num(st.get("max"))):
+                g.append(c)
+                break
+        else:
+            groups.append([c])
+    for group in groups:
+        if len(group) < 2:
+            continue
+        # keep a column of the layer's own over an exported / system one
+        group.sort(key=lambda c: (bool(_SYSTEM_COLUMN.search(c.name)), columns.index(c)))
+        k = '"' + group[0].name.replace('"', '""') + '"'
+        for other in group[1:]:
+            o = '"' + other.name.replace('"', '""') + '"'
+            differs = await conn.fetchval(
+                f'SELECT count(*) FROM "{table}" {sample} {scope_sql} '
+                f'{"AND" if scope_sql else "WHERE"} abs({k}::float8 - {o}::float8) > 1e-6 * greatest(abs({k}::float8), 1)',
+                *params,
+            )
+            if differs == 0:
+                stats[other.name]["same_as"] = group[0].name
 
 
 async def learn_layers(conn, municipality_id: str, layers) -> None:
@@ -215,7 +309,7 @@ async def learn_layers(conn, municipality_id: str, layers) -> None:
             continue
         scope, params = ("WHERE gis_workspace_id = $1", [layer.workspace_id]) if layer.is_demo else ("", [])
         try:
-            stats = await _profile_stats(conn, layer.table, cols, scope, params)
+            stats = await _profile_stats(conn, layer.table, cols, scope, params, layer)
         except Exception:
             stats = {}
         for c in cols:

@@ -32,6 +32,10 @@ export interface CatalogColumn {
   unit?: string | null;
   description?: string | null;
   aliases?: string[];
+  /** Profiled: each feature has its own value here (a "Pawna River"
+   *  column); how often values contain spaces (names do, codes don't). */
+  uniquePerFeature?: boolean;
+  spaced?: number;
 }
 
 /** Everything the query compiler needs to safely build SQL for one layer. */
@@ -223,17 +227,24 @@ export class LayerCatalogService {
    *  `layerId:field`. Empty when the table is missing (not migrated yet). */
   private async fieldMetadata(
     layerIds: string[],
-  ): Promise<Map<string, Pick<CatalogColumn, 'role' | 'unit' | 'description' | 'aliases'>>> {
-    const out = new Map<string, Pick<CatalogColumn, 'role' | 'unit' | 'description' | 'aliases'>>();
+  ): Promise<Map<string, Pick<CatalogColumn, 'role' | 'unit' | 'description' | 'aliases' | 'uniquePerFeature' | 'spaced'>>> {
+    const out = new Map<
+      string,
+      Pick<CatalogColumn, 'role' | 'unit' | 'description' | 'aliases' | 'uniquePerFeature' | 'spaced'>
+    >();
     if (layerIds.length === 0) return out;
     try {
       const rows = await this.prisma.aiFieldMetadata.findMany({ where: { layerId: { in: layerIds } } });
       for (const r of rows) {
+        const st = (r.stats ?? {}) as { rows?: number; filled?: number; distinct?: number; spaced?: number };
+        const filled = st.filled ?? 0;
         out.set(`${r.layerId}:${r.field}`, {
           role: r.role,
           unit: r.unit,
           description: r.description,
           aliases: [...new Set([...r.learnedAliases, ...r.aliases])],
+          uniquePerFeature: filled > 0 && filled >= 0.9 * (st.rows ?? 0) && (st.distinct ?? 0) >= 0.95 * filled,
+          spaced: st.spaced ?? 0,
         });
       }
     } catch {

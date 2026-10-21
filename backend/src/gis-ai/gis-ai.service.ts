@@ -269,7 +269,11 @@ export class GisAiService {
       history.push({ role: 'user', content: r.question });
       if (r.explanation) history.push({ role: 'assistant', content: r.explanation });
     }
-    const previous = rows.find((r) => r.answerKind === 'gis_operation' && r.operation)?.operation ?? null;
+    // A clarification's half-built plan counts too: "yes, use length" completes
+    // "display the longest river", not whatever ran before it.
+    const previous =
+      rows.find((r) => (r.answerKind === 'gis_operation' || r.answerKind === 'clarification') && r.operation)
+        ?.operation ?? null;
     return { history: history.slice(-6), previous };
   }
 
@@ -479,6 +483,9 @@ export class GisAiService {
         answerKind: plan.answer_kind,
         explanation: plan.explanation,
         clarification: plan.clarification ?? undefined,
+        // The plan a clarification is about, so the reply ("yes, length")
+        // completes it (see conversationMemory).
+        operation: plan.answer_kind === 'clarification' ? plan.operation ?? undefined : undefined,
         usedContext,
         planner,
         ...guidance,
@@ -704,16 +711,30 @@ export class GisAiService {
       geometries: execution.geometries,
       exact: false,
     };
-    return { compiled, result };
+    return { compiled, result, ranked: execution.ranked };
   }
 
   private async runSelect(op: AiGisOperation, catalogEntries: Catalog, ws: string) {
-    const { compiled, result } = await this.selection(op, catalogEntries, ws);
-    const answer =
+    const selected = await this.selection(op, catalogEntries, ws);
+    const { compiled, result } = selected;
+    const ranked = 'ranked' in selected ? selected.ranked : undefined;
+    let answer =
       result.matched === 0
         ? `No ${result.layerName} features match.`
         : `Found ${fmt(result.matched)} ${result.layerName} feature${result.matched === 1 ? '' : 's'}` +
           (result.truncated ? ` (the first ${fmt(result.geometries.length)} are shown on the map).` : '.');
+    // "The longest river": name the winner(s) and the value they won with,
+    // straight from the rows the map shows.
+    const rank = compiled.ranking;
+    if (rank && ranked?.length && compiled.limitAsked && ranked.length <= 5) {
+      const unit = rank.unit ? ` ${rank.unit}` : '';
+      const one = (r: { label: string | null; value: number | null }) =>
+        `${r.label ?? `${result.layerName} feature`} (${rank.field} ${fmt(r.value)}${unit})`;
+      answer =
+        ranked.length === 1
+          ? `${one(ranked[0])} has the ${rank.desc ? 'highest' : 'lowest'} ${rank.field} of ${result.layerName}.`
+          : `${rank.desc ? 'Highest' : 'Lowest'} ${rank.field} of ${result.layerName}: ${ranked.map(one).join(', ')}.`;
+    }
     return {
       compiledSql: compiled.sql,
       compiledSummary: compiled.summary,
@@ -721,7 +742,13 @@ export class GisAiService {
       answer,
       // `query` tells the narrator exactly WHICH features matched, so it
       // describes them instead of guessing (e.g. "type = Not Working").
-      facts: { operation: 'select', layer: result.layerName, query: compiled.summary, matched: result.matched },
+      facts: {
+        operation: 'select',
+        layer: result.layerName,
+        query: compiled.summary,
+        matched: result.matched,
+        ...(rank && ranked?.length ? { ranked: ranked.map((r) => ({ name: r.label, [rank.field]: r.value })) } : {}),
+      },
     };
   }
 

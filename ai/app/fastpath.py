@@ -32,6 +32,11 @@ from .repair import (
     _CODED,
     _FOLLOW_UP,
     _NUMBERED,
+    _RANKED,
+    SUP_DESC,
+    comparison_field,
+    field_reply,
+    rank_measure,
     _coded_filters,
     is_follow_up,
     _drop_redundant_area_filter,
@@ -48,14 +53,14 @@ from .repair import (
     matching_values,
     value_filter,
 )
-from .metadata import alias_words, role_of
 from .schema import AttributeFilter, GisOperation, LayerInfo, PlanResult, SpatialFilter
 
 # Words that carry no condition of their own.
 _FILLER = set(_tokens(
     "show display list find get locate highlight view see give me please all the a an "
     "of in on at with that which who are is there where what feature features layer "
-    "layers map data record records every entire whole any have has or and made built"
+    "layers map data record records every entire whole any have has or and made built "
+    "city town municipality"
 ))
 _COUNT_WORDS = set(_tokens("how many count number total no"))
 _GROUP_WORDS = set(_tokens("each every per by"))
@@ -96,17 +101,6 @@ _NEGATION = re.compile(
     re.I,
 )
 
-# "the 10 tallest signals" / "5 largest pipelines"
-_SUPERLATIVE = re.compile(
-    r"\b(?:top\s+)?(?P<n>\d+)\s+(?P<sup>tallest|highest|largest|biggest|longest|widest|deepest|"
-    r"shortest|smallest|lowest|narrowest)\b",
-    re.I,
-)
-_SUP_DESC = {"tallest", "highest", "largest", "biggest", "longest", "widest", "deepest"}
-_SUP_IMPLIES = {
-    "tallest": "height", "highest": "height", "shortest": "height", "lowest": "height",
-    "longest": "length", "widest": "width", "narrowest": "width", "deepest": "depth",
-}
 # "top 5 pipelines by diameter"
 _TOP_BY = re.compile(r"\btop\s+(?P<n>\d+)\b.*?\bby\s+(?P<field>[a-z][a-z_ ]*)$", re.I)
 # "height between 4 and 6", "diameter between 100 mm and 300 mm"
@@ -159,34 +153,6 @@ def _metres(num: str, unit: Optional[str]) -> float:
     return value * 1000 if unit and unit.lower().startswith(("km", "kilo")) else value
 
 
-def _numeric_fields(layer: LayerInfo):
-    return [
-        f for f in layer.fields
-        if f.type in ("integer", "number")
-        and (role_of(f.name) in ("measure", "category") or (
-            role_of(f.name) is None and not re.search(r"(^|_)(id|no|num|number|fid|gid)$", f.name, re.I)
-        ))
-    ]
-
-
-def _comparison_field(layer: LayerInfo, hints: List[str]):
-    """The numeric column a comparison is about: a hint word sharing its
-    first 3 letters with a part of the column name ("diameter" ->
-    pipe_dia_i, "height" -> height). None when no or several columns fit."""
-    found = []
-    for f in _numeric_fields(layer):
-        parts = [p for p in re.split(r"[_\W]+", f.name.lower()) if len(p) >= 3]
-        if any(h[:3] == p[:3] for h in hints if len(h) >= 3 for p in parts):
-            found.append(f)
-    if not found:
-        # the column's aliases: "height" -> bldg_ht, "storey" -> floors_cnt
-        found = [
-            f for f in _numeric_fields(layer)
-            if any(h == a or (len(h) >= 5 and a.startswith(h[:5])) for h in hints if len(h) >= 3 for a in alias_words(f))
-        ]
-    return found[0] if len(found) == 1 else None
-
-
 def _comparisons(text: str, target: LayerInfo, words: List[str]) -> Optional[Tuple[List[AttributeFilter], Set[str]]]:
     filters: List[AttributeFilter] = []
     explained: Set[str] = set()
@@ -195,11 +161,11 @@ def _comparisons(text: str, target: LayerInfo, words: List[str]) -> Optional[Tup
         hints = [_CMP_IMPLIES[cmp]] if cmp in _CMP_IMPLIES else []
         if m.group("field"):
             hints.append(m.group("field").lower())
-        field = _comparison_field(target, hints)
+        field = comparison_field(target, hints)
         if field is None:
             # "with diameter more than 300" / "signals above 5 m height": the
             # measure is named elsewhere in the question.
-            field = _comparison_field(target, words)
+            field = comparison_field(target, words)
         if field is None:
             return None
         value = _metres(m.group("num"), m.group("unit"))
@@ -217,23 +183,23 @@ def _number(field, value: float):
 
 
 def _ordering(text: str, op: GisOperation, target: LayerInfo, words: List[str]) -> Optional[Set[str]]:
-    """"the 10 tallest" / "top 5 ... by diameter" -> order_by + limit.
-    None when the measure cannot be pinned to exactly one column."""
-    m = _SUPERLATIVE.search(text)
+    """"the 10 tallest" / "the longest river" / "top 5 ... by diameter" ->
+    order_by + limit (1 without a number). None when the measure cannot be
+    pinned to exactly one column."""
+    m = _RANKED.search(text)
     if m:
         sup = m.group("sup").lower()
-        hints = [_SUP_IMPLIES[sup]] if sup in _SUP_IMPLIES else []
-        field = _comparison_field(target, hints) if hints else _comparison_field(target, words)
+        field = rank_measure(sup, target, words)
         if field is None:
             return None
-        op.order_by, op.order_desc, op.limit = field.name, sup in _SUP_DESC, int(m.group("n"))
-        return set(_tokens(m.group(0))) | set(_tokens(field.name.replace("_", " "))) | {
-            w for w in words if any(w[:3] == p[:3] for p in re.split(r"[_\W]+", field.name.lower()) if len(p) >= 3)
+        op.order_by, op.order_desc, op.limit = field, sup in SUP_DESC, int(m.group("n") or 1)
+        return set(_tokens(m.group(0))) | set(_tokens(field.replace("_", " "))) | {
+            w for w in words if any(w[:3] == p[:3] for p in re.split(r"[_\W]+", field.lower()) if len(p) >= 3)
         }
     m = _TOP_BY.search(text)
     if m:
         hint = _tokens(m.group("field"))
-        field = _comparison_field(target, hint)
+        field = comparison_field(target, hint)
         if field is None:
             return None
         op.order_by, op.order_desc, op.limit = field.name, True, int(m.group("n"))
@@ -246,9 +212,9 @@ def _between(text: str, target: LayerInfo, words: List[str]) -> Optional[Tuple[L
     explained: Set[str] = set()
     for m in _BETWEEN.finditer(text):
         hints = [m.group("field").lower()] if m.group("field") else []
-        field = _comparison_field(target, hints) if hints else None
+        field = comparison_field(target, hints) if hints else None
         if field is None:
-            field = _comparison_field(target, words)
+            field = comparison_field(target, words)
         if field is None:
             return None
         unit = m.group("ub") or m.group("ua")
@@ -477,7 +443,7 @@ def fast_plan(
         target = _find_layer(layers, previous.target_layer)
         if target is None:
             return None
-        renumbered = _number_follow_up(text, previous)
+        renumbered = _number_follow_up(text, previous) or field_reply(text, previous, target)
         if renumbered is not None:
             return PlanResult(answer_kind="gis_operation", explanation=_describe(renumbered, target),
                               operation=renumbered, planner="fast")

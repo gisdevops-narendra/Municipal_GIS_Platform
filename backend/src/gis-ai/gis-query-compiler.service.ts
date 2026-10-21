@@ -88,6 +88,8 @@ export interface CompiledQuery {
    *  ("the 10 tallest"), so the rows ARE the answer. */
   limit?: number;
   limitAsked?: boolean;
+  /** select with order_by: the measure ranked on ("the longest river"). */
+  ranking?: { field: string; unit: string | null; desc: boolean };
 }
 
 export interface CompiledAggregate extends CompiledQuery {
@@ -146,6 +148,8 @@ export interface ExecutionResult {
   ids: (number | string)[];
   /** matched geometries, EPSG:4326 GeoJSON (capped). */
   geometries: Record<string, unknown>[];
+  /** ordered selects: each feature's name and ranked value, in order. */
+  ranked?: { label: string | null; value: number | null }[];
 }
 
 type Bind = (value: unknown) => string;
@@ -180,20 +184,44 @@ export class GisQueryCompilerService {
     // every other field name), never an expression from the plan.
     let orderSql = '';
     let orderSummary = '';
+    let rankCols = '';
+    let ranking: CompiledQuery['ranking'];
     if (operation.order_by) {
-      const col = this.findColumn(target, operation.order_by);
-      if (col.kind === 'geometry') {
-        throw new PlanValidationError(`Cannot sort by the geometry column "${col.name}".`);
+      // A column, else the geometry's own length / area ("longest road"
+      // on a layer without a length column).
+      const named = target.columns.some(
+        (c) => c.name.toLowerCase().replace(/_/g, '') === operation.order_by!.trim().toLowerCase().replace(/_/g, ''),
+      );
+      let orderExpr: string;
+      let orderLabel: string;
+      if (named) {
+        const col = this.findColumn(target, operation.order_by);
+        if (col.kind === 'geometry') {
+          throw new PlanValidationError(`Cannot sort by the geometry column "${col.name}".`);
+        }
+        orderExpr = `${t}."${col.name}"`;
+        orderLabel = col.name;
+        ranking = { field: col.name, unit: col.unit ?? null, desc: operation.order_desc !== false };
+      } else {
+        const measured = this.measureExpr(t, target, operation.order_by);
+        orderExpr = measured.expr;
+        orderLabel = measured.label;
+        ranking = { field: measured.label, unit: null, desc: operation.order_desc !== false };
       }
       const dir = operation.order_desc === false ? 'ASC' : 'DESC';
-      orderSql = `ORDER BY ${t}."${col.name}" ${dir} NULLS LAST `;
-      orderSummary = `, ${dir === 'DESC' ? 'highest' : 'lowest'} ${col.name} first${
+      orderSql = `ORDER BY ${orderExpr} ${dir} NULLS LAST `;
+      orderSummary = `, ${dir === 'DESC' ? 'highest' : 'lowest'} ${orderLabel} first${
         operation.limit ? ` (top ${limit})` : ''
       }`;
+      // What each ranked feature is called, so the answer names it.
+      const label = this.labelColumn(target);
+      rankCols = `, ${orderExpr} AS __rank` + (label ? `, ${t}."${label.name}"::text AS __label` : '');
     }
     const sql =
       `SELECT ${t}."${target.pkColumn}" AS __id, ` +
-      `ST_AsGeoJSON(ST_Transform(${t}."${target.geomColumn}", 4326), 6) AS __geojson ` +
+      `ST_AsGeoJSON(ST_Transform(${t}."${target.geomColumn}", 4326), 6) AS __geojson` +
+      rankCols +
+      ' ' +
       `FROM "${target.table}" ${t} ` +
       (where.length ? `WHERE ${where.join(' AND ')} ` : '') +
       orderSql +
@@ -206,6 +234,7 @@ export class GisQueryCompilerService {
       summary: `Select from ${target.name}${
         summaryBits.length ? ' where ' + summaryBits.join(' and ') : ''
       }${orderSummary}.`,
+      ranking,
       countSql:
         `SELECT count(*)::int AS n FROM "${target.table}" ${t} ` +
         (where.length ? `WHERE ${where.join(' AND ')}` : ''),
@@ -506,10 +535,12 @@ export class GisQueryCompilerService {
   }
 
   async execute(compiled: CompiledQuery): Promise<ExecutionResult> {
-    const rows = await this.readOnly<{ __id: number | string; __geojson: string }>(
-      compiled.sql,
-      compiled.params,
-    );
+    const rows = await this.readOnly<{
+      __id: number | string;
+      __geojson: string;
+      __rank?: number | string | null;
+      __label?: string | null;
+    }>(compiled.sql, compiled.params);
 
     let matched = rows.length;
     let cutOff = matched >= HARD_MAX_ROWS;
@@ -528,8 +559,29 @@ export class GisQueryCompilerService {
     const geometries = rendered
       .map((row) => this.parseGeo(row.__geojson))
       .filter((g): g is Record<string, unknown> => g !== null);
+    const ranked = compiled.ranking
+      ? rendered.slice(0, 10).map((row) => ({
+          label: row.__label ?? null,
+          value: row.__rank == null ? null : Number(row.__rank),
+        }))
+      : undefined;
 
-    return { matched, truncated, ids, geometries };
+    return { matched, truncated, ids, geometries, ranked };
+  }
+
+  /** The column that names a feature ("Pawna River"), from the profiled
+   *  data: a name column, or a text column whose value differs for every
+   *  feature; values with spaces (names) before codes. */
+  private labelColumn(layer: LayerCatalogEntry): CatalogColumn | undefined {
+    const score = (c: CatalogColumn) =>
+      (c.role === 'name' ? 2 : 0) + (c.uniquePerFeature ? 1 : 0) + (c.spaced ?? 0);
+    return layer.columns
+      .filter(
+        (c) =>
+          c.kind === 'text' &&
+          (c.role === 'name' || (c.role === 'category' && c.uniquePerFeature)),
+      )
+      .sort((a, b) => score(b) - score(a))[0];
   }
 
   async runAggregate(
