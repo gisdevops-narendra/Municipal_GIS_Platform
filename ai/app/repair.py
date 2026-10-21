@@ -69,6 +69,49 @@ _FOLLOW_UP = re.compile(r"\b(those|these|them|they|same|previous|of them|now onl
 _FLAG_VALUES = {"yes", "no", "y", "n", "true", "false", "1", "0"}
 # "zone no 13", "ward no. 5", "prabhag number 4", "ward 7", "zone #2"
 _NUMBERED = re.compile(r"\b([a-z]+)\s*(?:no\.?|number|num|#)?\s*[-:]?\s*(\d+)\b", re.I)
+# "prabhag no C", "sector no. B": a letter code needs the "no" marker, so
+# ordinary words are never read as codes.
+_CODED = re.compile(r"\b([a-z]+)\s*(?:no\.?|number|num|#)\s*[-:]?\s*([a-z])\b", re.I)
+
+
+def is_follow_up(message: str, layers: List[LayerInfo], previous: Optional[GisOperation]) -> bool:
+    """Does this message build on the previous answer? Yes when it refers
+    back ("those", "now only"), or names no layer of its own ("which are in
+    prabhag no C", "only the working ones", "how many?"). A message naming
+    its own layer ("count signals by type", "show landmarks") starts fresh."""
+    if previous is None or previous.kind not in ("select", "aggregate"):
+        return False
+    if _FOLLOW_UP.search(message):
+        return True
+    area_words = {t for w, _ in _NUMBERED.findall(message) + _CODED.findall(message) for t in _tokens(w)}
+    named = [
+        m[0] for m in _mentioned_layers(message, layers)
+        if not (area_words & set(_tokens(f"{m[0].name} {m[0].code}")))
+    ]
+    return not named
+
+
+def carry_over(previous: GisOperation, plan: PlanResult, layers: List[LayerInfo]) -> PlanResult:
+    """A follow-up keeps the previous answer's conditions even when the
+    model forgot them: same layer -> previous filters on fields the new plan
+    does not set, and the previous spatial condition if it has none."""
+    op = plan.operation
+    if op is None:
+        return plan
+    same = _find_layer(layers, op.target_layer)
+    before = _find_layer(layers, previous.target_layer)
+    if same is None or before is None or same.code != before.code:
+        return plan
+    have = {f.field.lower() for f in op.attribute_filters}
+    added = [f for f in previous.attribute_filters if f.field.lower() not in have]
+    if not added and (op.spatial_filter is not None or previous.spatial_filter is None):
+        return plan
+    op = op.model_copy(deep=True)
+    op.attribute_filters = added + op.attribute_filters
+    if op.spatial_filter is None and previous.spatial_filter is not None:
+        op.spatial_filter = previous.spatial_filter.model_copy(deep=True)
+    log.info("follow-up kept %d earlier condition(s)", len(added))
+    return plan.model_copy(update={"operation": op})
 
 
 def _tokens(text: str) -> List[str]:
@@ -312,7 +355,7 @@ def _numbered_filters(text: str, op: GisOperation, target: LayerInfo, layers: Li
             continue
         if op.spatial_filter is not None:
             continue
-        for area in layers:
+        for area in layers:  # (numbered area via another polygon layer)
             if area.code == target.code or (area.geometry_type or "").upper() != "POLYGON":
                 continue
             if not set(_tokens(word)) & set(_tokens(f"{area.name} {area.code}")):
@@ -459,13 +502,30 @@ def _value_phrase_filters(text: str, op: GisOperation, target: LayerInfo) -> Lis
     return notes
 
 
-def _drop_unasked_filters(text: str, op: GisOperation) -> List[str]:
+def _coded_filters(text: str, op: GisOperation, target: LayerInfo) -> List[str]:
+    """"prabhag no C" -> prabhag_no = 'C' when the column holds that code."""
+    notes: List[str] = []
+    have = {f.field.lower() for f in op.attribute_filters}
+    for word, code in _CODED.findall(text):
+        field = _numbered_field(target, word)
+        if field is None or field.type != "text" or field.name.lower() in have:
+            continue
+        stored = next((v for v in field.sample_values if v.strip().lower() == code.lower()), None)
+        if stored is None:
+            continue
+        op.attribute_filters.append(AttributeFilter(field=field.name, op="=", value=stored))
+        have.add(field.name.lower())
+        notes.append(f"filter {field.name} = {stored}")
+    return notes
+
+
+def _drop_unasked_filters(text: str, op: GisOperation, follow_up: bool = False) -> List[str]:
     """The small model copies a condition from an earlier chat turn into an
     unrelated request ("Count signals by type" after "...Not Working" ran as
     type = 'Not Working'). Drop a text filter whose value the request never
     mentions — when its field is not mentioned either, or it is the very
     field being grouped by. Follow-ups ("those", "now only") keep them."""
-    if _FOLLOW_UP.search(text):
+    if follow_up or _FOLLOW_UP.search(text):
         return []
     notes: List[str] = []
     op.attribute_filters = _unasked(text, op, op.attribute_filters, notes)
@@ -515,7 +575,7 @@ def _is_identifier(field: str) -> bool:
     return bool(_IDENTIFIER.search(field))
 
 
-def repair_plan(message: str, plan: PlanResult, layers: List[LayerInfo]) -> PlanResult:
+def repair_plan(message: str, plan: PlanResult, layers: List[LayerInfo], follow_up: bool = False) -> PlanResult:
     if plan.answer_kind == "clarification" and plan.operation is None:
         return plan
     text = message
@@ -593,10 +653,11 @@ def repair_plan(message: str, plan: PlanResult, layers: List[LayerInfo]) -> Plan
                 notes.append(f"group_by -> {group_field}")
 
     notes.extend(_drop_incomplete_filters(op))
-    notes.extend(_drop_unasked_filters(text, op))
+    notes.extend(_drop_unasked_filters(text, op, follow_up))
 
     if target is not None and op.kind in ("select", "aggregate"):
         notes.extend(_numbered_filters(text, op, target, layers))
+        notes.extend(_coded_filters(text, op, target))
         notes.extend(_drop_redundant_area_filter(text, op, target, layers))
         notes.extend(_drop_impossible_values(op, target))
         notes.extend(_drop_layer_name_values(op, layers))

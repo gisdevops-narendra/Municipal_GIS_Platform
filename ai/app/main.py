@@ -28,8 +28,8 @@ from fastapi import FastAPI, HTTPException
 from . import config, db, embeddings, llm, rag
 from .indexer import reindex_municipality
 from .fastpath import fast_plan
-from .guide import annotate, preflight, suggestions
-from .repair import repair_plan
+from .guide import annotate, preflight, remember_near, suggestions
+from .repair import carry_over, is_follow_up, repair_plan
 from .schema import (
     NarrateRequest,
     NarrateResult,
@@ -108,14 +108,29 @@ async def reindex(body: ReindexRequest):
 async def plan(body: PlanRequest) -> PlanResult:
     # Simple requests whose every word maps onto a plan piece need no model
     # call at all (~1 s instead of ~7-40 s on CPU). See fastpath.py.
+    # Follow the conversation: a refinement ("which are in prabhag no C")
+    # builds on the previous answer; a remembered "near" distance is reused.
+    follow = is_follow_up(body.message, body.layers, body.previous_operation)
+    previous = body.previous_operation if follow else None
+    message, remembered_note, remembered_options = remember_near(body.message, body.history)
+
+    def finish(result: PlanResult) -> PlanResult:
+        result = annotate(message, result, body.layers, previous)
+        if remembered_note:
+            result = result.model_copy(update={
+                "notes": [remembered_note, *result.notes],
+                "options": [*result.options, *remembered_options],
+            })
+        return result
+
     # Ask instead of guessing; refuse what would silently drop a condition.
-    asked = preflight(body.message)
+    asked = preflight(message)
     if asked is not None:
         return asked
-    quick = fast_plan(body.message, body.layers, body.previous_operation)
+    quick = fast_plan(message, body.layers, previous)
     if quick is not None:
-        log.info("fast path (%s): %s", body.message[:80], quick.explanation)
-        return annotate(body.message, quick, body.layers)
+        log.info("fast path (%s): %s", message[:80], quick.explanation)
+        return finish(quick)
 
     if not llm.available():
         raise HTTPException(
@@ -133,7 +148,7 @@ async def plan(body: PlanRequest) -> PlanResult:
         log.exception("lazy reindex failed; continuing without retrieval")
 
     try:
-        snippets = await rag.retrieve(body.message, body.municipality_id)
+        snippets = await rag.retrieve(message, body.municipality_id)
     except Exception:
         log.exception("retrieval failed; continuing with empty context")
         snippets = []
@@ -141,17 +156,19 @@ async def plan(body: PlanRequest) -> PlanResult:
     try:
         result = await asyncio.to_thread(
             llm.generate_plan,
-            body.message,
+            message,
             body.layers,
             snippets,
             body.history,
             body.municipality_name,
-            body.previous_operation,
+            previous,
         )
         # The small model often drops the newer operation fields; the
         # question's own words fill them (see repair.py).
-        repaired = repair_plan(body.message, result, body.layers)
-        return annotate(body.message, repaired.model_copy(update={"planner": "model"}), body.layers)
+        repaired = repair_plan(message, result, body.layers, follow_up=follow)
+        if previous is not None:
+            repaired = carry_over(previous, repaired, body.layers)
+        return finish(repaired.model_copy(update={"planner": "model"}))
     except llm.LLMUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:

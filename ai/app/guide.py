@@ -16,7 +16,7 @@ from typing import List, Optional
 
 from .fastpath import fast_plan
 from .repair import _DISTANCE, _FREE_TEXT_FIELD, _NEAREST, _tokens, _value_core, _has_word
-from .schema import AttributeFilter, ClarifyOption, GisOperation, LayerInfo, PlanResult
+from .schema import AttributeFilter, ChatTurn, ClarifyOption, GisOperation, LayerInfo, PlanResult
 
 # "near / close to / next to / around / adjacent to <X>" with no distance.
 _NEAR = re.compile(r"\b(near(?:by)?|close to|next to|adjacent to|around|surrounding)\b", re.I)
@@ -24,6 +24,30 @@ _WITHIN_DISTANCE = re.compile(
     r"\bwithin\s+\d+(?:\.\d+)?\s*(?:km|kilomet\w*|m|met\w*)\s+(?:of|from|around)\b", re.I
 )
 _NEAR_CHOICES = (50, 100, 250, 500)
+
+
+_CHOSEN_DISTANCE = re.compile(r"\bwithin\s+(\d+(?:\.\d+)?)\s*m\s+of\b", re.I)
+
+
+def remember_near(message: str, history: List[ChatTurn]):
+    """Follow the user's earlier choice: once they picked how close "near"
+    is (or asked "within N m of" themselves) in this chat, a later "near"
+    uses that distance instead of asking again — stated in a note, with
+    chips to pick another. Returns (message to plan, note, options)."""
+    near = _NEAR.search(message)
+    if not near or _DISTANCE.search(message) or _NEAREST.search(message):
+        return message, None, []
+    for turn in reversed(history):
+        if turn.role != "user":
+            continue
+        chosen = _CHOSEN_DISTANCE.search(turn.content)
+        if chosen:
+            d = chosen.group(1)
+            rewrite = lambda n: (message[: near.start()] + f"within {n} m of" + message[near.end():]).strip()
+            note = f"Used {d} m for “near”, as earlier in this chat."
+            options = [ClarifyOption(label=f"Use {n} m", message=rewrite(n)) for n in _NEAR_CHOICES if str(n) != d]
+            return rewrite(d), note, options
+    return message, None, []
 
 
 def preflight(message: str) -> Optional[PlanResult]:
@@ -56,8 +80,12 @@ def preflight(message: str) -> Optional[PlanResult]:
     return None
 
 
-def annotate(message: str, plan: PlanResult, layers: List[LayerInfo]) -> PlanResult:
-    """Fuzzy-matched values are stated, with close alternatives to pick."""
+def annotate(
+    message: str, plan: PlanResult, layers: List[LayerInfo], previous: Optional[GisOperation] = None
+) -> PlanResult:
+    """Fuzzy-matched values are stated, with close alternatives to pick —
+    only for conditions this message introduced (not ones carried over
+    from the previous answer)."""
     op = plan.operation
     if op is None:
         return plan
@@ -68,7 +96,10 @@ def annotate(message: str, plan: PlanResult, layers: List[LayerInfo]) -> PlanRes
     words = set(_tokens(message))
     notes: List[str] = list(plan.notes)
     options: List[ClarifyOption] = list(plan.options)
+    carried = {(c.field, c.op, str(c.value), tuple(c.values or [])) for c in (previous.attribute_filters if previous else [])}
     for index, f in enumerate(op.attribute_filters):
+        if (f.field, f.op, str(f.value), tuple(f.values or [])) in carried:
+            continue
         values = [v for v in ([f.value] if f.value is not None else []) + list(f.values or []) if isinstance(v, str)]
         if not values or any(v.lower() in lower for v in values):
             continue  # the user typed it as stored

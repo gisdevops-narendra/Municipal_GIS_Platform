@@ -29,8 +29,11 @@ import re
 from typing import List, Optional, Set, Tuple
 
 from .repair import (
+    _CODED,
     _FOLLOW_UP,
     _NUMBERED,
+    _coded_filters,
+    is_follow_up,
     _drop_redundant_area_filter,
     _find_layer,
     _grouping,
@@ -293,9 +296,9 @@ def fast_plan(
     text = message.strip().rstrip("?.! ")
     if not text:
         return None
-    follow_up = bool(_FOLLOW_UP.search(text))
-    if follow_up and (previous is None or previous.kind not in ("select", "aggregate")):
-        return None
+    follow_up = is_follow_up(text, layers, previous)
+    if _FOLLOW_UP.search(text) and not follow_up:
+        return None  # "those" with nothing to refer back to
     words = _tokens(text)
     explained: Set[str] = set(_FILLER)
     counting = bool(_COUNTING.search(text))
@@ -390,6 +393,10 @@ def fast_plan(
     for word, number in _NUMBERED.findall(body):
         if _numbered_field(target, word) or op.spatial_filter is not None:
             explained |= set(_tokens(word)) | _NUMBER_MARKERS | {number}
+    _coded_filters(body, op, target)
+    for word, code in _CODED.findall(body):
+        if any(f.field == getattr(_numbered_field(target, word), "name", None) for f in op.attribute_filters):
+            explained |= set(_tokens(word)) | _NUMBER_MARKERS | {code.lower()}
 
     if within_filter is not None:
         if op.spatial_filter is not None and op.spatial_filter != within_filter:

@@ -20,6 +20,7 @@ results = []
 
 
 def check(name, ok, got=""):
+    ok = bool(ok)
     results.append(ok)
     print(f"{'PASS' if ok else 'FAIL'}  {name} {got}")
 
@@ -44,5 +45,28 @@ check("typed-as-stored value adds no note", not exact.notes)
 
 sugg = suggestions(LAYERS)
 check("suggestions are all plannable", bool(sugg) and all(fast_plan(q, LAYERS) for q in sugg), sugg)
+# Conversation: refinements build on the previous answer.
+from app.repair import carry_over, is_follow_up
+from app.schema import AttributeFilter, ChatTurn, GisOperation, PlanResult
+LAYERS[0].fields.append(LayerField(name="prabhag_no", type="text", sample_values=list("ABCDEFGH")))
+prev = GisOperation(kind="select", target_layer="SIGNAL",
+                    attribute_filters=[AttributeFilter(field="road_name", op="=", value="Dehu - Alandi Road")])
+check("'which are in prabhag no c' is a follow-up", is_follow_up("which are in prabhag no c", LAYERS, prev))
+check("'count signals by type' starts fresh", not is_follow_up("Count signals by type", LAYERS, prev))
+check("'how many?' is a follow-up", is_follow_up("how many?", LAYERS, prev))
+refined = fast_plan("which are in prabhag no c", LAYERS, prev)
+got = [(f.field, f.value) for f in refined.operation.attribute_filters] if refined else None
+check("refinement keeps the road and adds prabhag_no = C",
+      got == [("road_name", "Dehu - Alandi Road"), ("prabhag_no", "C")], got)
+forgot = PlanResult(answer_kind="gis_operation", explanation="x", operation=GisOperation(
+    kind="select", target_layer="SIGNALS", attribute_filters=[AttributeFilter(field="prabhag_no", op="=", value="C")]))
+kept = carry_over(prev, forgot, LAYERS).operation.attribute_filters
+check("model path: earlier condition carried over", [f.field for f in kept] == ["road_name", "prabhag_no"])
+
+from app.guide import remember_near
+history = [ChatTurn(role="user", content="Show signals within 250 m of educational landmarks")]
+msg, note, opts = remember_near("show landmarks near the BRTS", history)
+check("remembered 'near' distance is reused", msg == "show landmarks within 250 m of the BRTS" and note and opts, msg)
+check("no earlier choice -> still asks", remember_near("signals near BRTS", [])[0] == "signals near BRTS")
 print(f"\n{sum(results)}/{len(results)} passed")
 raise SystemExit(0 if all(results) else 1)

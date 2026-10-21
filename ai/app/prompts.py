@@ -281,7 +281,7 @@ def build_user_message(
     """Only what depends on this question — kept small, since it is the
     part Ollama has to read fresh every time."""
     parts = []
-    if previous is not None and _FOLLOW_UP.search(message):
+    if previous is not None:  # only passed for follow-ups (see main.plan)
         parts.append(
             "PREVIOUS OPERATION (the request builds on it — keep its layer and "
             "conditions, then apply the request's change):\n"
