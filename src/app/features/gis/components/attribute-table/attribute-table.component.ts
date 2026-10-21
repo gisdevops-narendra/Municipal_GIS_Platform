@@ -8,8 +8,10 @@ import {
   Output,
   SimpleChanges,
   computed,
+  effect,
   inject,
-  signal
+  signal,
+  untracked
 } from '@angular/core';
 import { NgClass } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -162,11 +164,15 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
     this.fields().filter((field) => !this.hiddenFields().has(field.name))
   );
 
-  readonly layerOptions = computed(() =>
-    this.layers
-      .filter((layer) => layer.layerType === 'VECTOR')
-      .map((layer) => ({ label: layer.name, value: layer.id }))
-  );
+  /** Only the vector layers switched ON on the map — the table follows
+   *  what the user is looking at (an AI / query result switches its layer
+   *  on, so it is always listed). */
+  readonly layerOptions = computed(() => {
+    const visible = this.mapService.layerVisibility();
+    return this.layers
+      .filter((layer) => layer.layerType === 'VECTOR' && visible[layer.id] === true)
+      .map((layer) => ({ label: layer.name, value: layer.id }));
+  });
 
   readonly hasLayers = computed(() => this.layerOptions().length > 0);
 
@@ -183,6 +189,12 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
   });
 
   constructor() {
+    // A layer switched on/off on the map updates the list; if the shown
+    // layer was switched off, move to another visible one (or none).
+    effect(() => {
+      this.layerOptions();
+      untracked(() => this.pickDefaultLayer());
+    });
     this.search$
       // Compared with the search actually applied (not the last value typed):
       // switching layers clears `search`, and typing the same text again on
@@ -254,6 +266,7 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
   private pickDefaultLayer(): void {
     const options = this.layerOptions();
     if (options.length === 0) {
+      if (this.activeLayerId()) this.selectLayer(null);
       return;
     }
     const current = this.activeLayerId();
