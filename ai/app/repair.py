@@ -269,7 +269,7 @@ def _numbered_field(layer: LayerInfo, word: str):
     return None
 
 
-def _drop_impossible_values(op: GisOperation, target: LayerInfo) -> List[str]:
+def _drop_impossible_values(op: GisOperation, target: LayerInfo, dropped: Optional[list] = None) -> List[str]:
     """`prabhag_no = 'BRTS'` can never match when prabhag_no only holds
     A-H. Applies only when the catalog sampled EVERY distinct value (no
     '…(more)' marker), so a rare real value is never dropped."""
@@ -283,10 +283,45 @@ def _drop_impossible_values(op: GisOperation, target: LayerInfo) -> List[str]:
         known = complete.get(f.field.lower())
         if known and f.op in ("=", "!=") and isinstance(f.value, str) and f.value.lower() not in known:
             notes.append(f"dropped impossible filter {f.field} = {f.value!r}")
+            if dropped is not None:
+                dropped.append((f.field, f.value))
             continue
         kept.append(f)
     op.attribute_filters = kept
     return notes
+
+
+def _value_choice(plan: PlanResult, op: GisOperation, target: LayerInfo, field: str, value: str) -> PlanResult:
+    """'No pipeline has constructi = "cast iron". Which value did you mean?'
+    with the column's real values as chips — closest spellings / initials
+    first — each running the plan with that value."""
+    from .schema import ClarifyOption  # local: schema imports nothing from here
+
+    col = next((f for f in target.fields if f.name.lower() == field.lower()), None)
+    values = [v for v in (col.sample_values if col else []) if v != "…(more)"]
+    asked = _tokens(value)
+    initials = "".join(w[0] for w in asked if w)
+
+    def score(v: str) -> float:
+        core = _value_core(v)
+        letters = "".join(c for c in core if len(c) == 1)
+        s = sum(1 for c in core if _has_word(c, asked))
+        if letters and letters == initials:
+            s += 2
+        return -s
+
+    ranked = sorted(values, key=score)[:6]
+    options = []
+    for v in ranked:
+        changed = op.model_copy(deep=True)
+        changed.attribute_filters.append(AttributeFilter(field=col.name if col else field, op="=", value=v))
+        options.append(ClarifyOption(label=v, operation=changed))
+    return plan.model_copy(update={
+        "answer_kind": "clarification",
+        "operation": None,
+        "clarification": f"No {target.name} has {field} = “{value}”. Which value did you mean?",
+        "options": options,
+    })
 
 
 def _drop_layer_name_values(op: GisOperation, layers: List[LayerInfo]) -> List[str]:
@@ -419,6 +454,31 @@ def _value_core(value: str) -> List[str]:
     return core or words
 
 
+def _abbreviation_window(core: List[str], ordered: List[str]) -> Optional[List[str]]:
+    """'C.I' (core ['c','i']) is the initials of consecutive request words
+    ('cast iron'): returns those words, else None. Only for values made of
+    single letters, so ordinary words never match this way."""
+    if len(core) < 2 or not all(len(c) == 1 and c.isalpha() for c in core):
+        return None
+    target = "".join(core)
+    for i in range(len(ordered) - len(core) + 1):
+        window = ordered[i : i + len(core)]
+        if "".join(w[0] for w in window) == target:
+            return window
+    return None
+
+
+def abbreviation_words(text: str, values: List[str]) -> set:
+    """Request words a matched abbreviation stands for ('cast', 'iron')."""
+    ordered = _tokens(text)
+    out: set = set()
+    for v in values:
+        window = _abbreviation_window(_value_core(v), ordered)
+        if window:
+            out |= set(window)
+    return out
+
+
 def matching_values(text: str, layers: List[LayerInfo]) -> List[Tuple[LayerInfo, str, List[str]]]:
     """(layer, field, values) for every sampled text value whose words all
     appear in the request (exactly or as a close spelling). A value whose
@@ -427,7 +487,8 @@ def matching_values(text: str, layers: List[LayerInfo]) -> List[Tuple[LayerInfo,
     values ('Pedestrian or Fixed time') and spelling variants ('Akurdi
     Railway Station Road' / '... road'). Single short words, numbers and
     yes/no flags are too weak a signal and never match on their own."""
-    words = set(_tokens(text))
+    ordered = _tokens(text)
+    words = set(ordered)
     out: List[Tuple[LayerInfo, str, List[str]]] = []
     for lyr in layers:
         layer_words = set(_tokens(f"{lyr.name} {lyr.code}"))
@@ -439,6 +500,11 @@ def matching_values(text: str, layers: List[LayerInfo]) -> List[Tuple[LayerInfo,
                 if value == "…(more)" or value.strip().lower() in _FLAG_VALUES:
                     continue
                 core = _value_core(value)
+                if _abbreviation_window(core, ordered):
+                    # "cast iron" -> 'C.I': counts as the full words.
+                    if value not in (v for v, _ in found):
+                        found.append((value, set(_abbreviation_window(core, ordered))))
+                    continue
                 if not core or set(core) <= layer_words or not all(_has_word(c, words) for c in core):
                     continue
                 if len(core) == 1 and (len(core[0]) < 4 or core[0].isdigit()):
@@ -659,9 +725,17 @@ def repair_plan(message: str, plan: PlanResult, layers: List[LayerInfo], follow_
         notes.extend(_numbered_filters(text, op, target, layers))
         notes.extend(_coded_filters(text, op, target))
         notes.extend(_drop_redundant_area_filter(text, op, target, layers))
-        notes.extend(_drop_impossible_values(op, target))
+        dropped: list = []
+        notes.extend(_drop_impossible_values(op, target, dropped))
         notes.extend(_drop_layer_name_values(op, layers))
         notes.extend(_value_phrase_filters(text, op, target))
+        # Never widen silently: a condition whose value does not exist and
+        # was not replaced by a real one becomes a question, not "show all".
+        layer_names = set().union(*(set(_tokens(f"{l.name} {l.code}")) for l in layers)) if layers else set()
+        for field, value in dropped:
+            names_a_layer = set(_tokens(value)) - _GENERIC <= layer_names  # 'BRTS': the layer, not a value
+            if not names_a_layer and not any(f.field.lower() == field.lower() for f in op.attribute_filters):
+                return _value_choice(plan, op, target, field, value)
 
     if op.kind == "nearest" and not op.count and nearest and nearest.group(2):
         op.count = int(nearest.group(2))

@@ -68,5 +68,24 @@ history = [ChatTurn(role="user", content="Show signals within 250 m of education
 msg, note, opts = remember_near("show landmarks near the BRTS", history)
 check("remembered 'near' distance is reused", msg == "show landmarks within 250 m of the BRTS" and note and opts, msg)
 check("no earlier choice -> still asks", remember_near("signals near BRTS", [])[0] == "signals near BRTS")
+# "cast iron" vs stored abbreviations; never widen silently.
+from app.repair import repair_plan
+PIPES = LayerInfo(id="p", code="DISTRIBUTION_PIPELINE", name="distribution_pipeline", geometry_type="LINE", fields=[
+    LayerField(name="constructi", type="text", sample_values=["A.C.", "C.I", "C.I Gravity", "C.I.", "D.I", "M.S."])])
+cast = fast_plan("Show pipelines made of cast iron", [PIPES])
+got = [(f.field, f.op, tuple(f.values or [f.value])) for f in cast.operation.attribute_filters] if cast else None
+check("'cast iron' -> constructi IN (C.I, C.I.) on the fast path", got == [("constructi", "in", ("C.I", "C.I."))], got)
+model = PlanResult(answer_kind="gis_operation", explanation="x", operation=GisOperation(
+    kind="select", target_layer="DISTRIBUTION_PIPELINE",
+    attribute_filters=[AttributeFilter(field="constructi", op="=", value="copper")]))
+asked = repair_plan("Show pipelines made of copper", model, [PIPES])
+check("impossible value -> asks with real values, does not show all",
+      asked.answer_kind == "clarification" and asked.operation is None and len(asked.options) >= 3, asked.clarification)
+model_ci = PlanResult(answer_kind="gis_operation", explanation="x", operation=GisOperation(
+    kind="select", target_layer="DISTRIBUTION_PIPELINE",
+    attribute_filters=[AttributeFilter(field="constructi", op="=", value="cast iron")]))
+fixed = repair_plan("Show pipelines made of cast iron", model_ci, [PIPES])
+got = [(f.field, tuple(f.values or [f.value])) for f in fixed.operation.attribute_filters] if fixed.operation else fixed.clarification
+check("model's 'cast iron' replaced by the real C.I values", got == [("constructi", ("C.I", "C.I."))], got)
 print(f"\n{sum(results)}/{len(results)} passed")
 raise SystemExit(0 if all(results) else 1)

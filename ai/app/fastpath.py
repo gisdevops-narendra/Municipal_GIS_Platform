@@ -43,6 +43,7 @@ from .repair import (
     _numbered_filters,
     _tokens,
     _value_phrase_filters,
+    abbreviation_words,
     matching_values,
     value_filter,
 )
@@ -52,7 +53,7 @@ from .schema import AttributeFilter, GisOperation, LayerInfo, PlanResult, Spatia
 _FILLER = set(_tokens(
     "show display list find get locate highlight view see give me please all the a an "
     "of in on at with that which who are is there where what feature features layer "
-    "layers map data record records every entire whole any have has or and"
+    "layers map data record records every entire whole any have has or and made built"
 ))
 _COUNT_WORDS = set(_tokens("how many count number total no"))
 _GROUP_WORDS = set(_tokens("each every per by"))
@@ -404,6 +405,9 @@ def fast_plan(
         op.spatial_filter = within_filter
     value_words = _value_words(op)
     explained |= value_words
+    # "cast iron" stands behind the abbreviation 'C.I'.
+    string_values = [v for f in op.attribute_filters for v in ([f.value] if isinstance(f.value, str) else []) + list(f.values or [])]
+    explained |= abbreviation_words(text, [v for v in string_values if isinstance(v, str)])
 
     # A misspelt value word ("Aalandi") is accounted for by the value it matched.
     if any(t not in explained and not _has_word(t, value_words) for t in words):
