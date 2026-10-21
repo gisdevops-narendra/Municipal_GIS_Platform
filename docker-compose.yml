@@ -161,7 +161,9 @@ services:
     volumes:
       - ollama-models:/root/.ollama
     ports:
-      - "${OLLAMA_PORT:-11434}:11434"
+      # Localhost only: the model has no authentication; only the gis-ai
+      # container needs it (over the compose network).
+      - "127.0.0.1:${OLLAMA_PORT:-11434}:11434"
     healthcheck:
       test: ["CMD-SHELL", "ollama --version > /dev/null 2>&1 || exit 1"]
       interval: 15s
@@ -185,7 +187,9 @@ services:
       GIS_AI_LLM_MODEL: ${GIS_AI_LLM_MODEL:-qwen2.5:1.5b-instruct}
       GIS_AI_LLM_NUM_CTX: ${GIS_AI_LLM_NUM_CTX:-6144}
     ports:
-      - "${GIS_AI_PORT:-8100}:8000"
+      # Localhost only: no authentication of its own; the backend reaches
+      # it over the compose network and enforces login + permissions.
+      - "127.0.0.1:${GIS_AI_PORT:-8100}:8000"
     depends_on:
       postgres:
         condition: service_healthy

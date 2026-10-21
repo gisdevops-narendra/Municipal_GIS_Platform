@@ -1,3 +1,5 @@
+import { ModuleAccessModule } from '../module-access/module-access.module';
+import { AiAssistantGuard } from './ai-assistant.guard';
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { GisModule } from '../gis/gis.module';
@@ -14,9 +16,10 @@ import { GisQueryCompilerService } from './gis-query-compiler.service';
  * compiler, not a parallel GIS stack.
  */
 @Module({
-  imports: [AuthModule, GisModule, AiClientModule],
+  imports: [AuthModule, GisModule, AiClientModule, ModuleAccessModule],
   controllers: [GisAiController],
   providers: [
+    AiAssistantGuard,
     GisAiService,
     LayerCatalogService,
     GisQueryCompilerService,

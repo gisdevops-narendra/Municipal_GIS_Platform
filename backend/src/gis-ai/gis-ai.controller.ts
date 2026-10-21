@@ -3,6 +3,7 @@ import {
   RequireMunicipalityMember,
   RequireMunicipalityOwner,
 } from '../auth/decorators/authorization.decorators';
+import { RequireAiAssistant } from './ai-assistant.guard';
 import { CurrentAppUser } from '../auth/decorators/current-app-user.decorator';
 import type { AppUser } from '../auth/types/app-user.type';
 import { GisAiService } from './gis-ai.service';
@@ -29,7 +30,7 @@ export class GisAiController {
     return this.gisAi.health();
   }
 
-  @RequireMunicipalityMember()
+  @RequireAiAssistant()
   @Post('chat')
   chat(@CurrentAppUser() appUser: AppUser, @Body() dto: GisChatDto) {
     return this.gisAi.chat(appUser, dto);
@@ -38,13 +39,13 @@ export class GisAiController {
   /** Friendlier wording of a chat answer from its computed facts (any
    *  member; the caller already holds the deterministic sentence). */
   /** Primes the local model's prompt cache; returns immediately. */
-  @RequireMunicipalityMember()
+  @RequireAiAssistant()
   @Post('warm')
   warm(@CurrentAppUser() appUser: AppUser) {
     return this.gisAi.warm(appUser);
   }
 
-  @RequireMunicipalityMember()
+  @RequireAiAssistant()
   @Post('narrate')
   narrate(@CurrentAppUser() appUser: AppUser, @Body() dto: GisNarrateDto) {
     return this.gisAi.narrate(appUser, dto);
@@ -67,7 +68,7 @@ export class GisAiController {
 
   /** Dev/QA: run a structured operation with no LLM. 403 unless
    *  `GIS_AI_ENABLE_RAW_PLAN=true`. */
-  @RequireMunicipalityMember()
+  @RequireAiAssistant()
   @Post('execute-plan')
   executePlan(
     @CurrentAppUser() appUser: AppUser,
