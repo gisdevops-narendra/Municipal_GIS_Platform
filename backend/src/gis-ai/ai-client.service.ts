@@ -47,6 +47,15 @@ export interface AiNarrateRequest {
   language?: 'en' | 'mr' | 'hi';
 }
 
+/** What a column seems to mean (AI service `/profile-columns`). */
+export interface AiColumnProposal {
+  name: string;
+  role: string;
+  unit: string | null;
+  description: string;
+  aliases: string[];
+}
+
 /** A layer to suggest map-marker icon search words for. */
 export interface AiIconTermsRequest {
   name: string;
@@ -108,6 +117,22 @@ export class AiClientService {
   async narrate(body: AiNarrateRequest, timeoutMs = 150000): Promise<AiNarrateResult> {
     const raw = await this.request('POST', '/narrate', body, timeoutMs);
     return raw as unknown as AiNarrateResult;
+  }
+
+  /** Proposed meaning of each column of an upload's staging table, for the
+   *  uploader to review. Null when the AI service is unavailable. */
+  async profileColumns(body: {
+    table: string;
+    geometry_type: string | null;
+    srid: number;
+    columns: { name: string; data_type: string; sample_values: string[] }[];
+  }): Promise<AiColumnProposal[] | null> {
+    try {
+      const raw = await this.request('POST', '/profile-columns', body, 30000, true);
+      return Array.isArray(raw) ? (raw as unknown as AiColumnProposal[]) : null;
+    } catch {
+      return null;
+    }
   }
 
   /** English icon-library search words for a layer, most fitting first. */

@@ -6,6 +6,11 @@
   max-width: 100%;
 }
 
+/* Step 3 (Columns) needs room for a column table and the data preview. */
+.upload-wizard--wide {
+  width: min(900px, 90vw);
+}
+
 .upload-wizard__steps {
   display: flex;
   gap: 16px;

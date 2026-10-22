@@ -368,6 +368,15 @@ model GISLayerUpload {
   validationSummary Json?   @map("validation_summary")
   errorMessage      String? @map("error_message")
 
+  /// Columns step: what each column means, as the uploader approved it
+  /// ([{ name, role, unit, description, aliases }], final column names).
+  /// Written to ai_field_metadata (source 'user') when published.
+  fieldMetadata     Json?     @map("field_metadata")
+  /// Every rename / type change the uploader approved, in order — shown to
+  /// reviewers ([{ column, renamedTo?, typeFrom?, typeTo?, at }]).
+  schemaChanges     Json?     @map("schema_changes")
+  schemaConfirmedAt DateTime? @map("schema_confirmed_at")
+
   reviewedById    String?   @map("reviewed_by")
   reviewedAt      DateTime? @map("reviewed_at")
   rejectionReason String?   @map("rejection_reason")

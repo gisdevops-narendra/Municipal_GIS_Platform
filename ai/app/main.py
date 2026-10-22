@@ -28,16 +28,18 @@ import threading
 from fastapi import FastAPI, HTTPException, Request
 
 from . import config, db, embeddings, llm, rag
-from .metadata import use_layers
+from .metadata import propose, use_layers
 from .indexer import reindex_municipality
 from .fastpath import fast_plan
 from .guide import annotate, apply_instructions, converse, field_confidence, parse_instruction, is_small_talk, preflight, remember_near, suggestions
 from .repair import carry_over, is_follow_up, repair_plan
 from .schema import (
+    ColumnProposal,
     IconTermsRequest,
     IconTermsResult,
     NarrateRequest,
     NarrateResult,
+    ProfileColumnsRequest,
     PlanRequest,
     PlanResult,
     ReindexRequest,
@@ -256,6 +258,15 @@ async def warm(body: PlanRequest) -> dict:
     """Pre-loads this municipality's plan prompt into the model cache."""
     await asyncio.to_thread(llm.prime_plan_cache, body.layers, body.municipality_name)
     return {"ok": True}
+
+
+@app.post("/profile-columns", response_model=list[ColumnProposal])
+async def profile_columns(body: ProfileColumnsRequest) -> list[ColumnProposal]:
+    """Proposed meaning of each column of an upload (role, unit,
+    description, aliases), for the user to review. Read-only."""
+    async with db.acquire() as conn:
+        rows = await propose(conn, body.table, body.geometry_type, body.srid, body.columns)
+    return [ColumnProposal(**r) for r in rows]
 
 
 @app.post("/icon-terms", response_model=IconTermsResult)

@@ -9,6 +9,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { AiClientService } from '../gis-ai/ai-client.service';
 import { UploadReviewService } from './upload-review.service';
+import { UploadSchemaService } from './upload-schema.service';
+import type { ApplyUploadSchemaDto } from './dto/upload-schema.dto';
 import * as path from 'path';
 import {
   GISLayerUpload,
@@ -99,6 +101,7 @@ export class GisUploadsService {
     /** Optional so unit tests need not stub it. */
     @Optional() private readonly ai?: AiClientService,
     @Optional() private readonly review?: UploadReviewService,
+    @Optional() private readonly schema?: UploadSchemaService,
   ) {}
 
   async create(
@@ -375,12 +378,74 @@ export class GisUploadsService {
     return this.review.review(upload);
   }
 
+  // ---- Columns step: preview the imported data, approve renames, type
+  //      changes and what each column means (nothing changes unseen). ----
+
+  async getSchema(uploadId: string, appUser: AppUser) {
+    const upload = await this.findScoped(uploadId, appUser);
+    this.assertCanManage(appUser, upload);
+    if (!this.schema) throw new BadRequestException('Column review is not available.');
+    const workspace = await this.prisma.gISWorkspace.findUniqueOrThrow({
+      where: { id: upload.gisWorkspaceId },
+    });
+    const srid = Number(String(upload.targetCrs ?? workspace.defaultCrs).split(':').pop()) || 32643;
+    return this.schema.describe(upload, srid);
+  }
+
+  async applySchema(uploadId: string, appUser: AppUser, dto: ApplyUploadSchemaDto) {
+    const upload = await this.findScoped(uploadId, appUser);
+    this.assertCanManage(appUser, upload);
+    if (!this.schema) throw new BadRequestException('Column review is not available.');
+    if (upload.status !== 'DRAFT') {
+      throw new BadRequestException(
+        `Columns can only be changed before the upload is submitted (status ${upload.status}).`,
+      );
+    }
+    const { log, meanings, renamed } = await this.schema.apply(upload, dto);
+
+    // Keep everything that names a column in step with the renames.
+    const styleSpec = upload.styleSpec && renamed.size
+      ? (renameStyleFields(upload.styleSpec, renamed) as Prisma.InputJsonValue)
+      : undefined;
+    const summary = upload.validationSummary as unknown as ValidationSummary | null;
+    const attributes = await this.fieldStats.attributes(upload.postgisTable!, null);
+    const validationSummary = summary
+      ? ({ ...summary, fields: attributes.map((a) => ({ name: a.name, type: a.type })) } as unknown as Prisma.InputJsonValue)
+      : undefined;
+    // GeoServer caches a featuretype's attributes: drop the preview so it
+    // is rebuilt with the new columns next time.
+    if (log.length) {
+      const workspace = await this.prisma.gISWorkspace.findUniqueOrThrow({ where: { id: upload.gisWorkspaceId } });
+      await this.geoServer
+        .deleteFeatureType(workspace.geoserverWorkspace, `${workspace.geoserverWorkspace}_postgis`, this.previewLayerName(upload.id))
+        .catch(() => undefined);
+    }
+
+    const previous = (upload.schemaChanges as unknown as unknown[] | null) ?? [];
+    const updated = await this.prisma.gISLayerUpload.update({
+      where: { id: uploadId },
+      data: {
+        fieldMetadata: meanings as unknown as Prisma.InputJsonValue,
+        schemaChanges: [...previous, ...log] as unknown as Prisma.InputJsonValue,
+        schemaConfirmedAt: new Date(),
+        ...(styleSpec !== undefined && { styleSpec }),
+        ...(validationSummary !== undefined && { validationSummary }),
+      },
+    });
+    return { upload: this.toResponse(updated), changes: log };
+  }
+
   async submitForReview(uploadId: string, appUser: AppUser) {
     const upload = await this.findScoped(uploadId, appUser);
     this.assertCanManage(appUser, upload);
     if (upload.status !== 'DRAFT') {
       throw new BadRequestException(
         `Cannot submit for review from status ${upload.status}.`,
+      );
+    }
+    if (this.schema && !upload.schemaConfirmedAt) {
+      throw new BadRequestException(
+        'Review and confirm the columns (step 3) before submitting for review.',
       );
     }
     const updated = await this.prisma.gISLayerUpload.update({
@@ -609,6 +674,13 @@ export class GisUploadsService {
           );
         }
       }
+
+      // What each column means, as the uploader approved it: saved as
+      // 'user' metadata, which the AI's re-index keeps (it only refreshes
+      // the stats). Best-effort, like the style above.
+      await this.saveApprovedMeanings(savedLayer.id, appUser.municipalityId, upload.fieldMetadata).catch(
+        (error: Error) => this.logger.warn(`Layer ${savedLayer.id}: column meanings not saved: ${error.message}`),
+      );
 
       // Refresh the AI index (chat assistant + semantic search) so the new
       // layer is findable at once. Fire-and-forget: embedding a large
@@ -1133,6 +1205,32 @@ export class GisUploadsService {
       );
   }
 
+  private async saveApprovedMeanings(
+    layerId: string,
+    municipalityId: string,
+    fieldMetadata: Prisma.JsonValue | null,
+  ): Promise<void> {
+    const meanings = (fieldMetadata as unknown as
+      | { name: string; role: string; unit: string | null; description: string | null; aliases: string[] }[]
+      | null) ?? [];
+    for (const m of meanings) {
+      const data = {
+        municipalityId,
+        role: m.role,
+        unit: m.unit,
+        description: m.description,
+        aliases: m.aliases ?? [],
+        source: 'user',
+        updatedAt: new Date(),
+      };
+      await this.prisma.aiFieldMetadata.upsert({
+        where: { layerId_field: { layerId, field: m.name } },
+        create: { layerId, field: m.name, ...data },
+        update: data,
+      });
+    }
+  }
+
   private previewLayerName(uploadId: string): string {
     return `preview_${uploadId.replace(/-/g, '')}`;
   }
@@ -1186,6 +1284,11 @@ export class GisUploadsService {
         summary: upload.validationSummary,
       },
       errorMessage: upload.errorMessage,
+      schema: {
+        confirmedAt: upload.schemaConfirmedAt,
+        changes: upload.schemaChanges ?? [],
+        fieldMetadata: upload.fieldMetadata ?? [],
+      },
       review: {
         reviewedById: upload.reviewedById,
         reviewedAt: upload.reviewedAt,
@@ -1201,4 +1304,19 @@ export class GisUploadsService {
       updatedAt: upload.updatedAt,
     };
   }
+}
+
+/** A style spec with every `field: <old>` renamed (categorize / graduate /
+ *  label all name their field that way). */
+function renameStyleFields(value: unknown, renamed: Map<string, string>): unknown {
+  if (Array.isArray(value)) return value.map((v) => renameStyleFields(v, renamed));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [
+        k,
+        k === 'field' && typeof v === 'string' && renamed.has(v) ? renamed.get(v) : renameStyleFields(v, renamed),
+      ]),
+    );
+  }
+  return value;
 }

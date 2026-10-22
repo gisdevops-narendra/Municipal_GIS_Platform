@@ -35,6 +35,7 @@ import { VectorToolsService } from './vector-tools.service';
 import { DataToolsController } from './data-tools.controller';
 import { DataToolsService } from './data-tools.service';
 import { UploadReviewService } from './upload-review.service';
+import { UploadSchemaService } from './upload-schema.service';
 
 @Module({
   imports: [AuthModule, ModuleAccessModule, AiClientModule],
@@ -74,6 +75,7 @@ import { UploadReviewService } from './upload-review.service';
     VectorToolsService,
     DataToolsService,
     UploadReviewService,
+    UploadSchemaService,
   ],
   exports: [
     GisWorkspaceService,

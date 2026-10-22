@@ -5,6 +5,9 @@ import { filter, map } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import {
   CreateGisUploadRequest,
+  UploadColumnChange,
+  UploadSchema,
+  UploadSchemaChange,
   GisUpload,
   GisUploadPage,
   GisUploadPreview,
@@ -88,6 +91,16 @@ export class GisUploadsService {
   /** Automated pre-approval checks with a risk score (read-only). */
   reviewCheck(id: string): Observable<UploadReviewReport> {
     return this.http.get<UploadReviewReport>(`${this.baseUrl}/${id}/review-check`);
+  }
+
+  /** Columns step: records, column types/values and the AI's proposals. */
+  schema(id: string): Observable<UploadSchema> {
+    return this.http.get<UploadSchema>(`${this.baseUrl}/${id}/schema`);
+  }
+
+  /** Columns step: apply the approved renames, type changes and meanings. */
+  applySchema(id: string, columns: UploadColumnChange[]): Observable<{ upload: GisUpload; changes: UploadSchemaChange[] }> {
+    return this.http.put<{ upload: GisUpload; changes: UploadSchemaChange[] }>(`${this.baseUrl}/${id}/schema`, { columns });
   }
 
   submitForReview(id: string): Observable<GisUpload> {

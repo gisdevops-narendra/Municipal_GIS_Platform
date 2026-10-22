@@ -51,6 +51,13 @@ export interface GisUpload {
     summary: GisUploadValidationSummary | null;
   };
   errorMessage: string | null;
+  /** Columns step: what the uploader approved (renames, type changes and
+   *  what each column means). */
+  schema?: {
+    confirmedAt: string | null;
+    changes: UploadSchemaChange[];
+    fieldMetadata: UploadColumnMeaning[];
+  };
   review: {
     reviewedById: string | null;
     reviewedAt: string | null;
@@ -108,4 +115,59 @@ export interface UploadReviewReport {
   findings: UploadReviewFinding[];
   replaces: { id: string; name: string; version: number } | null;
   checkedAt: string;
+}
+
+// ---- Columns step (review the imported data before submitting) ----------
+
+export type UploadColumnKind = 'text' | 'integer' | 'number' | 'date' | 'boolean';
+export type UploadColumnRole = 'id' | 'name' | 'category' | 'measure' | 'free_text' | 'date' | 'flag' | 'hidden';
+
+export interface UploadColumnMeaning {
+  name: string;
+  role: UploadColumnRole;
+  unit: string | null;
+  description: string | null;
+  aliases: string[];
+}
+
+export interface UploadSchemaChange {
+  column: string;
+  renamedTo?: string;
+  typeFrom?: string;
+  typeTo?: string;
+  at: string;
+}
+
+export interface UploadSchemaColumn {
+  name: string;
+  dbType: string;
+  kind: UploadColumnKind | 'other';
+  stats: { rows: number; filled: number; distinct: number; min: string | null; max: string | null };
+  samples: { value: string; count: number }[];
+  /** Other types, with how many non-empty values would not convert (0 = safe). */
+  conversions: Partial<Record<UploadColumnKind, { failing: number; examples: string[] }>>;
+  /** What the AI proposes the column means (null if the AI is unavailable). */
+  proposal: { role: UploadColumnRole; unit: string | null; description: string; aliases: string[] } | null;
+  /** What the uploader approved earlier. */
+  approved: { role: UploadColumnRole; unit: string | null; description: string | null; aliases: string[] } | null;
+}
+
+export interface UploadSchema {
+  table: { rows: number };
+  columns: UploadSchemaColumn[];
+  /** First records, every value as text. */
+  records: Record<string, string | null>[];
+  proposalsAvailable: boolean;
+  confirmedAt: string | null;
+  changes: UploadSchemaChange[];
+}
+
+export interface UploadColumnChange {
+  name: string;
+  newName?: string;
+  type?: UploadColumnKind;
+  role?: UploadColumnRole;
+  unit?: string;
+  description?: string;
+  aliases?: string[];
 }

@@ -177,6 +177,29 @@ class ReindexRequest(BaseModel):
     municipality_id: str
 
 
+class ProfileColumn(BaseModel):
+    name: str = Field(max_length=63)
+    data_type: str = Field(max_length=64)
+    sample_values: List[str] = Field(default_factory=list, max_length=20)
+
+
+class ProfileColumnsRequest(BaseModel):
+    """A staging table of an upload, profiled before it is published."""
+
+    table: str = Field(pattern=r"^layer_[a-f0-9]{32}$")
+    geometry_type: Optional[str] = None
+    srid: int = 32643
+    columns: List[ProfileColumn] = Field(max_length=300)
+
+
+class ColumnProposal(BaseModel):
+    name: str
+    role: str
+    unit: Optional[str] = None
+    description: str
+    aliases: List[str] = Field(default_factory=list)
+
+
 class IconTermsField(BaseModel):
     name: str = Field(max_length=120)
     sample_values: List[str] = Field(default_factory=list, max_length=8)

@@ -20,6 +20,7 @@ import type { AppUser } from '../auth/types/app-user.type';
 import { GisUploadsService } from './gis-uploads.service';
 import { CreateUploadDto } from './dto/create-upload.dto';
 import { RejectUploadDto } from './dto/reject-upload.dto';
+import { ApplyUploadSchemaDto } from './dto/upload-schema.dto';
 import { LayerStyleSpecDto } from './dto/layer-style.dto';
 import type { ClassificationMethod } from './dto/layer-style.dto';
 
@@ -153,6 +154,28 @@ export class GisUploadsController {
     res.setHeader('Content-Type', icon.contentType);
     res.setHeader('Cache-Control', 'public, max-age=86400');
     res.send(icon.body);
+  }
+
+  /** Columns step: the imported records, each column's type, values and
+   *  safe type conversions, plus the AI's *proposed* meaning of each
+   *  column — for the uploader to review. Read-only. */
+  @RequireMunicipalityManager()
+  @Get('uploads/:id/schema')
+  getSchema(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
+    return this.uploadsService.getSchema(id, appUser);
+  }
+
+  /** Columns step: apply the renames / type changes / column meanings the
+   *  uploader approved (all or nothing; a conversion that would lose a
+   *  value is refused). Required before Submit for Review. */
+  @RequireMunicipalityManager()
+  @Put('uploads/:id/schema')
+  applySchema(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @Body() dto: ApplyUploadSchemaDto,
+  ) {
+    return this.uploadsService.applySchema(id, appUser, dto);
   }
 
   /** AI-assisted review: automated pre-approval checks (geometry, location

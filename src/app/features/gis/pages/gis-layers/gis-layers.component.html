@@ -343,6 +343,40 @@
           </div>
         }
       }
+      @if (upload.schema; as schema) {
+        <div class="layers-detail__row">
+          <dt>Columns</dt>
+          <dd>
+            @if (!schema.confirmedAt) {
+              <span class="layers-review__muted">Not reviewed yet by the uploader.</span>
+            } @else {
+              <span class="layers-review__muted">Reviewed by the uploader {{ schema.confirmedAt | date: 'd MMM, h:mm a' }}</span>
+              @if (schema.changes.length) {
+                <ul class="layers-detail__list">
+                  @for (c of schema.changes; track $index) {
+                    <li>
+                      @if (c.renamedTo) { Renamed <code>{{ c.column }}</code> → <code>{{ c.renamedTo }}</code> }
+                      @else { <code>{{ c.column }}</code>: type {{ c.typeFrom }} → {{ c.typeTo }} }
+                    </li>
+                  }
+                </ul>
+              } @else {
+                <div class="layers-review__muted">No renames or type changes.</div>
+              }
+              @if (schema.fieldMetadata.length) {
+                <details class="layers-detail__meanings">
+                  <summary>Column meanings for the AI assistant ({{ schema.fieldMetadata.length }})</summary>
+                  <ul class="layers-detail__list">
+                    @for (m of schema.fieldMetadata; track m.name) {
+                      <li><code>{{ m.name }}</code> — {{ m.role }}@if (m.unit) {, {{ m.unit }}}@if (m.description) { · {{ m.description }}}</li>
+                    }
+                  </ul>
+                </details>
+              }
+            }
+          </dd>
+        </div>
+      }
       @if (reviewLoading()) {
         <div class="layers-detail__row">
           <dt>Automated review</dt>

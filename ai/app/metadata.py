@@ -10,8 +10,11 @@ distinct values, empty share, text length, min/max — and given:
   * a one-line description.
 
 Results go to `ai_field_metadata`. A row the Owner edited (`source` =
-'owner') keeps its role/unit/description/aliases; `learned_aliases` (users'
-answers to "which field did you mean?") always survive.
+'owner') or the uploader approved in the upload's Columns step (`source` =
+'user') keeps its role/unit/description/aliases — only its stats refresh;
+`learned_aliases` (users' answers to "which field did you mean?") always
+survive. Uploads now show these proposals for review (`propose`) instead
+of applying them unseen.
 
 At question time the backend sends each field's role/unit/aliases with the
 catalog; `use_layers()` makes them visible to the planner, and `RoleRule`
@@ -323,10 +326,10 @@ async def learn_layers(conn, municipality_id: str, layers) -> None:
                     municipality_id = EXCLUDED.municipality_id,
                     stats = EXCLUDED.stats,
                     updated_at = now(),
-                    role = CASE WHEN ai_field_metadata.source = 'owner' THEN ai_field_metadata.role ELSE EXCLUDED.role END,
-                    unit = CASE WHEN ai_field_metadata.source = 'owner' THEN ai_field_metadata.unit ELSE EXCLUDED.unit END,
-                    description = CASE WHEN ai_field_metadata.source = 'owner' THEN ai_field_metadata.description ELSE EXCLUDED.description END,
-                    aliases = CASE WHEN ai_field_metadata.source = 'owner' THEN ai_field_metadata.aliases ELSE EXCLUDED.aliases END
+                    role = CASE WHEN ai_field_metadata.source IN ('owner', 'user') THEN ai_field_metadata.role ELSE EXCLUDED.role END,
+                    unit = CASE WHEN ai_field_metadata.source IN ('owner', 'user') THEN ai_field_metadata.unit ELSE EXCLUDED.unit END,
+                    description = CASE WHEN ai_field_metadata.source IN ('owner', 'user') THEN ai_field_metadata.description ELSE EXCLUDED.description END,
+                    aliases = CASE WHEN ai_field_metadata.source IN ('owner', 'user') THEN ai_field_metadata.aliases ELSE EXCLUDED.aliases END
                 """,
                 layer.layer_id, c.name, municipality_id, p.role, p.unit, p.description,
                 p.aliases, json.dumps(p.stats, default=str),
@@ -354,6 +357,32 @@ async def learn_layers(conn, municipality_id: str, layers) -> None:
             if r:
                 c.role, c.unit, c.description = r["role"], r["unit"], r["description"]
                 c.aliases = list(dict.fromkeys([*(r["learned_aliases"] or []), *(r["aliases"] or [])]))
+
+
+async def propose(conn, table: str, geometry_type: Optional[str], srid: int, columns) -> List[dict]:
+    """What each column of an upload's staging table seems to mean —
+    proposals for the upload's Columns step, shown to the user to review.
+    Nothing is stored: only what the user approves is saved at publish."""
+    from .catalog import Column, _classify
+
+    cols = [Column(name=c.name, data_type=c.data_type, kind=_classify(c.data_type), sample_values=list(c.sample_values))
+            for c in columns]
+    cols = [c for c in cols if c.kind != "geometry"]
+
+    class _Layer:  # what _geometry_measures needs
+        geom_column = "geom"
+
+    layer = _Layer()
+    layer.srid, layer.geometry_type = srid, geometry_type
+    try:
+        stats = await _profile_stats(conn, table, cols, "", [], layer)
+    except Exception:
+        stats = {}
+    out = []
+    for c in cols:
+        p = classify(c.name, c.kind, stats.get(c.name, {}), c.sample_values)
+        out.append({"name": c.name, "role": p.role, "unit": p.unit, "description": p.description, "aliases": p.aliases})
+    return out
 
 
 # ----------------------------------------------------- question-time roles

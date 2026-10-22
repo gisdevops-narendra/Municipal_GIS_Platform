@@ -378,3 +378,13 @@ app-site-footer {
     height: auto;
   }
 }
+
+.layers-detail__meanings {
+  margin-top: 6px;
+  font-size: 12.5px;
+
+  summary {
+    cursor: pointer;
+    color: var(--color-primary-700);
+  }
+}

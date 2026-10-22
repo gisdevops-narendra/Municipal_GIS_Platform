@@ -1,8 +1,9 @@
-<div class="upload-wizard">
+<div class="upload-wizard" [class.upload-wizard--wide]="step() === 'COLUMNS'">
   <div class="upload-wizard__steps">
     <span class="upload-wizard__step" [class.upload-wizard__step--active]="step() === 'FILE_INFO'">1. File &amp; Layer Info</span>
     <span class="upload-wizard__step" [class.upload-wizard__step--active]="step() === 'VALIDATION'">2. Validation</span>
-    <span class="upload-wizard__step" [class.upload-wizard__step--active]="step() === 'PREVIEW'">3. Preview &amp; Submit</span>
+    <span class="upload-wizard__step" [class.upload-wizard__step--active]="step() === 'COLUMNS'">3. Columns</span>
+    <span class="upload-wizard__step" [class.upload-wizard__step--active]="step() === 'PREVIEW'">4. Preview &amp; Submit</span>
   </div>
 
   @if (step() === 'FILE_INFO') {
@@ -175,10 +176,16 @@
         <div class="upload-wizard__actions">
           <button pButton type="button" label="Back" class="p-button-text" (click)="backToFileInfo()"></button>
           @if (u.status === 'DRAFT') {
-            <button pButton type="button" label="Next: Preview" (click)="goToPreview()"></button>
+            <button pButton type="button" label="Next: Review columns" (click)="goToColumns()"></button>
           }
         </div>
       </div>
+    }
+  }
+
+  @if (step() === 'COLUMNS') {
+    @if (upload(); as u) {
+      <app-upload-columns [uploadId]="u.id" (confirmed)="onColumnsConfirmed($event)" (back)="step.set('VALIDATION')" />
     }
   }
 
@@ -215,7 +222,7 @@
       }
 
       <div class="upload-wizard__actions">
-        <button pButton type="button" label="Back" class="p-button-text" (click)="step.set('VALIDATION')"></button>
+        <button pButton type="button" label="Back" class="p-button-text" (click)="step.set('COLUMNS')"></button>
         <button pButton type="button" label="Submit for Review" [loading]="submitting()" (click)="submitForReview()"></button>
       </div>
     </div>

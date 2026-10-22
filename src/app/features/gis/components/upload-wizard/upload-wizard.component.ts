@@ -18,10 +18,11 @@ import { GisUpload, GisUploadPreview } from '../../../../core/models/gis-upload.
 import { MapService } from '../../services/map.service';
 import { MunicipalMapComponent } from '../municipal-map/municipal-map.component';
 import { StyleEditorComponent } from '../style-editor/style-editor.component';
+import { UploadColumnsComponent } from '../upload-columns/upload-columns.component';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { StyleGeometry } from '../../../../core/models/layer-style.model';
 
-type WizardStep = 'FILE_INFO' | 'VALIDATION' | 'PREVIEW';
+type WizardStep = 'FILE_INFO' | 'VALIDATION' | 'COLUMNS' | 'PREVIEW';
 
 const CRS_PATTERN = /^EPSG:\d{4,6}$/;
 
@@ -54,7 +55,8 @@ const CRS_PATTERN = /^EPSG:\d{4,6}$/;
     ProgressBarModule,
     FileUploadModule,
     MunicipalMapComponent,
-    StyleEditorComponent
+    StyleEditorComponent,
+    UploadColumnsComponent
   ],
   providers: [MapService],
   templateUrl: './upload-wizard.component.html',
@@ -201,6 +203,20 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
           this.submitError.set(this.resolveErrorMessage(error));
         }
       });
+  }
+
+  /** Step 3: review the imported columns (names, types, meanings). */
+  goToColumns(): void {
+    this.submitError.set(null);
+    this.step.set('COLUMNS');
+  }
+
+  /** The user approved the column changes: the data now has them. The
+   *  preview is rebuilt so it shows the new column names. */
+  onColumnsConfirmed(updated: GisUpload): void {
+    this.upload.set(updated);
+    this.preview.set(null);
+    this.goToPreview();
   }
 
   goToPreview(): void {
