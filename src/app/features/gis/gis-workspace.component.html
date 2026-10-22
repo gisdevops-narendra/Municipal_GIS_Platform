@@ -317,6 +317,7 @@
         (selectRequest)="onMapSelectRequest($event)"
         [selectedCount]="selectedCount()"
         (clearSelectionRequest)="onMapClearSelection()"
+        (resetRequest)="onResetRequest()"
       />
 
       @if (layersReady() && canSearch()) {

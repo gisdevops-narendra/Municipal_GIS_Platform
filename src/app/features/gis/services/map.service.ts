@@ -1649,6 +1649,39 @@ export class MapService {
     }
   }
 
+  /** Map Reset: drops every overlay, filter, popup and interaction a tool
+   *  left behind, puts layer visibility and the basemap back to their
+   *  start-up state and returns to the initial view. Saved data (sketches,
+   *  bookmarks, layer order) is untouched. */
+  resetMap(): void {
+    this.cancelDraw();
+    this.clearDraw();
+    this.cancelMapPick();
+    this.stopMeasure();
+    this.clearMeasure();
+    this.setMeasureMode(false);
+    this.clearEditFeature();
+    this.disableRouteDrag();
+    this.closeFeatureInfoPopup();
+    this.clearSelectionHighlight();
+    this.clearQueryHighlight();
+    this.clearAllLayerCqlFilters();
+    this.clearAnalysisGeometry();
+    this.clearPreviewImage();
+    this.clearGoToMarker();
+    this.setHoverMarker(null);
+    this.setSwipe(null);
+    this.setSpyglass(null);
+    this.sketchLayer?.getSource()?.clear();
+    for (const [id, entry] of this.managedLayers) {
+      this.setLayerVisibility(id, this.defaultVisible(entry.layer));
+    }
+    if (this.activeBasemap() !== 'osm') this.setBasemap('osm');
+    this.identifyActive.set(true);
+    this.resetView();
+    this.resetNavHistory();
+  }
+
   // ----- navigation history -----
 
   /** Called on every `moveend`. A view equal to the current history entry

@@ -65,6 +65,8 @@ export class MapControlsComponent {
   /** Number of features currently selected (enables Clear selection). */
   @Input() selectedCount = 0;
   @Output() clearSelectionRequest = new EventEmitter<void>();
+  /** Reset clicked — the workspace resets the map and every tool. */
+  @Output() resetRequest = new EventEmitter<void>();
 
   /** Inline SVG icons (24×24 viewBox) — PrimeIcons has no polygon or
    *  lasso glyph. Dashed outlines read as "selection" like desktop GIS. */
@@ -117,7 +119,7 @@ export class MapControlsComponent {
   }
 
   resetView(): void {
-    this.mapService.resetView();
+    this.resetRequest.emit();
   }
 
   toggleFullscreen(): void {

@@ -684,6 +684,43 @@ export class GisWorkspaceComponent {
     this.pendingSelect.set(request);
   }
 
+  // ----- reset -----
+
+  onResetRequest(): void {
+    this.notify.confirm({
+      header: 'Reset the map?',
+      message:
+        'Clears every tool result, selection, filter, drawing and measurement, closes all panels and returns to the initial view. Saved layers, sketches and bookmarks are kept.',
+      confirmLabel: 'Reset',
+      destructive: true,
+      accept: () => this.resetWorkspace()
+    });
+  }
+
+  /** Tool panels are kept mounted to preserve their state, so a reset
+   *  unmounts them all (each tidies up after itself) and starts fresh. */
+  private resetWorkspace(): void {
+    this.onMapClearSelection();
+    this.activeQueryFilter.set(null);
+    this.tableSelection.set(null);
+    this.featureInfoResults.set([]);
+    this.highlightLayerId.set(null);
+    this.reportLayer.set(null);
+    this.styleTargetLayer.set(null);
+    this.pendingSelect.set(null);
+    this.leftTool.set(null);
+    this.bottomTool.set(null);
+    this.openedLeftTools.set(new Set());
+    this.openedBottomTools.set(new Set());
+    // Next tick: after the panels' own teardown has run.
+    setTimeout(() => {
+      this.mapService.resetMap();
+      this.leftTool.set('layers');
+      this.openedLeftTools.set(new Set(['layers']));
+      this.refreshMapSize();
+    });
+  }
+
   // ----- query builder -----
 
   onQueryRun(filter: AttributeExternalFilter): void {
