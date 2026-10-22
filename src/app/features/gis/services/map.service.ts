@@ -605,9 +605,11 @@ export class MapService {
     return this.analysisLayer.getSource() as VectorSource;
   }
 
-  setQueryHighlight(geometries: (Record<string, unknown> | null | undefined)[]): void {
+  /** `append` keeps the shapes already highlighted (AI Assistant setting
+   *  "Clear previous results" off). */
+  setQueryHighlight(geometries: (Record<string, unknown> | null | undefined)[], append = false): void {
     const source = this.ensureQuerySource();
-    source.clear();
+    if (!append) source.clear();
     for (const geometry of geometries) {
       const feature = this.toMapFeature(geometry);
       if (feature) source.addFeature(feature);
@@ -1075,18 +1077,33 @@ export class MapService {
 
   private ensureQuerySource(): VectorSource {
     if (!this.queryLayer) {
-      const primary = '#128077';
+      // Colour from the AI Assistant settings; the style is rebuilt only
+      // when that colour changes.
+      let cached: { color: string; style: Style } | null = null;
+      const style = () => {
+        const color = /^#[0-9a-f]{6}$/i.test(this.settings.assistant().highlightColor)
+          ? this.settings.assistant().highlightColor
+          : '#128077';
+        if (cached?.color !== color) {
+          const [r, g, b] = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16));
+          cached = {
+            color,
+            style: new Style({
+              stroke: new Stroke({ color, width: 2.5 }),
+              fill: new Fill({ color: `rgba(${r}, ${g}, ${b}, 0.14)` }),
+              image: new CircleStyle({
+                radius: 6,
+                stroke: new Stroke({ color, width: 2.5 }),
+                fill: new Fill({ color: `rgba(${r}, ${g}, ${b}, 0.3)` })
+              })
+            })
+          };
+        }
+        return cached.style;
+      };
       this.queryLayer = new VectorLayer({
         source: new VectorSource(),
-        style: new Style({
-          stroke: new Stroke({ color: primary, width: 2.5 }),
-          fill: new Fill({ color: 'rgba(18, 128, 119, 0.14)' }),
-          image: new CircleStyle({
-            radius: 6,
-            stroke: new Stroke({ color: primary, width: 2.5 }),
-            fill: new Fill({ color: 'rgba(18, 128, 119, 0.3)' })
-          })
-        }),
+        style,
         zIndex: 9998,
         properties: { queryOverlay: true }
       });

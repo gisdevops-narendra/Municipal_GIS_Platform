@@ -34,6 +34,8 @@ export interface AiPlanRequest {
   history: { role: 'user' | 'assistant'; content: string }[];
   previous_operation?: Record<string, unknown>;
   instructions?: AiInstruction[];
+  /** "Instant answers only": the AI service never calls the model. */
+  instant_only?: boolean;
 }
 
 export interface AiNarrateRequest {
@@ -42,6 +44,7 @@ export interface AiNarrateRequest {
   /** Backend-computed, verified numbers — the model only rephrases them. */
   facts: Record<string, unknown>;
   municipality_name?: string;
+  language?: 'en' | 'mr' | 'hi';
 }
 
 export interface AiNarrateResult {

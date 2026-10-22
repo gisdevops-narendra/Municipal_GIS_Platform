@@ -257,13 +257,13 @@ def _measure_field(text: str, target: Optional[LayerInfo]) -> Optional[str]:
         words = _tokens(text)
         for f in target.fields:
             if f.type in ("integer", "number") and f.name.lower() not in ("ogc_fid", "id", "objectid") \
-                    and role_of(f.name) not in ("id", "hidden"):
+                    and role_of(f) not in ("id", "hidden"):
                 parts = [p for p in _tokens(f.name) if len(p) > 2]
                 if parts and all(p in words or any(w.startswith(p) for w in words) for p in parts):
                     return f.name
         # "storey height" -> bldg_ht via its learned/auto aliases
         for f in target.fields:
-            if f.type in ("integer", "number") and role_of(f.name) not in ("id", "hidden"):
+            if f.type in ("integer", "number") and role_of(f) not in ("id", "hidden"):
                 if any(a.split() and all(w in words for w in a.split()) for a in alias_phrases(f)):
                     return f.name
     if target:
@@ -286,8 +286,8 @@ def numeric_fields(layer: LayerInfo):
     return [
         f for f in layer.fields
         if f.type in ("integer", "number")
-        and (role_of(f.name) in ("measure", "category") or (
-            role_of(f.name) is None and not re.search(r"(^|_)(id|no|num|number|fid|gid)$", f.name, re.I)
+        and (role_of(f) in ("measure", "category") or (
+            role_of(f) is None and not re.search(r"(^|_)(id|no|num|number|fid|gid)$", f.name, re.I)
         ))
     ]
 

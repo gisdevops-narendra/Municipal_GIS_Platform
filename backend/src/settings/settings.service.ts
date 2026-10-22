@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import type { AppSettingsDto } from './dto/app-settings.dto';
+import type { AppSettingsDto, MunicipalityDefaultsDto } from './dto/app-settings.dto';
 
 type Json = Record<string, unknown>;
 
@@ -16,12 +16,31 @@ export class SettingsService {
 
   async get(
     userId: string,
-  ): Promise<{ settings: Json; updatedAt: string | null }> {
+    municipalityId?: string | null,
+  ): Promise<{ settings: Json; updatedAt: string | null; municipalityDefaults: Json }> {
     const row = await this.prisma.userSetting.findUnique({ where: { userId } });
     return {
       settings: (row?.data as Json) ?? {},
       updatedAt: row?.updatedAt.toISOString() ?? null,
+      municipalityDefaults: municipalityId ? await this.municipalityDefaults(municipalityId) : {},
     };
+  }
+
+  /** The Owner's defaults for everyone in the municipality. */
+  async municipalityDefaults(municipalityId: string): Promise<Json> {
+    const row = await this.prisma.municipalitySetting.findUnique({ where: { municipalityId } });
+    return (row?.data as Json) ?? {};
+  }
+
+  /** Replaces the municipality defaults (Owner only — see the controller). */
+  async setMunicipalityDefaults(municipalityId: string, data: MunicipalityDefaultsDto): Promise<Json> {
+    const json = data as unknown as Prisma.InputJsonValue;
+    await this.prisma.municipalitySetting.upsert({
+      where: { municipalityId },
+      create: { municipalityId, data: json },
+      update: { data: json },
+    });
+    return data as unknown as Json;
   }
 
   /** Deep-merges `partial` into the stored blob and returns the result. */

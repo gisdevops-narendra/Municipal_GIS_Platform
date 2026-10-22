@@ -8,6 +8,7 @@ export type SettingsGroup =
   | 'appearance'
   | 'regional'
   | 'map'
+  | 'assistant'
   | 'system-behaviour'
   | 'about';
 
@@ -26,6 +27,7 @@ export const SETTINGS_GROUPS: { id: SettingsGroup; label: string }[] = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'regional', label: 'Regional & Formats' },
   { id: 'map', label: 'Map' },
+  { id: 'assistant', label: 'AI Assistant' },
   { id: 'system-behaviour', label: 'Notifications & Session' },
   { id: 'about', label: 'System & About' },
 ];
@@ -114,6 +116,13 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     icon: 'pi pi-bolt',
     group: 'map',
     blurb: 'Render quality, animation and feature-info limits.',
+  },
+  {
+    id: 'assistant',
+    label: 'AI Assistant',
+    icon: 'pi pi-sparkles',
+    group: 'assistant',
+    blurb: 'How the assistant answers, what it searches, how results show on the map, and your chat history.',
   },
   {
     id: 'notifications',

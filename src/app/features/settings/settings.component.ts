@@ -27,6 +27,7 @@ import { MapPerformanceSectionComponent } from './sections/map-performance-secti
 import { NotificationsSectionComponent } from './sections/notifications-section.component';
 import { SessionSectionComponent } from './sections/session-section.component';
 import { ShortcutsSectionComponent } from './sections/shortcuts-section.component';
+import { AssistantSectionComponent } from './sections/assistant-section.component';
 import { SystemStatusSectionComponent } from './sections/system-status-section.component';
 import { AboutSectionComponent } from './sections/about-section.component';
 import { HelpSectionComponent } from './sections/help-section.component';
@@ -61,6 +62,7 @@ import { ResetSectionComponent } from './sections/reset-section.component';
     NotificationsSectionComponent,
     SessionSectionComponent,
     ShortcutsSectionComponent,
+    AssistantSectionComponent,
     SystemStatusSectionComponent,
     AboutSectionComponent,
     HelpSectionComponent,

@@ -1,6 +1,9 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
+  IsHexColor,
   IsIn,
   IsInt,
   IsNumber,
@@ -168,6 +171,30 @@ class ShortcutSettingsDto {
   @IsOptional() @IsBoolean() enabled?: boolean;
 }
 
+/** The AI Assistant panel (see `AssistantSettings` in the frontend). */
+export class AssistantSettingsDto {
+  @IsOptional() @IsIn(['short', 'detailed']) answerStyle?: 'short' | 'detailed';
+  @IsOptional() @IsIn(['en', 'mr', 'hi']) language?: 'en' | 'mr' | 'hi';
+  @IsOptional() @IsIn(['auto', 'm', 'km']) distanceUnit?: 'auto' | 'm' | 'km';
+  @IsOptional() @IsIn(['auto', 'sqm', 'ha', 'acre']) areaUnit?: 'auto' | 'sqm' | 'ha' | 'acre';
+  /** Default "near" distance in metres; 0 = ask each time. */
+  @IsOptional() @IsInt() @Min(0) @Max(50000) nearMeters?: number;
+  @IsOptional() @IsBoolean() autoZoom?: boolean;
+  @IsOptional() @IsHexColor() highlightColor?: string;
+  @IsOptional() @IsBoolean() clearPrevious?: boolean;
+  @IsOptional() @IsBoolean() openTable?: boolean;
+  @IsOptional() @IsBoolean() saveHistory?: boolean;
+  @IsOptional() @IsIn(['all', 'visible', 'custom']) layerScope?: 'all' | 'visible' | 'custom';
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @IsString({ each: true })
+  layerIds?: string[];
+  @IsOptional() @IsBoolean() instantOnly?: boolean;
+  @IsOptional() @IsBoolean() aiSummaries?: boolean;
+  @IsOptional() @IsIn(['docked', 'wide', 'floating']) panelMode?: 'docked' | 'wide' | 'floating';
+}
+
 export class AppSettingsDto {
   @IsOptional()
   @ValidateNested()
@@ -203,4 +230,18 @@ export class AppSettingsDto {
   @ValidateNested()
   @Type(() => ShortcutSettingsDto)
   shortcuts?: ShortcutSettingsDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AssistantSettingsDto)
+  assistant?: AssistantSettingsDto;
+}
+
+/** `PUT /api/me/settings/municipality-defaults` (Owner): the defaults every
+ *  user of the municipality starts from. Only the assistant for now. */
+export class MunicipalityDefaultsDto {
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AssistantSettingsDto)
+  assistant?: AssistantSettingsDto;
 }

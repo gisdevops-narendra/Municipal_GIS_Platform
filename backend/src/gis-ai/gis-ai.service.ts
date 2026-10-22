@@ -1,15 +1,18 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import {
+  BadRequestException,
   ForbiddenException,
   HttpException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { GisGeometryType, Prisma } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AppUser } from '../auth/types/app-user.type';
 import { NetworkService } from '../gis/network.service';
+import { RasterService } from '../gis/raster.service';
 import { AiClientService } from './ai-client.service';
 import { LayerCatalogService } from './layer-catalog.service';
 import {
@@ -20,7 +23,15 @@ import {
   UnknownFieldError,
 } from './gis-query-compiler.service';
 import type { AggregateMetric, AiClarifyOption, AiGisOperation, AiInstruction } from './ai-plan.types';
-import type { GisChatDto, GisExplainDto, GisNarrateDto } from './dto/chat.dto';
+import type {
+  AnswerFormatDto,
+  GisChatDto,
+  GisExplainDto,
+  GisExportDto,
+  GisNarrateDto,
+  GisPinDto,
+  GisSaveLayerDto,
+} from './dto/chat.dto';
 
 type Catalog = Awaited<ReturnType<LayerCatalogService['buildForUser']>>;
 type Geo = Record<string, unknown>;
@@ -60,6 +71,8 @@ export interface GisChatResponse {
   options?: AiClarifyOption[];
   /** How the question was read (e.g. a corrected spelling). */
   notes?: string[];
+  /** Suggested next questions shown under the answer. */
+  followUps?: string[];
   /** Server-side chat this answer belongs to. */
   conversationId?: string;
   /** Standing instructions now in force in that chat. */
@@ -108,12 +121,48 @@ export interface GisChatResponse {
   overlays?: Geo[];
 }
 
-const nf = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 });
-const fmt = (n: number | null | undefined) => (n == null ? '—' : nf.format(n));
-const fmtDist = (m: number) =>
-  m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(2)} km`;
-const fmtArea = (m2: number) =>
-  m2 < 10000 ? `${Math.round(m2)} m²` : `${(m2 / 10000).toFixed(2)} ha`;
+/** How one request writes numbers (the user's assistant settings); the
+ *  answer builders read it through fmt / fmtDist / fmtArea. */
+interface AnswerFormat {
+  nf: Intl.NumberFormat;
+  distanceUnit: 'auto' | 'm' | 'km';
+  areaUnit: 'auto' | 'sqm' | 'ha' | 'acre';
+}
+const formatStore = new AsyncLocalStorage<AnswerFormat>();
+const DEFAULT_FORMAT: AnswerFormat = {
+  nf: new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }),
+  distanceUnit: 'auto',
+  areaUnit: 'auto',
+};
+function answerFormat(dto?: AnswerFormatDto): AnswerFormat {
+  let nf = DEFAULT_FORMAT.nf;
+  try {
+    if (dto?.numberLocale) nf = new Intl.NumberFormat(dto.numberLocale, { maximumFractionDigits: 2 });
+  } catch {
+    // unknown locale: keep the default grouping
+  }
+  return { nf, distanceUnit: dto?.distanceUnit ?? 'auto', areaUnit: dto?.areaUnit ?? 'auto' };
+}
+const format = () => formatStore.getStore() ?? DEFAULT_FORMAT;
+const fmt = (n: number | null | undefined) => (n == null ? '—' : format().nf.format(n));
+const round2 = (n: number) => Math.round(n * 100) / 100;
+const fmtDist = (m: number) => {
+  const unit = format().distanceUnit;
+  return unit === 'm' || (unit === 'auto' && m < 1000) ? `${fmt(Math.round(m))} m` : `${fmt(round2(m / 1000))} km`;
+};
+const fmtArea = (m2: number) => {
+  const unit = format().areaUnit;
+  if (unit === 'sqm' || (unit === 'auto' && m2 < 10000)) return `${fmt(Math.round(m2))} m²`;
+  if (unit === 'acre') return `${fmt(round2(m2 / 4046.8564224))} acres`;
+  return `${fmt(round2(m2 / 10000))} ha`;
+};
+
+/** A step of a chat in progress, streamed to the panel. */
+export type ChatProgress = (stage: 'understanding' | 'planned' | 'running', detail?: string) => void;
+
+const MULTI_TYPE: Record<string, string> = { POINT: 'MultiPoint', LINE: 'MultiLineString', POLYGON: 'MultiPolygon' };
+/** Export / save-as-layer take every match up to this many features. */
+const EXPORT_MAX_ROWS = 5000;
 const METRIC_WORD: Record<AggregateMetric, string> = {
   count: 'number',
   sum: 'total',
@@ -141,6 +190,7 @@ export class GisAiService {
     private readonly compiler: GisQueryCompilerService,
     private readonly network: NetworkService,
     private readonly config: ConfigService,
+    private readonly raster: RasterService,
   ) {}
 
   async health(): Promise<Record<string, unknown>> {
@@ -198,36 +248,49 @@ export class GisAiService {
   /** Answers a question and records it in ai_query_logs (question, path,
    *  plan, result count, time, error) so failures and slow answers can be
    *  found, and the user can rate the answer. Logging never fails a chat. */
-  async chat(appUser: AppUser, dto: GisChatDto, signal?: AbortSignal): Promise<GisChatResponse> {
+  async chat(appUser: AppUser, dto: GisChatDto, signal?: AbortSignal, progress?: ChatProgress): Promise<GisChatResponse> {
+    return formatStore.run(answerFormat(dto.format), () => this.chatTurn(appUser, dto, signal, progress));
+  }
+
+  private async chatTurn(
+    appUser: AppUser,
+    dto: GisChatDto,
+    signal?: AbortSignal,
+    progress?: ChatProgress,
+  ): Promise<GisChatResponse> {
     const started = Date.now();
+    progress?.('understanding');
     // Server-side memory: the chat's own turns give the history and the
-    // previous plan, so follow-ups work after a reload too.
-    const conversation = await this.openConversation(appUser, dto.conversationId, dto.message);
-    const memory = await this.conversationMemory(conversation.id);
+    // previous plan, so follow-ups work after a reload too. With history
+    // off ("Save chat history" setting) nothing is kept: the panel's own
+    // turns stand in for the memory.
+    const keep = dto.saveHistory !== false;
+    const conversation = keep ? await this.openConversation(appUser, dto.conversationId, dto.message) : null;
+    const memory = conversation ? await this.conversationMemory(conversation.id) : { history: [], previous: null };
     const request: GisChatDto = {
       ...dto,
       history: memory.history.length ? memory.history : dto.history,
       previousOperation: (memory.previous as Record<string, unknown> | null) ?? dto.previousOperation,
     };
-    let instructions = (conversation.instructions as unknown as AiInstruction[]) ?? [];
+    let instructions = ((conversation?.instructions as unknown as AiInstruction[]) ?? []);
     let response: GisChatResponse & { instructionAction?: 'add' | 'clear'; instructionAdded?: AiInstruction };
     try {
-      response = await this.answer(appUser, request, instructions, signal);
+      response = await this.answer(appUser, request, instructions, signal, progress);
     } catch (error) {
       await this.logQuestion(appUser, dto.message, started, {
         answerKind: signal?.aborted ? 'cancelled' : 'error',
         error: error instanceof Error ? error.message : String(error),
-        conversationId: conversation.id,
+        conversationId: conversation?.id,
       });
       throw error;
     }
-    if (response.instructionAction) {
+    if (conversation && response.instructionAction) {
       instructions = response.instructionAction === 'clear' ? [] : [...instructions, response.instructionAdded!];
       await this.prisma.aiConversation.update({
         where: { id: conversation.id },
         data: { instructions: instructions as unknown as Prisma.InputJsonValue },
       });
-    } else {
+    } else if (conversation) {
       await this.prisma.aiConversation.update({ where: { id: conversation.id }, data: { updatedAt: new Date() } });
     }
     const { instructionAction: _a, instructionAdded: _b, ...shown } = response;
@@ -237,10 +300,10 @@ export class GisAiService {
       operation: response.operation,
       explanation: response.answer ?? response.clarification ?? response.explanation,
       matched: response.result?.matched ?? null,
-      conversationId: conversation.id,
-      response: stripForStorage(shown),
+      conversationId: conversation?.id,
+      response: conversation ? stripForStorage(shown) : undefined,
     });
-    return { ...shown, logId: logId ?? undefined, conversationId: conversation.id, instructions };
+    return { ...shown, logId: logId ?? undefined, conversationId: conversation?.id, instructions };
   }
 
   /** The caller's chat, or a new one titled by its first question. */
@@ -281,9 +344,9 @@ export class GisAiService {
   async conversations(appUser: AppUser) {
     const rows = await this.prisma.aiConversation.findMany({
       where: { userId: appUser.id, municipalityId: appUser.municipalityId },
-      orderBy: { updatedAt: 'desc' },
-      take: 50,
-      select: { id: true, title: true, updatedAt: true },
+      orderBy: [{ pinned: 'desc' }, { updatedAt: 'desc' }],
+      take: 100,
+      select: { id: true, title: true, updatedAt: true, pinned: true },
     });
     return rows;
   }
@@ -425,6 +488,7 @@ export class GisAiService {
     dto: GisChatDto,
     instructions: AiInstruction[] = [],
     signal?: AbortSignal,
+    progress?: ChatProgress,
   ): Promise<GisChatResponse & { instructionAction?: 'add' | 'clear'; instructionAdded?: AiInstruction }> {
     const municipality = await this.prisma.municipality.findUnique({
       where: { id: appUser.municipalityId },
@@ -435,7 +499,17 @@ export class GisAiService {
       select: { id: true },
     });
 
-    const catalogEntries = await this.catalog.buildForUser(appUser);
+    let catalogEntries = await this.catalog.buildForUser(appUser);
+    // "Layers the assistant may use" (setting): never widen past what the
+    // user can see anyway — buildForUser already applied permissions.
+    if (dto.layerIds?.length) {
+      const allowed = new Set(dto.layerIds);
+      catalogEntries = catalogEntries.filter((e) => allowed.has(e.layerId));
+    }
+    // "Only the current map view" — a condition the backend adds, never the model.
+    const inView = (op: AiGisOperation): AiGisOperation => (dto.viewBbox ? { ...op, view_bbox: dto.viewBbox } : op);
+    const layerName = (code?: string | null) =>
+      catalogEntries.find((e) => e.code === code || e.name === code)?.name ?? code ?? undefined;
 
     // A clicked option carries its plan: run it, no model call.
     if (dto.resolvedOperation) {
@@ -448,15 +522,16 @@ export class GisAiService {
         await this.catalog.learnAlias(learn.layer_id, learn.field, learn.alias);
         void this.ai.reindex(appUser.municipalityId).catch(() => undefined);
       }
+      progress?.('running', layerName((resolved as AiGisOperation).target_layer));
       const chosen = await this.runOperation(
         appUser,
-        resolved as AiGisOperation,
+        inView(resolved as AiGisOperation),
         catalogEntries,
         workspace.id,
         'Your choice.',
         [],
       );
-      return { ...chosen, planner: 'choice' };
+      return { ...chosen, planner: 'choice', followUps: this.followUps(chosen, catalogEntries, dto.message) };
     }
 
     await this.catalog.addMatchingValues(catalogEntries, dto.message);
@@ -471,8 +546,14 @@ export class GisAiService {
         content: t.content,
       })),
       previous_operation: dto.previousOperation,
-      instructions,
+      // The user's default "near" distance counts until the chat sets its own.
+      instructions:
+        dto.nearMeters && !instructions.some((r) => r.near_m)
+          ? [{ text: `near = ${dto.nearMeters} m (assistant setting)`, near_m: dto.nearMeters }, ...instructions]
+          : instructions,
+      instant_only: dto.instantOnly ?? false,
     }, signal);
+    progress?.('planned', plan.operation ? layerName(plan.operation.target_layer) : undefined);
 
     const usedContext = plan.used_context ?? [];
 
@@ -503,9 +584,10 @@ export class GisAiService {
       };
     }
 
+    progress?.('running', layerName(plan.operation.target_layer));
     const response = await this.runOperation(
       appUser,
-      plan.operation,
+      inView(plan.operation),
       catalogEntries,
       workspace.id,
       plan.explanation,
@@ -513,6 +595,7 @@ export class GisAiService {
     );
     return {
       ...response,
+      followUps: this.followUps(response, catalogEntries, dto.message),
       planner,
       // Options from validation (field / distance choice) win over hints.
       options: response.options?.length ? response.options : guidance.options,
@@ -568,7 +651,7 @@ export class GisAiService {
     if (this.config.get<string>('GIS_AI_QUERY_NARRATION') !== 'true') {
       return { text: null };
     }
-    return this.narrateFacts(appUser, 'query', dto.question, dto.facts);
+    return this.narrateFacts(appUser, 'query', dto.question, dto.facts, dto.language);
   }
 
   /** Plain-language explanation of a finished Raster Analysis result, from
@@ -594,6 +677,7 @@ export class GisAiService {
     kind: 'query' | 'raster',
     question: string,
     facts: Record<string, unknown>,
+    language?: 'en' | 'mr' | 'hi',
   ): Promise<{ text: string | null }> {
     const municipality = await this.prisma.municipality.findUnique({
       where: { id: appUser.municipalityId },
@@ -604,11 +688,163 @@ export class GisAiService {
       question,
       facts,
       municipality_name: municipality?.name,
+      language,
     });
     return { text: result.grounded && result.text.trim() ? result.text.trim() : null };
   }
 
   // ------------------------------------------------------------------
+
+  /** Up to three next questions for an answer, built from the target
+   *  layer's profiled fields — each in a form the planner answers. */
+  private followUps(response: GisChatResponse, catalog: Catalog, question: string): string[] {
+    const op = response.operation;
+    if (response.answerKind !== 'gis_operation' || !op) return [];
+    const target = catalog.find((e) => e.code === op.target_layer || e.name === op.target_layer);
+    if (!target) return [];
+    const name = target.name.replace(/_/g, ' ');
+    const usable = target.columns.filter((c) => c.role !== 'hidden' && c.role !== 'id');
+    const category = usable.find((c) => c.role === 'category' && c.kind === 'text' && c.name !== op.group_by);
+    const measure = usable.find((c) => c.role === 'measure');
+    const spatialRef = op.spatial_filter?.reference_layer;
+    const area =
+      catalog.find((e) => e.geometryType === 'POLYGON' && (e.code === spatialRef || e.name === spatialRef)) ??
+      catalog.find((e) => e.geometryType === 'POLYGON' && e.layerId !== target.layerId && e.code !== op.group_by_layer);
+    const out: string[] = [];
+    const kind = op.kind ?? 'select';
+    if (kind === 'aggregate' && op.group_by && response.aggregate?.rows.length) {
+      const top = [...response.aggregate.rows].sort((a, b) => (b.value ?? 0) - (a.value ?? 0))[0]?.group;
+      if (top) out.push(`Show ${name} that are ${top}`);
+    }
+    if (kind === 'nearest' && op.reference_layer) {
+      const ref = catalog.find((e) => e.code === op.reference_layer || e.name === op.reference_layer);
+      if (ref) out.push(`Show ${name} within 500 m of ${ref.name.replace(/_/g, ' ')}`);
+    }
+    if (category) out.push(`Count ${name} by ${category.name}`);
+    if (area && target.geometryType !== 'POLYGON') out.push(`How many ${name} are there in each ${area.name.replace(/_/g, ' ')}`);
+    if (measure && kind === 'select' && !op.order_by) out.push(`Top 5 ${name} by ${measure.name}`);
+    const asked = question.trim().toLowerCase();
+    return [...new Set(out)].filter((q) => q.toLowerCase() !== asked).slice(0, 3);
+  }
+
+  /** The features an answer matched, as CSV or GeoJSON. */
+  async exportFeatures(appUser: AppUser, dto: GisExportDto): Promise<{ filename: string; mime: string; body: string }> {
+    const { compiled } = await this.compileForUser(appUser, dto.operation);
+    const rows = (await this.compiler.exportRows(compiled)).map(plainRow);
+    const base = `${compiled.target.name.replace(/[^\w-]+/g, '_')}_${new Date().toISOString().slice(0, 10)}`;
+    if (dto.format === 'geojson') {
+      const features = rows.map(({ __geojson, ...properties }) => ({
+        type: 'Feature',
+        geometry: typeof __geojson === 'string' ? JSON.parse(__geojson) : null,
+        properties,
+      }));
+      return {
+        filename: `${base}.geojson`,
+        mime: 'application/geo+json',
+        body: JSON.stringify({ type: 'FeatureCollection', features }),
+      };
+    }
+    const columns = rows.length ? Object.keys(rows[0]).filter((k) => k !== '__geojson') : [];
+    const cell = (v: unknown) => {
+      const text = v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+      return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+    const lines = [columns.map(cell).join(','), ...rows.map((r) => columns.map((c) => cell(r[c])).join(','))];
+    // BOM: Excel then opens Marathi / Hindi text correctly.
+    return { filename: `${base}.csv`, mime: 'text/csv; charset=utf-8', body: '\uFEFF' + lines.join('\r\n') };
+  }
+
+  /** The features an answer matched, saved as a new layer of the user's. */
+  async saveAsLayer(appUser: AppUser, dto: GisSaveLayerDto) {
+    const { compiled } = await this.compileForUser(appUser, dto.operation);
+    const target = compiled.target;
+    const multi = MULTI_TYPE[target.geometryType ?? ''];
+    if (!multi) throw new BadRequestException('Only point, line and polygon results can be saved as a layer.');
+    const output = await this.raster.prepareVectorOutput(appUser, dto.name);
+    const srid = Number(String(output.workspace.defaultCrs ?? '').split(':').pop()) || 32643;
+    const skip = new Set(['ogc_fid', 'gis_workspace_id', 'geom', target.pkColumn.toLowerCase()]);
+    const cols = target.columns
+      .filter((c) => c.kind !== 'geometry' && !skip.has(c.name.toLowerCase()))
+      .map((c) => `x."${c.name}"`);
+    await this.prisma.$executeRawUnsafe(
+      `CREATE TABLE "${output.table}" AS SELECT ${cols.length ? cols.join(', ') + ', ' : ''}` +
+        `ST_Multi(ST_Transform(x."${target.geomColumn}", ${srid}))::geometry(${multi}, ${srid}) AS geom ` +
+        `FROM "${target.table}" x WHERE x."${target.pkColumn}" IN (SELECT q.__id FROM (${compiled.sql}) q)`,
+      ...compiled.params,
+    );
+    await this.prisma.$executeRawUnsafe(`ALTER TABLE "${output.table}" ADD COLUMN ogc_fid SERIAL PRIMARY KEY`);
+    const [{ n }] = await this.prisma.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM "${output.table}"`);
+    if (n === 0) {
+      await this.prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS "${output.table}"`);
+      throw new BadRequestException('The answer matched no features, so there is nothing to save.');
+    }
+    return this.raster.publishVectorTable(appUser, output, {
+      name: dto.name,
+      geometryType: target.geometryType as GisGeometryType,
+      description: `Saved from the AI Assistant — ${compiled.summary}`,
+      rasterAnalysis: false,
+    });
+  }
+
+  /** An answer as a Dashboard tile (the Dashboard's pins). */
+  async pin(appUser: AppUser, dto: GisPinDto) {
+    return this.prisma.rasterPin.create({
+      data: {
+        municipalityId: appUser.municipalityId,
+        createdById: appUser.id,
+        title: dto.title,
+        value: dto.value,
+        detail: dto.detail,
+        layerId: dto.layerId,
+      },
+    });
+  }
+
+  async setConversationPinned(appUser: AppUser, id: string, pinned: boolean) {
+    const { count } = await this.prisma.aiConversation.updateMany({
+      where: { id, userId: appUser.id, municipalityId: appUser.municipalityId },
+      data: { pinned },
+    });
+    if (count === 0) throw new NotFoundException('That chat was not found.');
+    return { ok: true };
+  }
+
+  /** "Delete all my chats" (privacy setting). The question log keeps the
+   *  questions for the Owner, without their stored answers. */
+  async deleteAllConversations(appUser: AppUser) {
+    const rows = await this.prisma.aiConversation.findMany({
+      where: { userId: appUser.id, municipalityId: appUser.municipalityId },
+      select: { id: true },
+    });
+    const ids = rows.map((r) => r.id);
+    if (ids.length) {
+      await this.prisma.aiQueryLog.updateMany({
+        where: { conversationId: { in: ids } },
+        data: { conversationId: null, response: Prisma.DbNull },
+      });
+      await this.prisma.aiConversation.deleteMany({ where: { id: { in: ids } } });
+    }
+    return { deleted: ids.length };
+  }
+
+  /** A client-sent plan, compiled against the caller's own layers —
+   *  validated exactly like a chat answer's plan. */
+  private async compileForUser(appUser: AppUser, raw: Record<string, unknown>) {
+    const workspace = await this.prisma.gISWorkspace.findUnique({
+      where: { municipalityId: appUser.municipalityId },
+      select: { id: true },
+    });
+    if (!workspace) throw new BadRequestException('This municipality has no GIS workspace yet.');
+    const catalogEntries = await this.catalog.buildForUser(appUser);
+    const op = raw as unknown as AiGisOperation;
+    try {
+      const compiled = this.compiler.compile({ ...op, limit: op.limit ?? EXPORT_MAX_ROWS }, catalogEntries, workspace.id);
+      return { compiled };
+    } catch (error) {
+      if (error instanceof PlanValidationError) throw new BadRequestException(error.message);
+      throw error;
+    }
+  }
 
   private async runOperation(
     appUser: AppUser,
@@ -1111,4 +1347,13 @@ function stripForStorage(response: GisChatResponse): Prisma.InputJsonValue {
   delete copy['overlays'];
   if (response.result) copy['result'] = { ...response.result, geometries: [] };
   return JSON.parse(JSON.stringify(copy)) as Prisma.InputJsonValue;
+}
+
+/** A raw query row made JSON-safe: bigint -> number, Date -> ISO text. */
+function plainRow(row: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(row)) {
+    out[k] = typeof v === 'bigint' ? Number(v) : v instanceof Date ? v.toISOString() : v;
+  }
+  return out;
 }

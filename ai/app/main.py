@@ -178,6 +178,16 @@ async def _plan(body: PlanRequest, cancel: threading.Event) -> PlanResult:
         log.info("fast path (%s): %s", message[:80], quick.explanation)
         return finish(quick)
 
+    if body.instant_only:
+        return PlanResult(
+            answer_kind="unsupported",
+            explanation=(
+                "I couldn't answer that instantly. Rephrase it more simply, or turn off "
+                "“Instant answers only” in the assistant settings to let the AI model read it."
+            ),
+            planner="fast",
+        )
+
     if not llm.available():
         raise HTTPException(
             status_code=503,
@@ -250,7 +260,7 @@ async def warm(body: PlanRequest) -> dict:
 async def narrate(body: NarrateRequest) -> NarrateResult:
     try:
         text, grounded = await asyncio.to_thread(
-            llm.narrate, body.kind, body.question, body.facts
+            llm.narrate, body.kind, body.question, body.facts, body.language
         )
     except llm.LLMUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc))

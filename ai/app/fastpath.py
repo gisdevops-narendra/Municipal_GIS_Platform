@@ -38,6 +38,8 @@ from .repair import (
     field_reply,
     rank_measure,
     _coded_filters,
+    _measure_field,
+    numeric_fields,
     is_follow_up,
     _drop_redundant_area_filter,
     _find_layer,
@@ -103,6 +105,22 @@ _NEGATION = re.compile(
 
 # "top 5 pipelines by diameter"
 _TOP_BY = re.compile(r"\btop\s+(?P<n>\d+)\b.*?\bby\s+(?P<field>[a-z][a-z_ ]*)$", re.I)
+# "what is the length" / "total area" / "average length of them" right after
+# an answer: a statistic of the features that answer selected.
+_MEASURE_FOLLOW_UP = re.compile(
+    r"^\s*(?:and\s+|so\s+)?(?:what(?:'s|\s+is|\s+are)?\s+|tell\s+me\s+|give\s+me\s+|show\s+)?"
+    r"(?:the\s+|a\s+|an\s+|its\s+|their\s+)?(?P<stat>total\s+|sum\s+of\s+(?:the\s+)?|overall\s+|combined\s+|"
+    r"average\s+|avg\s+|mean\s+)?(?P<measure>length|area)\s*"
+    r"(?:of\s+(?:it|them|these|those|this|that|all|all\s+of\s+them|the\s+result))?\s*$",
+    re.I,
+)
+# "length of nashik pune highway", "what is the total area of ward 5 gardens":
+# the statistic of whatever the rest of the question selects.
+_MEASURE_OF = re.compile(
+    r"^\s*(?:what(?:'s|\s+is|\s+are)?\s+|tell\s+me\s+|give\s+me\s+|show\s+|find\s+)?(?:the\s+|a\s+)?"
+    r"(?P<stat>total\s+|overall\s+|combined\s+|average\s+|avg\s+|mean\s+)?(?P<measure>length|area)\s+of\s+(?:the\s+|all\s+)?(?P<rest>.+)$",
+    re.I,
+)
 # "height between 4 and 6", "diameter between 100 mm and 300 mm"
 _BETWEEN = re.compile(
     r"\b(?:(?P<field>[a-z][a-z_]*)\s+)?(?:is\s+|of\s+)?between\s+(?P<a>\d+(?:\.\d+)?)\s*(?P<ua>mm|cm|km|mtrs?|mts?|m|met\w*)?"
@@ -146,6 +164,50 @@ def _number_follow_up(text: str, previous: GisOperation) -> Optional[GisOperatio
         distances[-1].distance_meters = value
         return op
     return None
+
+
+def _measure_follow_up(text: str, previous: GisOperation, target: LayerInfo) -> Optional[GisOperation]:
+    """"what is the length" after "show the Mumbai Bangalore Highway" ->
+    the total length of those features (average when asked), keeping the
+    previous answer's conditions."""
+    m = _MEASURE_FOLLOW_UP.search(text)
+    if not m:
+        return None
+    return _as_measure(previous, target, m.group("measure"), m.group("stat"))
+
+
+def _measure_of(text: str, layers: List[LayerInfo]) -> Optional[PlanResult]:
+    """"length of nashik pune highway" -> the rest planned as a selection,
+    then its total (or average) length / area."""
+    m = _MEASURE_OF.search(text)
+    if not m:
+        return None
+    selected = fast_plan(m.group("rest"), layers)
+    op = selected.operation if selected is not None else None
+    if op is None or op.kind != "select" or op.order_by or op.limit:
+        return None
+    target = _find_layer(layers, op.target_layer)
+    if target is None:
+        return None
+    measured = _as_measure(op, target, m.group("measure"), m.group("stat"))
+    if measured is None:
+        return None
+    return PlanResult(answer_kind="gis_operation", explanation=_describe(measured, target),
+                      operation=measured, planner="fast")
+
+
+def _as_measure(previous: GisOperation, target: LayerInfo, measure: str, stat: Optional[str]) -> Optional[GisOperation]:
+    field = _measure_field(measure, target)
+    if field is None:
+        return None
+    stat = (stat or "").strip().lower()
+    op = previous.model_copy(deep=True)
+    op.kind = "aggregate"
+    op.metric = "avg" if stat.startswith(("average", "avg", "mean")) else "sum"
+    op.metric_field = field
+    op.group_by = op.group_by_layer = op.group_by_layer_field = None
+    op.order_by, op.order_desc, op.limit = None, None, None
+    return op
 
 
 def _metres(num: str, unit: Optional[str]) -> float:
@@ -199,7 +261,11 @@ def _ordering(text: str, op: GisOperation, target: LayerInfo, words: List[str]) 
     m = _TOP_BY.search(text)
     if m:
         hint = _tokens(m.group("field"))
-        field = comparison_field(target, hint)
+        # The exact column name first: "by shape_leng" must not tie with
+        # shape_area on the shared "shape" part.
+        norm = lambda s: re.sub(r"[\s_]+", "", s.lower())  # noqa: E731
+        field = next((f for f in numeric_fields(target) if norm(f.name) == norm(m.group("field"))), None) \
+            or comparison_field(target, hint)
         if field is None:
             return None
         op.order_by, op.order_desc, op.limit = field.name, True, int(m.group("n"))
@@ -398,7 +464,7 @@ def fast_plan(
     text = message.strip().rstrip("?.! ")
     if not text:
         return None
-    stepped = _area_step(text, layers) or _nearest_each(text, layers)
+    stepped = _area_step(text, layers) or _nearest_each(text, layers) or _measure_of(text, layers)
     if stepped is not None:
         return stepped
     follow_up = is_follow_up(text, layers, previous)
@@ -443,7 +509,11 @@ def fast_plan(
         target = _find_layer(layers, previous.target_layer)
         if target is None:
             return None
-        renumbered = _number_follow_up(text, previous) or field_reply(text, previous, target)
+        renumbered = (
+            _number_follow_up(text, previous)
+            or _measure_follow_up(text, previous, target)
+            or field_reply(text, previous, target)
+        )
         if renumbered is not None:
             return PlanResult(answer_kind="gis_operation", explanation=_describe(renumbered, target),
                               operation=renumbered, planner="fast")
@@ -570,7 +640,9 @@ def _describe(op: GisOperation, target: LayerInfo) -> str:
             conditions.append(f"inside {sf.reference_layer}{where}")
     if op.kind == "aggregate":
         group = op.group_by_layer or op.group_by
-        what = f"Count of {target.name}" + (f" per {group}" if group else "")
+        stat = {"sum": "Total", "avg": "Average", "min": "Minimum", "max": "Maximum"}.get(op.metric or "")
+        head = f"{stat} {op.metric_field} of {target.name}" if stat and op.metric_field else f"Count of {target.name}"
+        what = head + (f" per {group}" if group else "")
         if op.having_op:
             what += f", keeping {group} with a count {op.having_op} {op.having_value:g}"
         elif op.limit:

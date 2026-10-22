@@ -467,6 +467,16 @@ model UserSetting {
   @@map("user_settings")
 }
 
+/// Municipality-wide setting defaults set by the Owner (e.g. the AI
+/// Assistant's), layered under each user's own settings in the app.
+model MunicipalitySetting {
+  municipalityId String   @id @map("municipality_id")
+  data           Json     @default("{}")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@map("municipality_settings")
+}
+
 /// Module Access (hierarchical feature-module RBAC). Global reference
 /// catalog of every application module/tool (Pan, Measure, Basemap,
 /// Export to CSV, ...), shared across every municipality — not
@@ -741,6 +751,8 @@ model AiConversation {
   title          String
   /// [{ text, layer, filters: [...], near_m }]
   instructions   Json     @default("[]")
+  /// Kept at the top of the user's chat history.
+  pinned         Boolean  @default(false)
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 

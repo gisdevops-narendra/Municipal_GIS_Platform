@@ -389,11 +389,20 @@ def _grounded(text: str, allowed: List[float], headline: Optional[float] = None)
     return True
 
 
-def narrate(kind: str, question: str, facts: dict) -> Tuple[str, bool]:
+_LANGUAGE_NAMES = {"mr": "Marathi", "hi": "Hindi"}
+
+
+def narrate(kind: str, question: str, facts: dict, language: Optional[str] = None) -> Tuple[str, bool]:
     if not available():
         raise LLMUnavailable(f"The local model '{config.LLM_MODEL}' is not ready yet.")
     facts_json = json.dumps(facts, ensure_ascii=False, default=str)[:6000]
     system = prompts.RASTER_SYSTEM if kind == "raster" else prompts.NARRATE_SYSTEM
+    if language in _LANGUAGE_NAMES:
+        # Numbers stay as written so the grounding check below still holds.
+        system += (
+            f"\nWrite the answer in {_LANGUAGE_NAMES[language]}. Keep every number exactly "
+            "as given, in digits 0-9, and keep layer and field names as they are."
+        )
     payload = {
         "model": config.LLM_MODEL,
         "messages": [

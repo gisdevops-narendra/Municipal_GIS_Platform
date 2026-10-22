@@ -1,5 +1,6 @@
 import { AnalysisReportComponent } from './components/analysis-report/analysis-report.component';
 import { NotificationService } from '../../core/services/notification.service';
+import { SettingsService } from '../../core/services/settings.service';
 import { Component, WritableSignal, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
@@ -183,6 +184,7 @@ export class GisWorkspaceComponent {
   private readonly gisWorkspaceService = inject(GisWorkspaceService);
   private readonly gisLayersService = inject(GisLayersService);
   private readonly notify = inject(NotificationService);
+  private readonly settingsService = inject(SettingsService);
   private readonly currentUserService = inject(CurrentUserService);
   private readonly moduleAccessService = inject(ModuleAccessService);
   private readonly fb = inject(FormBuilder);
@@ -277,7 +279,18 @@ export class GisWorkspaceComponent {
   readonly bottomTool = signal<string | null>(null);
   readonly leftWidth = signal(300);
   /** Raster Analysis needs room for its category rail + tool list. */
-  readonly leftPanelWidth = computed(() => (this.leftTool() === 'raster' ? Math.max(this.leftWidth(), 420) : this.leftWidth()));
+  readonly leftPanelWidth = computed(() => {
+    const tool = this.leftTool();
+    if (tool === 'raster') return Math.max(this.leftWidth(), 420);
+    if (tool === 'assistant' && this.assistantPanelMode() === 'wide') return Math.max(this.leftWidth(), 520);
+    if (tool === 'assistant' && this.assistantPanelMode() === 'floating') return 400;
+    return this.leftWidth();
+  });
+  /** AI Assistant setting: docked (normal), wide, or floating over the map. */
+  readonly assistantPanelMode = computed(() => this.settingsService.assistant().panelMode);
+  readonly assistantFloating = computed(
+    () => this.leftTool() === 'assistant' && this.assistantPanelMode() === 'floating',
+  );
   readonly bottomHeight = signal(240);
 
   /** Every tool panel that has been opened at least once. Panels are kept
@@ -677,11 +690,13 @@ export class GisWorkspaceComponent {
     this.activeQueryFilter.set(filter);
     this.mapService.setLayerVisibility(filter.layerId, true);
     this.mapService.setLayerCqlFilter(filter.layerId, filter.cql);
-    this.bottomTool.set('attributes');
-    // The panel only renders tools in openedBottomTools — without this the
-    // first query of a session opened an empty Attribute Table.
-    this.rememberOpened(this.openedBottomTools, 'attributes');
-    this.refreshMapSize();
+    if (filter.openTable !== false) {
+      this.bottomTool.set('attributes');
+      // The panel only renders tools in openedBottomTools — without this the
+      // first query of a session opened an empty Attribute Table.
+      this.rememberOpened(this.openedBottomTools, 'attributes');
+      this.refreshMapSize();
+    }
   }
 
   onQueryCleared(): void {

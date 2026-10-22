@@ -1,8 +1,8 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { Subject, debounceTime } from 'rxjs';
+import { Observable, Subject, debounceTime, tap } from 'rxjs';
 import { environment } from '../../../environments/environment';
-import { AppSettings, DeepPartial } from '../settings/app-settings.model';
+import { AppSettings, AssistantSettings, DeepPartial } from '../settings/app-settings.model';
 import { SETTINGS_DEFAULTS, cloneDefaults, mergeSettings } from '../settings/settings-defaults';
 
 /** localStorage key — also read by the anti-flash snippet in index.html. */
@@ -28,6 +28,9 @@ export class SettingsService {
   readonly settings = this.state.asReadonly();
   /** `true` once the backend copy has been loaded at least once this session. */
   readonly loaded = signal(false);
+  /** The Owner's defaults every user of the municipality starts from
+   *  (below the user's own changes). Only `assistant` for now. */
+  readonly municipalityDefaults = signal<DeepPartial<AppSettings>>({});
 
   private readonly flush$ = new Subject<void>();
   /** Changes made while `load()` is in flight. They are replayed over the
@@ -37,16 +40,24 @@ export class SettingsService {
 
   constructor() {
     this.flush$.pipe(debounceTime(600)).subscribe(() => {
-      this.http.patch(this.url, this.state()).subscribe({ error: () => undefined });
+      // Assistant settings still equal to the municipality defaults are not
+      // stored, so later changes to those defaults reach this user.
+      const { assistant, ...rest } = this.state();
+      const inherited = JSON.stringify(assistant) === JSON.stringify(mergeSettings(this.municipalityDefaults()).assistant);
+      this.http.patch(this.url, inherited ? rest : this.state()).subscribe({ error: () => undefined });
     });
   }
 
   /** Reconcile with the backend. Safe to call once authenticated. */
   load(): void {
     this.pendingPatches = [];
-    this.http.get<{ settings: DeepPartial<AppSettings> }>(this.url).subscribe({
-      next: ({ settings }) => {
-        const merged = mergeSettings(settings);
+    this.http
+      .get<{ settings: DeepPartial<AppSettings>; municipalityDefaults?: DeepPartial<AppSettings> }>(this.url)
+      .subscribe({
+      next: ({ settings, municipalityDefaults }) => {
+        this.municipalityDefaults.set(municipalityDefaults ?? {});
+        // defaults < municipality defaults < the user's own changes
+        const merged = mergeSettings(deepMerge(structuredClone(municipalityDefaults ?? {}), settings ?? {}));
         const replay = this.pendingPatches ?? [];
         this.pendingPatches = null;
         for (const p of replay) deepMerge(merged, p);
@@ -70,10 +81,24 @@ export class SettingsService {
     this.flush$.next();
   }
 
-  /** "Reset Application Settings" — back to defaults, and drop the server row. */
+  /** "Reset Application Settings" — back to the (municipality) defaults,
+   *  and drop the server row. */
   reset(): void {
-    this.setAll(cloneDefaults());
+    this.setAll(mergeSettings(this.municipalityDefaults()));
     this.http.delete(this.url).subscribe({ error: () => undefined });
+  }
+
+  /** Owner: make these assistant settings the municipality's defaults. */
+  saveMunicipalityAssistantDefaults(assistant: AssistantSettings): Observable<unknown> {
+    return this.http
+      .put<{ municipalityDefaults: DeepPartial<AppSettings> }>(`${this.url}/municipality-defaults`, { assistant })
+      .pipe(tap(({ municipalityDefaults }) => this.municipalityDefaults.set(municipalityDefaults ?? {})));
+  }
+
+  /** The assistant settings back to the municipality's defaults. */
+  resetAssistant(): void {
+    const assistant = mergeSettings(this.municipalityDefaults()).assistant;
+    this.patch({ assistant });
   }
 
   private setAll(next: AppSettings): void {
@@ -95,6 +120,7 @@ export class SettingsService {
   readonly notifications = computed(() => this.state().notifications);
   readonly session = computed(() => this.state().session);
   readonly shortcutsEnabled = computed(() => this.state().shortcuts.enabled);
+  readonly assistant = computed(() => this.state().assistant);
 }
 
 // ---- helpers -------------------------------------------------------------

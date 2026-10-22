@@ -54,6 +54,23 @@ export const SETTINGS_DEFAULTS: AppSettings = {
   shortcuts: {
     enabled: true,
   },
+  assistant: {
+    answerStyle: 'short',
+    language: 'en',
+    distanceUnit: 'auto',
+    areaUnit: 'auto',
+    nearMeters: 0,
+    autoZoom: true,
+    highlightColor: '#128077',
+    clearPrevious: true,
+    openTable: true,
+    saveHistory: true,
+    layerScope: 'all',
+    layerIds: [],
+    instantOnly: false,
+    aiSummaries: true,
+    panelMode: 'docked',
+  },
 };
 
 /** Deep clone so callers can never mutate `SETTINGS_DEFAULTS`. */

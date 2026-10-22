@@ -165,6 +165,8 @@ class PlanRequest(BaseModel):
     previous_operation: Optional[GisOperation] = None
     # Standing instructions saved in this conversation.
     instructions: List[Instruction] = Field(default_factory=list)
+    # Assistant setting "Instant answers only": never call the model.
+    instant_only: bool = False
 
 
 class SuggestRequest(BaseModel):
@@ -183,6 +185,8 @@ class NarrateRequest(BaseModel):
     question: str = Field(max_length=2000)
     facts: dict
     municipality_name: Optional[str] = None
+    # Language of the wording (assistant setting): en | mr | hi.
+    language: Optional[Literal["en", "mr", "hi"]] = None
 
 
 class NarrateResult(BaseModel):

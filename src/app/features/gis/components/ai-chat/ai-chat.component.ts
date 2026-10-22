@@ -18,11 +18,14 @@ import { ButtonModule } from 'primeng/button';
 import { MessageModule } from 'primeng/message';
 import { DialogModule } from 'primeng/dialog';
 import { CurrentUserService } from '../../../../core/services/current-user.service';
+import { NotificationService } from '../../../../core/services/notification.service';
+import { SettingsService } from '../../../../core/services/settings.service';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { MapService } from '../../services/map.service';
 import { GisAiService } from '../../services/gis-ai.service';
 import { AttributeExternalFilter } from '../attribute-table/attribute-table.component';
 import {
+  AiChatOptions,
   AiClarifyOption,
   AiConversationSummary,
   AiGisOperation,
@@ -59,6 +62,10 @@ const nf = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 });
 export class AiChatComponent {
   private readonly mapService = inject(MapService);
   private readonly aiService = inject(GisAiService);
+  private readonly notify = inject(NotificationService);
+  /** AI Assistant settings (Settings → AI Assistant). */
+  readonly prefs = inject(SettingsService).assistant;
+  private readonly settings = inject(SettingsService);
 
   @Input() layers: GisLayer[] = [];
   @Input() activeLayerId: string | null = null;
@@ -83,6 +90,14 @@ export class AiChatComponent {
   readonly instructions = signal<AiInstruction[]>([]);
   readonly historyVisible = signal(false);
   readonly historyRows = signal<AiConversationSummary[]>([]);
+  readonly historyLoading = signal(false);
+  readonly historyQuery = signal('');
+  private readonly filteredHistory = computed(() => {
+    const q = this.historyQuery().trim().toLowerCase();
+    return q ? this.historyRows().filter((r) => r.title.toLowerCase().includes(q)) : this.historyRows();
+  });
+  readonly pinnedChats = computed(() => this.filteredHistory().filter((r) => r.pinned));
+  readonly recentChats = computed(() => this.filteredHistory().filter((r) => !r.pinned));
 
   /** Owner only: the question log (what failed, what was slow, 👎). */
   readonly isOwner = signal(false);
@@ -93,6 +108,13 @@ export class AiChatComponent {
 
   @ViewChild('thread') private thread?: ElementRef<HTMLElement>;
   @ViewChild('input') private input?: ElementRef<HTMLTextAreaElement>;
+
+  /** "Save as layer" dialog: the answer being saved and the new name. */
+  readonly saveTarget = signal<GisChatResponse | null>(null);
+  saveName = '';
+  readonly saving = signal(false);
+  /** Answer index with a download / pin in flight. */
+  readonly busyIndex = signal<number | null>(null);
 
   /** Answer whose text was just copied (shows a tick for a moment). */
   readonly copiedIndex = signal<number | null>(null);
@@ -132,9 +154,35 @@ export class AiChatComponent {
     });
   }
 
-  openHistory(): void {
+  /** The chats sidebar slides over the thread; the button toggles it. */
+  toggleHistory(): void {
+    if (this.historyVisible()) {
+      this.historyVisible.set(false);
+      return;
+    }
     this.historyVisible.set(true);
-    this.aiService.conversations().subscribe({ next: (rows) => this.historyRows.set(rows), error: () => this.historyRows.set([]) });
+    this.historyQuery.set('');
+    this.historyLoading.set(true);
+    this.aiService.conversations().subscribe({
+      next: (rows) => {
+        this.historyRows.set(rows);
+        this.historyLoading.set(false);
+      },
+      error: () => {
+        this.historyRows.set([]);
+        this.historyLoading.set(false);
+      },
+    });
+  }
+
+  /** Pinned chats stay at the top of the list. */
+  togglePin(chat: AiConversationSummary, event: Event): void {
+    event.stopPropagation();
+    const pinned = !chat.pinned;
+    const setPinned = (value: boolean) =>
+      this.historyRows.update((rows) => rows.map((r) => (r.id === chat.id ? { ...r, pinned: value } : r)));
+    setPinned(pinned);
+    this.aiService.pinConversation(chat.id, pinned).subscribe({ error: () => setPinned(!pinned) });
   }
 
   /** Reopen a saved chat: its turns, memory and instructions. */
@@ -239,6 +287,13 @@ export class AiChatComponent {
     });
   }
 
+  /** Follow-up chips show only under the newest answer. */
+  readonly lastAnswerIndex = computed(() => {
+    const list = this.messages();
+    for (let i = list.length - 1; i >= 0; i--) if (list[i].role === 'assistant') return i;
+    return -1;
+  });
+
   useExample(text: string): void {
     this.draft = text;
     this.send();
@@ -275,12 +330,14 @@ export class AiChatComponent {
     ]);
     this.sending.set(true);
 
-    this.chatSub = this.aiService.chat(text, priorHistory, this.activeLayerId, previousOperation, resolvedOperation, this.conversationId()).subscribe({
+    this.chatSub = this.aiService
+      .chat(text, priorHistory, this.activeLayerId, previousOperation, resolvedOperation, this.conversationId(), this.chatOptions())
+      .subscribe({
       next: (response) => {
         this.sending.set(false);
         if (response.conversationId) this.conversationId.set(response.conversationId);
         if (response.instructions) this.instructions.set(response.instructions);
-        const wantsWording = !!response.answer && !!response.facts;
+        const wantsWording = this.prefs().aiSummaries && !this.prefs().instantOnly && !!response.answer && !!response.facts;
         const index = this.applyAssistant({
           role: 'assistant',
           content: response.explanation,
@@ -333,7 +390,8 @@ export class AiChatComponent {
         next[index] = { ...msg, narrating: false, ...(narration && { narration }) };
         return next;
       });
-    const sub = this.aiService.narrate(question, facts).subscribe({
+    const language = this.prefs().language;
+    const sub = this.aiService.narrate(question, facts, language === 'en' ? undefined : language).subscribe({
       next: ({ text }) => settle(text ?? undefined),
       error: () => settle(),
     });
@@ -350,20 +408,22 @@ export class AiChatComponent {
     if (result && result.matched > 0) {
       this.mapService.setLayerVisibility(result.layerId, true);
     }
+    const { autoZoom, clearPrevious, openTable } = this.prefs();
     if (shapes.length > 0) {
-      this.mapService.setQueryHighlight(shapes);
-      this.mapService.zoomToGeometries(shapes);
+      this.mapService.setQueryHighlight(shapes, !clearPrevious);
+      if (autoZoom) this.mapService.zoomToGeometries(shapes);
     } else {
       // Exact answers send no geometries: GeoServer draws the layer
       // filtered by the question's conditions (cql below) — just zoom.
-      this.mapService.clearQueryHighlight();
-      if (result?.bbox && result.matched > 0) this.mapService.zoomToBbox4326(result.bbox);
+      if (clearPrevious) this.mapService.clearQueryHighlight();
+      if (autoZoom && result?.bbox && result.matched > 0) this.mapService.zoomToBbox4326(result.bbox);
     }
     if (result?.cql) {
       this.queryRun.emit({
         layerId: result.layerId,
         cql: result.cql,
         label: `AI · ${result.layerName}`,
+        openTable,
       });
     }
   }
@@ -402,12 +462,119 @@ export class AiChatComponent {
   }
 
   dist(m: number): string {
-    return m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(2)} km`;
+    const unit = this.prefs().distanceUnit;
+    if (unit === 'm' || (unit === 'auto' && m < 1000)) return `${nf.format(Math.round(m))} m`;
+    return `${(m / 1000).toFixed(2)} km`;
   }
 
   area(m2: number | null): string {
     if (m2 == null) return '—';
-    return m2 < 10000 ? `${Math.round(m2)} m²` : `${(m2 / 10000).toFixed(2)} ha`;
+    switch (this.prefs().areaUnit) {
+      case 'sqm':
+        return `${nf.format(Math.round(m2))} m²`;
+      case 'ha':
+        return `${nf.format(m2 / 10000)} ha`;
+      case 'acre':
+        return `${nf.format(m2 / 4046.8564224)} acres`;
+      default:
+        return m2 < 10000 ? `${Math.round(m2)} m²` : `${(m2 / 10000).toFixed(2)} ha`;
+    }
+  }
+
+  /** The assistant settings the backend applies to a question. */
+  private chatOptions(): AiChatOptions {
+    const p = this.prefs();
+    const layerIds =
+      p.layerScope === 'custom'
+        ? p.layerIds
+        : p.layerScope === 'visible'
+          ? Object.entries(this.mapService.layerVisibility())
+              .filter(([, on]) => on)
+              .map(([id]) => id)
+          : undefined;
+    const numberMode = this.settings.locale().numberFormat;
+    return {
+      layerIds: layerIds?.length ? layerIds : undefined,
+      instantOnly: p.instantOnly || undefined,
+      saveHistory: p.saveHistory ? undefined : false,
+      nearMeters: p.nearMeters > 0 ? p.nearMeters : undefined,
+      format: {
+        numberLocale:
+          numberMode === 'in' ? 'en-IN' : numberMode === 'eu' ? 'de-DE' : numberMode === 'us' ? 'en-US' : this.settings.locale().language,
+        distanceUnit: p.distanceUnit,
+        areaUnit: p.areaUnit,
+      },
+    };
+  }
+
+  // ---- answer actions -------------------------------------------------------
+
+  download(index: number, format: 'csv' | 'geojson'): void {
+    const op = this.messages()[index]?.response?.operation;
+    if (!op || this.busyIndex() !== null) return;
+    this.busyIndex.set(index);
+    this.aiService.export(op, format).subscribe({
+      next: (res) => {
+        this.busyIndex.set(null);
+        const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? `ai-result.${format}`;
+        const url = URL.createObjectURL(res.body!);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        a.click();
+        URL.revokeObjectURL(url);
+      },
+      error: () => {
+        this.busyIndex.set(null);
+        this.notify.error('Could not download the result. Try again.');
+      },
+    });
+  }
+
+  openSave(response: GisChatResponse): void {
+    this.saveName = `AI · ${response.result?.layerName ?? 'Result'}`.slice(0, 120);
+    this.saveTarget.set(response);
+  }
+
+  saveAsLayer(): void {
+    const op = this.saveTarget()?.operation;
+    const name = this.saveName.trim();
+    if (!op || name.length < 2 || this.saving()) return;
+    this.saving.set(true);
+    this.aiService.saveAsLayer(op, name).subscribe({
+      next: () => {
+        this.saving.set(false);
+        this.saveTarget.set(null);
+        this.notify.success(`Saved as the layer “${name}”. Reload the workspace to add it to the map.`, 'Layer saved', 'layers');
+      },
+      error: (err: HttpErrorResponse) => {
+        this.saving.set(false);
+        this.notify.error(err.error?.message ?? 'Could not save the layer.');
+      },
+    });
+  }
+
+  pinToDashboard(index: number): void {
+    const msg = this.messages()[index];
+    const question = this.messages()[index - 1]?.content ?? 'AI answer';
+    const r = msg?.response;
+    if (!r || this.busyIndex() !== null) return;
+    const value = r.result
+      ? `${this.num(r.result.matched)} ${r.result.matched === 1 ? 'feature' : 'features'}`
+      : (r.answer ?? this.mainText(msg)).slice(0, 120);
+    this.busyIndex.set(index);
+    this.aiService
+      .pinToDashboard({ title: question.slice(0, 200), value, detail: this.mainText(msg).slice(0, 1000), layerId: r.result?.layerId })
+      .subscribe({
+        next: () => {
+          this.busyIndex.set(null);
+          this.notify.success('Pinned to the Dashboard.');
+        },
+        error: () => {
+          this.busyIndex.set(null);
+          this.notify.error('Could not pin this answer.');
+        },
+      });
   }
 
   /** Bar width (%) of an aggregate row relative to the largest value. */

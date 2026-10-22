@@ -376,7 +376,15 @@ def use_layers(layers: Iterable) -> None:
     _ALIASES.set(aliases)
 
 
-def role_of(field: str) -> Optional[str]:
+def role_of(field) -> Optional[str]:
+    """A field's role. Pass the field itself where possible: roles are per
+    layer, and the same column name ("shape_leng") can be a measure on one
+    layer and hidden (empty / constant) on another."""
+    if not isinstance(field, str):
+        own = getattr(field, "role", None)
+        if own:
+            return own
+        field = field.name
     return _ROLES.get().get(field.lower())
 
 

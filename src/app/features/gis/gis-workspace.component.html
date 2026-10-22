@@ -80,6 +80,7 @@
   <aside
     class="gis-ws__left"
     [class.is-collapsed]="!activeLeftTool() || !!styleTargetLayer()"
+    [class.is-floating]="assistantFloating()"
     [style.width.px]="leftPanelWidth()"
   >
     <header class="gis-ws__panel-head">

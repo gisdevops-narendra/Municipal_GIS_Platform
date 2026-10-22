@@ -1,10 +1,15 @@
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsBoolean,
+  IsInt,
+  IsNumber,
   IsUUID,
   IsIn,
+  Max,
+  Min,
   IsObject,
   IsOptional,
   IsString,
@@ -20,6 +25,22 @@ export class ChatTurnDto {
   @IsString()
   @MaxLength(4000)
   content!: string;
+}
+
+export class AnswerFormatDto {
+  /** BCP-47 locale for digit grouping (en-IN = 1,00,000). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  numberLocale?: string;
+
+  @IsOptional()
+  @IsIn(['auto', 'm', 'km'])
+  distanceUnit?: 'auto' | 'm' | 'km';
+
+  @IsOptional()
+  @IsIn(['auto', 'sqm', 'ha', 'acre'])
+  areaUnit?: 'auto' | 'sqm' | 'ha' | 'acre';
 }
 
 export class GisChatDto {
@@ -55,6 +76,94 @@ export class GisChatDto {
   @IsOptional()
   @IsUUID()
   conversationId?: string;
+
+  // ---- assistant settings (see AssistantSettings in the frontend) ----
+
+  /** Only these layers may be used; omitted = every layer the user sees. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @IsString({ each: true })
+  layerIds?: string[];
+
+  /** "Only the current map view": [minX, minY, maxX, maxY], EPSG:4326. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(4)
+  @ArrayMaxSize(4)
+  @IsNumber({}, { each: true })
+  viewBbox?: number[];
+
+  /** Never call the language model — fast-path answers only. */
+  @IsOptional()
+  @IsBoolean()
+  instantOnly?: boolean;
+
+  /** false = do not keep this chat in the user's history. */
+  @IsOptional()
+  @IsBoolean()
+  saveHistory?: boolean;
+
+  /** Default "near" distance (m) when the chat has none of its own. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(50000)
+  nearMeters?: number;
+
+  /** How numbers in the answer sentence are written. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AnswerFormatDto)
+  format?: AnswerFormatDto;
+}
+
+/** `POST /gis/ai/export` — the features an answer matched, as a file. */
+export class GisExportDto {
+  @IsObject()
+  operation!: Record<string, unknown>;
+
+  @IsIn(['csv', 'geojson'])
+  format!: 'csv' | 'geojson';
+}
+
+/** `POST /gis/ai/save-layer` — the matched features as a new layer. */
+export class GisSaveLayerDto {
+  @IsObject()
+  operation!: Record<string, unknown>;
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  name!: string;
+}
+
+/** `POST /gis/ai/pin` — an answer as a Dashboard tile. */
+export class GisPinDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  title!: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(120)
+  value!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  detail?: string;
+
+  @IsOptional()
+  @IsString()
+  layerId?: string;
+}
+
+/** `PATCH /gis/ai/conversations/:id` — pin / unpin a chat. */
+export class GisConversationPatchDto {
+  @IsBoolean()
+  pinned!: boolean;
 }
 
 /** `POST /gis/ai/narrate` — the question plus the `facts` a chat answer
@@ -67,6 +176,11 @@ export class GisNarrateDto {
 
   @IsObject()
   facts!: Record<string, unknown>;
+
+  /** Language of the wording (assistant setting). */
+  @IsOptional()
+  @IsIn(['en', 'mr', 'hi'])
+  language?: 'en' | 'mr' | 'hi';
 }
 
 export class ExplainFactDto {

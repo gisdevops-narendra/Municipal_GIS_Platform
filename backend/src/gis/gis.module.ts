@@ -81,6 +81,7 @@ import { UploadReviewService } from './upload-review.service';
     GisAuthorizationService,
     GeoServerService,
     NetworkService,
+    RasterService,
   ],
 })
 export class GisModule {}

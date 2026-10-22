@@ -93,6 +93,51 @@ export const THEME_MODE_OPTIONS: Option[] = [
   { label: 'Match system', value: 'system' },
 ];
 
+export const ASSISTANT_ANSWER_STYLE_OPTIONS: Option[] = [
+  { label: 'Short — just the answer', value: 'short' },
+  { label: 'Detailed — also show how it was interpreted', value: 'detailed' },
+];
+
+export const ASSISTANT_LANGUAGE_OPTIONS: Option[] = [
+  { label: 'English', value: 'en' },
+  { label: 'मराठी — Marathi', value: 'mr' },
+  { label: 'हिन्दी — Hindi', value: 'hi' },
+];
+
+export const ASSISTANT_DISTANCE_UNIT_OPTIONS: Option[] = [
+  { label: 'Automatic (m, then km)', value: 'auto' },
+  { label: 'Metres', value: 'm' },
+  { label: 'Kilometres', value: 'km' },
+];
+
+export const ASSISTANT_AREA_UNIT_OPTIONS: Option[] = [
+  { label: 'Automatic (m², then ha)', value: 'auto' },
+  { label: 'Square metres', value: 'sqm' },
+  { label: 'Hectares', value: 'ha' },
+  { label: 'Acres', value: 'acre' },
+];
+
+export const ASSISTANT_NEAR_OPTIONS: Option<number>[] = [
+  { label: 'Ask each time', value: 0 },
+  { label: '100 m', value: 100 },
+  { label: '250 m', value: 250 },
+  { label: '500 m', value: 500 },
+  { label: '1 km', value: 1000 },
+  { label: '2 km', value: 2000 },
+];
+
+export const ASSISTANT_LAYER_SCOPE_OPTIONS: Option[] = [
+  { label: 'All layers I can see', value: 'all' },
+  { label: 'Only layers switched on on the map', value: 'visible' },
+  { label: 'Only the layers I choose', value: 'custom' },
+];
+
+export const ASSISTANT_PANEL_MODE_OPTIONS: Option[] = [
+  { label: 'Docked — beside the map', value: 'docked' },
+  { label: 'Wide — docked, with more room', value: 'wide' },
+  { label: 'Floating — a card over the map', value: 'floating' },
+];
+
 export const DENSITY_OPTIONS: Option[] = [
   { label: 'Comfortable', value: 'comfortable' },
   { label: 'Compact', value: 'compact' },

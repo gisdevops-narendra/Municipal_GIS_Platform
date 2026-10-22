@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, ParseUUIDPipe, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, ParseUUIDPipe, Patch, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import {
   RequireMunicipalityMember,
@@ -8,7 +8,16 @@ import { RequireAiAssistant } from './ai-assistant.guard';
 import { CurrentAppUser } from '../auth/decorators/current-app-user.decorator';
 import type { AppUser } from '../auth/types/app-user.type';
 import { GisAiService } from './gis-ai.service';
-import { GisChatDto, GisExplainDto, GisFeedbackDto, GisNarrateDto } from './dto/chat.dto';
+import {
+  GisChatDto,
+  GisConversationPatchDto,
+  GisExplainDto,
+  GisExportDto,
+  GisFeedbackDto,
+  GisNarrateDto,
+  GisPinDto,
+  GisSaveLayerDto,
+} from './dto/chat.dto';
 import type { AiGisOperation } from './ai-plan.types';
 
 /**
@@ -58,6 +67,24 @@ export class GisAiController {
   @Get('conversations/:id')
   conversation(@CurrentAppUser() appUser: AppUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.gisAi.conversation(appUser, id);
+  }
+
+  /** Pin a chat to the top of the history list (or unpin it). */
+  @RequireAiAssistant()
+  @Patch('conversations/:id')
+  patchConversation(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: GisConversationPatchDto,
+  ) {
+    return this.gisAi.setConversationPinned(appUser, id, dto.pinned);
+  }
+
+  /** "Delete all my chats" (assistant settings). */
+  @RequireAiAssistant()
+  @Delete('conversations')
+  deleteAllConversations(@CurrentAppUser() appUser: AppUser) {
+    return this.gisAi.deleteAllConversations(appUser);
   }
 
   @RequireAiAssistant()
@@ -110,6 +137,34 @@ export class GisAiController {
     @Query('limit') limit?: string,
   ) {
     return this.gisAi.logs(appUser, problems === 'true', Number(limit) || 100);
+  }
+
+  /** The features an answer matched, downloaded as CSV or GeoJSON. */
+  @RequireAiAssistant()
+  @Post('export')
+  async export(
+    @CurrentAppUser() appUser: AppUser,
+    @Body() dto: GisExportDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const file = await this.gisAi.exportFeatures(appUser, dto);
+    res.setHeader('Content-Type', file.mime);
+    res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+    return file.body;
+  }
+
+  /** The features an answer matched, saved as a new layer. */
+  @RequireAiAssistant()
+  @Post('save-layer')
+  saveLayer(@CurrentAppUser() appUser: AppUser, @Body() dto: GisSaveLayerDto) {
+    return this.gisAi.saveAsLayer(appUser, dto);
+  }
+
+  /** An answer as a Dashboard tile. */
+  @RequireAiAssistant()
+  @Post('pin')
+  pin(@CurrentAppUser() appUser: AppUser, @Body() dto: GisPinDto) {
+    return this.gisAi.pin(appUser, dto);
   }
 
   @RequireAiAssistant()

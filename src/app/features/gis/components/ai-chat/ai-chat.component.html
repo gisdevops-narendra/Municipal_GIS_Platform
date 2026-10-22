@@ -1,16 +1,30 @@
 <div class="aic">
   <div class="aic__bar">
-    <span class="aic__status" [class.is-busy]="sending()">
-      <span class="aic__status-dot" aria-hidden="true"></span>
-      {{ sending() ? 'Working…' : 'Ready' }}
-    </span>
+    <div class="aic__bar-title">
+      <span class="aic__bar-mark" aria-hidden="true"><i class="pi pi-sparkles"></i></span>
+      <div class="aic__bar-text">
+        <span class="aic__bar-name">AI Assistant</span>
+        <span class="aic__status" [class.is-busy]="sending()">
+          <span class="aic__status-dot" aria-hidden="true"></span>
+          {{ sending() ? 'Working…' : 'Ready' }}
+        </span>
+      </div>
+    </div>
     <div class="aic__bar-actions">
       @if (isOwner()) {
         <button type="button" class="aic__icon-btn" title="Question log" aria-label="Question log" (click)="openLog()">
           <i class="pi pi-list" aria-hidden="true"></i>
         </button>
       }
-      <button type="button" class="aic__icon-btn" title="Your chats" aria-label="Your chats" (click)="openHistory()">
+      <button
+        type="button"
+        class="aic__icon-btn"
+        [class.is-active]="historyVisible()"
+        title="Your chats"
+        aria-label="Your chats"
+        [attr.aria-expanded]="historyVisible()"
+        (click)="toggleHistory()"
+      >
         <i class="pi pi-history" aria-hidden="true"></i>
       </button>
       <button type="button" class="aic__new" [disabled]="messages().length === 0 || sending()" (click)="reset()">
@@ -19,21 +33,27 @@
     </div>
   </div>
 
+  <div class="aic__body">
   <div class="aic__thread" #thread>
     @if (messages().length === 0) {
       <div class="aic__welcome">
         <span class="aic__welcome-mark" aria-hidden="true"><i class="pi pi-sparkles"></i></span>
         <h3 class="aic__welcome-title">Ask your GIS data</h3>
         <p class="aic__welcome-text">
-          Find features, count or total them per ward, find the nearest, buffer or route —
-          in plain language. Results appear on the map and in the Attribute Table.
+          Ask in plain language. Results appear on the map and in the Attribute Table.
         </p>
+        <div class="aic__caps" aria-label="What you can ask">
+          <span><i class="pi pi-search" aria-hidden="true"></i> Find</span>
+          <span><i class="pi pi-chart-bar" aria-hidden="true"></i> Count &amp; total</span>
+          <span><i class="pi pi-map-marker" aria-hidden="true"></i> Nearest</span>
+          <span><i class="pi pi-circle" aria-hidden="true"></i> Buffer</span>
+          <span><i class="pi pi-directions" aria-hidden="true"></i> Route</span>
+        </div>
         @if (examples().length) {
           <span class="aic__section-label">Try asking</span>
           <div class="aic__suggestions">
             @for (ex of examples(); track ex) {
               <button type="button" class="aic__suggestion" (click)="useExample(ex)">
-                <i class="pi pi-search" aria-hidden="true"></i>
                 <span>{{ ex }}</span>
                 <i class="pi pi-arrow-right aic__suggestion-go" aria-hidden="true"></i>
               </button>
@@ -55,8 +75,9 @@
           </span>
           <div class="aic__bubble" [class.aic__bubble--error]="msg.error">
             @if (msg.pending) {
-              <span class="aic__typing" aria-label="Thinking">
-                <span></span><span></span><span></span>
+              <span class="aic__thinking">
+                <span class="aic__typing" aria-hidden="true"><span></span><span></span><span></span></span>
+                Thinking…
               </span>
             } @else {
               <p class="aic__msg-text">{{ mainText(msg) }}</p>
@@ -85,10 +106,33 @@
                 </div>
               }
 
+              @if (msg.response?.result; as result) {
+                <div class="aic__result" [class.is-empty]="result.matched === 0">
+                  <span class="aic__result-icon" aria-hidden="true"><i class="pi pi-map-marker"></i></span>
+                  <div class="aic__result-body">
+                    <span class="aic__result-count">
+                      {{ num(result.matched) }} {{ result.matched === 1 ? 'feature' : 'features' }}
+                    </span>
+                    <span class="aic__result-layer" [title]="result.layerName">
+                      in {{ result.layerName }}
+                      @if (result.truncated) { · showing first {{ result.geometries.length }} }
+                    </span>
+                    @if (result.matched > 0) {
+                      <span class="aic__result-hint">On the map and in the Attribute Table</span>
+                    }
+                  </div>
+                  @if (result.matched > 0) {
+                    <button type="button" class="aic__icon-btn" title="Clear from map" aria-label="Clear results" (click)="clearResults()">
+                      <i class="pi pi-times" aria-hidden="true"></i>
+                    </button>
+                  }
+                </div>
+              }
+
               @if (msg.response?.aggregate; as agg) {
                 <div class="aic__card">
-                  <div class="aic__agg-head">
-                    <span>{{ agg.groupLabel ?? 'All features' }}</span>
+                  <div class="aic__card-head">
+                    <span><i class="pi pi-chart-bar" aria-hidden="true"></i> {{ agg.groupLabel ? 'By ' + agg.groupLabel : 'All features' }}</span>
                     <span>{{ metricTitle(msg.response!) }}</span>
                   </div>
                   @for (row of agg.rows.slice(0, 15); track $index) {
@@ -106,6 +150,7 @@
 
               @if (msg.response?.nearest; as near) {
                 <div class="aic__card">
+                  <div class="aic__card-head"><span><i class="pi pi-map-marker" aria-hidden="true"></i> Nearest</span><span>Distance</span></div>
                   <ol class="aic__list">
                     @for (item of near.items; track item.id) {
                       <li><span>{{ item.label ?? '#' + item.id }}</span><strong>{{ dist(item.distanceM) }}</strong></li>
@@ -116,71 +161,59 @@
               }
 
               @if (msg.response?.buffer; as buf) {
-                <ul class="aic__card aic__stats">
-                  <li><span>Buffer width</span><strong>{{ dist(buf.distanceM) }}</strong></li>
-                  <li><span>Features buffered</span><strong>{{ num(buf.sources) }}</strong></li>
-                  <li><span>Area covered</span><strong>{{ area(buf.areaM2) }}</strong></li>
-                </ul>
+                <div class="aic__card">
+                  <div class="aic__card-head"><span><i class="pi pi-circle" aria-hidden="true"></i> Buffer</span></div>
+                  <ul class="aic__stats">
+                    <li><span>Buffer width</span><strong>{{ dist(buf.distanceM) }}</strong></li>
+                    <li><span>Features buffered</span><strong>{{ num(buf.sources) }}</strong></li>
+                    <li><span>Area covered</span><strong>{{ area(buf.areaM2) }}</strong></li>
+                  </ul>
+                </div>
               }
 
               @if (msg.response?.route; as rt) {
-                <ul class="aic__card aic__stats">
-                  <li><span>From</span><strong>{{ rt.from.label }}</strong></li>
-                  <li><span>To</span><strong>{{ rt.to.label }}</strong></li>
-                  <li><span>Road distance</span><strong>{{ dist(rt.lengthM) }}</strong></li>
-                  <li><span>Network</span><strong>{{ rt.networkLayer }}</strong></li>
-                </ul>
+                <div class="aic__card">
+                  <div class="aic__card-head"><span><i class="pi pi-directions" aria-hidden="true"></i> Route</span></div>
+                  <ul class="aic__stats">
+                    <li><span>From</span><strong>{{ rt.from.label }}</strong></li>
+                    <li><span>To</span><strong>{{ rt.to.label }}</strong></li>
+                    <li><span>Road distance</span><strong>{{ dist(rt.lengthM) }}</strong></li>
+                    <li><span>Network</span><strong>{{ rt.networkLayer }}</strong></li>
+                  </ul>
+                </div>
               }
 
               @if (msg.response?.serviceArea; as sa) {
-                <ul class="aic__card aic__stats">
-                  <li><span>From</span><strong>{{ sa.origin.label }}</strong></li>
-                  <li><span>Reach</span><strong>{{ dist(sa.distanceM) }} by road</strong></li>
-                  <li><span>Roads reachable</span><strong>{{ dist(sa.roadLengthM) }}</strong></li>
-                </ul>
-              }
-
-              @if (msg.response?.result; as result) {
-                <div class="aic__result" [class.is-empty]="result.matched === 0">
-                  <span class="aic__result-icon" aria-hidden="true"><i class="pi pi-map-marker"></i></span>
-                  <div class="aic__result-body">
-                    <span class="aic__result-count">
-                      {{ num(result.matched) }} {{ result.matched === 1 ? 'feature' : 'features' }}
-                    </span>
-                    <span class="aic__result-layer">
-                      in {{ result.layerName }}
-                      @if (result.truncated) { · showing first {{ result.geometries.length }} }
-                    </span>
-                    @if (result.matched > 0) {
-                      <span class="aic__result-hint">On the map and in the Attribute Table</span>
-                    }
-                  </div>
-                  @if (result.matched > 0) {
-                    <button type="button" class="aic__icon-btn" title="Clear from map" aria-label="Clear results" (click)="clearResults()">
-                      <i class="pi pi-times" aria-hidden="true"></i>
-                    </button>
-                  }
+                <div class="aic__card">
+                  <div class="aic__card-head"><span><i class="pi pi-share-alt" aria-hidden="true"></i> Service area</span></div>
+                  <ul class="aic__stats">
+                    <li><span>From</span><strong>{{ sa.origin.label }}</strong></li>
+                    <li><span>Reach</span><strong>{{ dist(sa.distanceM) }} by road</strong></li>
+                    <li><span>Roads reachable</span><strong>{{ dist(sa.roadLengthM) }}</strong></li>
+                  </ul>
                 </div>
               }
 
               @if (msg.response?.operation) {
-                <details class="aic__detail">
+                <details class="aic__detail" [open]="prefs().answerStyle === 'detailed'">
                   <summary><i class="pi pi-chevron-right" aria-hidden="true"></i> How this was interpreted</summary>
-                  @if (msg.response?.answer && msg.response?.explanation) {
-                    <p class="aic__ctx">Plan: {{ msg.response!.explanation }}</p>
-                  }
-                  <ul class="aic__op">
-                    @for (bit of operationSummary(msg.response!); track bit) {
-                      <li>{{ bit }}</li>
+                  <div class="aic__detail-body">
+                    @if (msg.response?.answer && msg.response?.explanation) {
+                      <p class="aic__ctx">Plan: {{ msg.response!.explanation }}</p>
                     }
-                  </ul>
-                  @if (msg.response?.compiledSql) {
-                    <p class="aic__sql-label">Query the platform compiled and ran (read-only):</p>
-                    <pre class="aic__sql">{{ msg.response!.compiledSql }}</pre>
-                  }
-                  @if (msg.response?.usedContext?.length) {
-                    <p class="aic__ctx">Grounded in: {{ msg.response!.usedContext.join(' · ') }}</p>
-                  }
+                    <ul class="aic__op">
+                      @for (bit of operationSummary(msg.response!); track bit) {
+                        <li>{{ bit }}</li>
+                      }
+                    </ul>
+                    @if (msg.response?.compiledSql) {
+                      <p class="aic__sql-label">Query the platform compiled and ran (read-only):</p>
+                      <pre class="aic__sql">{{ msg.response!.compiledSql }}</pre>
+                    }
+                    @if (msg.response?.usedContext?.length) {
+                      <p class="aic__ctx">Grounded in: {{ msg.response!.usedContext.join(' · ') }}</p>
+                    }
+                  </div>
                 </details>
               }
 
@@ -200,12 +233,110 @@
                     </button>
                   }
                 }
+                @if (msg.response?.operation && (msg.response?.result?.matched ?? 0) > 0) {
+                  <span class="aic__actions-sep" aria-hidden="true"></span>
+                  <button type="button" class="aic__icon-btn" title="Download CSV" aria-label="Download CSV" [disabled]="busyIndex() !== null" (click)="download($index, 'csv')">
+                    <i class="pi pi-file-excel" aria-hidden="true"></i>
+                  </button>
+                  <button type="button" class="aic__icon-btn" title="Download GeoJSON" aria-label="Download GeoJSON" [disabled]="busyIndex() !== null" (click)="download($index, 'geojson')">
+                    <i class="pi pi-download" aria-hidden="true"></i>
+                  </button>
+                  <button type="button" class="aic__icon-btn" title="Save as a layer" aria-label="Save as a layer" (click)="openSave(msg.response!)">
+                    <i class="pi pi-clone" aria-hidden="true"></i>
+                  </button>
+                }
+                @if (msg.response?.answerKind === 'gis_operation') {
+                  <button type="button" class="aic__icon-btn" title="Pin to Dashboard" aria-label="Pin to Dashboard" [disabled]="busyIndex() !== null" (click)="pinToDashboard($index)">
+                    <i class="pi" [class.pi-thumbtack]="busyIndex() !== $index" [class.pi-spin]="busyIndex() === $index" [class.pi-spinner]="busyIndex() === $index" aria-hidden="true"></i>
+                  </button>
+                }
               </div>
             }
           </div>
         </div>
+
+        @if ($index === lastAnswerIndex() && !msg.pending && msg.response?.followUps?.length) {
+          <div class="aic__followups">
+            <span class="aic__section-label">Ask next</span>
+            @for (q of msg.response!.followUps!; track q) {
+              <button type="button" class="aic__followup" [disabled]="sending()" (click)="useExample(q)">
+                <i class="pi pi-reply" aria-hidden="true"></i>
+                <span>{{ q }}</span>
+              </button>
+            }
+          </div>
+        }
       }
     }
+  </div>
+
+  @if (historyVisible()) {
+    <div class="aic__scrim" (click)="historyVisible.set(false)" aria-hidden="true"></div>
+    <aside class="aic__drawer" aria-label="Your chats">
+      <div class="aic__drawer-head">
+        <span class="aic__drawer-title">Your chats</span>
+        <button type="button" class="aic__icon-btn" aria-label="Close chats" (click)="historyVisible.set(false)">
+          <i class="pi pi-times" aria-hidden="true"></i>
+        </button>
+      </div>
+      <label class="aic__search">
+        <i class="pi pi-search" aria-hidden="true"></i>
+        <input
+          type="search"
+          placeholder="Search chats"
+          [value]="historyQuery()"
+          (input)="historyQuery.set($any($event.target).value)"
+        />
+      </label>
+      @if (!prefs().saveHistory) {
+        <p class="aic__drawer-note"><i class="pi pi-eye-slash" aria-hidden="true"></i> New chats are not being saved (Settings → AI Assistant).</p>
+      }
+      <div class="aic__drawer-list">
+        @if (historyLoading()) {
+          <p class="aic__drawer-empty"><i class="pi pi-spin pi-spinner" aria-hidden="true"></i> Loading…</p>
+        } @else if (historyRows().length === 0) {
+          <p class="aic__drawer-empty">No saved chats yet. Your conversations will appear here.</p>
+        } @else if (pinnedChats().length === 0 && recentChats().length === 0) {
+          <p class="aic__drawer-empty">No chats match “{{ historyQuery() }}”.</p>
+        } @else {
+          @for (group of [{ label: 'Pinned', rows: pinnedChats() }, { label: 'Recent', rows: recentChats() }]; track group.label) {
+            @if (group.rows.length) {
+              <span class="aic__section-label">{{ group.label }}</span>
+              <ul class="aic-history">
+                @for (chat of group.rows; track chat.id) {
+                  <li
+                    class="aic-history__item"
+                    [class.is-current]="chat.id === conversationId()"
+                    tabindex="0"
+                    (click)="openConversation(chat.id)"
+                    (keydown.enter)="openConversation(chat.id)"
+                  >
+                    <div class="aic-history__text">
+                      <span class="aic-history__title" [title]="chat.title">{{ chat.title }}</span>
+                      <span class="aic-history__date">{{ chat.updatedAt | date: 'd MMM, h:mm a' }}</span>
+                    </div>
+                    <button
+                      type="button"
+                      class="aic__icon-btn aic-history__pin"
+                      [class.is-pinned]="chat.pinned"
+                      [title]="chat.pinned ? 'Unpin' : 'Pin to top'"
+                      [attr.aria-label]="chat.pinned ? 'Unpin chat' : 'Pin chat'"
+                      (click)="togglePin(chat, $event)"
+                    >
+                      <i class="pi pi-thumbtack" aria-hidden="true"></i>
+                    </button>
+                    <button type="button" class="aic__icon-btn aic-history__del" title="Delete" aria-label="Delete chat" (click)="deleteConversation(chat.id, $event)">
+                      <i class="pi pi-trash" aria-hidden="true"></i>
+                    </button>
+                  </li>
+                }
+              </ul>
+            }
+          }
+        }
+      </div>
+    </aside>
+  }
   </div>
 
   <div class="aic__dock">
@@ -247,34 +378,30 @@
         </button>
       }
     </form>
-    <p class="aic__hint">Enter to send · Shift + Enter for a new line · answers are computed from your layers</p>
   </div>
 </div>
 
 <p-dialog
-  [visible]="historyVisible()"
-  (visibleChange)="historyVisible.set($event)"
+  [visible]="!!saveTarget()"
+  (visibleChange)="!$event && saveTarget.set(null)"
   [modal]="true"
-  header="AI Assistant — your chats"
-  [style]="{ width: '560px' }"
-  [breakpoints]="{ '600px': '95vw' }"
+  header="Save as a layer"
+  [style]="{ width: '420px' }"
+  [breakpoints]="{ '480px': '95vw' }"
   appendTo="body"
 >
-  @if (historyRows().length === 0) {
-    <p class="aic-log__empty">No saved chats yet.</p>
-  } @else {
-    <ul class="aic-history">
-      @for (chat of historyRows(); track chat.id) {
-        <li class="aic-history__item" [class.is-current]="chat.id === conversationId()" (click)="openConversation(chat.id)">
-          <span class="aic-history__title">{{ chat.title }}</span>
-          <span class="aic-history__date">{{ chat.updatedAt | date: 'd MMM, h:mm a' }}</span>
-          <button type="button" class="aic__icon-btn" aria-label="Delete chat" (click)="deleteConversation(chat.id, $event)">
-            <i class="pi pi-trash" aria-hidden="true"></i>
-          </button>
-        </li>
-      }
-    </ul>
-  }
+  <form class="aic-save" (ngSubmit)="saveAsLayer()">
+    <p class="aic-save__text">
+      The {{ num(saveTarget()?.result?.matched) }} matched features of {{ saveTarget()?.result?.layerName }} become a new
+      layer of your own, with their attributes.
+    </p>
+    <label class="aic-save__label" for="aic-save-name">Layer name</label>
+    <input id="aic-save-name" class="aic-save__input" name="saveName" [(ngModel)]="saveName" maxlength="120" required />
+    <div class="aic-save__actions">
+      <button pButton type="button" class="p-button-text p-button-sm" label="Cancel" (click)="saveTarget.set(null)"></button>
+      <button pButton type="submit" class="p-button-sm" label="Save layer" [loading]="saving()" [disabled]="saveName.trim().length < 2"></button>
+    </div>
+  </form>
 </p-dialog>
 
 <p-dialog

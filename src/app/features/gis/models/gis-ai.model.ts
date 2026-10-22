@@ -78,10 +78,24 @@ export interface AiInstruction {
 }
 
 /** One saved chat (history panel). */
+/** Assistant settings sent with each question (see `GisChatDto`). */
+export interface AiChatOptions {
+  layerIds?: string[];
+  instantOnly?: boolean;
+  saveHistory?: boolean;
+  nearMeters?: number;
+  format?: {
+    numberLocale?: string;
+    distanceUnit?: 'auto' | 'm' | 'km';
+    areaUnit?: 'auto' | 'sqm' | 'ha' | 'acre';
+  };
+}
+
 export interface AiConversationSummary {
   id: string;
   title: string;
   updatedAt: string;
+  pinned?: boolean;
 }
 
 export interface AiConversationDetail {
@@ -109,6 +123,8 @@ export interface GisChatResponse {
   options?: AiClarifyOption[];
   /** How the question was read, e.g. a corrected spelling. */
   notes?: string[];
+  /** Suggested next questions shown under the answer. */
+  followUps?: string[];
   /** Server-side chat this answer belongs to. */
   conversationId?: string;
   /** Standing instructions in force in that chat. */

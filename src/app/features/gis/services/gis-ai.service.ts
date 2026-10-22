@@ -1,8 +1,9 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import {
+  AiChatOptions,
   AiConversationDetail,
   AiConversationSummary,
   AiGisOperation,
@@ -30,6 +31,7 @@ export class GisAiService {
     previousOperation?: AiGisOperation,
     resolvedOperation?: AiGisOperation,
     conversationId?: string | null,
+    options: AiChatOptions = {},
   ): Observable<GisChatResponse> {
     return this.http.post<GisChatResponse>(`${this.baseUrl}/chat`, {
       message,
@@ -38,13 +40,38 @@ export class GisAiService {
       previousOperation,
       resolvedOperation,
       conversationId: conversationId ?? undefined,
+      ...options,
     });
   }
 
   /** LLM wording of an answer the backend already computed; `text` is
    *  null when the model failed or strayed from the numbers. */
-  narrate(question: string, facts: Record<string, unknown>): Observable<{ text: string | null }> {
-    return this.http.post<{ text: string | null }>(`${this.baseUrl}/narrate`, { question, facts });
+  narrate(
+    question: string,
+    facts: Record<string, unknown>,
+    language?: 'en' | 'mr' | 'hi',
+  ): Observable<{ text: string | null }> {
+    return this.http.post<{ text: string | null }>(`${this.baseUrl}/narrate`, { question, facts, language });
+  }
+
+  /** The features an answer matched, as a CSV or GeoJSON file. */
+  export(operation: AiGisOperation, format: 'csv' | 'geojson'): Observable<HttpResponse<Blob>> {
+    return this.http.post(`${this.baseUrl}/export`, { operation, format }, { observe: 'response', responseType: 'blob' });
+  }
+
+  /** The features an answer matched, saved as a new layer. */
+  saveAsLayer(operation: AiGisOperation, name: string): Observable<{ id: string; name: string }> {
+    return this.http.post<{ id: string; name: string }>(`${this.baseUrl}/save-layer`, { operation, name });
+  }
+
+  /** An answer as a Dashboard tile. */
+  pinToDashboard(tile: { title: string; value: string; detail?: string; layerId?: string }): Observable<unknown> {
+    return this.http.post(`${this.baseUrl}/pin`, tile);
+  }
+
+  /** "Delete all my chats". */
+  deleteAllConversations(): Observable<{ deleted: number }> {
+    return this.http.delete<{ deleted: number }>(`${this.baseUrl}/conversations`);
   }
 
   /** Plain-language explanation of a Raster Analysis result. */
@@ -71,6 +98,10 @@ export class GisAiService {
 
   deleteConversation(id: string): Observable<{ ok: true }> {
     return this.http.delete<{ ok: true }>(`${this.baseUrl}/conversations/${id}`);
+  }
+
+  pinConversation(id: string, pinned: boolean): Observable<{ ok: true }> {
+    return this.http.patch<{ ok: true }>(`${this.baseUrl}/conversations/${id}`, { pinned });
   }
 
   removeInstruction(id: string, index: number): Observable<{ instructions: AiInstruction[] }> {

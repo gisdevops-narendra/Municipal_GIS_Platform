@@ -1,9 +1,9 @@
-import { Body, Controller, Delete, Get, Patch } from '@nestjs/common';
-import { RequireMunicipalityMember } from '../auth/decorators/authorization.decorators';
+import { Body, Controller, Delete, Get, Patch, Put } from '@nestjs/common';
+import { RequireMunicipalityMember, RequireMunicipalityOwner } from '../auth/decorators/authorization.decorators';
 import { CurrentAppUser } from '../auth/decorators/current-app-user.decorator';
 import type { AppUser } from '../auth/types/app-user.type';
 import { SettingsService } from './settings.service';
-import { AppSettingsDto } from './dto/app-settings.dto';
+import { AppSettingsDto, MunicipalityDefaultsDto } from './dto/app-settings.dto';
 
 /**
  * `/api/me/settings` — the authenticated user's own application settings.
@@ -17,7 +17,14 @@ export class SettingsController {
   @RequireMunicipalityMember()
   @Get()
   get(@CurrentAppUser() appUser: AppUser) {
-    return this.settingsService.get(appUser.id);
+    return this.settingsService.get(appUser.id, appUser.municipalityId);
+  }
+
+  /** Owner: the setting defaults for everyone in the municipality. */
+  @RequireMunicipalityOwner()
+  @Put('municipality-defaults')
+  async setMunicipalityDefaults(@CurrentAppUser() appUser: AppUser, @Body() dto: MunicipalityDefaultsDto) {
+    return { municipalityDefaults: await this.settingsService.setMunicipalityDefaults(appUser.municipalityId, dto) };
   }
 
   @RequireMunicipalityMember()

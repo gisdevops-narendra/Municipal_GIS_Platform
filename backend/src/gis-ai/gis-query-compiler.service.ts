@@ -569,6 +569,19 @@ export class GisQueryCompilerService {
     return { matched, truncated, ids, geometries, ranked };
   }
 
+  /** Every attribute + the EPSG:4326 geometry of the features a compiled
+   *  selection matched — for "Export CSV / GeoJSON". */
+  async exportRows(compiled: CompiledQuery): Promise<Record<string, unknown>[]> {
+    const t = compiled.target;
+    const cols = t.columns.filter((c) => c.kind !== 'geometry').map((c) => `x."${c.name}"`);
+    return this.readOnly<Record<string, unknown>>(
+      `SELECT ${cols.length ? cols.join(', ') + ', ' : ''}` +
+        `ST_AsGeoJSON(ST_Transform(x."${t.geomColumn}", 4326), 6) AS __geojson ` +
+        `FROM "${t.table}" x WHERE x."${t.pkColumn}" IN (SELECT q.__id FROM (${compiled.sql}) q)`,
+      compiled.params,
+    );
+  }
+
   /** The column that names a feature ("Pawna River"), from the profiled
    *  data: a name column, or a text column whose value differs for every
    *  feature; values with spaces (names) before codes. */
@@ -856,7 +869,7 @@ export class GisQueryCompilerService {
     catalog: LayerCatalogEntry[],
     opts: { queryLayer: boolean },
   ): string | null {
-    if (operation.limit != null || operation.order_by) return null;
+    if (operation.limit != null || operation.order_by || operation.view_bbox) return null;
     const target = this.resolveLayer(catalog, operation.target_layer);
     if (target.isDemo) return null;
     const parts: string[] = [];
@@ -1034,6 +1047,15 @@ export class GisQueryCompilerService {
     }
     if (target.isDemo) {
       where.push(`${t}."gis_workspace_id" = ${bind(workspaceId)}`);
+    }
+    // "Only the current map view" (the assistant's composer toggle).
+    const box = operation.view_bbox;
+    if (box?.length === 4 && box.every((n) => Number.isFinite(n))) {
+      const [x1, y1, x2, y2] = box.map((n) => `${bind(n)}::float8`);
+      where.push(
+        `ST_Intersects(${t}."${target.geomColumn}", ST_Transform(ST_MakeEnvelope(${x1}, ${y1}, ${x2}, ${y2}, 4326), ${target.srid}))`,
+      );
+      summaryBits.push('in the current map view');
     }
     if ((operation.attribute_filters ?? []).length > 0) {
       summaryBits.push(

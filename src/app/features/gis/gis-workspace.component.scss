@@ -6,6 +6,7 @@
    ============================================================ */
 
 .gis-ws {
+  position: relative;
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr);
   grid-template-rows: 100%;
@@ -112,6 +113,24 @@
   min-width: 0;
   background: var(--color-surface);
   border-right: 1px solid var(--color-line);
+}
+
+/* AI Assistant "floating" panel mode: a card over the map instead of a
+   column that squeezes it. */
+.gis-ws__left.is-floating:not(.is-collapsed) {
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 64px;
+  z-index: 30;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  box-shadow: 0 18px 40px -16px rgba(16, 34, 31, 0.35);
+  overflow: hidden;
+
+  .gis-ws__resize--x {
+    display: none;
+  }
 }
 
 /* Dock closed, or the style editor has taken over — the panel host stays in

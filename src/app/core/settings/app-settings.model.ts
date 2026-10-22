@@ -91,6 +91,42 @@ export interface ShortcutSettings {
   enabled: boolean;
 }
 
+export type AssistantAnswerStyle = 'short' | 'detailed';
+export type AssistantLanguage = 'en' | 'mr' | 'hi';
+export type AssistantDistanceUnit = 'auto' | 'm' | 'km';
+export type AssistantAreaUnit = 'auto' | 'sqm' | 'ha' | 'acre';
+export type AssistantLayerScope = 'all' | 'visible' | 'custom';
+export type AssistantPanelMode = 'docked' | 'wide' | 'floating';
+
+/** The AI Assistant panel. Mirrors the backend `AssistantSettingsDto`; the
+ *  Owner can store municipality-wide defaults for it. */
+export interface AssistantSettings {
+  /** short = just the answer; detailed = also open "How this was interpreted". */
+  answerStyle: AssistantAnswerStyle;
+  /** Language of the AI-worded summaries. */
+  language: AssistantLanguage;
+  distanceUnit: AssistantDistanceUnit;
+  areaUnit: AssistantAreaUnit;
+  /** Default "near" distance in metres; 0 = ask each time. */
+  nearMeters: number;
+  autoZoom: boolean;
+  highlightColor: string;
+  /** Replace the previous answer's highlight instead of adding to it. */
+  clearPrevious: boolean;
+  /** Open the Attribute Table with the matched features. */
+  openTable: boolean;
+  /** Keep chats in "Your chats". */
+  saveHistory: boolean;
+  layerScope: AssistantLayerScope;
+  /** Layer ids for `layerScope === 'custom'`. */
+  layerIds: string[];
+  /** Never call the language model — fast-path answers only. */
+  instantOnly: boolean;
+  /** Friendlier AI wording of computed answers. */
+  aiSummaries: boolean;
+  panelMode: AssistantPanelMode;
+}
+
 export interface AppSettings {
   appearance: AppearanceSettings;
   accessibility: AccessibilitySettings;
@@ -99,6 +135,7 @@ export interface AppSettings {
   notifications: NotificationSettings;
   session: SessionSettings;
   shortcuts: ShortcutSettings;
+  assistant: AssistantSettings;
 }
 
 /** A recursively-partial `AppSettings` — the shape `SettingsService.patch` takes. */

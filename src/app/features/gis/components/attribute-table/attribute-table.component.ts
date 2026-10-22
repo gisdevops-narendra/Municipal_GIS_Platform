@@ -56,6 +56,8 @@ export interface AttributeExternalFilter {
   layerId: string;
   cql: string;
   label: string;
+  /** false = filter the layer but leave the Attribute Table closed. */
+  openTable?: boolean;
 }
 
 /**
