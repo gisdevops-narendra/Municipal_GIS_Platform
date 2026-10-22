@@ -123,8 +123,14 @@
                         [loading]="isBusy(pending, 'validate')" (click)="retryValidate(pending)"></button>
                     }
                     @if (canSubmitForReview(pending)) {
-                      <button pButton type="button" label="Submit for Review" class="p-button-text p-button-sm"
-                        [loading]="isBusy(pending, 'submit')" (click)="submitForReview(pending)"></button>
+                      @if (needsColumnReview(pending)) {
+                        <button pButton type="button" label="Continue Setup" icon="pi pi-arrow-right" iconPos="right"
+                          class="p-button-text p-button-sm" pTooltip="Review the columns (step 3), then submit for review"
+                          tooltipPosition="top" (click)="continueUpload(pending)"></button>
+                      } @else {
+                        <button pButton type="button" label="Submit for Review" class="p-button-text p-button-sm"
+                          [loading]="isBusy(pending, 'submit')" (click)="submitForReview(pending)"></button>
+                      }
                     }
                     @if (canApproveOrReject(pending)) {
                       <button pButton type="button" label="Approve" class="p-button-text p-button-sm"
@@ -368,7 +374,8 @@
                 <ul class="layers-detail__list">
                   @for (c of schema.changes; track $index) {
                     <li>
-                      @if (c.renamedTo) { Renamed <code>{{ c.column }}</code> → <code>{{ c.renamedTo }}</code> }
+                      @if (c.removed) { Removed <code>{{ c.column }}</code> }
+                      @else if (c.renamedTo) { Renamed <code>{{ c.column }}</code> → <code>{{ c.renamedTo }}</code> }
                       @else { <code>{{ c.column }}</code>: type {{ c.typeFrom }} → {{ c.typeTo }} }
                     </li>
                   }
@@ -480,7 +487,7 @@
     [style]="{ width: 'auto', maxWidth: '95vw' }"
     [breakpoints]="{ '600px': '95vw' }"
   >
-    <app-upload-wizard [currentUser]="user" (closed)="onWizardClosed()" (submittedForReview)="onWizardSubmitted()" />
+    <app-upload-wizard [currentUser]="user" [resume]="wizardResume()" (closed)="onWizardClosed()" (submittedForReview)="onWizardSubmitted()" />
   </p-dialog>
 }
 

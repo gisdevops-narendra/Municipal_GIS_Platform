@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsOptional,
   IsString,
@@ -23,6 +24,12 @@ export class UploadColumnChangeDto {
   @IsString()
   @MaxLength(63)
   newName?: string;
+
+  /** Drop this column from the imported data (its other fields are then
+   *  ignored). */
+  @IsOptional()
+  @IsBoolean()
+  remove?: boolean;
 
   /** New type (omitted / same = keep). Refused if any value would be lost. */
   @IsOptional()

@@ -65,6 +65,7 @@ export interface UploadSchemaChange {
   renamedTo?: string;
   typeFrom?: string;
   typeTo?: string;
+  removed?: boolean;
   at: string;
 }
 
@@ -137,9 +138,13 @@ export class UploadSchemaService {
       seen.add(change.name);
     }
 
+    // Removed columns are dropped first and take no part in the checks below.
+    const removed = dto.columns.filter((c) => c.remove).map((c) => c.name);
+    const kept = dto.columns.filter((c) => !c.remove);
+
     // Final names: unique, safe, not reserved.
-    const finalName = new Map(current.map((c) => [c.name, c.name]));
-    for (const change of dto.columns) {
+    const finalName = new Map(current.filter((c) => !removed.includes(c.name)).map((c) => [c.name, c.name]));
+    for (const change of kept) {
       if (change.newName == null || change.newName === change.name) continue;
       const name = change.newName;
       if (!COLUMN_NAME.test(name)) {
@@ -157,7 +162,7 @@ export class UploadSchemaService {
     // Type changes: each must keep every non-empty value.
     const total = (await this.prisma.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM "${table}"`))[0]?.n ?? 0;
     const retype: { change: UploadColumnChangeDto; from: ColumnKind | 'other' }[] = [];
-    for (const change of dto.columns) {
+    for (const change of kept) {
       if (!change.type) continue;
       const from = kindOf(byName.get(change.name)!.dataType);
       if (from === change.type) continue;
@@ -176,8 +181,12 @@ export class UploadSchemaService {
     const at = new Date().toISOString();
     const log: UploadSchemaChange[] = [];
     await this.prisma.$transaction(async (tx) => {
+      for (const name of removed) {
+        await tx.$executeRawUnsafe(`ALTER TABLE "${table}" DROP COLUMN "${name}"`);
+        log.push({ column: name, removed: true, at });
+      }
       // Renames in two passes (via temporary names) so swaps work.
-      const renames = dto.columns.filter((c) => finalName.get(c.name) !== c.name);
+      const renames = kept.filter((c) => finalName.get(c.name) !== c.name);
       for (const [i, c] of renames.entries()) {
         await tx.$executeRawUnsafe(`ALTER TABLE "${table}" RENAME COLUMN "${c.name}" TO "__mgp_tmp_${i}"`);
       }
@@ -195,7 +204,7 @@ export class UploadSchemaService {
       }
     });
 
-    const meanings: ApprovedMeaning[] = dto.columns
+    const meanings: ApprovedMeaning[] = kept
       .filter((c) => c.role)
       .map((c) => ({
         name: finalName.get(c.name)!,

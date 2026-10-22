@@ -263,11 +263,7 @@
   background: var(--color-surface-alt);
 }
 
-.attr-table__grid ::ng-deep .attr-table__row--selected > td,
-.attr-table__grid ::ng-deep .attr-table__row--selected:hover > td {
-  background: var(--color-primary-100);
-  color: var(--color-primary-700);
-}
+
 
 .attr-table__grid ::ng-deep th.attr-table__gutter,
 .attr-table__grid ::ng-deep td.attr-table__gutter {
@@ -394,4 +390,22 @@
   &:hover {
     text-decoration: underline;
   }
+}
+
+/* Selected rows — after the hover and gutter rules, with higher
+   specificity, so a just-clicked row (still under the mouse) shows as
+   selected rather than hovered. */
+.attr-table__grid ::ng-deep .p-datatable-tbody > tr.attr-table__row--selected > td {
+  background: color-mix(in srgb, var(--color-primary-500) 22%, var(--color-surface));
+  color: var(--color-ink-900);
+}
+
+.attr-table__grid ::ng-deep .p-datatable-tbody > tr.attr-table__row--selected:hover > td {
+  background: color-mix(in srgb, var(--color-primary-500) 30%, var(--color-surface));
+}
+
+.attr-table__grid ::ng-deep .p-datatable-tbody > tr.attr-table__row--selected > td.attr-table__gutter {
+  background: var(--color-primary-600);
+  color: #fff;
+  box-shadow: inset 3px 0 0 var(--color-primary-700);
 }

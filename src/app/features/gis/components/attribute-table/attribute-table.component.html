@@ -38,6 +38,16 @@
         </span>
       }
 
+      @if (showSelectedOnly()) {
+        <span class="attr-table__filter-chip">
+          <i class="pi pi-list-check" aria-hidden="true"></i>
+          <span class="attr-table__filter-label">Selected records</span>
+          <button type="button" aria-label="Show all records" (click)="toggleShowSelected()">
+            <i class="pi pi-times" aria-hidden="true"></i>
+          </button>
+        </span>
+      }
+
       <span class="attr-table__report">{{ pageReport() }}</span>
 
       @if (selectHint(); as hint) {
@@ -66,6 +76,25 @@
           pTooltip="Select all on this page" tooltipPosition="top"
           (click)="selectAllOnPage()"
         ><i class="pi pi-check-square" aria-hidden="true"></i></button>
+
+        <button
+          type="button"
+          class="attr-table__btn"
+          [class.is-active]="switching()"
+          [disabled]="switching()"
+          pTooltip="Switch selection (select the unselected records)" tooltipPosition="top"
+          (click)="switchSelection()"
+        ><i class="pi" [class.pi-sync]="!switching()" [class.pi-spinner]="switching()" [class.pi-spin]="switching()" aria-hidden="true"></i></button>
+
+        <button
+          type="button"
+          class="attr-table__btn"
+          [class.is-active]="showSelectedOnly()"
+          [disabled]="!showSelectedOnly() && selectedIds().size === 0"
+          [attr.aria-pressed]="showSelectedOnly()"
+          [pTooltip]="showSelectedOnly() ? 'Show all records' : 'Show selected records only'" tooltipPosition="top"
+          (click)="toggleShowSelected()"
+        ><i class="pi pi-list-check" aria-hidden="true"></i></button>
 
         <button
           type="button"
@@ -185,6 +214,8 @@
             <td [attr.colspan]="visibleFields().length + 1" class="attr-table__empty">
               @if (loading()) {
                 Loading features…
+              } @else if (showSelectedOnly()) {
+                No selected records match.
               } @else if (search()) {
                 No records match &ldquo;{{ searchInput() }}&rdquo;.
               } @else {

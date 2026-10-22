@@ -6,6 +6,7 @@ import { InputTextModule } from 'primeng/inputtext';
 import { SelectModule } from 'primeng/select';
 import { MessageModule } from 'primeng/message';
 import { TagModule } from 'primeng/tag';
+import { TooltipModule } from 'primeng/tooltip';
 import { GisUploadsService } from '../../../../core/services/gis-uploads.service';
 import {
   GisUpload,
@@ -20,6 +21,7 @@ interface ColumnRow {
   col: UploadSchemaColumn;
   newName: string;
   type: UploadColumnKind | 'other';
+  removed: boolean;
 }
 
 interface TypeOption {
@@ -63,7 +65,7 @@ export function toColumnName(text: string): string {
 @Component({
   selector: 'app-upload-columns',
   standalone: true,
-  imports: [FormsModule, ButtonModule, InputTextModule, SelectModule, MessageModule, TagModule],
+  imports: [FormsModule, ButtonModule, InputTextModule, SelectModule, MessageModule, TagModule, TooltipModule],
   templateUrl: './upload-columns.component.html',
   styleUrl: './upload-columns.component.scss',
 })
@@ -94,7 +96,7 @@ export class UploadColumnsComponent implements OnInit {
     this.uploads.schema(this.uploadId).subscribe({
       next: (schema) => {
         this.schema.set(schema);
-        this.rows = schema.columns.map((col) => ({ col, newName: col.name, type: col.kind }));
+        this.rows = schema.columns.map((col) => ({ col, newName: col.name, type: col.kind, removed: false }));
         this.loading.set(false);
       },
       error: (error: HttpErrorResponse) => {
@@ -129,12 +131,22 @@ export class UploadColumnsComponent implements OnInit {
     return toColumnName(row.newName) || row.col.name;
   }
 
+  /** Rows still in the data (not marked for removal). */
+  keptRows(): ColumnRow[] {
+    return this.rows.filter((r) => !r.removed);
+  }
+
+  toggleRemove(row: ColumnRow): void {
+    row.removed = !row.removed;
+  }
+
   /** Why the new name cannot be used (null = fine). */
   nameError(row: ColumnRow): string | null {
+    if (row.removed) return null;
     const name = this.finalName(row);
     if (!/^[a-z][a-z0-9_]{0,62}$/.test(name)) return 'Use letters, digits and _ (max 63), starting with a letter.';
     if (RESERVED.has(name) && name !== row.col.name) return `"${name}" is reserved.`;
-    if (this.rows.some((r) => r !== row && this.finalName(r) === name)) return `Another column is also called "${name}".`;
+    if (this.rows.some((r) => r !== row && !r.removed && this.finalName(r) === name)) return `Another column is also called "${name}".`;
     return null;
   }
 
@@ -144,12 +156,16 @@ export class UploadColumnsComponent implements OnInit {
 
   // ---- review & approve ----------------------------------------------------
 
+  removals(): ColumnRow[] {
+    return this.rows.filter((r) => r.removed);
+  }
+
   renames(): ColumnRow[] {
-    return this.rows.filter((r) => this.finalName(r) !== r.col.name);
+    return this.keptRows().filter((r) => this.finalName(r) !== r.col.name);
   }
 
   retypes(): ColumnRow[] {
-    return this.rows.filter((r) => r.type !== r.col.kind);
+    return this.keptRows().filter((r) => r.type !== r.col.kind);
   }
 
   toReview(): void {
@@ -161,6 +177,7 @@ export class UploadColumnsComponent implements OnInit {
   approve(): void {
     const columns: UploadColumnChange[] = this.rows.map((r) => {
       const change: UploadColumnChange = { name: r.col.name };
+      if (r.removed) return { ...change, remove: true };
       if (this.finalName(r) !== r.col.name) change.newName = this.finalName(r);
       if (r.type !== r.col.kind && r.type !== 'other') change.type = r.type;
       return change;

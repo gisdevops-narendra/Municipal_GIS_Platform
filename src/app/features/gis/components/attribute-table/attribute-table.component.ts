@@ -47,6 +47,8 @@ export interface MapClickFeatureRef {
 
 /** Most features one map selection adds (ids + geometry are fetched). */
 const MAP_SELECT_LIMIT = 2000;
+/** Most features Switch Selection can select. */
+const SWITCH_SELECT_LIMIT = 5000;
 
 export type SelectShape = 'Rectangle' | 'Polygon' | 'Lasso';
 export type SelectMode = 'new' | 'add' | 'remove';
@@ -154,6 +156,9 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
   readonly search = signal('');
 
   readonly selectedIds = signal<Set<string>>(new Set());
+  /** List only the selected records (ArcGIS "Show selected records"). */
+  readonly showSelectedOnly = signal(false);
+  readonly switching = signal(false);
   readonly fieldsMenuOpen = signal(false);
 
   private readonly geomCache = new Map<string, GeoJsonGeometry | null>();
@@ -293,6 +298,7 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
     this.searchInput.set('');
     this.search.set('');
     this.hiddenFields.set(new Set());
+    this.showSelectedOnly.set(false);
     this.fields.set((layerId && this.service.getFields(layerId)) || []);
     this.geomCache.clear();
     this.lastClickedIndex = -1;
@@ -333,7 +339,13 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
     };
 
     const base = this.baseFilter();
-    this.service.fetchPage(layer, query, { baseFilter: base?.layerId === layer.id ? base.cql : null }).subscribe({
+    const onlySelected = this.showSelectedOnly() && this.selectedIds().size > 0;
+    this.service
+      .fetchPage(layer, query, {
+        baseFilter: base?.layerId === layer.id ? base.cql : null,
+        featureIds: onlySelected ? [...this.selectedIds()] : null
+      })
+      .subscribe({
       next: (page) => {
         if (token !== this.loadToken) return;
         this.rows.set(page.rows);
@@ -502,6 +514,55 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
     this.applySelection(new Set());
   }
 
+  toggleShowSelected(): void {
+    if (!this.showSelectedOnly() && this.selectedIds().size === 0) return;
+    this.showSelectedOnly.update((on) => !on);
+    this.first.set(0);
+    this.load();
+  }
+
+  /** Switch Selection: selects every record the table lists (query filter
+   *  and search applied) that is not selected now, and unselects the rest. */
+  switchSelection(): void {
+    const layer = this.activeLayer();
+    if (!layer || this.switching()) return;
+    const base = this.baseFilter();
+    const cql = this.service.recordFilter(layer.id, this.search(), base?.layerId === layer.id ? base.cql : null);
+    const current = this.selectedIds();
+    this.switching.set(true);
+    this.selectNote.set(null);
+    this.service.loadMetadata(layer).subscribe({
+      next: ({ geometryField }) => {
+        this.service.fetchIds(layer, geometryField, cql, SWITCH_SELECT_LIMIT + current.size).subscribe({
+          next: ({ rows, total }) => {
+            this.switching.set(false);
+            if (this.activeLayerId() !== layer.id) return;
+            const ids = new Set<string>();
+            for (const row of rows) {
+              this.geomCache.set(row.featureId, row.geometry);
+              if (!current.has(row.featureId) && ids.size < SWITCH_SELECT_LIMIT) ids.add(row.featureId);
+            }
+            const capped = total > rows.length || ids.size === SWITCH_SELECT_LIMIT;
+            this.applySelection(ids);
+            this.selectNote.set(
+              ids.size === 0
+                ? 'Nothing left to select — every record was selected.'
+                : `Switched: ${ids.size.toLocaleString()} selected${capped ? ` (capped at ${SWITCH_SELECT_LIMIT.toLocaleString()})` : ''}.`
+            );
+          },
+          error: () => {
+            this.switching.set(false);
+            this.selectNote.set('Could not switch the selection.');
+          }
+        });
+      },
+      error: () => {
+        this.switching.set(false);
+        this.selectNote.set('Could not switch the selection.');
+      }
+    });
+  }
+
   zoomToSelected(): void {
     const ids = [...this.selectedIds()];
     if (ids.length === 0) {
@@ -519,6 +580,12 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
     this.selectedIds.set(ids);
     const layerId = this.activeLayerId();
     if (layerId) this.selectionChange.emit({ layerId, featureIds: [...ids] });
+    if (this.showSelectedOnly()) {
+      // The list *is* the selection: follow it (or leave the view if empty).
+      if (ids.size === 0) this.showSelectedOnly.set(false);
+      this.first.set(0);
+      this.load();
+    }
     if (ids.size === 0) {
       this.mapService.clearSelectionHighlight();
       return;

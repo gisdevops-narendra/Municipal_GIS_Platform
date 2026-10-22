@@ -135,6 +135,7 @@ export interface UploadSchemaChange {
   renamedTo?: string;
   typeFrom?: string;
   typeTo?: string;
+  removed?: boolean;
   at: string;
 }
 
@@ -165,6 +166,7 @@ export interface UploadSchema {
 export interface UploadColumnChange {
   name: string;
   newName?: string;
+  remove?: boolean;
   type?: UploadColumnKind;
   role?: UploadColumnRole;
   unit?: string;

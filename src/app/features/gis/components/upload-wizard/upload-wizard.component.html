@@ -1,36 +1,67 @@
 <div class="upload-wizard" [class.upload-wizard--wide]="step() === 'COLUMNS'">
-  <div class="upload-wizard__steps">
-    <span class="upload-wizard__step" [class.upload-wizard__step--active]="step() === 'FILE_INFO'">1. File &amp; Layer Info</span>
-    <span class="upload-wizard__step" [class.upload-wizard__step--active]="step() === 'VALIDATION'">2. Validation</span>
-    <span class="upload-wizard__step" [class.upload-wizard__step--active]="step() === 'COLUMNS'">3. Columns</span>
-    <span class="upload-wizard__step" [class.upload-wizard__step--active]="step() === 'PREVIEW'">4. Preview &amp; Submit</span>
-  </div>
+  <ol class="upload-wizard__steps">
+    @for (label of stepLabels; track label; let i = $index) {
+      <li
+        class="upload-wizard__step"
+        [class.upload-wizard__step--active]="i === stepIndex()"
+        [class.upload-wizard__step--done]="i < stepIndex()"
+      >
+        <span class="upload-wizard__step-num">
+          @if (i < stepIndex()) { <i class="pi pi-check"></i> } @else { {{ i + 1 }} }
+        </span>
+        <span class="upload-wizard__step-label">{{ label }}</span>
+      </li>
+    }
+  </ol>
 
   @if (step() === 'FILE_INFO') {
     <form [formGroup]="form" (ngSubmit)="submitUpload()" class="upload-wizard__form">
       <div class="upload-wizard__field">
-        <label class="field-label">File</label>
-        <p-fileupload
-          mode="advanced"
-          [customUpload]="true"
-          [multiple]="false"
+        <label class="field-label">File <span class="upload-wizard__req">*</span></label>
+        <input
+          #fileInput
+          type="file"
+          hidden
           accept=".zip,.geojson,.json,.csv"
-          [showUploadButton]="false"
-          [showCancelButton]="false"
-          chooseLabel="Choose File"
-          (onSelect)="onFileSelect($event)"
-        >
-          <ng-template #empty>
-            <p class="upload-wizard__dropzone-hint">Drag and drop a Shapefile ZIP, GeoJSON, or CSV file here.</p>
-          </ng-template>
-        </p-fileupload>
+          (change)="onFileInput($event)"
+        />
         @if (selectedFile(); as file) {
-          <p class="upload-wizard__file-name">Selected: {{ file.name }} ({{ (file.size / 1024).toFixed(0) }} KB)</p>
+          <div class="upload-wizard__file-card">
+            <span class="upload-wizard__file-badge">{{ fileExt(file) }}</span>
+            <div class="upload-wizard__file-meta">
+              <span class="upload-wizard__file-title" [title]="file.name">{{ file.name }}</span>
+              <span class="upload-wizard__file-sub">{{ formatSize(file.size) }} · {{ fileKind(file) }}</span>
+            </div>
+            <button pButton type="button" label="Change" class="p-button-text p-button-sm"
+              [disabled]="uploading()" (click)="fileInput.click()"></button>
+            <button pButton type="button" icon="pi pi-times" class="p-button-text p-button-sm p-button-rounded p-button-secondary"
+              aria-label="Remove file" [disabled]="uploading()" (click)="clearFile(fileInput)"></button>
+          </div>
+        } @else {
+          <button
+            type="button"
+            class="upload-wizard__dropzone"
+            [class.upload-wizard__dropzone--over]="dragOver()"
+            (click)="fileInput.click()"
+            (dragover)="onDragOver($event)"
+            (dragleave)="dragOver.set(false)"
+            (drop)="onDrop($event)"
+          >
+            <span class="upload-wizard__dropzone-icon"><i class="pi pi-cloud-upload"></i></span>
+            <span class="upload-wizard__dropzone-title">
+              Drop your file here, or <span class="upload-wizard__dropzone-link">browse</span>
+            </span>
+            <span class="upload-wizard__formats">
+              <span class="upload-wizard__format">Shapefile .zip</span>
+              <span class="upload-wizard__format">GeoJSON</span>
+              <span class="upload-wizard__format">CSV with coordinates</span>
+            </span>
+          </button>
         }
       </div>
 
       <div class="upload-wizard__field">
-        <label class="field-label" for="wiz-layer-name">Layer Name</label>
+        <label class="field-label" for="wiz-layer-name">Layer Name <span class="upload-wizard__req">*</span></label>
         <input pInputText id="wiz-layer-name" formControlName="layerName" class="w-full" placeholder="e.g. Streetlights" />
         @if (f.layerName.invalid && f.layerName.touched) {
           <div class="field-error">Layer name is required (2-150 characters).</div>
@@ -38,28 +69,38 @@
       </div>
 
       <div class="upload-wizard__field">
-        <label class="field-label" for="wiz-description">Description</label>
-        <textarea pTextarea id="wiz-description" formControlName="description" class="w-full" rows="2"></textarea>
+        <label class="field-label" for="wiz-description">Description <span class="upload-wizard__optional">(optional)</span></label>
+        <textarea pTextarea id="wiz-description" formControlName="description" class="w-full" rows="2"
+          placeholder="What this layer shows, its source and date"></textarea>
       </div>
 
       @if (isOwner) {
         <div class="upload-wizard__field">
-          <label class="field-label" for="wiz-ownership">Ownership</label>
-          <p-select
-            inputId="wiz-ownership"
-            [options]="[{ label: 'Department', value: 'DEPARTMENT' }, { label: 'Canonical (municipality-wide)', value: 'CANONICAL' }]"
-            optionLabel="label"
-            optionValue="value"
-            formControlName="ownershipType"
-            styleClass="w-full"
-            (onChange)="onOwnershipChange($event.value)"
-          ></p-select>
+          <span class="field-label">Ownership</span>
+          <div class="upload-wizard__choices" role="radiogroup" aria-label="Ownership">
+            @for (opt of ownershipOptions; track opt.value) {
+              <button
+                type="button"
+                role="radio"
+                class="upload-wizard__choice"
+                [class.upload-wizard__choice--active]="f.ownershipType.value === opt.value"
+                [attr.aria-checked]="f.ownershipType.value === opt.value"
+                (click)="selectOwnership(opt.value)"
+              >
+                <i [class]="'pi ' + opt.icon"></i>
+                <span class="upload-wizard__choice-text">
+                  <span class="upload-wizard__choice-title">{{ opt.label }}</span>
+                  <span class="upload-wizard__choice-desc">{{ opt.description }}</span>
+                </span>
+              </button>
+            }
+          </div>
         </div>
       }
 
       @if (f.ownershipType.value === 'DEPARTMENT') {
         <div class="upload-wizard__field">
-          <label class="field-label" for="wiz-department">Department</label>
+          <label class="field-label" for="wiz-department">Department <span class="upload-wizard__req">*</span></label>
           <p-select
             inputId="wiz-department"
             [options]="departmentOptions"
@@ -69,6 +110,7 @@
             placeholder="Select a department"
             styleClass="w-full"
             [disabled]="!isOwner"
+            [filter]="departmentOptions.length > 8"
           ></p-select>
         </div>
       }
@@ -109,7 +151,9 @@
       @if (uploading()) {
         <div class="upload-wizard__field">
           <p-progressBar [value]="uploadPercent()" [showValue]="true"></p-progressBar>
-          <p class="upload-wizard__hint">Uploading…</p>
+          <p class="upload-wizard__hint">
+            {{ uploadPercent() < 100 ? 'Uploading…' : 'Upload complete — importing and validating the data…' }}
+          </p>
         </div>
       }
 
@@ -119,7 +163,8 @@
 
       <div class="upload-wizard__actions">
         <button pButton type="button" label="Cancel" class="p-button-text" (click)="close()"></button>
-        <button pButton type="submit" label="Upload &amp; Validate" [loading]="uploading()"></button>
+        <button pButton type="submit" icon="pi pi-upload" label="Upload &amp; Validate" [loading]="uploading()"
+          [disabled]="!selectedFile()"></button>
       </div>
     </form>
   }

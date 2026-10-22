@@ -10,30 +10,39 @@
   @let s = schema()!;
   @if (phase() === 'edit') {
     <p class="uc__intro">
-      Check your columns. You can rename them or change their type before the data is imported.
+      Check your columns. You can rename them, change their type, or remove ones you don't need before the data is imported.
     </p>
 
     <div class="uc__table">
       <div class="uc__row uc__row--head">
-        <span>Column</span><span>Example values</span><span>Name</span><span>Type</span>
+        <span>Column</span><span>Example values</span><span>Name</span><span>Type</span><span></span>
       </div>
       @for (row of rows; track row.col.name) {
-        <div class="uc__row">
+        <div class="uc__row" [class.uc__row--removed]="row.removed">
           <code class="uc__orig" [title]="row.col.name">{{ row.col.name }}</code>
           <span class="uc__examples" [title]="examples(row)">{{ examples(row) || '(empty)' }}</span>
           <span class="uc__cell">
-            <input pInputText [(ngModel)]="row.newName" [attr.aria-label]="'Name for ' + row.col.name" [class.ng-invalid]="!!nameError(row)" [class.ng-dirty]="!!nameError(row)" />
+            <input pInputText [(ngModel)]="row.newName" [disabled]="row.removed" [attr.aria-label]="'Name for ' + row.col.name" [class.ng-invalid]="!!nameError(row)" [class.ng-dirty]="!!nameError(row)" />
             @if (nameError(row); as error) {
               <small class="uc__error">{{ error }}</small>
+            } @else if (row.removed) {
+              <small class="uc__muted">Will be removed</small>
             } @else if (finalName(row) !== row.newName) {
               <small class="uc__muted">Saved as {{ finalName(row) }}</small>
             }
           </span>
           <span class="uc__cell">
             <p-select [options]="typeOptions(row)" optionLabel="label" optionValue="value" optionDisabled="disabled"
-              [(ngModel)]="row.type" [disabled]="row.col.kind === 'other'" appendTo="body" styleClass="w-full"
+              [(ngModel)]="row.type" [disabled]="row.removed || row.col.kind === 'other'" appendTo="body" styleClass="w-full"
               [ariaLabel]="'Type of ' + row.col.name" />
           </span>
+          <button pButton type="button" class="p-button-text p-button-sm p-button-rounded"
+            [class.p-button-danger]="!row.removed"
+            [icon]="row.removed ? 'pi pi-undo' : 'pi pi-trash'"
+            [attr.aria-label]="(row.removed ? 'Keep ' : 'Remove ') + row.col.name"
+            [pTooltip]="row.removed ? 'Keep column' : 'Remove column'" tooltipPosition="top"
+            [disabled]="!row.removed && keptRows().length === 1"
+            (click)="toggleRemove(row)"></button>
         </div>
       }
     </div>
@@ -44,7 +53,7 @@
         <table>
           <thead>
             <tr>
-              @for (row of rows; track row.col.name) {
+              @for (row of keptRows(); track row.col.name) {
                 <th>{{ finalName(row) }}</th>
               }
             </tr>
@@ -52,7 +61,7 @@
           <tbody>
             @for (record of s.records; track $index) {
               <tr>
-                @for (row of rows; track row.col.name) {
+                @for (row of keptRows(); track row.col.name) {
                   <td [title]="record[row.col.name] ?? ''">{{ record[row.col.name] ?? '' }}</td>
                 }
               </tr>
@@ -69,8 +78,16 @@
   } @else {
     <div class="uc__review">
       <h4>Confirm your changes</h4>
-      @if (!renames().length && !retypes().length) {
+      @if (!removals().length && !renames().length && !retypes().length) {
         <p>No column names or types change.</p>
+      }
+      @if (removals().length) {
+        <p class="uc__review-label">Remove (data in these columns is deleted)</p>
+        <ul>
+          @for (row of removals(); track row.col.name) {
+            <li><code>{{ row.col.name }}</code></li>
+          }
+        </ul>
       }
       @if (renames().length) {
         <p class="uc__review-label">Rename</p>

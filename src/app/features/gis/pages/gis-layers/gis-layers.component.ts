@@ -154,6 +154,8 @@ export class GisLayersComponent {
   private styleChanged = false;
 
   readonly wizardVisible = signal(false);
+  /** Draft upload the wizard continues instead of starting a new one. */
+  readonly wizardResume = signal<GisUpload | null>(null);
   readonly detailUpload = signal<GisUpload | null>(null);
   readonly review = signal<UploadReviewReport | null>(null);
   readonly reviewLoading = signal(false);
@@ -558,7 +560,19 @@ export class GisLayersComponent {
   openWizard(): void {
     // A fresh <app-upload-wizard> is created each time via @if, so its
     // internal state always starts clean.
+    this.wizardResume.set(null);
     this.wizardVisible.set(true);
+  }
+
+  /** Reopens the wizard on a draft whose columns were never confirmed —
+   *  it can't be submitted for review until they are. */
+  continueUpload(upload: GisUpload): void {
+    this.wizardResume.set(upload);
+    this.wizardVisible.set(true);
+  }
+
+  needsColumnReview(upload: GisUpload): boolean {
+    return upload.status === 'DRAFT' && !!upload.schema && !upload.schema.confirmedAt;
   }
 
   onWizardClosed(): void {

@@ -91,7 +91,7 @@ export class AttributeTableService {
   fetchPage(
     layer: GisLayer,
     query: AttributeQuery,
-    options: { baseFilter?: string | null } = {}
+    options: { baseFilter?: string | null; featureIds?: string[] | null } = {}
   ): Observable<AttributePage> {
     const url = `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wfs`;
     const typeName = `${layer.geoserverWorkspace}:${layer.geoserverLayer}`;
@@ -112,15 +112,62 @@ export class AttributeTableService {
       params = params.set('sortBy', `${query.sortField} ${query.sortDir === 'desc' ? 'DESC' : 'ASC'}`);
     }
 
-    const searchCql = this.buildSearchFilter(layer.id, query.search);
-    const cql = combineCql(options.baseFilter, searchCql);
+    const cql = combineCql(
+      options.featureIds ? featureIdFilter(options.featureIds) : null,
+      this.recordFilter(layer.id, query.search, options.baseFilter)
+    );
     if (cql) {
       params = params.set('cql_filter', cql);
     }
 
-    return this.http.get<WfsFeatureCollection>(url, { params }).pipe(
-      map((collection) => this.toPage(layer.id, collection))
+    return this.wfs(url, params).pipe(map((collection) => this.toPage(layer.id, collection)));
+  }
+
+  /** The CQL for the records the table currently lists: the locked query
+   *  filter AND the free-text search (null = every record). */
+  recordFilter(layerId: string, search: string, baseFilter?: string | null): string | null {
+    return combineCql(baseFilter, this.buildSearchFilter(layerId, search));
+  }
+
+  /** Ids + geometry of every feature matching `cql` (null = all), capped at
+   *  `limit` — used by Switch Selection. `total` is the full match count. */
+  fetchIds(
+    layer: GisLayer,
+    geometryField: string,
+    cql: string | null,
+    limit: number
+  ): Observable<{ rows: AttributeRow[]; total: number }> {
+    const url = `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wfs`;
+    let params = new HttpParams()
+      .set('service', 'WFS')
+      .set('version', '2.0.0')
+      .set('request', 'GetFeature')
+      .set('typeNames', `${layer.geoserverWorkspace}:${layer.geoserverLayer}`)
+      .set('outputFormat', 'application/json')
+      .set('srsName', 'EPSG:4326')
+      .set('propertyName', geometryField)
+      .set('count', String(limit));
+    if (cql) params = params.set('cql_filter', cql);
+
+    return this.wfs(url, params).pipe(
+      map((collection) => {
+        const rows = (collection.features ?? [])
+          .filter((feature): feature is WfsFeature & { id: string } => typeof feature.id === 'string')
+          .map((feature) => ({ featureId: feature.id, values: {}, geometry: feature.geometry ?? null }));
+        return { rows, total: collection.numberMatched ?? collection.totalFeatures ?? rows.length };
+      })
     );
+  }
+
+  /** GET, or a form POST when the query is too long for a URL (a filter
+   *  listing many selected feature ids). GeoServer reads both alike. */
+  private wfs(url: string, params: HttpParams): Observable<WfsFeatureCollection> {
+    const body = params.toString();
+    return body.length > 1800
+      ? this.http.post<WfsFeatureCollection>(url, body, {
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        })
+      : this.http.get<WfsFeatureCollection>(url, { params });
   }
 
   /** Selection Tool: features of `layer` intersecting a drawn shape
@@ -133,26 +180,7 @@ export class AttributeTableService {
     wkt4326: string,
     limit: number
   ): Observable<{ rows: AttributeRow[]; total: number }> {
-    const url = `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wfs`;
-    const params = new HttpParams()
-      .set('service', 'WFS')
-      .set('version', '2.0.0')
-      .set('request', 'GetFeature')
-      .set('typeNames', `${layer.geoserverWorkspace}:${layer.geoserverLayer}`)
-      .set('outputFormat', 'application/json')
-      .set('srsName', 'EPSG:4326')
-      .set('propertyName', geometryField)
-      .set('count', String(limit))
-      .set('cql_filter', `INTERSECTS("${geometryField}", SRID=4326;${wkt4326})`);
-
-    return this.http.get<WfsFeatureCollection>(url, { params }).pipe(
-      map((collection) => {
-        const rows = (collection.features ?? [])
-          .filter((feature): feature is WfsFeature & { id: string } => typeof feature.id === 'string')
-          .map((feature) => ({ featureId: feature.id, values: {}, geometry: feature.geometry ?? null }));
-        return { rows, total: collection.numberMatched ?? collection.totalFeatures ?? rows.length };
-      })
-    );
+    return this.fetchIds(layer, geometryField, `INTERSECTS("${geometryField}", SRID=4326;${wkt4326})`, limit);
   }
 
   /** Fetches specific features by their WFS id — used to backfill geometry
@@ -171,7 +199,7 @@ export class AttributeTableService {
       .set('srsName', 'EPSG:4326')
       .set('featureID', featureIds.join(','));
 
-    return this.http.get<WfsFeatureCollection>(url, { params }).pipe(
+    return this.wfs(url, params).pipe(
       map((collection) =>
         (collection.features ?? [])
           .filter((feature): feature is WfsFeature & { id: string } => typeof feature.id === 'string')
@@ -319,6 +347,11 @@ export class AttributeTableService {
       .replace(/\b\w/g, (letter) => letter.toUpperCase())
       .trim();
   }
+}
+
+/** ECQL feature-id filter: `IN ('roads.1', 'roads.7')`. */
+export function featureIdFilter(ids: string[]): string {
+  return `IN (${ids.map((id) => `'${id.replace(/'/g, "''")}'`).join(', ')})`;
 }
 
 /** AND-combines two optional CQL fragments. */

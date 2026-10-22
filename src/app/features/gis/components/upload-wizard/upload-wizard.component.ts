@@ -9,7 +9,6 @@ import { SelectModule } from 'primeng/select';
 import { MessageModule } from 'primeng/message';
 import { TagModule } from 'primeng/tag';
 import { ProgressBarModule } from 'primeng/progressbar';
-import { FileUploadModule, FileSelectEvent } from 'primeng/fileupload';
 import { GisUploadsService } from '../../../../core/services/gis-uploads.service';
 import { DepartmentService } from '../../../../core/services/department.service';
 import { Department } from '../../../../core/models/department.model';
@@ -25,6 +24,9 @@ import { StyleGeometry } from '../../../../core/models/layer-style.model';
 type WizardStep = 'FILE_INFO' | 'VALIDATION' | 'COLUMNS' | 'PREVIEW';
 
 const CRS_PATTERN = /^EPSG:\d{4,6}$/;
+
+const STEP_ORDER: WizardStep[] = ['FILE_INFO', 'VALIDATION', 'COLUMNS', 'PREVIEW'];
+const ACCEPTED_EXTENSIONS = ['zip', 'geojson', 'json', 'csv'];
 
 /**
  * Upload wizard (Task 7 §22). Deliberately three visible steps, not six:
@@ -53,7 +55,6 @@ const CRS_PATTERN = /^EPSG:\d{4,6}$/;
     MessageModule,
     TagModule,
     ProgressBarModule,
-    FileUploadModule,
     MunicipalMapComponent,
     StyleEditorComponent,
     UploadColumnsComponent
@@ -72,6 +73,9 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
   }
 
   @Input({ required: true }) currentUser!: CurrentUser;
+  /** An existing DRAFT upload to continue — opens at step 3 (Columns), or
+   *  at step 4 if its columns are already confirmed. */
+  @Input() resume: GisUpload | null = null;
   @Output() closed = new EventEmitter<void>();
   @Output() submittedForReview = new EventEmitter<GisUpload>();
 
@@ -91,6 +95,29 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
   readonly previewLoading = signal(false);
   readonly submitting = signal(false);
   readonly styleOpen = signal(false);
+  readonly dragOver = signal(false);
+
+  readonly stepLabels = ['File & Layer Info', 'Validation', 'Columns', 'Preview & Submit'];
+  readonly stepIndex = computed(() => STEP_ORDER.indexOf(this.step()));
+
+  readonly ownershipOptions = [
+    {
+      value: 'DEPARTMENT' as const,
+      label: 'Department',
+      description: 'Owned and maintained by one department',
+      icon: 'pi-building'
+    },
+    {
+      value: 'CANONICAL' as const,
+      label: 'Canonical',
+      description: 'Municipality-wide reference layer',
+      icon: 'pi-globe'
+    }
+  ];
+
+  /** Layer name last auto-filled from a file name — replaced when another
+   *  file is picked, but never once the user has typed their own. */
+  private suggestedName = '';
 
   readonly form = this.fb.nonNullable.group({
     layerName: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(150)]],
@@ -105,6 +132,15 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
   });
 
   ngOnInit(): void {
+    if (this.resume) {
+      this.upload.set(this.resume);
+      if (this.resume.schema?.confirmedAt) {
+        this.goToPreview();
+      } else {
+        this.step.set('COLUMNS');
+      }
+    }
+
     this.departmentService.list().subscribe({
       next: (departments) => {
         this.departments.set(departments.filter((d) => d.status === 'ACTIVE'));
@@ -140,9 +176,77 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
     return (this.selectedFile()?.name ?? '').toLowerCase().endsWith('.csv');
   }
 
-  onFileSelect(event: FileSelectEvent): void {
-    this.selectedFile.set(event.files[0] ?? null);
+  onFileInput(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    this.setFile(input.files?.[0] ?? null);
+    input.value = '';
+  }
+
+  onDragOver(event: DragEvent): void {
+    event.preventDefault();
+    this.dragOver.set(true);
+  }
+
+  onDrop(event: DragEvent): void {
+    event.preventDefault();
+    this.dragOver.set(false);
+    this.setFile(event.dataTransfer?.files?.[0] ?? null);
+  }
+
+  clearFile(input: HTMLInputElement): void {
+    input.value = '';
+    this.selectedFile.set(null);
     this.submitError.set(null);
+  }
+
+  fileExt(file: File): string {
+    return (file.name.split('.').pop() ?? '').toUpperCase();
+  }
+
+  fileKind(file: File): string {
+    const ext = this.fileExt(file);
+    if (ext === 'ZIP') return 'Shapefile (ZIP)';
+    if (ext === 'CSV') return 'CSV table';
+    return 'GeoJSON';
+  }
+
+  formatSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  selectOwnership(value: 'CANONICAL' | 'DEPARTMENT'): void {
+    this.form.patchValue({ ownershipType: value });
+    this.onOwnershipChange(value);
+  }
+
+  private setFile(file: File | null): void {
+    this.submitError.set(null);
+    if (!file) return;
+    const ext = (file.name.split('.').pop() ?? '').toLowerCase();
+    if (!ACCEPTED_EXTENSIONS.includes(ext)) {
+      this.submitError.set('Unsupported file type. Upload a Shapefile ZIP, GeoJSON, or CSV file.');
+      return;
+    }
+    this.selectedFile.set(file);
+
+    const current = this.f.layerName.value.trim();
+    if (!current || current === this.suggestedName) {
+      this.suggestedName = this.nameFromFile(file.name);
+      this.form.patchValue({ layerName: this.suggestedName });
+    }
+  }
+
+  /** "ward_boundaries-2024.geojson" → "Ward Boundaries 2024". */
+  private nameFromFile(filename: string): string {
+    return filename
+      .replace(/\.[^.]+$/, '')
+      .replace(/[_\-.]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+      .slice(0, 150);
   }
 
   onOwnershipChange(value: 'CANONICAL' | 'DEPARTMENT'): void {
