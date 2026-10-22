@@ -43,11 +43,13 @@ import {
 } from '../../../../core/models/layer-style.model';
 import { LayerStyleService } from '../../../../core/services/layer-style.service';
 import { GisAiService } from '../../services/gis-ai.service';
+import { IconLibraryService, pageOf } from '../../services/icon-library.service';
 import { NotificationService } from '../../../../core/services/notification.service';
 
-/** Public icon search + SVG API (CORS-enabled), covering Google's and
- *  Font Awesome's free icon sets among others. */
-const ICONIFY_API = 'https://api.iconify.design';
+/** Online icons shown per page (more come from the same search). */
+const ICON_PAGE = 12;
+/** Libraries one page of online icons may draw on (one request each). */
+const LIBRARIES_PER_PAGE = 4;
 
 /** Free icon libraries offered for point markers. Each was tested end to
  *  end: search, SVG download in a chosen colour, the backend's SVG
@@ -190,6 +192,7 @@ const ZOOM_TO_DENOM = (z: number): number => 559082264.028 / Math.pow(2, z);
 export class StyleEditorComponent implements OnInit, OnDestroy {
   private readonly styleService = inject(LayerStyleService);
   private readonly aiService = inject(GisAiService);
+  private readonly icons = inject(IconLibraryService);
   private readonly notify = inject(NotificationService);
 
   @Input({ required: true }) target!: StyleTargetRef;
@@ -229,23 +232,42 @@ export class StyleEditorComponent implements OnInit, OnDestroy {
   /** The selected library (null for "All libraries"). */
   readonly onlineLibrary = computed(() => ONLINE_ICON_LIBRARIES.find((l) => l.value === this.onlineSource()) ?? null);
   readonly onlineQuery = signal('');
+  /** The current search's icons (≤ 32, variants folded); a page of them shows. */
   readonly onlineResults = signal<string[]>([]);
+  readonly onlineShown = signal(ICON_PAGE);
+  /** The page(s) shown: each page of 12 draws on at most 4 libraries, so
+   *  it costs at most 4 small icon-shape requests. */
+  readonly onlineVisible = computed(() =>
+    pageOf(this.onlineResults(), this.onlineShown(), LIBRARIES_PER_PAGE * (this.onlineShown() / ICON_PAGE)),
+  );
   readonly onlineLoading = signal(false);
-  /** AI icon suggestions: search words that find icons, with those icons. */
-  readonly suggestions = signal<{ term: string; icons: string[] }[]>([]);
+  /** Bumped when icon shapes arrive, so thumbnails re-render. */
+  private readonly iconDataVersion = signal(0);
+  /** Thumbnail URLs of the visible icons, built locally in the chosen colour. */
+  readonly onlineThumbs = computed(() => {
+    this.iconDataVersion();
+    const color = this.onlineColor();
+    const out: Record<string, string | null> = {};
+    for (const id of this.onlineVisible()) out[id] = this.icons.thumb(id, color);
+    return out;
+  });
+  /** AI suggestion chips. `count` is null until that word has been searched
+   *  (each word is searched only when needed, once). */
+  readonly suggestions = signal<{ term: string; count: number | null }[]>([]);
   readonly activeSuggestion = signal<string | null>(null);
   readonly suggesting = signal(false);
   readonly suggestNote = signal<string | null>(null);
   private suggestRun = 0;
+  private searchRun = 0;
   readonly onlineError = signal<string | null>(null);
-  /** Colour the online icon is downloaded in (it is stored as-is). */
+  /** Colour the online icon is drawn in (it is stored as-is). */
   readonly onlineColor = signal('#c62828');
-  /** "prefix:name" being downloaded + uploaded. */
+  /** "prefix:name" being saved as the layer's icon. */
   readonly onlinePicking = signal<string | null>(null);
   private readonly onlineSearch$ = new Subject<void>();
   private readonly onlineSearchSub = this.onlineSearch$
-    .pipe(debounceTime(300), takeUntilDestroyed())
-    .subscribe(() => this.runOnlineSearch());
+    .pipe(debounceTime(400), takeUntilDestroyed())
+    .subscribe(() => void this.runOnlineSearch());
 
   /** Object URL for the currently selected custom icon (upload / reload). */
   private customIconObjectUrl: string | null = null;
@@ -445,10 +467,10 @@ export class StyleEditorComponent implements OnInit, OnDestroy {
     if (!this.onlineQuery().trim() && !this.suggestions().length && this.layerName.trim()) void this.suggestIcons();
   }
 
-  /** "AI suggest": the local AI model reads the layer (name, description,
-   *  field values) and proposes icon search words; each is checked against
-   *  the icon libraries and the ones that find icons become chips, the
-   *  first one opened. Without the model, words from the layer name. */
+  /** "AI": the local AI model reads the layer (name, description, field
+   *  values) and proposes icon words, cached per layer. They become chips;
+   *  only the first is searched — the next one only if it finds nothing —
+   *  and the others when clicked. Without the model, the name's words. */
   async suggestIcons(): Promise<void> {
     const name = this.layerName.trim();
     if (!name || this.suggesting()) return;
@@ -457,42 +479,34 @@ export class StyleEditorComponent implements OnInit, OnDestroy {
     this.onlineError.set(null);
     this.suggestNote.set(null);
     try {
-      let terms: string[] = [];
+      const layerId = this.target.kind === 'layer' ? this.target.id : undefined;
+      const cacheKey = `${layerId ?? ''}|${name.toLowerCase()}`;
+      let terms = this.icons.cachedAiTerms(cacheKey) ?? [];
       let fromAi = true;
-      try {
-        const layerId = this.target.kind === 'layer' ? this.target.id : undefined;
-        terms = (await firstValueFrom(this.aiService.iconTerms(name, layerId))).terms;
-      } catch {
-        terms = [];
+      if (!terms.length) {
+        try {
+          terms = (await firstValueFrom(this.aiService.iconTerms(name, layerId))).terms.slice(0, 5);
+          if (terms.length) this.icons.rememberAiTerms(cacheKey, terms);
+        } catch {
+          terms = [];
+        }
       }
       if (!terms.length) {
         fromAi = false;
         terms = layerSearchTerms(name);
       }
-      const source = this.onlineSource();
-      const withIcons = async (words: string[]) =>
-        (
-          await Promise.all(
-            words.map(async (term) => {
-              const res = await fetch(`${ICONIFY_API}/search?query=${encodeURIComponent(term)}&prefixes=${source}&limit=96`);
-              if (!res.ok) throw new Error(String(res.status));
-              const body: { icons?: string[] } = await res.json();
-              return { term, icons: body.icons ?? [] };
-            }),
-          )
-        ).filter((f) => f.icons.length);
-      let chips = await withIcons(terms);
-      // None of the AI's words is in the libraries: try the name's own words.
-      if (!chips.length && fromAi) chips = await withIcons(layerSearchTerms(name).filter((t) => !terms.includes(t)));
-      // The user typed, switched library or asked again meanwhile.
-      if (run !== this.suggestRun || source !== this.onlineSource()) return;
-      this.suggestions.set(chips);
+      if (run !== this.suggestRun) return;
+      this.suggestions.set(terms.map((term) => ({ term, count: null })));
       if (!fromAi) this.suggestNote.set('AI is not available right now — suggestions are from the layer name.');
-      if (chips.length) {
-        this.useSuggestion(chips[0].term);
-      } else {
-        this.suggestNote.set(`No icons found for “${name}”. Type a word to search.`);
+      // First word that finds icons — usually the first, one request.
+      for (const term of terms) {
+        if (run !== this.suggestRun) return;
+        if (await this.showSearch(term, () => run === this.suggestRun)) {
+          this.activeSuggestion.set(term);
+          return;
+        }
       }
+      if (run === this.suggestRun) this.suggestNote.set(`No icons found for “${name}”. Type a word to search.`);
     } catch {
       if (run === this.suggestRun) this.onlineError.set('Could not reach the online icon library. Check the internet connection.');
     } finally {
@@ -500,56 +514,69 @@ export class StyleEditorComponent implements OnInit, OnDestroy {
     }
   }
 
-  /** A suggestion chip: show its icons (already fetched). */
-  useSuggestion(term: string): void {
-    const chip = this.suggestions().find((s) => s.term === term);
-    if (!chip) return;
+  /** A suggestion chip: its icons (searched now, or from the cache). */
+  async useSuggestion(term: string): Promise<void> {
     this.activeSuggestion.set(term);
     this.onlineQuery.set(term);
-    this.onlineResults.set(chip.icons);
+    const run = ++this.searchRun;
+    try {
+      await this.showSearch(term, () => run === this.searchRun && this.activeSuggestion() === term);
+    } catch {
+      this.onlineError.set('Could not reach the online icon library. Check the internet connection.');
+    }
   }
 
   setOnlineSource(prefixes: string): void {
     this.onlineSource.set(prefixes);
-    // Suggestions are re-checked in the new library (counts differ);
-    // a typed search just re-runs.
-    if (this.suggestions().length && this.activeSuggestion()) {
-      this.suggestions.set([]);
-      void this.suggestIcons();
-    } else {
-      this.onlineSearch$.next();
-    }
+    // Counts differ per library: chips are re-checked lazily.
+    this.suggestions.update((chips) => chips.map((c) => ({ ...c, count: null })));
+    const active = this.activeSuggestion();
+    if (active) void this.useSuggestion(active);
+    else this.onlineSearch$.next();
   }
 
-  private runOnlineSearch(): void {
+  private async runOnlineSearch(): Promise<void> {
     const query = this.onlineQuery().trim();
-    this.onlineError.set(null);
     if (query.length < 2) {
       this.onlineResults.set([]);
       return;
     }
-    this.onlineLoading.set(true);
-    const url = `${ICONIFY_API}/search?query=${encodeURIComponent(query)}&prefixes=${this.onlineSource()}&limit=96`;
-    // fetch, not HttpClient: the auth interceptor must never send the
-    // user's token to a third-party host.
-    fetch(url)
-      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
-      .then((body: { icons?: string[] }) => {
-        if (query !== this.onlineQuery().trim()) return;
-        this.onlineResults.set(body.icons ?? []);
-        this.onlineLoading.set(false);
-      })
-      .catch(() => {
-        this.onlineLoading.set(false);
-        this.onlineResults.set([]);
-        this.onlineError.set('Could not reach the online icon library. Check the internet connection.');
-      });
+    const run = ++this.searchRun;
+    try {
+      await this.showSearch(query, () => run === this.searchRun && query === this.onlineQuery().trim());
+    } catch {
+      this.onlineError.set('Could not reach the online icon library. Check the internet connection.');
+    }
   }
 
-  /** Thumbnail URL of an online icon ("prefix:name"), in the chosen colour. */
-  onlineIconUrl(id: string, size = 32): string {
-    const [prefix, name] = id.split(':');
-    return `${ICONIFY_API}/${prefix}/${name}.svg?height=${size}&color=${encodeURIComponent(this.onlineColor())}`;
+  /** Search one query (cached), show its first page and fetch only those
+   *  icons' shapes. Returns whether it found anything. `current()` says if
+   *  this search still matters (the user may have moved on). */
+  private async showSearch(query: string, current: () => boolean): Promise<boolean> {
+    this.onlineError.set(null);
+    this.onlineLoading.set(true);
+    try {
+      const ids = await this.icons.search(query, this.onlineSource());
+      this.suggestions.update((chips) => chips.map((c) => (c.term === query ? { ...c, count: ids.length } : c)));
+      if (!current()) return ids.length > 0;
+      this.onlineResults.set(ids);
+      this.onlineShown.set(ICON_PAGE);
+      await this.loadVisible();
+      return ids.length > 0;
+    } finally {
+      if (current()) this.onlineLoading.set(false);
+    }
+  }
+
+  /** "Show more": the next page of the icons already found — no new search. */
+  async showMoreIcons(): Promise<void> {
+    this.onlineShown.update((n) => n + ICON_PAGE);
+    await this.loadVisible();
+  }
+
+  private async loadVisible(): Promise<void> {
+    await this.icons.load(this.onlineVisible());
+    this.iconDataVersion.update((v) => v + 1);
   }
 
   onlineIconLabel(id: string): string {
@@ -558,25 +585,24 @@ export class StyleEditorComponent implements OnInit, OnDestroy {
     return `${name.replace(/-/g, ' ')} — ${library ? `${library.label} (${library.license})` : prefix}`;
   }
 
-  /** Download the icon as SVG in the chosen colour and store it as an
-   *  uploaded icon of this layer. */
-  pickOnlineIcon(id: string): void {
+  /** Save the icon (drawn locally from the shape already loaded, in the
+   *  chosen colour) as an uploaded icon of this layer. */
+  async pickOnlineIcon(id: string): Promise<void> {
     if (this.onlinePicking() || this.iconUploading()) return;
     this.iconError.set(null);
     this.onlinePicking.set(id);
-    fetch(this.onlineIconUrl(id, 64))
-      .then((res) => (res.ok ? res.text() : Promise.reject(res.status)))
-      .then((svg) => {
-        const name = id.replace(':', '_');
-        const file = new File([svg], `${name}.svg`, { type: 'image/svg+xml' });
-        // Pins point with their tip; other icons sit centred on the point.
-        const pin = /(^|-)(pin|marker|location-on|location-dot|place|map-pin)(-|$)/.test(id.split(':')[1]);
-        this.uploadIconFile(file, pin ? [0.5, 0.95] : [0.5, 0.5], () => this.onlinePicking.set(null));
-      })
-      .catch(() => {
-        this.onlinePicking.set(null);
-        this.iconError.set('Could not download that icon. Try again.');
-      });
+    try {
+      await this.icons.load([id]);
+      const svg = this.icons.svg(id, this.onlineColor(), 64);
+      if (!svg) throw new Error('missing icon');
+      const file = new File([svg], `${id.replace(':', '_')}.svg`, { type: 'image/svg+xml' });
+      // Pins point with their tip; other icons sit centred on the point.
+      const pin = /(^|-)(pin|marker|location-on|location-dot|place|map-pin)(-|$)/.test(id.split(':')[1]);
+      this.uploadIconFile(file, pin ? [0.5, 0.95] : [0.5, 0.5], () => this.onlinePicking.set(null));
+    } catch {
+      this.onlinePicking.set(null);
+      this.iconError.set('Could not load that icon. Try again.');
+    }
   }
 
   clearIcon(): void {

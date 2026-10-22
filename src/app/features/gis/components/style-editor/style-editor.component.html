@@ -121,12 +121,13 @@
                   }
                 </div>
 
-                @if (suggesting()) {
+                @if (suggesting() && !suggestions().length) {
                   <p class="se__hint"><i class="pi pi-sparkles" aria-hidden="true"></i> Finding icons that fit “{{ layerName }}”…</p>
                 } @else if (suggestions().length) {
                   <div class="se__suggest" aria-label="AI suggestions">
                     <span class="se__suggest-label"><i class="pi pi-sparkles" aria-hidden="true"></i> Suggested</span>
                     @for (chip of suggestions(); track chip.term) {
+                      @if (chip.count !== 0) {
                       <button
                         type="button"
                         class="se__suggest-chip"
@@ -134,8 +135,10 @@
                         [attr.aria-pressed]="activeSuggestion() === chip.term"
                         (click)="useSuggestion(chip.term)"
                       >
-                        {{ chip.term }} <span>{{ chip.icons.length >= 96 ? '96+' : chip.icons.length }}</span>
+                        {{ chip.term }}
+                        @if (chip.count !== null) { <span>{{ chip.count }}</span> }
                       </button>
+                      }
                     }
                   </div>
                 }
@@ -143,8 +146,7 @@
                   <p class="se__hint">{{ suggestNote() }}</p>
                 }
 
-                @if (suggesting()) {
-                } @else if (onlineLoading()) {
+                @if (onlineLoading() && !onlineResults().length) {
                   <p class="se__hint"><i class="pi pi-spin pi-spinner" aria-hidden="true"></i> Searching…</p>
                 } @else if (onlineError()) {
                   <p class="se__hint se__hint--error">{{ onlineError() }}</p>
@@ -154,7 +156,7 @@
                   <p class="se__hint">No icons match “{{ onlineQuery() }}”. Try another word.</p>
                 } @else {
                   <div class="se__icon-gallery">
-                    @for (id of onlineResults(); track id) {
+                    @for (id of onlineVisible(); track id) {
                       <button
                         type="button"
                         class="se__icon-cell"
@@ -166,11 +168,20 @@
                         @if (onlinePicking() === id) {
                           <i class="pi pi-spin pi-spinner" aria-hidden="true"></i>
                         } @else {
-                          <img [src]="onlineIconUrl(id)" [alt]="onlineIconLabel(id)" loading="lazy" />
+                          @if (onlineThumbs()[id]; as src) {
+                            <img [src]="src" [alt]="onlineIconLabel(id)" />
+                          } @else {
+                            <span class="se__icon-skeleton" aria-hidden="true"></span>
+                          }
                         }
                       </button>
                     }
                   </div>
+                  @if (onlineResults().length > onlineVisible().length) {
+                    <button type="button" class="se__link se__more" (click)="showMoreIcons()">
+                      Show more ({{ onlineResults().length - onlineVisible().length }})
+                    </button>
+                  }
                 }
                 <p class="se__hint">
                   Free, open-source icons via the Iconify API.

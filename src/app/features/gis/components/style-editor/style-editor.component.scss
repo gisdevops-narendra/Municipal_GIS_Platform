@@ -391,6 +391,30 @@
   cursor: pointer;
 }
 
+.se__icon-skeleton {
+  width: 70%;
+  height: 70%;
+  border-radius: 4px;
+  background: var(--color-line);
+  animation: se-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes se-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .se__icon-skeleton {
+    animation: none;
+  }
+}
+
+.se__more {
+  align-self: center;
+}
+
 .se__icon-cell.is-busy,
 .se__icon-cell:disabled {
   cursor: default;
