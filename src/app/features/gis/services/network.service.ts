@@ -47,10 +47,40 @@ export interface RouteRequest {
 
 export interface FacilityResult {
   label: string;
+  /** Road distance + the off-road bits at both ends. */
   lengthM: number;
+  roadM: number;
+  accessM: number;
+  /** Estimated travel time, when a speed was given. */
+  minutes: number | null;
   location: LonLat;
   properties: Record<string, unknown>;
   path: MultiLineGeometry;
+  /** Off-road connectors: start → road, road → facility. */
+  access: MultiLineGeometry;
+}
+
+export interface NearestResult {
+  /** Facilities looked at (the nearest by straight line, after the filter). */
+  considered: number;
+  reachable: number;
+  /** Left out: further than 500 m from any road. */
+  offNetwork: number;
+  blockedRoads: number;
+  start: LonLat;
+  facilities: FacilityResult[];
+}
+
+export interface NearestRequest {
+  from: LonLat;
+  count: number;
+  maxDistanceM?: number;
+  speedKmh?: number;
+  filterField?: string;
+  filterValues?: string[];
+  labelField?: string;
+  avoidAreas?: LonLat[][];
+  avoidPoints?: LonLat[];
 }
 
 export interface TraceResult {
@@ -81,18 +111,8 @@ export class NetworkService {
     return this.http.post<RouteResult>(`${this.baseUrl}/route`, { layerId, ...request });
   }
 
-  nearest(
-    layerId: string,
-    facilityLayerId: string,
-    from: LonLat,
-    count: number
-  ): Observable<{ facilities: FacilityResult[] }> {
-    return this.http.post<{ facilities: FacilityResult[] }>(`${this.baseUrl}/nearest`, {
-      layerId,
-      facilityLayerId,
-      from,
-      count
-    });
+  nearest(layerId: string, facilityLayerId: string, request: NearestRequest): Observable<NearestResult> {
+    return this.http.post<NearestResult>(`${this.baseUrl}/nearest`, { layerId, facilityLayerId, ...request });
   }
 
   /** `breaks` are metres, or minutes when `speedKmh` is given. */

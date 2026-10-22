@@ -597,10 +597,14 @@ export class MapService {
    *  red. Stops and the active route can be dragged (see enableRouteDrag).
    *  All coordinates EPSG:4326. */
   setRoutingView(view: {
-    routes: { lines: [number, number][][]; color: string; active: boolean }[];
-    stops: { at: [number, number]; label: string; index: number; role: 'start' | 'via' | 'end' }[];
+    /** `draggable: false` — not grabbable (e.g. nearest-facility paths). */
+    routes: { lines: [number, number][][]; color: string; active: boolean; draggable?: boolean }[];
+    /** `color` overrides the role colour; `fixed` markers can't be dragged. */
+    stops: { at: [number, number]; label: string; index: number; role: 'start' | 'via' | 'end'; color?: string; fixed?: boolean }[];
     avoidAreas: [number, number][][];
     avoidPoints: [number, number][];
+    /** Thin dashed off-road links (a point to the road it snapped to). */
+    connectors?: [number, number][][];
   }): void {
     const source = this.ensureAnalysisSource();
     source.clear();
@@ -620,7 +624,7 @@ export class MapService {
     for (const route of [...view.routes].sort((a, b) => Number(a.active) - Number(b.active))) {
       const feature = this.toMapFeature({ type: 'MultiLineString', coordinates: route.lines });
       if (!feature) continue;
-      feature.set('routeRole', route.active ? 'route' : 'alternative');
+      feature.set('routeRole', route.active && route.draggable !== false ? 'route' : 'alternative');
       feature.setStyle(
         route.active
           ? [
@@ -633,6 +637,13 @@ export class MapService {
             ]
       );
       source.addFeature(feature);
+    }
+    if (view.connectors?.length) {
+      const links = this.toMapFeature({ type: 'MultiLineString', coordinates: view.connectors });
+      if (links) {
+        links.setStyle(new Style({ stroke: new Stroke({ color: '#475569', width: 2, lineDash: [3, 4] }), zIndex: 4 }));
+        source.addFeature(links);
+      }
     }
     for (const point of view.avoidPoints) {
       const block = this.toMapFeature({ type: 'Point', coordinates: point });
@@ -649,13 +660,13 @@ export class MapService {
     for (const stop of view.stops) {
       const marker = this.toMapFeature({ type: 'Point', coordinates: stop.at });
       if (!marker) continue;
-      marker.set('routeRole', 'stop');
+      marker.set('routeRole', stop.fixed ? 'fixed' : 'stop');
       marker.set('stopIndex', stop.index);
       marker.setStyle(
         new Style({
           image: new CircleStyle({
             radius: 10,
-            fill: new Fill({ color: stop.role === 'start' ? '#16a34a' : stop.role === 'end' ? '#dc2626' : '#ea580c' }),
+            fill: new Fill({ color: stop.color ?? (stop.role === 'start' ? '#16a34a' : stop.role === 'end' ? '#dc2626' : '#ea580c') }),
             stroke: new Stroke({ color: '#ffffff', width: 2.5 })
           }),
           text: new TextStyle({ text: stop.label, font: '700 11px sans-serif', fill: new Fill({ color: '#ffffff' }) }),

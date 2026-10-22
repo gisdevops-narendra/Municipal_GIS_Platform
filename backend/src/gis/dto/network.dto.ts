@@ -6,7 +6,9 @@ import {
   IsInt,
   IsNumber,
   IsOptional,
+  IsString,
   IsUUID,
+  MaxLength,
   Max,
   Min,
   ValidateBy,
@@ -109,8 +111,53 @@ export class NearestFacilityDto {
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(10)
+  @Max(20)
   count?: number;
+
+  /** Only facilities further than this (metres, by road) are dropped. */
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  maxDistanceM?: number;
+
+  /** Travel speed for an estimated time per facility. */
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(150)
+  speedKmh?: number;
+
+  /** Only facilities whose `filterField` is one of `filterValues`. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(63)
+  filterField?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
+  @MaxLength(200, { each: true })
+  filterValues?: string[];
+
+  /** Field to name each facility by (default: a "name"-like field). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(63)
+  labelField?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsArray({ each: true })
+  @ArrayMaxSize(500, { each: true })
+  avoidAreas?: LonLat[][];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsLonLat({ each: true })
+  avoidPoints?: LonLat[];
 }
 
 /** POST /api/gis/network/trace — everything connected to a clicked line. */

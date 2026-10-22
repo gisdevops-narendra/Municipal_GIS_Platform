@@ -40,16 +40,83 @@
           optionLabel="label"
           optionValue="value"
           [ngModel]="facilityLayerId()"
-          (ngModelChange)="facilityLayerId.set($event)"
+          (ngModelChange)="onFacilityLayerChange($event)"
           placeholder="Choose a point layer"
           appendTo="body"
         />
       </label>
       <label class="bo__field">
         <span class="bo__label">Count</span>
-        <input type="number" class="bo__input" min="1" max="10" style="width: 64px" [(ngModel)]="facilityCount" />
+        <input type="number" class="bo__input" min="1" max="20" style="width: 64px" [(ngModel)]="facilityCount" />
       </label>
     </div>
+    @if (facilityLayerId()) {
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Only where</span>
+          <p-select
+            class="bo__select"
+            [options]="fieldOptions()"
+            optionLabel="label"
+            optionValue="value"
+            [ngModel]="filterField()"
+            (ngModelChange)="onFilterFieldChange($event)"
+            placeholder="All facilities"
+            [showClear]="true"
+            [filter]="fieldOptions().length > 8"
+            appendTo="body"
+          />
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Label by</span>
+          <p-select
+            class="bo__select"
+            [options]="fieldOptions()"
+            optionLabel="label"
+            optionValue="value"
+            [ngModel]="labelField()"
+            (ngModelChange)="labelField.set($event)"
+            placeholder="Automatic"
+            [showClear]="true"
+            [filter]="fieldOptions().length > 8"
+            appendTo="body"
+          />
+        </label>
+      </div>
+      @if (filterField()) {
+        <label class="bo__field">
+          <span class="bo__label">{{ filterField() }} is one of</span>
+          <p-multiselect
+            class="bo__select"
+            [options]="filterOptions()"
+            optionLabel="label"
+            optionValue="value"
+            [ngModel]="filterValues()"
+            (ngModelChange)="filterValues.set($event)"
+            placeholder="Choose values"
+            [filter]="true"
+            display="chip"
+            appendTo="body"
+          />
+        </label>
+      }
+    }
+    <div class="bo__row">
+      <label class="bo__field bo__field--grow">
+        <span class="bo__label">Max distance (m) — optional</span>
+        <input type="number" class="bo__input" min="1" placeholder="Any distance" [(ngModel)]="nearestMaxM" />
+      </label>
+      @if (nearestByTime()) {
+        <label class="bo__field">
+          <span class="bo__label">Speed km/h</span>
+          <input type="number" class="bo__input" min="1" max="150" style="width: 72px" [(ngModel)]="speedKmh" />
+        </label>
+      }
+    </div>
+    <label class="bo__toggle">
+      <input type="checkbox" [ngModel]="nearestByTime()" (ngModelChange)="nearestByTime.set($event)" />
+      <span>Show estimated travel time</span>
+    </label>
   }
 
   @if (mode() === 'route') {
@@ -93,6 +160,21 @@
       </label>
     </div>
 
+  } @else {
+    <div class="bo__section">
+      <span class="bo__section-title">{{ mode() === 'trace' ? 'Start point' : 'Your location' }}</span>
+      <div class="bo__operand">
+        <span class="bo__operand-state">{{ pointLabel(from()) }}</span>
+        <div class="bo__operand-actions">
+          <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'from'" (click)="pick('from')">
+            <i class="pi pi-map-marker" aria-hidden="true"></i>Pick on map
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+
+  @if (mode() === 'route' || mode() === 'nearest') {
     <div class="bo__section">
       <span class="bo__section-title">Avoid</span>
       <div class="bo__operand-actions">
@@ -113,18 +195,6 @@
       } @else if (picking() === 'avoidRoad') {
         <p class="bo__hint">Click on the road stretch to keep off.</p>
       }
-    </div>
-  } @else {
-    <div class="bo__section">
-      <span class="bo__section-title">{{ mode() === 'trace' ? 'Start point' : 'Your location' }}</span>
-      <div class="bo__operand">
-        <span class="bo__operand-state">{{ pointLabel(from()) }}</span>
-        <div class="bo__operand-actions">
-          <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'from'" (click)="pick('from')">
-            <i class="pi pi-map-marker" aria-hidden="true"></i>Pick on map
-          </button>
-        </div>
-      </div>
     </div>
   }
 
@@ -216,12 +286,27 @@
     @if (facilities().length > 0) {
       <ul class="bo__rings" aria-label="Nearest facilities">
         @for (f of facilities(); track $index) {
-          <li class="bo__ring">
-            <span class="bo__ring-label">{{ $index + 1 }}. {{ f.label }}</span>
-            <span class="bo__ring-count">{{ f.length }}</span>
+          <li class="bo__facility">
+            <button
+              type="button"
+              class="bo__route"
+              [class.bo__route--active]="$index === activeFacility()"
+              [attr.aria-pressed]="$index === activeFacility()"
+              (click)="selectFacility($index)"
+            >
+              <span class="bo__stop-badge" [style.background]="f.color">{{ $index + 1 }}</span>
+              <span class="bo__facility-label" [title]="f.label">{{ f.label }}</span>
+              <span class="bo__ring-count">{{ f.length }}@if (f.time) { · {{ f.time }} }</span>
+            </button>
+            <button type="button" class="bo__icon-btn" (click)="routeToFacility($index)" title="Route here (directions, export)"
+              [attr.aria-label]="'Route to ' + f.label"><i class="pi pi-directions"></i></button>
           </li>
         }
       </ul>
+      <p class="bo__hint">Drag the ● start point to search again from there.</p>
+      <div class="bo__operand-actions">
+        <button type="button" class="bo__chip" (click)="exportFacilitiesCsv()"><i class="pi pi-download" aria-hidden="true"></i>Export CSV</button>
+      </div>
     }
   }
 

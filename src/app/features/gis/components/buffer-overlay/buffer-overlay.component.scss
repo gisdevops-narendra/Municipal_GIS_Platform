@@ -415,3 +415,20 @@
     font-weight: 600;
   }
 }
+
+.bo__facility {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+
+  .bo__route {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.bo__facility-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -40,6 +40,8 @@ interface Graph {
   adj: { to: number; edge: number }[][];
   edges: Edge[];
   grid: Map<string, number[]>;
+  /** Edge ids by lon/lat cell (EDGE_CELL_DEG), built lazily for snapping. */
+  edgeGrid?: Map<string, number[]>;
   builtAt: number;
   /** Table write counter when built (see writeStamp) — a change rebuilds. */
   stamp: string;
@@ -101,6 +103,12 @@ const ROUTE_PENALTY = 3;
 /** An alternative may share at most this share of its length with another. */
 const MAX_ROUTE_OVERLAP = 0.7;
 const GRID_CELL_M = 200;
+/** Edge grid cell, in degrees (~550 m). */
+const EDGE_CELL_DEG = 0.005;
+/** A facility further than this from any road is left out. */
+const MAX_FACILITY_SNAP_M = 500;
+/** Facilities considered per search — the nearest by straight line. */
+const MAX_FACILITY_CANDIDATES = 5000;
 /** Safety net only: a graph is rebuilt as soon as its table is written to. */
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const MAX_CACHED_GRAPHS = 6;
@@ -110,7 +118,6 @@ const WARMUP_LAYERS = 4;
 const WARMUP_DELAY_MS = 15_000;
 /** How often layers are checked for changes (a cheap stats query each). */
 const WARMUP_INTERVAL_MS = 60_000;
-const MAX_FACILITIES = 5000;
 const DEMO_TABLES = new Set(['gis_demo_roads']);
 
 /**
@@ -153,12 +160,7 @@ export class NetworkService implements OnApplicationBootstrap, OnModuleDestroy {
     if (stops.length < 2) {
       throw new BadRequestException('Pick a start and a destination.');
     }
-    const areas = dto.avoidAreas ?? [];
-    for (const ring of areas) {
-      if (ring.length < 4 || !ring.every(isLonLat)) {
-        throw new BadRequestException('Each avoid area must be a closed ring of [lon, lat] points.');
-      }
-    }
+    const areas = this.checkAreas(dto.avoidAreas);
     const graph = await this.graphFor(appUser, dto.layerId, 'road');
     const blocked = this.blockedEdges(graph, areas, dto.avoidPoints ?? []);
     const base = (edge: number) => (blocked.has(edge) ? Infinity : 1);
@@ -451,6 +453,15 @@ export class NetworkService implements OnApplicationBootstrap, OnModuleDestroy {
     return edges.reverse();
   }
 
+  /**
+   * The `count` facilities closest to `from` by road. Facilities (optionally
+   * only those whose `filterField` is one of `filterValues`) are snapped
+   * onto the nearest road; one further than MAX_FACILITY_SNAP_M is left
+   * out. Distance = road distance + the short walks from the start / to the
+   * facility off the road. `maxDistanceM` drops anything further; with
+   * `speedKmh` each result gets an estimated travel time. Avoid areas /
+   * blocked roads work as in route().
+   */
   async nearest(appUser: AppUser, dto: NearestFacilityDto) {
     const graph = await this.graphFor(appUser, dto.layerId, 'road');
     const facilities = await this.gisLayers.networkSource(
@@ -459,47 +470,124 @@ export class NetworkService implements OnApplicationBootstrap, OnModuleDestroy {
       'POINT',
     );
     this.assertTable(facilities.table);
-    const scope = this.scope(facilities.table, facilities.workspaceId, 2);
+    const areas = this.checkAreas(dto.avoidAreas);
+    const blocked = this.blockedEdges(graph, areas, dto.avoidPoints ?? []);
+    const base = (edge: number) => (blocked.has(edge) ? Infinity : 1);
+    const usable = (edge: number) => !blocked.has(edge);
+    const start = this.snapToEdge(graph, dto.from, usable, 'your location');
+    const startAccess = start.distance;
+
+    // Candidate facilities: the nearest by straight line, optionally filtered.
+    const columns = await this.tableColumns(facilities.table);
+    const quote = (c: string) => `"${c.replace(/"/g, '""')}"`;
+    const params: unknown[] = [dto.from[0], dto.from[1]];
+    let where = '';
+    const scope = this.scope(facilities.table, facilities.workspaceId, params.length + 1);
+    where += ` ${scope.clause}`;
+    params.push(...scope.params);
+    if (dto.filterField) {
+      if (!columns.includes(dto.filterField)) {
+        throw new BadRequestException(`"${dto.filterField}" is not a field of "${facilities.name}".`);
+      }
+      if (!dto.filterValues?.length) {
+        throw new BadRequestException('Choose at least one value to filter the facilities by.');
+      }
+      params.push(dto.filterValues);
+      where += ` AND t.${quote(dto.filterField)}::text = ANY($${params.length}::text[])`;
+    }
+    if (dto.labelField && !columns.includes(dto.labelField)) {
+      throw new BadRequestException(`"${dto.labelField}" is not a field of "${facilities.name}".`);
+    }
     const rows = await this.prisma.$queryRawUnsafe<
-      { x: number; y: number; lon: number; lat: number; props: Record<string, unknown> }[]
+      { lon: number; lat: number; props: Record<string, unknown> }[]
     >(
-      `SELECT ST_X(p) AS x, ST_Y(p) AS y,
-              ST_X(ST_Transform(p, 4326)) AS lon, ST_Y(ST_Transform(p, 4326)) AS lat,
-              to_jsonb(s) - 'geom' - 'p' AS props
-         FROM (SELECT t.*, ST_Transform(ST_PointOnSurface(t.geom), $1::int) AS p
+      `SELECT ST_X(p) AS lon, ST_Y(p) AS lat, to_jsonb(s) - 'geom' - 'p' AS props
+         FROM (SELECT t.*, ST_Transform(ST_PointOnSurface(t.geom), 4326) AS p
                  FROM "${facilities.table}" t
-                WHERE t.geom IS NOT NULL ${scope.clause}
-                LIMIT ${MAX_FACILITIES}) s`,
-      graph.srid,
-      ...scope.params,
+                WHERE t.geom IS NOT NULL ${where}
+                ORDER BY ST_Transform(ST_PointOnSurface(t.geom), 4326) <-> ST_SetSRID(ST_MakePoint($1::float8, $2::float8), 4326)
+                LIMIT ${MAX_FACILITY_CANDIDATES}) s`,
+      ...params,
     );
     if (rows.length === 0) {
-      throw new BadRequestException(`"${facilities.name}" has no facilities.`);
-    }
-
-    const [start] = await this.snap(graph, [dto.from]);
-    const search = this.dijkstra(graph, start, {});
-    const ranked = rows
-      .map((row, index) => {
-        const node = this.nearestNode(graph, row.x, row.y);
-        return { row, index, node: node.id, distM: node.id < 0 ? Infinity : search.dist[node.id] };
-      })
-      .filter((f) => Number.isFinite(f.distM))
-      .sort((a, b) => a.distM - b.distM)
-      .slice(0, dto.count ?? 3);
-    if (ranked.length === 0) {
       throw new BadRequestException(
-        'No facility can be reached from this point on the network.',
+        dto.filterField
+          ? `No facility in "${facilities.name}" matches the filter.`
+          : `"${facilities.name}" has no facilities.`,
       );
     }
+
+    // One search from the start reaches every facility.
+    const fromEdge = graph.edges[start.edge];
+    const search = this.dijkstra(
+      graph,
+      [
+        [fromEdge.a, start.fromA],
+        [fromEdge.b, fromEdge.len - start.fromA],
+      ],
+      { factor: base, maxDist: dto.maxDistanceM ?? Infinity },
+    );
+    let offNetwork = 0;
+    const reached = rows
+      .map((row, index) => {
+        const snap = this.trySnap(graph, [row.lon, row.lat], usable, MAX_FACILITY_SNAP_M);
+        if (!snap) {
+          offNetwork++;
+          return null;
+        }
+        const edge = graph.edges[snap.edge];
+        const road = Math.min(
+          snap.edge === start.edge ? Math.abs(snap.fromA - start.fromA) : Infinity,
+          search.dist[edge.a] + snap.fromA,
+          search.dist[edge.b] + (edge.len - snap.fromA),
+        );
+        const accessM = startAccess + snap.distance;
+        return { row, index, snap, roadM: road, accessM, totalM: road + accessM };
+      })
+      .filter((f): f is NonNullable<typeof f> => !!f && Number.isFinite(f.roadM))
+      .filter((f) => dto.maxDistanceM === undefined || f.totalM <= dto.maxDistanceM)
+      .sort((a, b) => a.totalM - b.totalM);
+    const ranked = reached.slice(0, dto.count ?? 3);
+    if (ranked.length === 0) {
+      throw new BadRequestException(
+        dto.maxDistanceM !== undefined
+          ? `No facility is within ${Math.round(dto.maxDistanceM)} m by road.`
+          : 'No facility can be reached from this point on the network.',
+      );
+    }
+
+    const minutes = (metres: number) =>
+      dto.speedKmh ? (metres / 1000 / dto.speedKmh) * 60 : null;
     return {
-      facilities: ranked.map((f) => ({
-        label: this.facilityLabel(f.row.props, f.index),
-        lengthM: f.distM,
-        location: [f.row.lon, f.row.lat] as LonLat,
-        properties: f.row.props,
-        path: this.pathGeometry(graph, search, f.node),
-      })),
+      considered: rows.length,
+      reachable: reached.length,
+      offNetwork,
+      blockedRoads: blocked.size,
+      start: start.point,
+      facilities: ranked.map((f) => {
+        const route = this.bestRoute(graph, start, f.snap, base);
+        const lines = route ? route.pieces.map((p) => p.coords) : [];
+        return {
+          label: dto.labelField && f.row.props[dto.labelField] != null && f.row.props[dto.labelField] !== ''
+            ? String(f.row.props[dto.labelField])
+            : this.facilityLabel(f.row.props, f.index),
+          lengthM: f.totalM,
+          roadM: f.roadM,
+          accessM: f.accessM,
+          minutes: minutes(f.totalM),
+          location: [f.row.lon, f.row.lat] as LonLat,
+          properties: f.row.props,
+          path: { type: 'MultiLineString', coordinates: lines },
+          /** Off-road bits: start → road, road → facility. */
+          access: {
+            type: 'MultiLineString',
+            coordinates: [
+              [dto.from, start.point],
+              [f.snap.point, [f.row.lon, f.row.lat] as LonLat],
+            ],
+          },
+        };
+      }),
     };
   }
 
@@ -831,44 +919,72 @@ export class NetworkService implements OnApplicationBootstrap, OnModuleDestroy {
     click: LonLat,
     usable: (edge: number) => boolean = () => true,
     what = 'the point',
-  ): EdgeSnap {
-    const [lon0, lat0] = click;
-    const kx = 111320 * Math.cos((lat0 * Math.PI) / 180);
-    const ky = 110540;
-    let best: (EdgeSnap & { distance: number }) | null = null;
-    graph.edges.forEach((edge, index) => {
-      if (!usable(index)) return;
-      const c = edge.coords;
-      for (let i = 0; i < c.length - 1; i++) {
-        const ax = (c[i][0] - lon0) * kx;
-        const ay = (c[i][1] - lat0) * ky;
-        const bx = (c[i + 1][0] - lon0) * kx;
-        const by = (c[i + 1][1] - lat0) * ky;
-        const dx = bx - ax;
-        const dy = by - ay;
-        const len2 = dx * dx + dy * dy;
-        const t = len2 > 0 ? Math.min(1, Math.max(0, -(ax * dx + ay * dy) / len2)) : 0;
-        const px = ax + t * dx;
-        const py = ay + t * dy;
-        const distance = Math.hypot(px, py);
-        if (!best || distance < best.distance) {
-          best = {
-            edge: index,
-            segment: i,
-            t,
-            point: [c[i][0] + t * (c[i + 1][0] - c[i][0]), c[i][1] + t * (c[i + 1][1] - c[i][1])],
-            fromA: 0,
-            distance,
-          };
-        }
-      }
-    });
-    const found = best as (EdgeSnap & { distance: number }) | null;
-    if (!found || found.distance > MAX_SNAP_M) {
+  ): EdgeSnap & { distance: number } {
+    const found = this.trySnap(graph, click, usable, MAX_SNAP_M);
+    if (!found) {
       throw new BadRequestException(
         `Move ${what} closer to the network — no usable road within 2 km.`,
       );
     }
+    return found;
+  }
+
+  /** Nearest point on a usable edge within `maxM` metres (null if none),
+   *  plus how far the click is from it. Uses the edge grid, so it is cheap
+   *  enough to snap thousands of facilities. */
+  private trySnap(
+    graph: Graph,
+    click: LonLat,
+    usable: (edge: number) => boolean,
+    maxM: number,
+  ): (EdgeSnap & { distance: number }) | null {
+    const [lon0, lat0] = click;
+    const kx = 111320 * Math.cos((lat0 * Math.PI) / 180);
+    const ky = 110540;
+    const grid = this.edgeGrid(graph);
+    const cx = Math.floor(lon0 / EDGE_CELL_DEG);
+    const cy = Math.floor(lat0 / EDGE_CELL_DEG);
+    const cellM = EDGE_CELL_DEG * Math.min(kx, ky);
+    const maxRing = Math.ceil(maxM / cellM) + 1;
+    const seen = new Set<number>();
+    let best: (EdgeSnap & { distance: number }) | null = null;
+    for (let ring = 0; ring <= maxRing; ring++) {
+      for (let i = cx - ring; i <= cx + ring; i++) {
+        for (let j = cy - ring; j <= cy + ring; j++) {
+          if (Math.max(Math.abs(i - cx), Math.abs(j - cy)) !== ring) continue;
+          for (const index of grid.get(`${i}:${j}`) ?? []) {
+            if (seen.has(index) || !usable(index)) continue;
+            seen.add(index);
+            const c = graph.edges[index].coords;
+            for (let k = 0; k < c.length - 1; k++) {
+              const ax = (c[k][0] - lon0) * kx;
+              const ay = (c[k][1] - lat0) * ky;
+              const dx = (c[k + 1][0] - lon0) * kx - ax;
+              const dy = (c[k + 1][1] - lat0) * ky - ay;
+              const len2 = dx * dx + dy * dy;
+              const t = len2 > 0 ? Math.min(1, Math.max(0, -(ax * dx + ay * dy) / len2)) : 0;
+              const distance = Math.hypot(ax + t * dx, ay + t * dy);
+              if (!best || distance < best.distance) {
+                best = {
+                  edge: index,
+                  segment: k,
+                  t,
+                  point: [c[k][0] + t * (c[k + 1][0] - c[k][0]), c[k][1] + t * (c[k + 1][1] - c[k][1])],
+                  fromA: 0,
+                  distance,
+                };
+              }
+            }
+          }
+        }
+      }
+      // Anything in a further ring is at least `ring` cells away.
+      const sofar = best as (EdgeSnap & { distance: number }) | null;
+      if (sofar && sofar.distance <= ring * cellM) break;
+    }
+    const found = best as (EdgeSnap & { distance: number }) | null;
+    if (!found || found.distance > maxM) return null;
+
     // Distance from node a along the edge, scaled to the edge's true length.
     const edge = graph.edges[found.edge];
     const planar = (from: LonLat, to: LonLat) =>
@@ -883,6 +999,32 @@ export class NetworkService implements OnApplicationBootstrap, OnModuleDestroy {
     }
     found.fromA = total > 0 ? (before / total) * edge.len : 0;
     return found;
+  }
+
+  /** Edges by the lon/lat grid cells their bounding boxes cover (built
+   *  once per graph, on first use). */
+  private edgeGrid(graph: Graph): Map<string, number[]> {
+    if (graph.edgeGrid) return graph.edgeGrid;
+    const grid = new Map<string, number[]>();
+    graph.edges.forEach((edge, index) => {
+      let [minX, minY, maxX, maxY] = [Infinity, Infinity, -Infinity, -Infinity];
+      for (const [x, y] of edge.coords) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+      for (let i = Math.floor(minX / EDGE_CELL_DEG); i <= Math.floor(maxX / EDGE_CELL_DEG); i++) {
+        for (let j = Math.floor(minY / EDGE_CELL_DEG); j <= Math.floor(maxY / EDGE_CELL_DEG); j++) {
+          const key = `${i}:${j}`;
+          const bucket = grid.get(key);
+          if (bucket) bucket.push(index);
+          else grid.set(key, [index]);
+        }
+      }
+    });
+    graph.edgeGrid = grid;
+    return grid;
   }
 
   /** The part of `edge` between the snapped point and its node `side`,
@@ -991,17 +1133,6 @@ export class NetworkService implements OnApplicationBootstrap, OnModuleDestroy {
     return { dist, prevEdge };
   }
 
-  private pathGeometry(graph: Graph, search: SearchResult, target: number) {
-    const lines: LonLat[][] = [];
-    let node = target;
-    while (search.prevEdge[node] >= 0) {
-      const edge = graph.edges[search.prevEdge[node]];
-      lines.push(edge.coords);
-      node = edge.a === node ? edge.b : edge.a;
-    }
-    return { type: 'MultiLineString', coordinates: lines.reverse() };
-  }
-
   private nodeLonLat(graph: Graph, node: number): LonLat {
     const link = graph.adj[node][0];
     const edge = graph.edges[link.edge];
@@ -1018,7 +1149,26 @@ export class NetworkService implements OnApplicationBootstrap, OnModuleDestroy {
     return text ? String(props[text]) : `Facility ${index + 1}`;
   }
 
-  /** Demo tables are shared by every municipality — scope them by workspace. */
+  /** Avoid areas must be closed [lon, lat] rings. */
+  private checkAreas(areas: LonLat[][] | undefined): LonLat[][] {
+    for (const ring of areas ?? []) {
+      if (ring.length < 4 || !ring.every(isLonLat)) {
+        throw new BadRequestException('Each avoid area must be a closed ring of [lon, lat] points.');
+      }
+    }
+    return areas ?? [];
+  }
+
+  /** Column names of `table`, without the geometry. */
+  private async tableColumns(table: string): Promise<string[]> {
+    const rows = await this.prisma.$queryRawUnsafe<{ name: string }[]>(
+      `SELECT column_name AS name FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = $1`,
+      table,
+    );
+    return rows.map((r) => r.name).filter((n) => n !== 'geom');
+  }
+
   /** The column holding road names, if any (for turn-by-turn directions). */
   private async roadNameColumn(table: string): Promise<string | null> {
     const columns = await this.prisma.$queryRawUnsafe<{ name: string }[]>(
@@ -1046,6 +1196,7 @@ export class NetworkService implements OnApplicationBootstrap, OnModuleDestroy {
     return row?.stamp ?? '';
   }
 
+  /** Demo tables are shared by every municipality — scope them by workspace. */
   private scope(table: string, workspaceId: string | null, param: number) {
     return workspaceId && DEMO_TABLES.has(table)
       ? { clause: `AND t.gis_workspace_id = $${param}`, params: [workspaceId] }

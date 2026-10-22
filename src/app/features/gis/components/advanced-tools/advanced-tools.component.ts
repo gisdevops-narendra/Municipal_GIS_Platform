@@ -4,9 +4,12 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { Observable, Subscription } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { SelectModule } from 'primeng/select';
+import { MultiSelectModule } from 'primeng/multiselect';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { MapService, RING_COLORS } from '../../services/map.service';
-import { LonLat, NetworkService, RouteOption, RouteResult } from '../../services/network.service';
+import { FacilityResult, LonLat, NearestResult, NetworkService, RouteOption, RouteResult } from '../../services/network.service';
+import { GisLayersService } from '../../../../core/services/gis-layers.service';
+import { AnalyticsField } from '../../../../core/models/layer-analytics.model';
 
 type Mode = 'route' | 'nearest' | 'trace' | 'service';
 /** What the next map click sets: a point, a routing stop (by index), or
@@ -29,6 +32,8 @@ export const SERVICE_AREA_MODULE_ID = 1004;
 /** Shortest route first, then the alternatives. */
 const ROUTE_COLORS = ['#1d4ed8', '#ea580c', '#7c3aed'];
 const MAX_STOPS = 25;
+/** Nearest-facility results, nearest first (cycled past ten). */
+const FACILITY_COLORS = ['#1d4ed8', '#ea580c', '#7c3aed', '#0891b2', '#be185d', '#4d7c0f', '#b45309', '#4338ca', '#0f766e', '#9f1239'];
 
 /** "A", "B", … "Z", then "27" … — same labels as the backend's directions. */
 export function stopLabel(index: number): string {
@@ -37,13 +42,14 @@ export function stopLabel(index: number): string {
 @Component({
   selector: 'app-advanced-tools',
   standalone: true,
-  imports: [FormsModule, ButtonModule, SelectModule],
+  imports: [FormsModule, ButtonModule, SelectModule, MultiSelectModule],
   templateUrl: './advanced-tools.component.html',
   styleUrl: '../buffer-overlay/buffer-overlay.component.scss'
 })
 export class AdvancedToolsComponent implements OnDestroy {
   private readonly mapService = inject(MapService);
   private readonly network = inject(NetworkService);
+  private readonly gisLayers = inject(GisLayersService);
 
   @Input() set layers(value: GisLayer[]) {
     this.layersSignal.set(value ?? []);
@@ -94,6 +100,16 @@ export class AdvancedToolsComponent implements OnDestroy {
   readonly networkLayerId = signal<string | null>(null);
   readonly facilityLayerId = signal<string | null>(null);
   facilityCount = 3;
+  /** Nearest Facility options. */
+  readonly facilityFields = signal<AnalyticsField[]>([]);
+  readonly labelField = signal<string | null>(null);
+  readonly filterField = signal<string | null>(null);
+  readonly filterOptions = signal<{ label: string; value: string }[]>([]);
+  readonly filterValues = signal<string[]>([]);
+  nearestMaxM: number | null = null;
+  readonly nearestByTime = signal(false);
+  readonly activeFacility = signal(0);
+  readonly fieldOptions = computed(() => this.facilityFields().map((f) => ({ label: f.name, value: f.name })));
   maxDistanceM: number | null = null;
   /** Service Area: comma-separated breaks, in metres or minutes. */
   serviceBreaksText = '500, 1000, 2000';
@@ -107,7 +123,7 @@ export class AdvancedToolsComponent implements OnDestroy {
   readonly running = signal(false);
   readonly error = signal<string | null>(null);
   readonly summary = signal<string | null>(null);
-  readonly facilities = signal<{ label: string; length: string }[]>([]);
+  readonly facilities = signal<{ label: string; length: string; time: string | null; color: string; result: FacilityResult }[]>([]);
   /** Routing: shortest route + alternatives; `activeRoute` is drawn bold. */
   readonly routes = signal<(RouteOption & { color: string; length: string })[]>([]);
   readonly activeRoute = signal(0);
@@ -162,7 +178,7 @@ export class AdvancedToolsComponent implements OnDestroy {
         this.picking.set(null);
         // OpenLayers adds the drawn feature after this callback — clear next tick.
         setTimeout(() => this.mapService.clearDraw());
-        this.afterRoutingInputChange(typeof slot === 'number' || slot === 'avoidArea' || slot === 'avoidRoad');
+        this.afterRoutingInputChange(typeof slot === 'number' || slot === 'avoidArea' || slot === 'avoidRoad' || slot === 'from');
       },
       complete: () => this.picking.set(null)
     });
@@ -221,15 +237,15 @@ export class AdvancedToolsComponent implements OnDestroy {
   /** Routing inputs changed: re-route if a route is showing (so edits apply
    *  at once), else just redraw the picks. */
   private afterRoutingInputChange(reroute: boolean): void {
-    if (this.mode() !== 'route') {
+    const mode = this.mode();
+    if (mode !== 'route' && mode !== 'nearest') {
       this.showPicks();
       return;
     }
-    if (reroute && this.routes().length && this.stops().filter(Boolean).length >= 2) {
-      this.run();
-    } else {
-      this.renderRouting();
-    }
+    const ready =
+      mode === 'route' ? this.routes().length > 0 && this.stops().filter(Boolean).length >= 2 : this.facilities().length > 0 && !!this.from();
+    if (reroute && ready) this.run();
+    else this.renderRouting();
   }
 
   cancelPick(): void {
@@ -267,15 +283,23 @@ export class AdvancedToolsComponent implements OnDestroy {
     if (this.mode() === 'nearest') {
       const facilityLayerId = this.facilityLayerId();
       if (!facilityLayerId) return this.error.set('Choose the facility (point) layer.');
-      const count = Math.min(Math.max(Math.round(this.facilityCount || 1), 1), 10);
-      this.execute(this.network.nearest(layerId, facilityLayerId, from, count), (r) => {
-        this.draw(
-          r.facilities.map((f) => f.path),
-          [from, ...r.facilities.map((f) => f.location)]
-        );
-        this.facilities.set(r.facilities.map((f) => ({ label: f.label, length: this.formatLength(f.lengthM) })));
-        this.summary.set(`${r.facilities.length} nearest facilit${r.facilities.length === 1 ? 'y' : 'ies'} by road:`);
-      });
+      const count = Math.min(Math.max(Math.round(this.facilityCount || 1), 1), 20);
+      if (this.filterField() && !this.filterValues().length) return this.error.set('Pick at least one value to filter by, or clear the filter.');
+      const firstRun = !this.facilities().length;
+      this.execute(
+        this.network.nearest(layerId, facilityLayerId, {
+          from,
+          count,
+          maxDistanceM: this.nearestMaxM && this.nearestMaxM > 0 ? this.nearestMaxM : undefined,
+          speedKmh: this.nearestByTime() ? this.speedKmh : undefined,
+          filterField: this.filterField() ?? undefined,
+          filterValues: this.filterField() ? this.filterValues() : undefined,
+          labelField: this.labelField() ?? undefined,
+          avoidAreas: this.avoidAreas(),
+          avoidPoints: this.avoidPoints()
+        }),
+        (r) => this.showNearestResult(r, firstRun)
+      );
     } else if (this.mode() === 'service') {
       const breaks = this.serviceBreaksText
         .split(/[,\s]+/)
@@ -324,6 +348,7 @@ export class AdvancedToolsComponent implements OnDestroy {
     this.bands.set([]);
     this.routes.set([]);
     this.routeOrder = [];
+    this.activeFacility.set(0);
     this.stops.set([null, null]);
     this.avoidAreas.set([]);
     this.avoidPoints.set([]);
@@ -371,6 +396,29 @@ export class AdvancedToolsComponent implements OnDestroy {
 
   /** Draws the routing state: routes, lettered stops, avoid areas / roads. */
   private renderRouting(): void {
+    if (this.mode() === 'nearest') {
+      const from = this.from();
+      const active = this.activeFacility();
+      const facilities = this.facilities();
+      this.mapService.setRoutingView({
+        routes: facilities.map((f, i) => ({ lines: f.result.path.coordinates, color: f.color, active: i === active, draggable: false })),
+        stops: [
+          ...facilities.map((f, i) => ({
+            at: f.result.location,
+            index: i + 1,
+            label: String(i + 1),
+            role: 'end' as const,
+            color: f.color,
+            fixed: true
+          })),
+          ...(from ? [{ at: from, index: 0, label: '●', role: 'start' as const }] : [])
+        ],
+        avoidAreas: this.avoidAreas(),
+        avoidPoints: this.avoidPoints(),
+        connectors: facilities[active]?.result.access.coordinates ?? []
+      });
+      return;
+    }
     const stops = this.stops();
     const last = stops.length - 1;
     const active = this.activeRoute();
@@ -393,7 +441,15 @@ export class AdvancedToolsComponent implements OnDestroy {
   /** A stop dragged → it moves there. The route dragged → a via stop is
    *  added at the drop point, on the leg that was grabbed. */
   private onRouteDrag(target: { stopIndex: number | null; grab: LonLat; drop: LonLat }): void {
-    if (this.running() || this.mode() !== 'route') return;
+    if (this.running()) return;
+    if (this.mode() === 'nearest') {
+      if (target.stopIndex === 0) {
+        this.from.set(target.drop);
+        this.run();
+      }
+      return;
+    }
+    if (this.mode() !== 'route') return;
     if (target.stopIndex !== null) {
       this.stops.update((stops) => stops.map((s, i) => (i === target.stopIndex ? target.drop : s)));
       this.run();
@@ -415,6 +471,124 @@ export class AdvancedToolsComponent implements OnDestroy {
     // Keep the order the user just shaped.
     this.optimize.set(false);
     this.run();
+  }
+
+  // ----- nearest facility -----
+
+  onFacilityLayerChange(id: string | null): void {
+    this.facilityLayerId.set(id);
+    this.facilityFields.set([]);
+    this.labelField.set(null);
+    this.clearFacilityFilter();
+    if (!id) return;
+    this.gisLayers.analyticsFields(id).subscribe({
+      next: (fields) => this.facilityFields.set(fields.filter((f) => f.kind !== 'geometry')),
+      error: () => this.facilityFields.set([])
+    });
+  }
+
+  onFilterFieldChange(field: string | null): void {
+    this.filterField.set(field);
+    this.filterValues.set([]);
+    this.filterOptions.set([]);
+    const layerId = this.facilityLayerId();
+    if (!field || !layerId) return;
+    this.gisLayers.analyticsSummary(layerId, field).subscribe({
+      next: (summary) =>
+        this.filterOptions.set((summary.categories ?? []).map((c) => ({ label: `${c.value} (${c.count})`, value: c.value }))),
+      error: () => this.filterOptions.set([])
+    });
+  }
+
+  clearFacilityFilter(): void {
+    this.filterField.set(null);
+    this.filterValues.set([]);
+    this.filterOptions.set([]);
+  }
+
+  selectFacility(index: number): void {
+    this.activeFacility.set(index);
+    this.renderRouting();
+  }
+
+  /** Opens Routing from the start to this facility (directions, export…). */
+  routeToFacility(index: number): void {
+    const from = this.from();
+    const facility = this.facilities()[index];
+    if (!from || !facility) return;
+    const [areas, points] = [this.avoidAreas(), this.avoidPoints()];
+    this.setMode('route');
+    this.stops.set([from, facility.result.location]);
+    this.avoidAreas.set(areas);
+    this.avoidPoints.set(points);
+    this.run();
+  }
+
+  exportFacilitiesCsv(): void {
+    const rows = this.facilities();
+    if (!rows.length) return;
+    const keys = [...new Set(rows.flatMap((r) => Object.keys(r.result.properties)))];
+    const cell = (v: unknown) => {
+      const text = v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+      return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+    const header = ['rank', 'label', 'distance_m', 'road_m', 'off_road_m', 'minutes', 'lon', 'lat', ...keys];
+    const lines = rows.map((r, i) =>
+      [
+        i + 1,
+        r.label,
+        Math.round(r.result.lengthM),
+        Math.round(r.result.roadM),
+        Math.round(r.result.accessM),
+        r.result.minutes === null ? '' : r.result.minutes.toFixed(1),
+        r.result.location[0],
+        r.result.location[1],
+        ...keys.map((k) => r.result.properties[k])
+      ]
+        .map(cell)
+        .join(',')
+    );
+    this.download([header.join(','), ...lines].join('\n'), 'text/csv', 'nearest-facilities.csv');
+  }
+
+  private showNearestResult(r: NearestResult, zoom: boolean): void {
+    this.facilities.set(
+      r.facilities.map((f, i) => ({
+        label: f.label,
+        length: this.formatLength(f.lengthM),
+        time: f.minutes === null ? null : this.formatMinutes(f.minutes),
+        color: FACILITY_COLORS[i % FACILITY_COLORS.length],
+        result: f
+      }))
+    );
+    this.activeFacility.set(0);
+    this.renderRouting();
+    if (zoom) {
+      this.mapService.zoomToGeometries([
+        { type: 'MultiLineString', coordinates: r.facilities.flatMap((f) => [...f.path.coordinates, ...f.access.coordinates]) }
+      ]);
+    }
+    const notes = [
+      r.offNetwork ? `${r.offNetwork} facilit${r.offNetwork === 1 ? 'y is' : 'ies are'} over 500 m from any road and left out.` : '',
+      r.blockedRoads ? `Avoiding ${r.blockedRoads} road segment${r.blockedRoads === 1 ? '' : 's'}.` : ''
+    ].filter(Boolean);
+    this.summary.set(
+      `${r.facilities.length} nearest of ${r.reachable.toLocaleString()} reachable facilit${r.reachable === 1 ? 'y' : 'ies'} by road. ${notes.join(' ')}`.trim()
+    );
+    this.stopDragOff ??= this.mapService.enableRouteDrag((target) => this.onRouteDrag(target));
+  }
+
+  private formatMinutes(minutes: number): string {
+    return minutes < 60 ? `${Math.max(1, Math.round(minutes))} min` : `${Math.floor(minutes / 60)} h ${Math.round(minutes % 60)} min`;
+  }
+
+  private download(body: string, type: string, filename: string): void {
+    const url = URL.createObjectURL(new Blob([body], { type }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   // ----- export -----
@@ -463,12 +637,7 @@ export class AdvancedToolsComponent implements OnDestroy {
         stops.map((s) => `<Placemark><name>${s.name}</name><Point><coordinates>${s.at[0]},${s.at[1]}</coordinates></Point></Placemark>`).join('\n') +
         `\n</Document></kml>\n`;
     }
-    const url = URL.createObjectURL(new Blob([body], { type }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `route.${format}`;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    this.download(body, type, `route.${format}`);
   }
 
   formatDistance(metres: number): string {
@@ -506,7 +675,7 @@ export class AdvancedToolsComponent implements OnDestroy {
   }
 
   private showPicks(): void {
-    if (this.mode() === 'route') {
+    if (this.mode() === 'route' || this.mode() === 'nearest') {
       this.renderRouting();
       return;
     }
