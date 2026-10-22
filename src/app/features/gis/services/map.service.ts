@@ -31,8 +31,9 @@ import { getArea, getLength } from 'ol/sphere';
 import { defaults as defaultControls } from 'ol/control';
 import ScaleLine from 'ol/control/ScaleLine';
 import MousePosition from 'ol/control/MousePosition';
-import { createStringXY } from 'ol/coordinate';
-import { fromLonLat, getPointResolution, toLonLat, transform, transformExtent } from 'ol/proj';
+import { createStringXY, toStringHDMS } from 'ol/coordinate';
+import type { Coordinate } from 'ol/coordinate';
+import { fromLonLat, get as getProjection, getPointResolution, toLonLat, transform, transformExtent } from 'ol/proj';
 import { createEmpty, extend as extendExtent, isEmpty as isEmptyExtent } from 'ol/extent';
 import type Geometry from 'ol/geom/Geometry';
 import { forkJoin, map as rxMap, Observable, of } from 'rxjs';
@@ -228,6 +229,9 @@ const BASEMAPS: Record<string, { label: string; attribution: string; build: () =
  * (one Map instance per /gis visit), not `providedIn: 'root'`.
  */
 
+/** Status bar cursor readout: decimal degrees, degrees-minutes-seconds, or a projected CRS. */
+export type CoordFormat = 'dd' | 'dms' | 'crs';
+
 /** Choropleth areas get on-map labels only up to this many. */
 const CHOROPLETH_LABEL_LIMIT = 40;
 
@@ -317,7 +321,16 @@ export class MapService {
   readonly canGoBack = signal(false);
   /** Bumped after every pan / zoom / rotate, for readouts that follow the view. */
   readonly viewRevision = signal(0);
+  /** Current zoom level (one decimal), for the status bar. */
+  readonly zoomLevel = signal<number | null>(null);
+  /** Current scale denominator (1 : N), for the status bar. */
+  readonly scaleDenominator = signal<number | null>(null);
   readonly canGoForward = signal(false);
+  private mousePosition: MousePosition | null = null;
+  /** Last cursor position over the map (EPSG:3857), kept after the pointer
+   *  leaves so the status bar can copy it. */
+  private lastPointer: Coordinate | null = null;
+  private coordFormat: { mode: CoordFormat; crs: string } = { mode: 'dd', crs: 'EPSG:4326' };
   private navHistory: NavHistoryEntry[] = [];
   private navIndex = -1;
 
@@ -356,14 +369,17 @@ export class MapService {
       // controls (Task 9 §8/§9) rather than reimplemented.
       controls: defaultControls({ zoom: false, rotate: false }).extend([
         new ScaleLine({ className: 'gis-scale-line', units: 'metric', target: statusTargets.scaleLineTarget }),
-        new MousePosition({
+        (this.mousePosition = new MousePosition({
           className: 'gis-mouse-position',
-          coordinateFormat: createStringXY(5),
-          projection: 'EPSG:4326',
+          coordinateFormat: (c?: Coordinate) => (c ? this.formatCoord(c) : ''),
+          projection: this.coordFormat.crs,
           placeholder: '',
           target: statusTargets.mousePositionTarget
-        })
+        }))
       ])
+    });
+    this.map.on('pointermove', (event) => {
+      if (!event.dragging) this.lastPointer = event.coordinate;
     });
 
     const initialVisibility: Record<string, boolean> = {};
@@ -380,6 +396,10 @@ export class MapService {
     this.map.on('moveend', () => {
       this.recordView();
       this.viewRevision.update((n) => n + 1);
+      const zoom = this.map?.getView().getZoom();
+      this.zoomLevel.set(zoom === undefined ? null : Math.round(zoom * 10) / 10);
+      const scale = this.currentScaleDenominator();
+      this.scaleDenominator.set(scale === null ? null : Math.round(scale));
     });
     this.resetView();
     this.setPanEnabled(this.panEnabled);
@@ -390,6 +410,8 @@ export class MapService {
     this.clearMeasure();
     this.map?.setTarget(undefined);
     this.map = null;
+    this.mousePosition = null;
+    this.lastPointer = null;
     this.managedLayers.clear();
     this.selectionLayer = null;
     this.queryLayer = null;
@@ -1722,6 +1744,39 @@ export class MapService {
       );
       source.addFeature(feature);
     }
+  }
+
+  /** Status bar: switch the cursor readout between decimal degrees, DMS and
+   *  a projected CRS (falls back to degrees if `crs` isn't registered). */
+  setCoordFormat(mode: CoordFormat, crs: string): void {
+    const effective: CoordFormat = mode === 'crs' && !getProjection(crs) ? 'dd' : mode;
+    this.coordFormat = { mode: effective, crs: effective === 'crs' ? crs : 'EPSG:4326' };
+    this.mousePosition?.setProjection(this.coordFormat.crs);
+    this.mousePosition?.setCoordinateFormat((c?: Coordinate) => (c ? this.formatCoord(c) : ''));
+  }
+
+  /** The last cursor position in the active status-bar format, or null. */
+  lastCursorText(): string | null {
+    return this.lastPointer ? this.formatCoord(transform(this.lastPointer, MAP_PROJECTION, this.coordFormat.crs)) : null;
+  }
+
+  private formatCoord(coord: Coordinate): string {
+    const { mode } = this.coordFormat;
+    return mode === 'dms' ? toStringHDMS(coord, 1) : createStringXY(mode === 'crs' ? 2 : 5)(coord);
+  }
+
+  setZoom(zoom: number): void {
+    this.map?.getView().animate({ zoom, duration: 250 });
+  }
+
+  /** Zoom so the view centre shows at 1 : `denominator` (OGC 0.28 mm/px). */
+  zoomToScale(denominator: number): void {
+    const view = this.map?.getView();
+    const resolution = view?.getResolution();
+    const center = view?.getCenter();
+    if (!view || !resolution || !center || denominator <= 0) return;
+    const ratio = getPointResolution(MAP_PROJECTION, resolution, center) / resolution;
+    view.animate({ resolution: (denominator * 0.00028) / ratio, duration: 250 });
   }
 
   zoomIn(): void {

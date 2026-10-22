@@ -403,11 +403,33 @@
         <span class="gis-ws__status-item mono">{{ ws.displayCrs }}</span>
       }
       <span class="gis-ws__status-item mono">
-        <span class="gis-ws__status-key">Scale</span><span #scaleSlot class="gis-ws__status-slot"></span>
+        <span class="gis-ws__status-key">Zoom</span>
+        <input #zoomInput class="gis-ws__status-input is-short" [value]="zoomLevel() ?? ''" title="Type a zoom level and press Enter"
+          (keydown.enter)="applyStatusZoom(zoomInput)" (keydown.escape)="zoomInput.value = '' + (zoomLevel() ?? ''); zoomInput.blur()"
+          (blur)="zoomInput.value = '' + (zoomLevel() ?? '')" />
       </span>
       <span class="gis-ws__status-item mono">
-        <span class="gis-ws__status-key">Lon, Lat</span><span #coordSlot class="gis-ws__status-slot">—</span>
+        <span class="gis-ws__status-key">Scale</span><span #scaleSlot class="gis-ws__status-slot"></span>
+        <span class="gis-ws__status-key">1:</span>
+        <input #scaleInput class="gis-ws__status-input" [value]="scaleDenominator() ?? ''" title="Type a scale (e.g. 5000) and press Enter"
+          (keydown.enter)="applyStatusScale(scaleInput)" (keydown.escape)="scaleInput.value = '' + (scaleDenominator() ?? ''); scaleInput.blur()"
+          (blur)="scaleInput.value = '' + (scaleDenominator() ?? '')" />
       </span>
+      <span class="gis-ws__status-item mono">
+        <button type="button" class="gis-ws__status-btn gis-ws__status-key" title="Switch coordinate format" (click)="cycleCoordFormat()">{{ coordKey() }}</button>
+        <button type="button" class="gis-ws__status-btn" title="Copy last cursor coordinates" (click)="copyCursorCoords()">
+          <span #coordSlot class="gis-ws__status-slot">—</span>
+          <i class="pi pi-copy"></i>
+        </button>
+      </span>
+      <span class="gis-ws__status-item">
+        <span class="gis-ws__status-key">Layers</span>{{ visibleLayerCount() }}
+      </span>
+      @if (selectedCount() > 0) {
+        <span class="gis-ws__status-item">
+          <span class="gis-ws__status-key">Selected</span>{{ selectedCount() }}
+        </span>
+      }
       <span class="gis-ws__status-spacer"></span>
       @if (geoserverReachable() !== null) {
         <span class="gis-ws__status-item">

@@ -22,7 +22,7 @@ import { ModuleAccessService } from '../../core/services/module-access.service';
 import { GisWorkspace } from '../../core/models/gis-workspace.model';
 import { GisLayer } from '../../core/models/gis-layer.model';
 import { GisSearchFeatureMatch, GisSearchLayerMatch } from '../../core/models/gis-dashboard.model';
-import { MapService, FeatureInfoResult } from './services/map.service';
+import { MapService, FeatureInfoResult, CoordFormat } from './services/map.service';
 import { MunicipalMapComponent } from './components/municipal-map/municipal-map.component';
 import { LayerPanelComponent } from './components/layer-panel/layer-panel.component';
 import { MapControlsComponent } from './components/map-controls/map-controls.component';
@@ -334,6 +334,19 @@ export class GisWorkspaceComponent {
   /** Draw & Mark edit session: the layer being edited (its Attribute Table
    *  cells become editable), a tick when the edit panel writes features,
    *  and the cell edits saved in the table (for the open feature). */
+  /** Status bar zoom readout. */
+  readonly zoomLevel = this.mapService.zoomLevel;
+  readonly scaleDenominator = this.mapService.scaleDenominator;
+  readonly visibleLayerCount = computed(() => Object.values(this.mapService.layerVisibility()).filter(Boolean).length);
+  /** Status bar cursor readout format, cycled by clicking its label. */
+  readonly coordFormat = signal<CoordFormat>('dd');
+  readonly coordKey = computed(() => {
+    const format = this.coordFormat();
+    return format === 'crs' ? `${this.workspace()?.displayCrs ?? 'CRS'} X, Y` : format === 'dms' ? 'Lon, Lat (DMS)' : 'Lon, Lat';
+  });
+  private readonly applyCoordFormat = effect(() =>
+    this.mapService.setCoordFormat(this.coordFormat(), this.workspace()?.displayCrs ?? 'EPSG:4326')
+  );
   readonly editingLayerId = signal<string | null>(null);
   readonly featuresWrittenTick = signal(0);
   readonly tableEdits = signal<{ layerId: string; changes: Record<number, Record<string, string>> } | null>(null);
@@ -398,6 +411,37 @@ export class GisWorkspaceComponent {
 
   get f() {
     return this.form.controls;
+  }
+
+  // ----- status bar -----
+  cycleCoordFormat(): void {
+    this.coordFormat.update((format) => (format === 'dd' ? 'dms' : format === 'dms' ? 'crs' : 'dd'));
+  }
+
+  copyCursorCoords(): void {
+    const text = this.mapService.lastCursorText();
+    if (!text) {
+      this.notify.info('Move the cursor over the map first.');
+      return;
+    }
+    navigator.clipboard?.writeText(text).then(
+      () => this.notify.success(`Copied ${text}`, 'Coordinates'),
+      () => this.notify.error('Could not copy to the clipboard.')
+    );
+  }
+
+  applyStatusZoom(input: HTMLInputElement): void {
+    const zoom = Number(input.value);
+    if (input.value.trim() && Number.isFinite(zoom)) this.mapService.setZoom(Math.min(Math.max(zoom, 0), 22));
+    input.value = String(this.zoomLevel() ?? '');
+    input.blur();
+  }
+
+  applyStatusScale(input: HTMLInputElement): void {
+    const scale = Number(input.value.replace(/^1\s*:\s*/, '').replace(/[,\s]/g, ''));
+    if (scale > 0) this.mapService.zoomToScale(scale);
+    input.value = String(this.scaleDenominator() ?? '');
+    input.blur();
   }
 
   // ----- dock actions -----

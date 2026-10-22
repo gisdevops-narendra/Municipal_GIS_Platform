@@ -404,6 +404,47 @@
   text-align: left;
 }
 
+.gis-ws__status-input {
+  width: 64px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: none;
+  color: inherit;
+  font: inherit;
+
+  &.is-short {
+    width: 36px;
+  }
+
+  &:hover,
+  &:focus {
+    border-color: var(--color-line);
+    outline: none;
+  }
+}
+
+.gis-ws__status-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+
+  .pi {
+    font-size: 10px;
+    opacity: 0.6;
+  }
+
+  &:hover {
+    color: var(--color-ink-700, inherit);
+  }
+}
+
 .gis-ws__status-spacer {
   flex: 1;
 }
