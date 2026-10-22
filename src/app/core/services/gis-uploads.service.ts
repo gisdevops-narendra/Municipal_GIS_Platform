@@ -107,6 +107,10 @@ export class GisUploadsService {
     return this.http.post<GisUpload>(`${this.baseUrl}/${id}/submit-review`, {});
   }
 
+  discard(id: string): Observable<void> {
+    return this.http.delete<void>(`${this.baseUrl}/${id}`);
+  }
+
   approve(id: string): Observable<GisUpload> {
     return this.http.post<GisUpload>(`${this.baseUrl}/${id}/approve`, {});
   }

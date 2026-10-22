@@ -455,6 +455,44 @@ export class GisUploadsService {
     return this.toResponse(updated);
   }
 
+  /** Discards an upload that never reached PUBLISHED (a draft, failed
+   *  validation, rejected, …): removes its preview featuretype/style, its
+   *  imported layer_<uuid> table, its stored files and the row itself.
+   *  Same rights as managing it — the uploader or the Owner. */
+  async discard(uploadId: string, appUser: AppUser): Promise<void> {
+    const upload = await this.findScoped(uploadId, appUser);
+    this.assertCanManage(appUser, upload);
+    if (upload.status === 'PUBLISHED') {
+      throw new BadRequestException(
+        'A published upload cannot be discarded — delete the layer instead.',
+      );
+    }
+
+    const workspace = await this.prisma.gISWorkspace.findUniqueOrThrow({
+      where: { id: upload.gisWorkspaceId },
+    });
+    await this.geoServer
+      .deleteFeatureType(
+        workspace.geoserverWorkspace,
+        `${workspace.geoserverWorkspace}_postgis`,
+        this.previewLayerName(upload.id),
+      )
+      .catch(() => undefined);
+    await this.geoServer
+      .deleteStyle(
+        workspace.geoserverWorkspace,
+        `${this.previewLayerName(upload.id)}_style`,
+      )
+      .catch(() => undefined);
+    if (upload.postgisTable) {
+      await this.dropTableIfSafe(upload.postgisTable);
+    }
+    await this.storage
+      .deleteUploadFiles(upload.municipalityId, upload.id)
+      .catch(() => undefined);
+    await this.prisma.gISLayerUpload.delete({ where: { id: upload.id } });
+  }
+
   async approve(uploadId: string, appUser: AppUser) {
     const upload = await this.findScoped(uploadId, appUser);
     if (upload.status !== 'IN_REVIEW') {

@@ -136,6 +136,19 @@
                       <button pButton type="button" label="Publish" class="p-button-text p-button-sm"
                         [loading]="isBusy(pending, 'publish')" (click)="publish(pending)"></button>
                     }
+                    @if (canDiscard(pending)) {
+                      <button
+                        pButton
+                        type="button"
+                        icon="pi pi-trash"
+                        class="p-button-text p-button-sm p-button-rounded p-button-danger"
+                        aria-label="Discard upload"
+                        pTooltip="Discard upload"
+                        tooltipPosition="top"
+                        [loading]="deleting() === pending.id"
+                        (click)="discardUpload(pending)"
+                      ></button>
+                    }
                   }
                   <button
                     pButton

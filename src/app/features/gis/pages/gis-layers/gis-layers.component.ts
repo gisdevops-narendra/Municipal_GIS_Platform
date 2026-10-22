@@ -368,6 +368,10 @@ export class GisLayersComponent {
     return upload.status === 'DRAFT' && this.canEditUpload(upload);
   }
 
+  canDiscard(upload: GisUpload): boolean {
+    return upload.status !== 'PUBLISHED' && this.canEditUpload(upload);
+  }
+
   canApproveOrReject(upload: GisUpload): boolean {
     return upload.status === 'IN_REVIEW' && this.canManage(upload.layer);
   }
@@ -487,6 +491,30 @@ export class GisLayersComponent {
           error: (error: HttpErrorResponse) => {
             this.deleting.set(null);
             this.notify.error(error.error?.message ?? 'Delete failed. Please try again.');
+          }
+        });
+      }
+    });
+  }
+
+  /** Discards an unpublished upload (draft, failed, rejected, …) — its
+   *  imported data and files are removed; a published layer it would
+   *  replace is untouched. */
+  discardUpload(upload: GisUpload): void {
+    this.notify.confirmDelete({
+      message: `Discard the upload "${upload.layer.name}"? Its imported data and file are permanently removed. This cannot be undone.`,
+      accept: () => {
+        this.deleting.set(upload.id);
+        this.uploadsService.discard(upload.id).subscribe({
+          next: () => {
+            this.deleting.set(null);
+            this.notify.success(`Upload "${upload.layer.name}" was discarded.`);
+            this.closeDetail();
+            this.loadAll();
+          },
+          error: (error: HttpErrorResponse) => {
+            this.deleting.set(null);
+            this.notify.error(error.error?.message ?? 'Discard failed. Please try again.');
           }
         });
       }

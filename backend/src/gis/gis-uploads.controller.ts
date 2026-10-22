@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
@@ -192,6 +193,13 @@ export class GisUploadsController {
   @Post('uploads/:id/submit-review')
   submitForReview(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
     return this.uploadsService.submitForReview(id, appUser);
+  }
+
+  /** Discard an unpublished upload (draft, failed, rejected, …). */
+  @RequireMunicipalityManager()
+  @Delete('uploads/:id')
+  discard(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
+    return this.uploadsService.discard(id, appUser);
   }
 
   /** Task 8: no longer Owner-only at the route level — a Department Head
