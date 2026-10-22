@@ -1,104 +1,144 @@
 <div class="report">
   @if (layerOptions().length === 0) {
-    <p class="report__message">No vector layers to report on.</p>
+    <p class="report__empty">
+      <i class="pi pi-file" aria-hidden="true"></i>
+      No vector layers to report on.
+    </p>
   } @else {
-    <div class="report__col">
-      <label class="report__field">
-        <span class="report__label">Layer</span>
-        <p-select
-          class="report__select"
-          [options]="layerOptions()"
-          optionLabel="label"
-          optionValue="value"
-          [ngModel]="layerId()"
-          (ngModelChange)="selectLayer($event)"
-          appendTo="body"
-        />
-      </label>
+    <div class="report__body">
+      <section class="report__section">
+        <label class="report__field">
+          <span class="report__label">Layer</span>
+          <p-select
+            class="report__select"
+            [options]="layerOptions()"
+            optionLabel="label"
+            optionValue="value"
+            [ngModel]="layerId()"
+            (ngModelChange)="selectLayer($event)"
+            [filter]="layerOptions().length > 8"
+            appendTo="body"
+          />
+        </label>
 
-      <label class="report__field">
-        <span class="report__label">Title</span>
-        <input
-          pInputText
-          class="report__input"
-          maxlength="120"
-          [placeholder]="(layer()?.name ?? 'Layer') + ' report'"
-          [(ngModel)]="title"
-        />
-      </label>
+        <label class="report__field">
+          <span class="report__label">Report title</span>
+          <input
+            pInputText
+            class="report__input"
+            maxlength="120"
+            [placeholder]="(layer()?.name ?? 'Layer') + ' report'"
+            [(ngModel)]="title"
+          />
+        </label>
+      </section>
+
+      <section class="report__section">
+        <span class="report__label">Features</span>
+        <div class="report__scopes" role="radiogroup" aria-label="Features to include">
+          <button
+            type="button"
+            role="radio"
+            class="report__scope"
+            [class.is-active]="effectiveScope() === 'layer'"
+            [attr.aria-checked]="effectiveScope() === 'layer'"
+            (click)="scope.set('layer')"
+          >
+            <i class="pi pi-clone report__scope-icon" aria-hidden="true"></i>
+            <span class="report__scope-text">
+              <span class="report__scope-title">Whole layer</span>
+              <span class="report__scope-sub">Every feature in {{ layer()?.name ?? 'the layer' }}</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            role="radio"
+            class="report__scope"
+            [class.is-active]="effectiveScope() === 'query'"
+            [attr.aria-checked]="effectiveScope() === 'query'"
+            [disabled]="!queryForLayer()"
+            (click)="scope.set('query')"
+          >
+            <i class="pi pi-filter report__scope-icon" aria-hidden="true"></i>
+            <span class="report__scope-text">
+              <span class="report__scope-title">Current query</span>
+              @if (queryForLayer(); as q) {
+                <span class="report__scope-sub" [attr.title]="q.cql">{{ q.label }}</span>
+              } @else {
+                <span class="report__scope-sub">No query on this layer</span>
+              }
+            </span>
+          </button>
+
+          <button
+            type="button"
+            role="radio"
+            class="report__scope"
+            [class.is-active]="effectiveScope() === 'selection'"
+            [attr.aria-checked]="effectiveScope() === 'selection'"
+            [disabled]="!selectionForLayer()"
+            (click)="scope.set('selection')"
+          >
+            <i class="pi pi-check-square report__scope-icon" aria-hidden="true"></i>
+            <span class="report__scope-text">
+              <span class="report__scope-title">Selected features</span>
+              <span class="report__scope-sub">
+                {{ selectionForLayer()?.featureIds?.length ?? 0 }} selected in the attribute table
+              </span>
+            </span>
+          </button>
+        </div>
+      </section>
+
+      <section class="report__section">
+        <div class="report__section-head">
+          <span class="report__label">Columns</span>
+          <span class="report__count" [class.is-full]="atLimit()">{{ chosen().size }} / {{ maxFields }}</span>
+          <span class="report__spacer"></span>
+          <button type="button" class="report__link" [disabled]="!fields().length" (click)="fillFields()">Auto</button>
+          <button type="button" class="report__link" [disabled]="!chosen().size" (click)="clearFields()">Clear</button>
+        </div>
+        @if (loadingFields()) {
+          <p class="report__message">Loading fields…</p>
+        } @else {
+          <div class="report__chips">
+            @for (field of fields(); track field.name) {
+              <button
+                type="button"
+                class="report__chip"
+                [class.is-on]="chosen().has(field.name)"
+                [attr.aria-pressed]="chosen().has(field.name)"
+                [disabled]="atLimit() && !chosen().has(field.name)"
+                [attr.title]="field.name"
+                (click)="toggleField(field.name, !chosen().has(field.name))"
+              >
+                @if (chosen().has(field.name)) {
+                  <i class="pi pi-check" aria-hidden="true"></i>
+                }
+                {{ field.name }}
+              </button>
+            }
+          </div>
+        }
+      </section>
     </div>
 
-    <fieldset class="report__col report__scope">
-      <legend class="report__label">Features</legend>
-      <label class="report__radio">
-        <input type="radio" name="report-scope" [checked]="effectiveScope() === 'layer'" (change)="scope.set('layer')" />
-        Whole layer
-      </label>
-      <label class="report__radio" [class.is-disabled]="!queryForLayer()">
-        <input
-          type="radio"
-          name="report-scope"
-          [disabled]="!queryForLayer()"
-          [checked]="effectiveScope() === 'query'"
-          (change)="scope.set('query')"
-        />
-        Current query
-        @if (queryForLayer(); as q) {
-          <span class="report__aside" [attr.title]="q.cql">· {{ q.label }}</span>
-        } @else {
-          <span class="report__aside">· none on this layer</span>
-        }
-      </label>
-      <label class="report__radio" [class.is-disabled]="!selectionForLayer()">
-        <input
-          type="radio"
-          name="report-scope"
-          [disabled]="!selectionForLayer()"
-          [checked]="effectiveScope() === 'selection'"
-          (change)="scope.set('selection')"
-        />
-        Selected features
-        <span class="report__aside">· {{ selectionForLayer()?.featureIds?.length ?? 0 }} selected</span>
-      </label>
-    </fieldset>
-
-    <fieldset class="report__fields">
-      <legend class="report__label">Columns ({{ chosen().size }}/{{ maxFields }})</legend>
-      @if (loadingFields()) {
-        <p class="report__message">Loading fields…</p>
-      } @else {
-        <div class="report__field-grid">
-          @for (field of fields(); track field.name) {
-            <label class="report__check" [class.is-disabled]="atLimit() && !chosen().has(field.name)">
-              <input
-                type="checkbox"
-                [checked]="chosen().has(field.name)"
-                [disabled]="atLimit() && !chosen().has(field.name)"
-                (change)="toggleField(field.name, $any($event.target).checked)"
-              />
-              <span class="report__check-name" [attr.title]="field.name">{{ field.name }}</span>
-            </label>
-          }
-        </div>
+    <footer class="report__footer">
+      @if (error(); as message) {
+        <p class="report__message report__message--error" role="alert">{{ message }}</p>
       }
-    </fieldset>
-
-    <div class="report__actions">
       <button
         pButton
         type="button"
         icon="pi pi-file-pdf"
         label="Generate PDF"
-        class="p-button-sm"
+        class="p-button-sm report__generate"
         [loading]="generating()"
         [disabled]="!layer() || chosen().size === 0"
         (click)="generate()"
       ></button>
-      @if (error(); as message) {
-        <p class="report__message report__message--error" role="alert">{{ message }}</p>
-      } @else {
-        <p class="report__message">Includes summary statistics and up to 5,000 features.</p>
-      }
-    </div>
+      <p class="report__message">Includes summary statistics and up to 5,000 features.</p>
+    </footer>
   }
 </div>

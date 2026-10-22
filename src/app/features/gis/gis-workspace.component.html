@@ -225,6 +225,15 @@
           />
         }
 
+        @if (openedLeftTools().has('reports') && layersReady()) {
+          <app-layer-report
+            [class.gis-ws__panel--hidden]="leftTool() !== 'reports'"
+            [layers]="layers()"
+            [queryFilter]="activeQueryFilter()"
+            [selection]="tableSelection()"
+          />
+        }
+
         @if (openedLeftTools().has('export') && layersReady()) {
           <app-export-data
             [class.gis-ws__panel--hidden]="leftTool() !== 'export'"
@@ -360,14 +369,6 @@
             [externalFilter]="activeQueryFilter()"
             (externalFilterCleared)="onQueryCleared()"
             (selectionChange)="tableSelection.set($event)"
-          />
-        }
-        @if (openedBottomTools().has('reports') && layersReady()) {
-          <app-layer-report
-            [class.gis-ws__panel--hidden]="bottomTool() !== 'reports'"
-            [layers]="layers()"
-            [queryFilter]="activeQueryFilter()"
-            [selection]="tableSelection()"
           />
         }
         @if (openedBottomTools().has('statistics') && layersReady()) {

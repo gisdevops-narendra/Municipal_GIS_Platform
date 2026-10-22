@@ -4,23 +4,40 @@
   min-height: 0;
 }
 
-/* Short, wide bottom dock: settings | scope | columns | action, side by
-   side; stacks on narrow screens. */
+/* Left dock: scrolling form sections above a pinned action footer. */
 .report {
   display: flex;
-  gap: 20px;
+  flex-direction: column;
   height: 100%;
-  padding: 10px 14px 12px;
-  box-sizing: border-box;
   font-size: 12.5px;
 }
 
-.report__col {
+.report__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 14px 12px;
+}
+
+.report__section {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  flex: 0 0 220px;
-  min-width: 0;
+  padding: 12px 0;
+
+  & + & {
+    border-top: 1px solid var(--color-line);
+  }
+}
+
+.report__section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.report__spacer {
+  flex: 1;
 }
 
 .report__field {
@@ -30,7 +47,6 @@
 }
 
 .report__label {
-  padding: 0;
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.06em;
@@ -41,98 +57,196 @@
 .report__select.p-select,
 .report__select ::ng-deep .p-select {
   width: 100%;
-  height: 30px;
+  height: 32px;
 }
 
 .report__select ::ng-deep .p-select-label {
   display: flex;
   align-items: center;
   padding: 0 8px;
-  font-size: 12px;
+  font-size: 12.5px;
 }
 
 .report__input {
   width: 100%;
-  height: 30px;
+  height: 32px;
   padding: 0 8px;
-  font-size: 12px;
+  font-size: 12.5px;
 }
 
-fieldset {
-  margin: 0;
-  padding: 0;
-  border: none;
-  min-width: 0;
+/* Feature scope: selectable option cards. */
+.report__scopes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .report__scope {
-  gap: 6px;
-  flex-basis: 230px;
-
-  legend {
-    margin-bottom: 4px;
-  }
-}
-
-.report__radio,
-.report__check {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
   color: var(--color-ink-700);
+  font: inherit;
+  text-align: left;
   cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
 
-  input {
-    margin: 0;
-    accent-color: var(--color-primary-600);
+  &:hover:not(:disabled) {
+    border-color: var(--color-ink-500);
   }
 
-  &.is-disabled {
-    color: var(--color-ink-500);
+  &.is-active {
+    border-color: var(--color-primary-600);
+    background: var(--color-surface-alt);
+
+    .report__scope-icon {
+      color: var(--color-primary-600);
+    }
+
+    .report__scope-title {
+      color: var(--color-primary-700);
+    }
+  }
+
+  &:disabled {
+    opacity: 0.55;
     cursor: not-allowed;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-primary-600);
+    outline-offset: 1px;
   }
 }
 
-.report__aside {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.report__scope-icon {
+  flex: none;
+  font-size: 14px;
   color: var(--color-ink-500);
 }
 
-.report__fields {
-  flex: 1 1 260px;
-  min-width: 0;
+.report__scope-text {
   display: flex;
   flex-direction: column;
-  min-height: 0;
-
-  legend {
-    margin-bottom: 4px;
-  }
+  min-width: 0;
 }
 
-.report__field-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 4px 12px;
-  overflow-y: auto;
-  min-height: 0;
-  max-height: 100%;
+.report__scope-title {
+  font-weight: 600;
+  color: var(--color-ink-900);
 }
 
-.report__check-name {
+.report__scope-sub {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--color-ink-500);
 }
 
-.report__actions {
+/* Columns: toggle chips that wrap instead of a scrolling checklist. */
+.report__count {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--color-surface-alt);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--color-ink-700);
+
+  &.is-full {
+    color: var(--color-primary-700);
+    font-weight: 600;
+  }
+}
+
+.report__link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-primary-700);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    text-decoration: underline;
+  }
+
+  &:disabled {
+    color: var(--color-ink-500);
+    cursor: default;
+  }
+}
+
+.report__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.report__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  height: 26px;
+  padding: 0 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-ink-700);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+
+  .pi {
+    font-size: 10px;
+  }
+
+  &:hover:not(:disabled) {
+    border-color: var(--color-ink-500);
+  }
+
+  &.is-on {
+    border-color: var(--color-primary-600);
+    background: var(--color-primary-600);
+    color: #fff;
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-primary-600);
+    outline-offset: 1px;
+  }
+}
+
+/* Pinned action. */
+.report__footer {
+  flex: none;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  flex: 0 0 190px;
+  gap: 6px;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--color-line);
+  background: var(--color-surface);
+}
+
+.report__generate {
+  width: 100%;
+  justify-content: center;
 }
 
 .report__message {
@@ -145,16 +259,16 @@ fieldset {
   }
 }
 
-@media (max-width: 760px) {
-  .report {
-    flex-direction: column;
-    height: auto;
-  }
+.report__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 32px 14px;
+  color: var(--color-ink-500);
 
-  .report__col,
-  .report__scope,
-  .report__fields,
-  .report__actions {
-    flex: none;
+  .pi {
+    font-size: 20px;
   }
 }

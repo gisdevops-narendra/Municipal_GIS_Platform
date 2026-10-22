@@ -122,6 +122,15 @@ export class LayerReportComponent {
     this.chosen.set(next);
   }
 
+  /** Picks the first fields up to the column limit. */
+  fillFields(): void {
+    this.chosen.set(new Set(this.fields().slice(0, MAX_FIELDS).map((f) => f.name)));
+  }
+
+  clearFields(): void {
+    this.chosen.set(new Set());
+  }
+
   generate(): void {
     const layer = this.layer();
     const fields = this.chosenList();

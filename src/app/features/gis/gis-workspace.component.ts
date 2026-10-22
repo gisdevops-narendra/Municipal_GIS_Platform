@@ -130,7 +130,7 @@ const TOOLS: WsTool[] = [
   { id: 'raster', label: 'Raster Analysis', icon: 'pi pi-images', group: 'analysis', dock: 'left', available: true, anyModuleIds: RASTER_TOOL_MODULE_IDS },
   { id: 'statistics', label: 'Statistics', icon: 'pi pi-chart-bar', group: 'analysis', dock: 'bottom', available: true, anyModuleIds: [ANALYTICS_MODULE_ID, DATA_VISUALISATION_MODULE_ID] },
   { id: 'print', label: 'Print Layout', icon: 'pi pi-print', group: 'output', dock: 'left', available: true, moduleId: 3 },
-  { id: 'reports', label: 'Reports', icon: 'pi pi-file', group: 'output', dock: 'bottom', available: true, moduleId: 251 },
+  { id: 'reports', label: 'Reports', icon: 'pi pi-file', group: 'output', dock: 'left', available: true, moduleId: 251 },
   { id: 'export', label: 'Export Data', icon: 'pi pi-download', group: 'output', dock: 'left', available: true, moduleId: 226 },
   { id: 'workspace', label: 'Workspace Details', icon: 'pi pi-server', group: 'admin', dock: 'left', available: true, moduleId: WORKSPACE_DETAILS_MODULE_ID }
 ];
