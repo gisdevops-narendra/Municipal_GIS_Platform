@@ -9,6 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { AiClientService } from '../gis-ai/ai-client.service';
 import { UploadReviewService } from './upload-review.service';
+import { NetworkService } from './network.service';
 import { UploadSchemaService } from './upload-schema.service';
 import type { ApplyUploadSchemaDto } from './dto/upload-schema.dto';
 import * as path from 'path';
@@ -102,6 +103,7 @@ export class GisUploadsService {
     @Optional() private readonly ai?: AiClientService,
     @Optional() private readonly review?: UploadReviewService,
     @Optional() private readonly schema?: UploadSchemaService,
+    @Optional() private readonly network?: NetworkService,
   ) {}
 
   async create(
@@ -160,6 +162,7 @@ export class GisUploadsService {
         departmentId:
           dto.ownershipType === 'DEPARTMENT' ? dto.departmentId : null,
         ownershipType: dto.ownershipType,
+        routingEnabled: dto.routingEnabled === true,
         sourceCrs: dto.sourceCrs ?? null,
         targetCrs: workspace.defaultCrs,
       },
@@ -613,6 +616,8 @@ export class GisUploadsService {
         },
       );
 
+      // Routing only where the uploader asked for it — and only on lines.
+      const routingEnabled = upload.routingEnabled && upload.geometryType === 'LINE';
       const savedLayer = await this.prisma.$transaction(async (tx) => {
         const layerRow = existingLayer
           ? await tx.gISLayer.update({
@@ -622,6 +627,8 @@ export class GisUploadsService {
                 description: upload.description,
                 postgisTable: upload.postgisTable!,
                 geometryType: upload.geometryType,
+                // The new version's upload decides (marked + still lines).
+                routingEnabled,
                 sourceUploadId: upload.id,
                 version: { increment: 1 },
                 status: 'ACTIVE',
@@ -644,6 +651,7 @@ export class GisUploadsService {
                 geometryType: upload.geometryType,
                 departmentId: upload.departmentId,
                 ownershipType: upload.ownershipType,
+                routingEnabled,
                 postgisTable: upload.postgisTable!,
                 sourceUploadId: upload.id,
                 version: 1,
@@ -724,6 +732,10 @@ export class GisUploadsService {
       // layer is findable at once. Fire-and-forget: embedding a large
       // catalog takes a while and the AI service may be down.
       void this.ai?.reindex(appUser.municipalityId).catch(() => undefined);
+
+      // A line layer may be routed on: build its road network now, in the
+      // background, so the first route on it is already fast.
+      if (routingEnabled) this.network?.warmLayer(savedLayer.id);
 
       // Best-effort cleanup, never allowed to fail the publish itself
       // (the layer is already live at this point).
@@ -1312,6 +1324,7 @@ export class GisUploadsService {
         ownershipType: upload.ownershipType,
         departmentId: upload.departmentId,
         departmentName: upload.department?.name ?? null,
+        routingEnabled: upload.routingEnabled,
       },
       validation: {
         valid: upload.status !== 'FAILED',

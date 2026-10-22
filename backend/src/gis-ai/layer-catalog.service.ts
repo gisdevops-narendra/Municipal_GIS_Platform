@@ -45,6 +45,8 @@ export interface LayerCatalogEntry {
   name: string;
   description: string | null;
   geometryType: string | null;
+  /** Marked as a routing (road network) layer at upload. */
+  routingEnabled: boolean;
   /** GeoServer workspace + layer: "{geoserverWorkspace}:{geoserverLayer}". */
   geoserverWorkspace: string;
   geoserverLayer: string;
@@ -174,6 +176,7 @@ export class LayerCatalogService {
         name: true,
         description: true,
         geometryType: true,
+        routingEnabled: true,
         geoserverWorkspace: true,
         geoserverLayer: true,
         postgisTable: true,
@@ -209,6 +212,7 @@ export class LayerCatalogService {
         name: row.name,
         description: row.description,
         geometryType: row.geometryType,
+        routingEnabled: row.routingEnabled,
         geoserverWorkspace: row.geoserverWorkspace,
         geoserverLayer: row.geoserverLayer,
         table,

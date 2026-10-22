@@ -7,6 +7,7 @@ import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
 import { SelectModule } from 'primeng/select';
 import { MessageModule } from 'primeng/message';
+import { CheckboxModule } from 'primeng/checkbox';
 import { TagModule } from 'primeng/tag';
 import { ProgressBarModule } from 'primeng/progressbar';
 import { GisUploadsService } from '../../../../core/services/gis-uploads.service';
@@ -53,6 +54,7 @@ const ACCEPTED_EXTENSIONS = ['zip', 'geojson', 'json', 'csv'];
     TextareaModule,
     SelectModule,
     MessageModule,
+    CheckboxModule,
     TagModule,
     ProgressBarModule,
     MunicipalMapComponent,
@@ -100,6 +102,11 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
   readonly stepLabels = ['File & Layer Info', 'Validation', 'Columns', 'Preview & Submit'];
   readonly stepIndex = computed(() => STEP_ORDER.indexOf(this.step()));
 
+  /** CSV gives points; routing needs line data. */
+  get canRoute(): boolean {
+    return !this.isCsv;
+  }
+
   readonly ownershipOptions = [
     {
       value: 'DEPARTMENT' as const,
@@ -123,6 +130,7 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
     layerName: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(150)]],
     description: [''],
     ownershipType: ['DEPARTMENT' as 'CANONICAL' | 'DEPARTMENT', Validators.required],
+    routingEnabled: [false],
     departmentId: [''],
     sourceCrs: [''],
     latitudeField: [''],
@@ -285,6 +293,7 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
         layerName: value.layerName,
         description: value.description || undefined,
         ownershipType: value.ownershipType,
+        routingEnabled: value.routingEnabled,
         departmentId: value.ownershipType === 'DEPARTMENT' ? value.departmentId : undefined,
         sourceCrs: value.sourceCrs || undefined,
         latitudeField: value.latitudeField || undefined,

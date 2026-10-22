@@ -115,6 +115,19 @@
         </div>
       }
 
+      @if (canRoute) {
+        <label class="upload-wizard__routing">
+          <p-checkbox formControlName="routingEnabled" [binary]="true" inputId="wiz-routing" />
+          <span class="upload-wizard__routing-text">
+            <span class="upload-wizard__routing-title"><i class="pi pi-directions" aria-hidden="true"></i> Use as a routing layer</span>
+            <span class="upload-wizard__routing-desc">
+              This is a road / path network. Enables Routing, Nearest Facility and Service Area on it.
+              Line data only — ignored for points or polygons.
+            </span>
+          </span>
+        </label>
+      }
+
       @if (isCsv) {
         <div class="upload-wizard__csv-fields">
           <p class="upload-wizard__hint">
@@ -188,6 +201,18 @@
               <dt>Geometry</dt>
               <dd>{{ summary.geometryType || '—' }}</dd>
             </div>
+            @if (u.layer.routingEnabled) {
+              <div class="upload-wizard__summary-row">
+                <dt>Routing layer</dt>
+                <dd>
+                  @if (summary.geometryType === 'LINE') {
+                    Yes — routing is enabled once published
+                  } @else {
+                    No — routing needs line data, so it stays off
+                  }
+                </dd>
+              </div>
+            }
             <div class="upload-wizard__summary-row">
               <dt>Features</dt>
               <dd>{{ summary.featureCount }}</dd>

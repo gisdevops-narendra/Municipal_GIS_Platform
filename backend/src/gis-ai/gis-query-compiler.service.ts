@@ -816,9 +816,14 @@ export class GisQueryCompilerService {
           `"${layer.name}" is not a line layer, so it cannot be routed on.`,
         );
       }
+      if (!layer.routingEnabled) {
+        throw new PlanValidationError(
+          `"${layer.name}" is not marked as a routing layer, so it cannot be routed on.`,
+        );
+      }
       return layer;
     }
-    const lines = catalog.filter((l) => l.geometryType === 'LINE');
+    const lines = catalog.filter((l) => l.geometryType === 'LINE' && l.routingEnabled);
     if (lines.length === 1) return lines[0];
     const roads = lines.filter((l) =>
       /road|street|network|highway/i.test(`${l.name} ${l.code}`),
@@ -826,10 +831,10 @@ export class GisQueryCompilerService {
     if (roads.length >= 1) return roads[0];
     throw new PlanValidationError(
       lines.length
-        ? `Which road layer should I route on? Line layers: ${lines
+        ? `Which road layer should I route on? Routing layers: ${lines
             .map((l) => l.name)
             .join(', ')}.`
-        : 'There is no road (line) layer to route on.',
+        : 'There is no routing layer. Mark a road (line) layer as a routing layer when uploading it.',
     );
   }
 

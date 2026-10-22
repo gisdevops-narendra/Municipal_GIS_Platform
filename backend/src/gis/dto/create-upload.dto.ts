@@ -1,4 +1,6 @@
+import { Transform } from 'class-transformer';
 import {
+  IsBoolean,
   IsIn,
   IsOptional,
   IsString,
@@ -34,6 +36,14 @@ export class CreateUploadDto {
 
   @IsIn(['CANONICAL', 'DEPARTMENT'])
   ownershipType!: 'CANONICAL' | 'DEPARTMENT';
+
+  /** The uploader marks this as a routing (road network) layer. Multipart
+   *  sends text, so "true" / "false" are accepted. Ignored unless the data
+   *  turns out to be lines. */
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  routingEnabled?: boolean;
 
   /** User-confirmed source CRS — required for CSV X/Y (never assumed to
    *  be WGS84, Task 7 §7/§8), optional otherwise (falls back to whatever

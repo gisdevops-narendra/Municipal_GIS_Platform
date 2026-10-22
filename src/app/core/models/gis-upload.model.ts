@@ -41,6 +41,7 @@ export interface GisUpload {
     ownershipType: GisLayerOwnershipType;
     departmentId: string | null;
     departmentName: string | null;
+    routingEnabled?: boolean;
   };
   validation: {
     valid: boolean;
@@ -93,6 +94,8 @@ export interface CreateGisUploadRequest {
   description?: string;
   departmentId?: string;
   ownershipType: GisLayerOwnershipType;
+  /** Mark as a routing (road network) layer — applies to line data only. */
+  routingEnabled?: boolean;
   sourceCrs?: string;
   latitudeField?: string;
   longitudeField?: string;

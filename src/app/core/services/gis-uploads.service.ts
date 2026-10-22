@@ -40,6 +40,7 @@ export class GisUploadsService {
     if (request.description) formData.append('description', request.description);
     if (request.departmentId) formData.append('departmentId', request.departmentId);
     formData.append('ownershipType', request.ownershipType);
+    if (request.routingEnabled) formData.append('routingEnabled', 'true');
     if (request.sourceCrs) formData.append('sourceCrs', request.sourceCrs);
     if (request.latitudeField) formData.append('latitudeField', request.latitudeField);
     if (request.longitudeField) formData.append('longitudeField', request.longitudeField);

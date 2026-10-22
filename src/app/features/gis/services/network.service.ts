@@ -11,9 +11,38 @@ export interface MultiLineGeometry {
   coordinates: LonLat[][];
 }
 
-export interface RouteResult {
+export interface RouteStep {
+  text: string;
+  distanceM: number;
+  at: LonLat;
+  kind: 'depart' | 'turn' | 'waypoint' | 'arrive';
+}
+
+/** One way through all the stops. */
+export interface RouteOption {
   lengthM: number;
   path: MultiLineGeometry;
+  /** Consecutive stop pairs; `from` / `to` index the request's stops. */
+  legs: { from: number; to: number; lengthM: number; path: MultiLineGeometry }[];
+  directions: RouteStep[];
+}
+
+export interface RouteResult extends RouteOption {
+  /** Stop indexes in visiting order (a round trip ends with the first). */
+  order: number[];
+  /** Each stop moved onto the road it snapped to. */
+  snapped: LonLat[];
+  blockedRoads: number;
+  /** Shortest first; alternatives only for a plain two-stop route. */
+  routes: RouteOption[];
+}
+
+export interface RouteRequest {
+  stops: LonLat[];
+  optimize?: boolean;
+  roundTrip?: boolean;
+  avoidAreas?: LonLat[][];
+  avoidPoints?: LonLat[];
 }
 
 export interface FacilityResult {
@@ -48,8 +77,8 @@ export class NetworkService {
   private readonly http = inject(HttpClient);
   private readonly baseUrl = `${environment.apiUrl}/gis/network`;
 
-  route(layerId: string, from: LonLat, to: LonLat): Observable<RouteResult> {
-    return this.http.post<RouteResult>(`${this.baseUrl}/route`, { layerId, from, to });
+  route(layerId: string, request: RouteRequest): Observable<RouteResult> {
+    return this.http.post<RouteResult>(`${this.baseUrl}/route`, { layerId, ...request });
   }
 
   nearest(

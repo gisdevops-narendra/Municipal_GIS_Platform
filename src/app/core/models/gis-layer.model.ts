@@ -41,6 +41,8 @@ export interface GisLayer {
   hasCustomStyle?: boolean;
   /** Produced by Raster Analysis — listed in its own Layers-panel group. */
   rasterAnalysis?: boolean;
+  /** Marked as a routing (road network) layer at upload. */
+  routingEnabled?: boolean;
   /** EPSG:4326 (lon/lat) extent captured from GeoServer at publish time, or
    *  null if unavailable (e.g. a layer with zero features yet). */
   bbox: GisLayerBoundingBox | null;

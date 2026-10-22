@@ -635,6 +635,7 @@ export class GisLayersService {
       styleName: layer.styleName,
       hasCustomStyle: !!layer.styleName,
       rasterAnalysis: layer.rasterAnalysis,
+      routingEnabled: layer.routingEnabled,
       bbox:
         layer.bboxMinX !== null &&
         layer.bboxMinY !== null &&
@@ -659,7 +660,9 @@ export class GisLayersService {
    *  from: an uploaded layer's own `layer_<uuid>` table, or the shared
    *  `gis_demo_*` table for a canonical demo layer (with a workspace
    *  filter). */
-  private styleSource(layer: GISLayer): {
+  /** The table (and workspace scope, for shared demo tables) holding a
+   *  layer's features. */
+  styleSource(layer: GISLayer): {
     table: string | null;
     workspaceId: string | null;
   } {
@@ -806,6 +809,9 @@ export class GisLayersService {
     appUser: AppUser,
     layerId: string,
     geometryType: 'LINE' | 'POINT',
+    /** Road-network analysis (route / nearest / service area): the layer
+     *  must be a marked routing layer. */
+    options: { routing?: boolean } = {},
   ) {
     const layer = await this.findLayerInMunicipality(
       appUser.municipalityId,
@@ -814,6 +820,11 @@ export class GisLayersService {
     if (layer.geometryType !== geometryType) {
       throw new BadRequestException(
         `"${layer.name}" is not a ${geometryType.toLowerCase()} layer.`,
+      );
+    }
+    if (options.routing && !layer.routingEnabled) {
+      throw new BadRequestException(
+        `"${layer.name}" is not a routing layer. Routing works only on line layers marked as a routing (road network) layer when they were uploaded.`,
       );
     }
     return { name: layer.name, ...(await this.analyticsSource(appUser, layerId)) };

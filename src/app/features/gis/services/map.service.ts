@@ -19,6 +19,7 @@ import Draw, { createBox } from 'ol/interaction/Draw';
 import Modify from 'ol/interaction/Modify';
 import Snap from 'ol/interaction/Snap';
 import DragPan from 'ol/interaction/DragPan';
+import PointerInteraction from 'ol/interaction/Pointer';
 import KeyboardPan from 'ol/interaction/KeyboardPan';
 import Overlay from 'ol/Overlay';
 import LineString from 'ol/geom/LineString';
@@ -536,6 +537,198 @@ export class MapService {
     if (feature) {
       source.addFeature(feature);
     }
+  }
+
+  /** Network result (route / nearest facility / trace): bold blue lines
+   *  with a white casing so they stand out over any road layer, the first
+   *  point as a green start marker and the rest as red end markers.
+   *  `lines` and `points` are EPSG:4326. */
+  setAnalysisRoute(
+    lines: [number, number][][],
+    points: [number, number][],
+    /** Other routes, drawn thinner and fainter underneath in their colour. */
+    alternatives: { lines: [number, number][][]; color: string }[] = [],
+    color = '#1d4ed8'
+  ): void {
+    const source = this.ensureAnalysisSource();
+    source.clear();
+    for (const alt of alternatives) {
+      const feature = this.toMapFeature({ type: 'MultiLineString', coordinates: alt.lines });
+      if (!feature) continue;
+      feature.setStyle([
+        new Style({ stroke: new Stroke({ color: '#ffffff', width: 6, lineCap: 'round', lineJoin: 'round' }), zIndex: 0 }),
+        new Style({ stroke: new Stroke({ color: `${alt.color}b3`, width: 3.5, lineCap: 'round', lineJoin: 'round', lineDash: [8, 6] }), zIndex: 0 })
+      ]);
+      source.addFeature(feature);
+    }
+    const path = this.toMapFeature({ type: 'MultiLineString', coordinates: lines });
+    if (path) {
+      path.setStyle([
+        new Style({ stroke: new Stroke({ color: '#ffffff', width: 9, lineCap: 'round', lineJoin: 'round' }), zIndex: 1 }),
+        new Style({ stroke: new Stroke({ color, width: 5, lineCap: 'round', lineJoin: 'round' }), zIndex: 2 })
+      ]);
+      source.addFeature(path);
+    }
+    points.forEach((point, index) => {
+      const marker = this.toMapFeature({ type: 'Point', coordinates: point });
+      if (!marker) return;
+      const start = index === 0;
+      marker.setStyle(
+        new Style({
+          image: new CircleStyle({
+            radius: 9,
+            fill: new Fill({ color: start ? '#16a34a' : '#dc2626' }),
+            stroke: new Stroke({ color: '#ffffff', width: 2.5 })
+          }),
+          text: new TextStyle({
+            text: start ? 'A' : points.length === 2 ? 'B' : String(index),
+            font: '700 11px sans-serif',
+            fill: new Fill({ color: '#ffffff' })
+          }),
+          zIndex: 3
+        })
+      );
+      source.addFeature(marker);
+    });
+  }
+
+  /** Routing result: every route (the active one bold on top, the others
+   *  dashed), lettered stop markers, and avoid areas / blocked roads in
+   *  red. Stops and the active route can be dragged (see enableRouteDrag).
+   *  All coordinates EPSG:4326. */
+  setRoutingView(view: {
+    routes: { lines: [number, number][][]; color: string; active: boolean }[];
+    stops: { at: [number, number]; label: string; index: number; role: 'start' | 'via' | 'end' }[];
+    avoidAreas: [number, number][][];
+    avoidPoints: [number, number][];
+  }): void {
+    const source = this.ensureAnalysisSource();
+    source.clear();
+    const red = '#dc2626';
+    for (const ring of view.avoidAreas) {
+      const area = this.toMapFeature({ type: 'Polygon', coordinates: [ring] });
+      if (!area) continue;
+      area.setStyle(
+        new Style({
+          stroke: new Stroke({ color: red, width: 2, lineDash: [6, 4] }),
+          fill: new Fill({ color: 'rgba(220, 38, 38, 0.12)' }),
+          zIndex: 0
+        })
+      );
+      source.addFeature(area);
+    }
+    for (const route of [...view.routes].sort((a, b) => Number(a.active) - Number(b.active))) {
+      const feature = this.toMapFeature({ type: 'MultiLineString', coordinates: route.lines });
+      if (!feature) continue;
+      feature.set('routeRole', route.active ? 'route' : 'alternative');
+      feature.setStyle(
+        route.active
+          ? [
+              new Style({ stroke: new Stroke({ color: '#ffffff', width: 9, lineCap: 'round', lineJoin: 'round' }), zIndex: 2 }),
+              new Style({ stroke: new Stroke({ color: route.color, width: 5, lineCap: 'round', lineJoin: 'round' }), zIndex: 3 })
+            ]
+          : [
+              new Style({ stroke: new Stroke({ color: '#ffffff', width: 6, lineCap: 'round', lineJoin: 'round' }), zIndex: 1 }),
+              new Style({ stroke: new Stroke({ color: `${route.color}b3`, width: 3.5, lineCap: 'round', lineJoin: 'round', lineDash: [8, 6] }), zIndex: 1 })
+            ]
+      );
+      source.addFeature(feature);
+    }
+    for (const point of view.avoidPoints) {
+      const block = this.toMapFeature({ type: 'Point', coordinates: point });
+      if (!block) continue;
+      block.setStyle(
+        new Style({
+          image: new CircleStyle({ radius: 8, fill: new Fill({ color: red }), stroke: new Stroke({ color: '#fff', width: 2 }) }),
+          text: new TextStyle({ text: '✕', font: '700 10px sans-serif', fill: new Fill({ color: '#fff' }) }),
+          zIndex: 4
+        })
+      );
+      source.addFeature(block);
+    }
+    for (const stop of view.stops) {
+      const marker = this.toMapFeature({ type: 'Point', coordinates: stop.at });
+      if (!marker) continue;
+      marker.set('routeRole', 'stop');
+      marker.set('stopIndex', stop.index);
+      marker.setStyle(
+        new Style({
+          image: new CircleStyle({
+            radius: 10,
+            fill: new Fill({ color: stop.role === 'start' ? '#16a34a' : stop.role === 'end' ? '#dc2626' : '#ea580c' }),
+            stroke: new Stroke({ color: '#ffffff', width: 2.5 })
+          }),
+          text: new TextStyle({ text: stop.label, font: '700 11px sans-serif', fill: new Fill({ color: '#ffffff' }) }),
+          zIndex: 5
+        })
+      );
+      source.addFeature(marker);
+    }
+  }
+
+  private routeDrag: { interaction: PointerInteraction; moveKey: EventsKey } | null = null;
+
+  /** Lets the user drag a stop marker (moves it) or the active route
+   *  (adds a via point where it is dropped) on the routing view. `grab` /
+   *  `drop` are EPSG:4326. Returns a function that turns it off. */
+  enableRouteDrag(onDrop: (target: { stopIndex: number | null; grab: [number, number]; drop: [number, number] }) => void): () => void {
+    this.disableRouteDrag();
+    const map = this.map;
+    if (!map) return () => undefined;
+    const source = this.ensureAnalysisSource();
+    const hit = (pixel: number[]) =>
+      map.forEachFeatureAtPixel(pixel, (f) => (f.get('routeRole') === 'stop' || f.get('routeRole') === 'route' ? (f as Feature) : undefined), {
+        layerFilter: (layer) => layer === this.analysisLayer,
+        hitTolerance: 6
+      });
+    let grabbed: { stopIndex: number | null; grab: [number, number] } | null = null;
+    let ghost: Feature<Point> | null = null;
+    const interaction = new PointerInteraction({
+      handleDownEvent: (event) => {
+        if (this.drawInteraction) return false;
+        const feature = hit(event.pixel);
+        if (!feature) return false;
+        const index = feature.get('stopIndex');
+        grabbed = { stopIndex: typeof index === 'number' ? index : null, grab: toLonLat(event.coordinate) as [number, number] };
+        ghost = new Feature(new Point(event.coordinate));
+        ghost.setStyle(
+          new Style({
+            image: new CircleStyle({ radius: 8, fill: new Fill({ color: 'rgba(29, 78, 216, 0.35)' }), stroke: new Stroke({ color: '#1d4ed8', width: 2 }) }),
+            zIndex: 6
+          })
+        );
+        source.addFeature(ghost);
+        return true;
+      },
+      handleDragEvent: (event) => {
+        ghost?.getGeometry()?.setCoordinates(event.coordinate);
+      },
+      handleUpEvent: (event) => {
+        if (ghost) source.removeFeature(ghost);
+        ghost = null;
+        const target = grabbed;
+        grabbed = null;
+        if (target) onDrop({ ...target, drop: toLonLat(event.coordinate) as [number, number] });
+        return false;
+      }
+    });
+    map.addInteraction(interaction);
+    const moveKey = map.on('pointermove', (event) => {
+      if (event.dragging || this.drawInteraction) return;
+      const over = !!hit(event.pixel);
+      map.getTargetElement().style.cursor = over ? 'grab' : '';
+    });
+    this.routeDrag = { interaction, moveKey };
+    return () => this.disableRouteDrag();
+  }
+
+  disableRouteDrag(): void {
+    if (!this.routeDrag) return;
+    this.map?.removeInteraction(this.routeDrag.interaction);
+    unByKey(this.routeDrag.moveKey);
+    const target = this.map?.getTargetElement();
+    if (target) target.style.cursor = '';
+    this.routeDrag = null;
   }
 
   private previewLayer: ImageLayer<ImageStatic> | null = null;

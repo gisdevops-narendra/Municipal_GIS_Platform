@@ -18,12 +18,16 @@
       optionValue="value"
       [ngModel]="networkLayerId()"
       (ngModelChange)="networkLayerId.set($event)"
-      placeholder="Choose a line layer"
+      [placeholder]="mode() === 'trace' ? 'Choose a line layer' : 'Choose a routing layer'"
       appendTo="body"
     />
   </label>
   @if (lineLayers().length === 0) {
-    <p class="bo__hint">Upload a line layer (roads or pipelines) through GIS Data to use these tools.</p>
+    @if (mode() === 'trace') {
+      <p class="bo__hint">Upload a line layer (roads or pipelines) through GIS Data to use tracing.</p>
+    } @else {
+      <p class="bo__hint">No routing layer yet. When uploading a road (line) layer in GIS Data, tick "Use as a routing layer".</p>
+    }
   }
 
   @if (mode() === 'nearest') {
@@ -48,33 +52,83 @@
     </div>
   }
 
-  <div class="bo__section">
-    <span class="bo__section-title">{{ mode() === 'trace' ? 'Start point' : mode() === 'route' ? 'From' : 'Your location' }}</span>
-    <div class="bo__operand">
-      <span class="bo__operand-state">{{ pointLabel(from()) }}</span>
-      <div class="bo__operand-actions">
-        <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'from'" (click)="pick('from')">
-          <i class="pi pi-map-marker" aria-hidden="true"></i>Pick on map
-        </button>
-      </div>
-    </div>
-  </div>
-
   @if (mode() === 'route') {
     <div class="bo__section">
-      <span class="bo__section-title">To</span>
+      <span class="bo__section-title">Stops</span>
+      <ol class="bo__stops">
+        @for (stop of stops(); track $index; let i = $index, last = $last, first = $first) {
+          <li class="bo__stop">
+            <span class="bo__stop-badge" [class.bo__stop-badge--start]="first" [class.bo__stop-badge--end]="last && !roundTrip()">{{ stopLabel(i) }}</span>
+            <button type="button" class="bo__stop-pick" [class.bo__chip--busy]="isPickingStop(i)" (click)="pick(i)"
+              [title]="stop ? 'Pick again on the map' : 'Pick on the map'">
+              @if (stop) {
+                {{ pointLabel(stop) }}
+              } @else {
+                <i class="pi pi-map-marker" aria-hidden="true"></i>{{ first ? 'Pick start' : last ? 'Pick destination' : 'Pick stop' }}
+              }
+            </button>
+            <span class="bo__stop-actions">
+              <button type="button" class="bo__icon-btn" [disabled]="first" (click)="moveStop(i, -1)" [attr.aria-label]="'Move stop ' + stopLabel(i) + ' up'"><i class="pi pi-arrow-up"></i></button>
+              <button type="button" class="bo__icon-btn" [disabled]="last" (click)="moveStop(i, 1)" [attr.aria-label]="'Move stop ' + stopLabel(i) + ' down'"><i class="pi pi-arrow-down"></i></button>
+              <button type="button" class="bo__icon-btn" (click)="removeStop(i)" [attr.aria-label]="'Remove stop ' + stopLabel(i)"><i class="pi pi-times"></i></button>
+            </span>
+          </li>
+        }
+      </ol>
+      <div class="bo__operand-actions">
+        <button type="button" class="bo__chip" [disabled]="stops().length >= maxStops" (click)="addStop()">
+          <i class="pi pi-plus" aria-hidden="true"></i>Add stop
+        </button>
+        <button type="button" class="bo__chip" [disabled]="stops().length < 2" (click)="reverseStops()">
+          <i class="pi pi-sort-alt" aria-hidden="true"></i>Reverse
+        </button>
+      </div>
+      <label class="bo__toggle">
+        <input type="checkbox" [ngModel]="roundTrip()" (ngModelChange)="setRoundTrip($event)" />
+        <span>Return to the start (round trip)</span>
+      </label>
+      <label class="bo__toggle" [class.bo__toggle--disabled]="!canOptimize()">
+        <input type="checkbox" [ngModel]="optimize()" (ngModelChange)="setOptimize($event)" [disabled]="!canOptimize()" />
+        <span>Optimise stop order (start{{ roundTrip() ? '' : ' and destination' }} stay fixed)</span>
+      </label>
+    </div>
+
+    <div class="bo__section">
+      <span class="bo__section-title">Avoid</span>
+      <div class="bo__operand-actions">
+        <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'avoidArea'" (click)="pick('avoidArea')">
+          <i class="pi pi-ban" aria-hidden="true"></i>Draw area
+        </button>
+        <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'avoidRoad'" (click)="pick('avoidRoad')">
+          <i class="pi pi-times-circle" aria-hidden="true"></i>Block a road
+        </button>
+        @if (avoidAreas().length || avoidPoints().length) {
+          <button type="button" class="bo__chip" (click)="clearAvoid()">
+            <i class="pi pi-eraser" aria-hidden="true"></i>Clear ({{ avoidAreas().length + avoidPoints().length }})
+          </button>
+        }
+      </div>
+      @if (picking() === 'avoidArea') {
+        <p class="bo__hint">Click the corners of the area; double-click to finish.</p>
+      } @else if (picking() === 'avoidRoad') {
+        <p class="bo__hint">Click on the road stretch to keep off.</p>
+      }
+    </div>
+  } @else {
+    <div class="bo__section">
+      <span class="bo__section-title">{{ mode() === 'trace' ? 'Start point' : 'Your location' }}</span>
       <div class="bo__operand">
-        <span class="bo__operand-state">{{ pointLabel(to()) }}</span>
+        <span class="bo__operand-state">{{ pointLabel(from()) }}</span>
         <div class="bo__operand-actions">
-          <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'to'" (click)="pick('to')">
-            <i class="pi pi-flag" aria-hidden="true"></i>Pick on map
+          <button type="button" class="bo__chip" [class.bo__chip--busy]="picking() === 'from'" (click)="pick('from')">
+            <i class="pi pi-map-marker" aria-hidden="true"></i>Pick on map
           </button>
         </div>
       </div>
     </div>
   }
 
-  @if (picking()) {
+  @if (picking() !== null) {
     <button type="button" class="bo__cancel" (click)="cancelPick()">Cancel picking</button>
   }
 
@@ -119,6 +173,45 @@
           </li>
         }
       </ul>
+    }
+    @if (routes().length > 1) {
+      <ul class="bo__rings" aria-label="Routes">
+        @for (r of routes(); track $index) {
+          <li>
+            <button
+              type="button"
+              class="bo__route"
+              [class.bo__route--active]="$index === activeRoute()"
+              [attr.aria-pressed]="$index === activeRoute()"
+              (click)="selectRoute($index)"
+            >
+              <span class="bo__ring-swatch" [style.background]="r.color"></span>
+              <span class="bo__ring-label">{{ $index === 0 ? 'Shortest' : 'Alternative ' + $index }}</span>
+              <span class="bo__ring-count">{{ r.length }}</span>
+            </button>
+          </li>
+        }
+      </ul>
+    }
+    @if (mode() === 'route' && routes().length) {
+      <p class="bo__hint">Drag a stop to move it, or drag the route to add a stop there.</p>
+      <details class="bo__directions" open>
+        <summary>Directions ({{ activeDirections().length }} steps)</summary>
+        <ol>
+          @for (step of activeDirections(); track $index) {
+            <li class="bo__direction" [class.bo__direction--stop]="step.kind === 'waypoint' || step.kind === 'arrive'">
+              <span>{{ step.text }}</span>
+              <span class="bo__ring-count">{{ formatDistance(step.distanceM) }}</span>
+            </li>
+          }
+        </ol>
+      </details>
+      <div class="bo__operand-actions">
+        <span class="bo__label">Export</span>
+        <button type="button" class="bo__chip" (click)="exportRoute('gpx')">GPX</button>
+        <button type="button" class="bo__chip" (click)="exportRoute('kml')">KML</button>
+        <button type="button" class="bo__chip" (click)="exportRoute('geojson')">GeoJSON</button>
+      </div>
     }
     @if (facilities().length > 0) {
       <ul class="bo__rings" aria-label="Nearest facilities">

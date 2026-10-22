@@ -254,6 +254,10 @@ model GISLayer {
   /// Produced by Raster Analysis (uploaded / downloaded rasters and every
   /// tool output) — the Layers panel lists these in their own group.
   rasterAnalysis Boolean               @default(false) @map("raster_analysis")
+  /// Usable as a road network for Routing / Nearest Facility / Service
+  /// Area (and its network is pre-built). Only ever set when the uploader
+  /// explicitly marked a LINE layer as a routing layer; off otherwise.
+  routingEnabled Boolean               @default(false) @map("routing_enabled")
   /// Attribute domains / validation enforced by the Edit panel:
   /// `{ [field]: { required?, values?: string[], min?, max? } }`.
   fieldRules     Json?                 @map("field_rules")
@@ -345,6 +349,9 @@ model GISLayerUpload {
   /// GISLayer.code in the same workspace, a successful publish replaces
   /// that layer's data (a new version) rather than creating a duplicate.
   layerCode     String                @map("layer_code")
+  /// The uploader marked this as a routing (road network) layer — carried
+  /// to GISLayer.routingEnabled on publish if the data is LINE geometry.
+  routingEnabled Boolean @default(false) @map("routing_enabled")
   description   String?
   departmentId  String?               @map("department_id")
   ownershipType GisLayerOwnershipType @default(DEPARTMENT) @map("ownership_type")

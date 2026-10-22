@@ -2,33 +2,92 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsInt,
   IsNumber,
   IsOptional,
   IsUUID,
   Max,
   Min,
+  ValidateBy,
+  type ValidationOptions,
 } from 'class-validator';
+
+/** `[longitude, latitude]` with both numbers in range. */
+function IsLonLat(options?: ValidationOptions) {
+  return ValidateBy(
+    {
+      name: 'isLonLat',
+      validator: {
+        validate: (p: unknown) =>
+          Array.isArray(p) &&
+          p.length === 2 &&
+          typeof p[0] === 'number' &&
+          typeof p[1] === 'number' &&
+          Math.abs(p[0]) <= 180 &&
+          Math.abs(p[1]) <= 90,
+        defaultMessage: () => 'each point must be [longitude, latitude]',
+      },
+    },
+    options,
+  );
+}
 
 /** A clicked map position, `[longitude, latitude]` in EPSG:4326. */
 type LonLat = [number, number];
 
-/** POST /api/gis/network/route — shortest path along a LINE layer. */
+/** POST /api/gis/network/route — route along a routing (LINE) layer:
+ *  `from` + `to`, or 2–25 `stops` in visiting order. */
 export class RouteDto {
   @IsUUID()
   layerId!: string;
 
+  @IsOptional()
   @IsArray()
   @ArrayMinSize(2)
   @ArrayMaxSize(2)
   @IsNumber({}, { each: true })
-  from!: LonLat;
+  from?: LonLat;
 
+  @IsOptional()
   @IsArray()
   @ArrayMinSize(2)
   @ArrayMaxSize(2)
   @IsNumber({}, { each: true })
-  to!: LonLat;
+  to?: LonLat;
+
+  /** Stops in order (overrides from / to). Each is [lon, lat]. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(25)
+  @IsLonLat({ each: true })
+  stops?: LonLat[];
+
+  /** Reorder the middle stops for the shortest trip. */
+  @IsOptional()
+  @IsBoolean()
+  optimize?: boolean;
+
+  /** Return to the first stop at the end. */
+  @IsOptional()
+  @IsBoolean()
+  roundTrip?: boolean;
+
+  /** Areas to keep out of: closed rings of [lon, lat]. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsArray({ each: true })
+  @ArrayMaxSize(500, { each: true })
+  avoidAreas?: LonLat[][];
+
+  /** Roads to keep off: each point blocks the road stretch nearest it. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsLonLat({ each: true })
+  avoidPoints?: LonLat[];
 }
 
 /** POST /api/gis/network/nearest — closest facilities by network distance. */
