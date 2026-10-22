@@ -222,3 +222,16 @@ export class GisFeedbackDto {
   @IsBoolean()
   helpful!: boolean;
 }
+
+/** `POST /gis/ai/icon-terms` — icon search words for a layer's markers. */
+export class GisIconTermsDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  name!: string;
+
+  /** A published layer: its description and field values give context. */
+  @IsOptional()
+  @IsUUID()
+  layerId?: string;
+}

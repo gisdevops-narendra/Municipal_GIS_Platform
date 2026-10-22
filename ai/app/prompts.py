@@ -319,6 +319,36 @@ def build_user_message(
 # Narration: verified facts -> 1-3 plain sentences. The facts are computed
 # by the backend; the model only rephrases them.
 
+ICON_TERMS_SYSTEM = (
+    "You pick search words for a map-marker icon library (Google Material Symbols, Font Awesome, "
+    "Mapbox Maki, Health Icons). Given a GIS layer of a municipality, reply with JSON "
+    '{"terms": [...]}: 4 to 6 short English search words for an icon that shows what ONE feature '
+    "of the layer is, most fitting first. Each term is 1 or 2 common icon words, lowercase and "
+    "singular, the way icon names are written: e.g. 'traffic light', 'manhole', 'tree', "
+    "'water pump', 'hospital', 'bus stop', 'fire hydrant', 'lamp', 'trash', 'school', 'valve'. "
+    "First work out the real-world object one feature is (use the field values), then name it "
+    "with everyday icon words. Prefer words that map-icon libraries actually have, such as "
+    "manhole, valve, pipe, faucet, pump, hydrant, lamp, traffic light, bench, trash, toilet, "
+    "tree, park, school, hospital, clinic, temple, church, mosque, bus stop, parking, fuel, "
+    "bridge, tower, antenna, camera, well, water, fire station, police, bank, shop, market. "
+    "Layer names may be abbreviated, snake_case, or Marathi / Hindi / "
+    "Gujarati words written in Latin or native script: translate them to English first. Never "
+    "return words like layer, location, point, data or survey."
+)
+
+
+def build_icon_terms_message(name: str, description: Optional[str], geometry: Optional[str], fields: list) -> str:
+    lines = [f"Layer name: {name}"]
+    if description:
+        lines.append(f"Description: {description}")
+    if geometry:
+        lines.append(f"Geometry: {geometry}")
+    for f in fields:
+        samples = ", ".join(v for v in f.sample_values if v and v != "…(more)")[:200]
+        lines.append(f"Field {f.name}" + (f": {samples}" if samples else ""))
+    return "\n".join(lines)
+
+
 NARRATE_SYSTEM = """You write a short answer for a municipal officer from VERIFIED FACTS.
 Rules:
 - 1 to 3 plain sentences, no markdown, no lists, no headings.

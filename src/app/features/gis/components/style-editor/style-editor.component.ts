@@ -12,7 +12,7 @@ import {
 import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Subject, debounceTime } from 'rxjs';
+import { Subject, debounceTime, firstValueFrom } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ButtonModule } from 'primeng/button';
 import { SelectModule } from 'primeng/select';
@@ -42,6 +42,7 @@ import {
   sampleRamp,
 } from '../../../../core/models/layer-style.model';
 import { LayerStyleService } from '../../../../core/services/layer-style.service';
+import { GisAiService } from '../../services/gis-ai.service';
 import { NotificationService } from '../../../../core/services/notification.service';
 
 /** Public icon search + SVG API (CORS-enabled), covering Google's and
@@ -115,6 +116,35 @@ const ONLINE_ICON_GROUPS: { label: string; items: OnlineIconLibrary[] }[] = [
 
 const ONLINE_ICON_LIBRARIES = ONLINE_ICON_GROUPS.flatMap((g) => g.items);
 
+/** Fallback icon search words from a layer name alone (used when the AI
+ *  model is not available): the whole name, word pairs, then single words,
+ *  last word first. Plurals become singular and "-ing" words their base
+ *  ("pumping" -> "pump"), as icon names are written. No word lists — what
+ *  a layer *is* comes from the AI suggestion. */
+function layerSearchTerms(name: string): string[] {
+  const words = name
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z]+/)
+    .filter((w) => w.length >= 3)
+    .map((w) =>
+      w.endsWith('ies')
+        ? `${w.slice(0, -3)}y`
+        : /(ches|shes|xes|sses)$/.test(w)
+          ? w.slice(0, -2)
+          : w.length > 3 && w.endsWith('s') && !w.endsWith('ss')
+            ? w.slice(0, -1)
+            : w.length > 5 && w.endsWith('ing')
+              ? w.slice(0, -3)
+              : w,
+    );
+  const terms: string[] = [];
+  if (words.length > 1) terms.push(words.join(' '));
+  for (let i = 0; i < words.length - 1; i++) terms.push(`${words[i]} ${words[i + 1]}`);
+  terms.push(...[...words].reverse());
+  return [...new Set(terms)].slice(0, 6);
+}
+
 /** Picker options: every library at once first, then the groups. */
 const ONLINE_ICON_SOURCES: { label: string; items: OnlineIconLibrary[] }[] = [
   {
@@ -159,6 +189,7 @@ const ZOOM_TO_DENOM = (z: number): number => 559082264.028 / Math.pow(2, z);
 })
 export class StyleEditorComponent implements OnInit, OnDestroy {
   private readonly styleService = inject(LayerStyleService);
+  private readonly aiService = inject(GisAiService);
   private readonly notify = inject(NotificationService);
 
   @Input({ required: true }) target!: StyleTargetRef;
@@ -200,6 +231,12 @@ export class StyleEditorComponent implements OnInit, OnDestroy {
   readonly onlineQuery = signal('');
   readonly onlineResults = signal<string[]>([]);
   readonly onlineLoading = signal(false);
+  /** AI icon suggestions: search words that find icons, with those icons. */
+  readonly suggestions = signal<{ term: string; icons: string[] }[]>([]);
+  readonly activeSuggestion = signal<string | null>(null);
+  readonly suggesting = signal(false);
+  readonly suggestNote = signal<string | null>(null);
+  private suggestRun = 0;
   readonly onlineError = signal<string | null>(null);
   /** Colour the online icon is downloaded in (it is stored as-is). */
   readonly onlineColor = signal('#c62828');
@@ -395,12 +432,93 @@ export class StyleEditorComponent implements OnInit, OnDestroy {
 
   setOnlineQuery(query: string): void {
     this.onlineQuery.set(query);
+    this.activeSuggestion.set(null);
+    // A suggestion still loading must not replace what the user typed.
+    this.suggestRun++;
+    this.suggesting.set(false);
     this.onlineSearch$.next();
+  }
+
+  /** Online tab: the first time, suggest icons for this layer. */
+  openOnlineTab(): void {
+    this.iconTab.set('online');
+    if (!this.onlineQuery().trim() && !this.suggestions().length && this.layerName.trim()) void this.suggestIcons();
+  }
+
+  /** "AI suggest": the local AI model reads the layer (name, description,
+   *  field values) and proposes icon search words; each is checked against
+   *  the icon libraries and the ones that find icons become chips, the
+   *  first one opened. Without the model, words from the layer name. */
+  async suggestIcons(): Promise<void> {
+    const name = this.layerName.trim();
+    if (!name || this.suggesting()) return;
+    const run = ++this.suggestRun;
+    this.suggesting.set(true);
+    this.onlineError.set(null);
+    this.suggestNote.set(null);
+    try {
+      let terms: string[] = [];
+      let fromAi = true;
+      try {
+        const layerId = this.target.kind === 'layer' ? this.target.id : undefined;
+        terms = (await firstValueFrom(this.aiService.iconTerms(name, layerId))).terms;
+      } catch {
+        terms = [];
+      }
+      if (!terms.length) {
+        fromAi = false;
+        terms = layerSearchTerms(name);
+      }
+      const source = this.onlineSource();
+      const withIcons = async (words: string[]) =>
+        (
+          await Promise.all(
+            words.map(async (term) => {
+              const res = await fetch(`${ICONIFY_API}/search?query=${encodeURIComponent(term)}&prefixes=${source}&limit=96`);
+              if (!res.ok) throw new Error(String(res.status));
+              const body: { icons?: string[] } = await res.json();
+              return { term, icons: body.icons ?? [] };
+            }),
+          )
+        ).filter((f) => f.icons.length);
+      let chips = await withIcons(terms);
+      // None of the AI's words is in the libraries: try the name's own words.
+      if (!chips.length && fromAi) chips = await withIcons(layerSearchTerms(name).filter((t) => !terms.includes(t)));
+      // The user typed, switched library or asked again meanwhile.
+      if (run !== this.suggestRun || source !== this.onlineSource()) return;
+      this.suggestions.set(chips);
+      if (!fromAi) this.suggestNote.set('AI is not available right now — suggestions are from the layer name.');
+      if (chips.length) {
+        this.useSuggestion(chips[0].term);
+      } else {
+        this.suggestNote.set(`No icons found for “${name}”. Type a word to search.`);
+      }
+    } catch {
+      if (run === this.suggestRun) this.onlineError.set('Could not reach the online icon library. Check the internet connection.');
+    } finally {
+      if (run === this.suggestRun) this.suggesting.set(false);
+    }
+  }
+
+  /** A suggestion chip: show its icons (already fetched). */
+  useSuggestion(term: string): void {
+    const chip = this.suggestions().find((s) => s.term === term);
+    if (!chip) return;
+    this.activeSuggestion.set(term);
+    this.onlineQuery.set(term);
+    this.onlineResults.set(chip.icons);
   }
 
   setOnlineSource(prefixes: string): void {
     this.onlineSource.set(prefixes);
-    this.onlineSearch$.next();
+    // Suggestions are re-checked in the new library (counts differ);
+    // a typed search just re-runs.
+    if (this.suggestions().length && this.activeSuggestion()) {
+      this.suggestions.set([]);
+      void this.suggestIcons();
+    } else {
+      this.onlineSearch$.next();
+    }
   }
 
   private runOnlineSearch(): void {

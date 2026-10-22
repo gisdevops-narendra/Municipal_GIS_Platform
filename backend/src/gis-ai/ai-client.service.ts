@@ -47,6 +47,14 @@ export interface AiNarrateRequest {
   language?: 'en' | 'mr' | 'hi';
 }
 
+/** A layer to suggest map-marker icon search words for. */
+export interface AiIconTermsRequest {
+  name: string;
+  description?: string | null;
+  geometry_type?: string | null;
+  fields?: { name: string; sample_values: string[] }[];
+}
+
 export interface AiNarrateResult {
   text: string;
   /** False when the model's text was rejected (it introduced a number not
@@ -100,6 +108,12 @@ export class AiClientService {
   async narrate(body: AiNarrateRequest, timeoutMs = 150000): Promise<AiNarrateResult> {
     const raw = await this.request('POST', '/narrate', body, timeoutMs);
     return raw as unknown as AiNarrateResult;
+  }
+
+  /** English icon-library search words for a layer, most fitting first. */
+  async iconTerms(body: AiIconTermsRequest, timeoutMs = 60000): Promise<string[]> {
+    const raw = (await this.request('POST', '/icon-terms', body, timeoutMs)) as unknown as { terms?: string[] };
+    return Array.isArray(raw?.terms) ? raw.terms : [];
   }
 
   /** Semantic layer search over this municipality's RAG layer/field docs.

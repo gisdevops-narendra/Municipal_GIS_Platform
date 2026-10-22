@@ -30,6 +30,7 @@ import type {
   GisExportDto,
   GisNarrateDto,
   GisPinDto,
+  GisIconTermsDto,
   GisSaveLayerDto,
 } from './dto/chat.dto';
 
@@ -182,6 +183,8 @@ const HAVING_WORD: Record<string, string> = {
 @Injectable()
 export class GisAiService {
   private readonly logger = new Logger(GisAiService.name);
+
+  private readonly iconTermsCache = new Map<string, string[]>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -725,6 +728,36 @@ export class GisAiService {
     if (measure && kind === 'select' && !op.order_by) out.push(`Top 5 ${name} by ${measure.name}`);
     const asked = question.trim().toLowerCase();
     return [...new Set(out)].filter((q) => q.toLowerCase() !== asked).slice(0, 3);
+  }
+
+  /** Icon search words for a layer's point markers (Layer Style → Icon →
+   *  AI). The layer's description and category values tell the model what
+   *  one feature is ("signal" + "Fixed time" = a traffic light). Cached per
+   *  layer: the answer only changes with the layer. */
+  async iconTerms(appUser: AppUser, dto: GisIconTermsDto): Promise<{ terms: string[] }> {
+    const key = `${appUser.municipalityId}:${dto.layerId ?? ''}:${dto.name.trim().toLowerCase()}`;
+    const cached = this.iconTermsCache.get(key);
+    if (cached) return { terms: cached };
+    let description: string | null = null;
+    let geometry: string | null = null;
+    let fields: { name: string; sample_values: string[] }[] = [];
+    if (dto.layerId) {
+      const entry = (await this.catalog.buildForUser(appUser)).find((e) => e.layerId === dto.layerId);
+      if (entry) {
+        description = entry.description;
+        geometry = entry.geometryType;
+        fields = entry.columns
+          .filter((c) => c.kind === 'text' && c.sampleValues.length && !['id', 'hidden', 'free_text'].includes(c.role ?? ''))
+          .slice(0, 4)
+          .map((c) => ({ name: c.name, sample_values: c.sampleValues.slice(0, 6) }));
+      }
+    }
+    const terms = await this.ai.iconTerms({ name: dto.name, description, geometry_type: geometry, fields });
+    if (terms.length) {
+      if (this.iconTermsCache.size > 500) this.iconTermsCache.clear();
+      this.iconTermsCache.set(key, terms);
+    }
+    return { terms };
   }
 
   /** The features an answer matched, as CSV or GeoJSON. */

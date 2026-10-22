@@ -47,7 +47,7 @@
           @if (iconGalleryOpen()) {
             <div class="se__icon-tabs" role="tablist">
               <button type="button" role="tab" class="se__seg-btn" [class.is-active]="iconTab() === 'builtin'" [attr.aria-selected]="iconTab() === 'builtin'" (click)="iconTab.set('builtin')">Built-in</button>
-              <button type="button" role="tab" class="se__seg-btn" [class.is-active]="iconTab() === 'online'" [attr.aria-selected]="iconTab() === 'online'" (click)="iconTab.set('online')">
+              <button type="button" role="tab" class="se__seg-btn" [class.is-active]="iconTab() === 'online'" [attr.aria-selected]="iconTab() === 'online'" (click)="openOnlineTab()">
                 <i class="pi pi-globe" aria-hidden="true"></i> Online
               </button>
             </div>
@@ -107,9 +107,44 @@
                       <input type="color" [ngModel]="onlineColor()" (ngModelChange)="onlineColor.set($event)" aria-label="Icon colour" />
                     </label>
                   }
+                  @if (layerName) {
+                    <button
+                      type="button"
+                      class="se__ai-btn"
+                      [disabled]="suggesting()"
+                      [title]="'Suggest icons for “' + layerName + '” with AI'"
+                      (click)="suggestIcons()"
+                    >
+                      <i class="pi" [class.pi-sparkles]="!suggesting()" [class.pi-spin]="suggesting()" [class.pi-spinner]="suggesting()" aria-hidden="true"></i>
+                      AI
+                    </button>
+                  }
                 </div>
 
-                @if (onlineLoading()) {
+                @if (suggesting()) {
+                  <p class="se__hint"><i class="pi pi-sparkles" aria-hidden="true"></i> Finding icons that fit “{{ layerName }}”…</p>
+                } @else if (suggestions().length) {
+                  <div class="se__suggest" aria-label="AI suggestions">
+                    <span class="se__suggest-label"><i class="pi pi-sparkles" aria-hidden="true"></i> Suggested</span>
+                    @for (chip of suggestions(); track chip.term) {
+                      <button
+                        type="button"
+                        class="se__suggest-chip"
+                        [class.is-active]="activeSuggestion() === chip.term"
+                        [attr.aria-pressed]="activeSuggestion() === chip.term"
+                        (click)="useSuggestion(chip.term)"
+                      >
+                        {{ chip.term }} <span>{{ chip.icons.length >= 96 ? '96+' : chip.icons.length }}</span>
+                      </button>
+                    }
+                  </div>
+                }
+                @if (suggestNote() && !suggesting()) {
+                  <p class="se__hint">{{ suggestNote() }}</p>
+                }
+
+                @if (suggesting()) {
+                } @else if (onlineLoading()) {
                   <p class="se__hint"><i class="pi pi-spin pi-spinner" aria-hidden="true"></i> Searching…</p>
                 } @else if (onlineError()) {
                   <p class="se__hint se__hint--error">{{ onlineError() }}</p>

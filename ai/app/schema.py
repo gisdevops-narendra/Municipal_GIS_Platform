@@ -177,6 +177,32 @@ class ReindexRequest(BaseModel):
     municipality_id: str
 
 
+class IconTermsField(BaseModel):
+    name: str = Field(max_length=120)
+    sample_values: List[str] = Field(default_factory=list, max_length=8)
+
+
+class IconTermsRequest(BaseModel):
+    """A layer to find a map-marker icon for: its name and what it holds."""
+
+    name: str = Field(min_length=1, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=1000)
+    geometry_type: Optional[str] = None
+    fields: List[IconTermsField] = Field(default_factory=list, max_length=8)
+
+
+class IconTermsResult(BaseModel):
+    # English icon-library search words, most specific first.
+    terms: List[str]
+
+
+ICON_TERMS_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {"terms": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 6}},
+    "required": ["terms"],
+}
+
+
 class NarrateRequest(BaseModel):
     """Verified facts (computed by the backend, never by the LLM) to be
     rewritten as a short plain-language answer."""

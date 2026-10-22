@@ -34,6 +34,8 @@ from .fastpath import fast_plan
 from .guide import annotate, apply_instructions, converse, field_confidence, parse_instruction, is_small_talk, preflight, remember_near, suggestions
 from .repair import carry_over, is_follow_up, repair_plan
 from .schema import (
+    IconTermsRequest,
+    IconTermsResult,
     NarrateRequest,
     NarrateResult,
     PlanRequest,
@@ -254,6 +256,19 @@ async def warm(body: PlanRequest) -> dict:
     """Pre-loads this municipality's plan prompt into the model cache."""
     await asyncio.to_thread(llm.prime_plan_cache, body.layers, body.municipality_name)
     return {"ok": True}
+
+
+@app.post("/icon-terms", response_model=IconTermsResult)
+async def icon_terms(body: IconTermsRequest) -> IconTermsResult:
+    """Icon search words for a layer (Layer Style → Point → Icon → AI)."""
+    try:
+        terms = await asyncio.to_thread(llm.icon_terms, body)
+    except llm.LLMUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        log.exception("icon terms failed")
+        raise HTTPException(status_code=502, detail=f"Local LLM error: {exc}")
+    return IconTermsResult(terms=terms)
 
 
 @app.post("/narrate", response_model=NarrateResult)

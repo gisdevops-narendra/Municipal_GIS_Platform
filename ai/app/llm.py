@@ -18,7 +18,7 @@ import httpx
 
 from . import config, prompts
 from .repair import mentioned_layer_codes
-from .schema import ChatTurn, GisOperation, LayerInfo, PLAN_JSON_SCHEMA, PlanResult
+from .schema import ChatTurn, GisOperation, ICON_TERMS_JSON_SCHEMA, IconTermsRequest, LayerInfo, PLAN_JSON_SCHEMA, PlanResult
 from .vectorstore import Retrieved
 
 log = logging.getLogger("gis-ai.llm")
@@ -390,6 +390,44 @@ def _grounded(text: str, allowed: List[float], headline: Optional[float] = None)
 
 
 _LANGUAGE_NAMES = {"mr": "Marathi", "hi": "Hindi"}
+
+
+# Words that never pick an icon, whatever the model says.
+_ICON_NOISE = {"layer", "location", "point", "data", "survey", "map", "gis", "feature", "icon", "marker"}
+
+
+def icon_terms(req: IconTermsRequest) -> List[str]:
+    """English icon-library search words for a layer, most fitting first."""
+    if not available():
+        raise LLMUnavailable(f"The local model '{config.LLM_MODEL}' is not ready yet.")
+    payload = {
+        "model": config.LLM_MODEL,
+        "messages": [
+            {"role": "system", "content": prompts.ICON_TERMS_SYSTEM},
+            {"role": "user", "content": prompts.build_icon_terms_message(
+                req.name, req.description, req.geometry_type, req.fields)},
+        ],
+        "stream": False,
+        "keep_alive": -1,
+        "format": ICON_TERMS_JSON_SCHEMA,
+        "options": {"temperature": 0, "num_ctx": 2048, "num_predict": 120},
+    }
+    try:
+        resp = _http().post("/api/chat", json=payload)
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise LLMUnavailable(f"Local LLM request failed: {exc}") from exc
+    data = _parse_json(((resp.json().get("message") or {}).get("content") or "")) or {}
+    out: List[str] = []
+    for term in data.get("terms") or []:
+        if not isinstance(term, str):
+            continue
+        # icon names are plain lowercase words: "Traffic-Light!" -> "traffic light"
+        words = [w for w in re.split(r"[^a-z]+", term.lower()) if w and w not in _ICON_NOISE]
+        clean = " ".join(words[:2])
+        if len(clean) >= 3 and clean not in out:
+            out.append(clean)
+    return out[:6]
 
 
 def narrate(kind: str, question: str, facts: dict, language: Optional[str] = None) -> Tuple[str, bool]:

@@ -14,6 +14,7 @@ import {
   GisExplainDto,
   GisExportDto,
   GisFeedbackDto,
+  GisIconTermsDto,
   GisNarrateDto,
   GisPinDto,
   GisSaveLayerDto,
@@ -171,6 +172,13 @@ export class GisAiController {
   @Post('narrate')
   narrate(@CurrentAppUser() appUser: AppUser, @Body() dto: GisNarrateDto) {
     return this.gisAi.narrate(appUser, dto);
+  }
+
+  /** Icon search words for a layer's markers (Layer Style, any member). */
+  @RequireMunicipalityMember()
+  @Post('icon-terms')
+  iconTerms(@CurrentAppUser() appUser: AppUser, @Body() dto: GisIconTermsDto) {
+    return this.gisAi.iconTerms(appUser, dto);
   }
 
   /** Plain-language explanation of a raster analysis result (any member). */

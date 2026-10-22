@@ -74,7 +74,13 @@ export class GisAiService {
     return this.http.delete<{ deleted: number }>(`${this.baseUrl}/conversations`);
   }
 
+  /** Icon search words for a layer's point markers (local AI model). */
+  iconTerms(name: string, layerId?: string): Observable<{ terms: string[] }> {
+    return this.http.post<{ terms: string[] }>(`${this.baseUrl}/icon-terms`, { name, layerId });
+  }
+
   /** Plain-language explanation of a Raster Analysis result. */
+
   explain(
     title: string,
     facts: { label: string; value: string }[],
