@@ -45,26 +45,106 @@
           }
 
           @if (iconGalleryOpen()) {
-            <div class="se__icon-gallery">
-              @for (icon of builtinIcons(); track icon.id) {
-                <button
-                  type="button"
-                  class="se__icon-cell"
-                  [class.is-active]="s.symbol.icon?.source === 'builtin' && s.symbol.icon?.name === icon.id"
-                  [title]="icon.label"
-                  (click)="selectBuiltinIcon(icon)"
-                >
-                  <img [src]="builtinIconUrl(icon.id)" [alt]="icon.label" />
-                </button>
-              }
+            <div class="se__icon-tabs" role="tablist">
+              <button type="button" role="tab" class="se__seg-btn" [class.is-active]="iconTab() === 'builtin'" [attr.aria-selected]="iconTab() === 'builtin'" (click)="iconTab.set('builtin')">Built-in</button>
+              <button type="button" role="tab" class="se__seg-btn" [class.is-active]="iconTab() === 'online'" [attr.aria-selected]="iconTab() === 'online'" (click)="iconTab.set('online')">
+                <i class="pi pi-globe" aria-hidden="true"></i> Online
+              </button>
             </div>
-            <label class="se__icon-upload">
-              <input type="file" accept=".svg,.png,image/svg+xml,image/png" (change)="onIconFile(iconInput)" hidden #iconInput />
-              <button pButton type="button" label="Upload SVG / PNG" icon="pi pi-upload"
-                class="p-button-sm p-button-outlined" [loading]="iconUploading()" (click)="iconInput.click()"></button>
-              <span class="se__hint">SVG or PNG, 512 KB max. Icons are rendered as-is (their own colours).</span>
-            </label>
-            <p class="se__hint">Built-in markers are public-domain (CC0) — attribution not required.</p>
+
+            @if (iconTab() === 'builtin') {
+              <div class="se__icon-gallery">
+                @for (icon of builtinIcons(); track icon.id) {
+                  <button
+                    type="button"
+                    class="se__icon-cell"
+                    [class.is-active]="s.symbol.icon?.source === 'builtin' && s.symbol.icon?.name === icon.id"
+                    [title]="icon.label"
+                    (click)="selectBuiltinIcon(icon)"
+                  >
+                    <img [src]="builtinIconUrl(icon.id)" [alt]="icon.label" />
+                  </button>
+                }
+              </div>
+              <label class="se__icon-upload">
+                <input type="file" accept=".svg,.png,image/svg+xml,image/png" (change)="onIconFile(iconInput)" hidden #iconInput />
+                <button pButton type="button" label="Upload SVG / PNG" icon="pi pi-upload"
+                  class="p-button-sm p-button-outlined" [loading]="iconUploading()" (click)="iconInput.click()"></button>
+                <span class="se__hint">SVG or PNG, 512 KB max. Icons are rendered as-is (their own colours).</span>
+              </label>
+              <p class="se__hint">Built-in markers are public-domain (CC0) — attribution not required.</p>
+            } @else {
+              <div class="se__online">
+                <p-select
+                  [options]="onlineSources"
+                  [group]="true"
+                  optionGroupLabel="label"
+                  optionGroupChildren="items"
+                  optionLabel="label"
+                  optionValue="value"
+                  [filter]="true"
+                  filterBy="label"
+                  [ngModel]="onlineSource()"
+                  (ngModelChange)="setOnlineSource($event)"
+                  appendTo="body"
+                  styleClass="w-full"
+                  ariaLabel="Icon library"
+                />
+                <div class="se__online-row">
+                  <span class="se__online-search">
+                    <i class="pi pi-search" aria-hidden="true"></i>
+                    <input
+                      pInputText
+                      type="search"
+                      placeholder="Search icons, e.g. hospital, school, tree"
+                      [ngModel]="onlineQuery()"
+                      (ngModelChange)="setOnlineQuery($event)"
+                      aria-label="Search online icons"
+                    />
+                  </span>
+                  @if (!onlineLibrary()?.multicolor) {
+                    <label class="se__online-color" title="Icon colour (colour emoji keep their own)">
+                      <input type="color" [ngModel]="onlineColor()" (ngModelChange)="onlineColor.set($event)" aria-label="Icon colour" />
+                    </label>
+                  }
+                </div>
+
+                @if (onlineLoading()) {
+                  <p class="se__hint"><i class="pi pi-spin pi-spinner" aria-hidden="true"></i> Searching…</p>
+                } @else if (onlineError()) {
+                  <p class="se__hint se__hint--error">{{ onlineError() }}</p>
+                } @else if (onlineQuery().trim().length < 2) {
+                  <p class="se__hint">Type at least 2 letters to search thousands of free icons.</p>
+                } @else if (onlineResults().length === 0) {
+                  <p class="se__hint">No icons match “{{ onlineQuery() }}”. Try another word.</p>
+                } @else {
+                  <div class="se__icon-gallery">
+                    @for (id of onlineResults(); track id) {
+                      <button
+                        type="button"
+                        class="se__icon-cell"
+                        [class.is-busy]="onlinePicking() === id"
+                        [disabled]="!!onlinePicking()"
+                        [title]="onlineIconLabel(id)"
+                        (click)="pickOnlineIcon(id)"
+                      >
+                        @if (onlinePicking() === id) {
+                          <i class="pi pi-spin pi-spinner" aria-hidden="true"></i>
+                        } @else {
+                          <img [src]="onlineIconUrl(id)" [alt]="onlineIconLabel(id)" loading="lazy" />
+                        }
+                      </button>
+                    }
+                  </div>
+                }
+                <p class="se__hint">
+                  Free, open-source icons via the Iconify API.
+                  @if (onlineLibrary(); as lib) { {{ lib.label }} is licensed {{ lib.license }}. }
+                  @else { Hover an icon to see its library and licence. }
+                  The chosen icon is saved with this layer's style, so the map does not need the internet afterwards.
+                </p>
+              </div>
+            }
           }
 
           @if (iconError()) {

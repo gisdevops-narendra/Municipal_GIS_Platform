@@ -44,6 +44,92 @@ import {
 import { LayerStyleService } from '../../../../core/services/layer-style.service';
 import { NotificationService } from '../../../../core/services/notification.service';
 
+/** Public icon search + SVG API (CORS-enabled), covering Google's and
+ *  Font Awesome's free icon sets among others. */
+const ICONIFY_API = 'https://api.iconify.design';
+
+/** Free icon libraries offered for point markers. Each was tested end to
+ *  end: search, SVG download in a chosen colour, the backend's SVG
+ *  sanitiser, and rendering by GeoServer on the map. All allow commercial
+ *  use; flag sets are left out (their icons are named by country code, so
+ *  they cannot be found by search). */
+interface OnlineIconLibrary {
+  label: string;
+  /** Iconify collection prefix(es), comma-separated. */
+  value: string;
+  license: string;
+  /** Icons keep their own colours (the colour choice does not apply). */
+  multicolor?: boolean;
+}
+
+const ONLINE_ICON_GROUPS: { label: string; items: OnlineIconLibrary[] }[] = [
+  {
+    label: 'Google',
+    items: [
+      { label: 'Material Symbols', value: 'material-symbols', license: 'Apache 2.0' },
+      { label: 'Material Icons', value: 'ic', license: 'Apache 2.0' },
+    ],
+  },
+  {
+    label: 'Font Awesome Free',
+    items: [
+      { label: 'Font Awesome Solid', value: 'fa7-solid', license: 'CC BY 4.0' },
+      { label: 'Font Awesome Regular', value: 'fa7-regular', license: 'CC BY 4.0' },
+      { label: 'Font Awesome Brands', value: 'fa7-brands', license: 'CC BY 4.0' },
+    ],
+  },
+  {
+    label: 'Maps & places',
+    items: [
+      { label: 'Maki (Mapbox)', value: 'maki', license: 'CC0' },
+      { label: 'Temaki', value: 'temaki', license: 'CC0' },
+      { label: 'Map Icons', value: 'map', license: 'OFL 1.1' },
+      { label: 'Health Icons', value: 'healthicons', license: 'MIT' },
+    ],
+  },
+  {
+    label: 'General',
+    items: [
+      { label: 'Material Design Icons', value: 'mdi', license: 'Apache 2.0' },
+      { label: 'Tabler', value: 'tabler', license: 'MIT' },
+      { label: 'Lucide', value: 'lucide', license: 'ISC' },
+      { label: 'Phosphor', value: 'ph', license: 'MIT' },
+      { label: 'Bootstrap Icons', value: 'bi', license: 'MIT' },
+      { label: 'Remix Icon', value: 'ri', license: 'Apache 2.0' },
+      { label: 'Heroicons', value: 'heroicons', license: 'MIT' },
+      { label: 'Ionicons', value: 'ion', license: 'MIT' },
+      { label: 'Carbon (IBM)', value: 'carbon', license: 'Apache 2.0' },
+      { label: 'Fluent UI (Microsoft)', value: 'fluent', license: 'MIT' },
+      { label: 'Iconoir', value: 'iconoir', license: 'MIT' },
+      { label: 'MingCute', value: 'mingcute', license: 'Apache 2.0' },
+    ],
+  },
+  {
+    label: 'Colour emoji',
+    items: [
+      { label: 'Noto Emoji (Google)', value: 'noto', license: 'Apache 2.0', multicolor: true },
+      { label: 'Twemoji', value: 'twemoji', license: 'CC BY 4.0', multicolor: true },
+    ],
+  },
+];
+
+const ONLINE_ICON_LIBRARIES = ONLINE_ICON_GROUPS.flatMap((g) => g.items);
+
+/** Picker options: every library at once first, then the groups. */
+const ONLINE_ICON_SOURCES: { label: string; items: OnlineIconLibrary[] }[] = [
+  {
+    label: 'All',
+    items: [
+      {
+        label: `All libraries (${ONLINE_ICON_LIBRARIES.length})`,
+        value: ONLINE_ICON_LIBRARIES.map((l) => l.value).join(','),
+        license: 'see each icon',
+      },
+    ],
+  },
+  ...ONLINE_ICON_GROUPS,
+];
+
 const ZOOM_TO_DENOM = (z: number): number => 559082264.028 / Math.pow(2, z);
 
 /**
@@ -105,6 +191,25 @@ export class StyleEditorComponent implements OnInit, OnDestroy {
   readonly iconUploading = signal(false);
   readonly iconError = signal<string | null>(null);
   readonly maxIconBytes = 512 * 1024;
+  /** Icon picker tab: the bundled gallery, or an online icon search. */
+  readonly iconTab = signal<'builtin' | 'online'>('builtin');
+  readonly onlineSources = ONLINE_ICON_SOURCES;
+  readonly onlineSource = signal(ONLINE_ICON_SOURCES[0].items[0].value);
+  /** The selected library (null for "All libraries"). */
+  readonly onlineLibrary = computed(() => ONLINE_ICON_LIBRARIES.find((l) => l.value === this.onlineSource()) ?? null);
+  readonly onlineQuery = signal('');
+  readonly onlineResults = signal<string[]>([]);
+  readonly onlineLoading = signal(false);
+  readonly onlineError = signal<string | null>(null);
+  /** Colour the online icon is downloaded in (it is stored as-is). */
+  readonly onlineColor = signal('#c62828');
+  /** "prefix:name" being downloaded + uploaded. */
+  readonly onlinePicking = signal<string | null>(null);
+  private readonly onlineSearch$ = new Subject<void>();
+  private readonly onlineSearchSub = this.onlineSearch$
+    .pipe(debounceTime(300), takeUntilDestroyed())
+    .subscribe(() => this.runOnlineSearch());
+
   /** Object URL for the currently selected custom icon (upload / reload). */
   private customIconObjectUrl: string | null = null;
   readonly customIconPreview = signal<string | null>(null);
@@ -260,6 +365,12 @@ export class StyleEditorComponent implements OnInit, OnDestroy {
       this.iconError.set('Icon must be 512 KB or smaller.');
       return;
     }
+    this.uploadIconFile(file, [0.5, 0.5]);
+  }
+
+  /** Stores an SVG/PNG as this layer's icon (GeoServer keeps its own copy,
+   *  so the map never depends on where the icon came from). */
+  private uploadIconFile(file: File, anchor: [number, number], done?: () => void): void {
     this.iconUploading.set(true);
     // Instant local preview from the picked file; the server round-trip
     // only produces the stored reference.
@@ -267,15 +378,87 @@ export class StyleEditorComponent implements OnInit, OnDestroy {
     this.styleService.uploadIcon(this.target, file).subscribe({
       next: (ref: IconRef) => {
         this.iconUploading.set(false);
-        this.applyIcon(ref, [0.5, 0.5]);
+        this.applyIcon(ref, anchor);
         this.iconGalleryOpen.set(false);
+        done?.();
       },
       error: (error: HttpErrorResponse) => {
         this.iconUploading.set(false);
         this.setCustomIconPreview(null);
         this.iconError.set(this.msg(error));
+        done?.();
       },
     });
+  }
+
+  // ---- online icons (Iconify: Google Material Symbols, Font Awesome, …) ----
+
+  setOnlineQuery(query: string): void {
+    this.onlineQuery.set(query);
+    this.onlineSearch$.next();
+  }
+
+  setOnlineSource(prefixes: string): void {
+    this.onlineSource.set(prefixes);
+    this.onlineSearch$.next();
+  }
+
+  private runOnlineSearch(): void {
+    const query = this.onlineQuery().trim();
+    this.onlineError.set(null);
+    if (query.length < 2) {
+      this.onlineResults.set([]);
+      return;
+    }
+    this.onlineLoading.set(true);
+    const url = `${ICONIFY_API}/search?query=${encodeURIComponent(query)}&prefixes=${this.onlineSource()}&limit=96`;
+    // fetch, not HttpClient: the auth interceptor must never send the
+    // user's token to a third-party host.
+    fetch(url)
+      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+      .then((body: { icons?: string[] }) => {
+        if (query !== this.onlineQuery().trim()) return;
+        this.onlineResults.set(body.icons ?? []);
+        this.onlineLoading.set(false);
+      })
+      .catch(() => {
+        this.onlineLoading.set(false);
+        this.onlineResults.set([]);
+        this.onlineError.set('Could not reach the online icon library. Check the internet connection.');
+      });
+  }
+
+  /** Thumbnail URL of an online icon ("prefix:name"), in the chosen colour. */
+  onlineIconUrl(id: string, size = 32): string {
+    const [prefix, name] = id.split(':');
+    return `${ICONIFY_API}/${prefix}/${name}.svg?height=${size}&color=${encodeURIComponent(this.onlineColor())}`;
+  }
+
+  onlineIconLabel(id: string): string {
+    const [prefix, name] = id.split(':');
+    const library = ONLINE_ICON_LIBRARIES.find((l) => l.value === prefix);
+    return `${name.replace(/-/g, ' ')} — ${library ? `${library.label} (${library.license})` : prefix}`;
+  }
+
+  /** Download the icon as SVG in the chosen colour and store it as an
+   *  uploaded icon of this layer. */
+  pickOnlineIcon(id: string): void {
+    if (this.onlinePicking() || this.iconUploading()) return;
+    this.iconError.set(null);
+    this.onlinePicking.set(id);
+    fetch(this.onlineIconUrl(id, 64))
+      .then((res) => (res.ok ? res.text() : Promise.reject(res.status)))
+      .then((svg) => {
+        const name = id.replace(':', '_');
+        const file = new File([svg], `${name}.svg`, { type: 'image/svg+xml' });
+        // Pins point with their tip; other icons sit centred on the point.
+        const pin = /(^|-)(pin|marker|location-on|location-dot|place|map-pin)(-|$)/.test(id.split(':')[1]);
+        this.uploadIconFile(file, pin ? [0.5, 0.95] : [0.5, 0.5], () => this.onlinePicking.set(null));
+      })
+      .catch(() => {
+        this.onlinePicking.set(null);
+        this.iconError.set('Could not download that icon. Try again.');
+      });
   }
 
   clearIcon(): void {
