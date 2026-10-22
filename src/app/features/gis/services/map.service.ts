@@ -226,6 +226,10 @@ const BASEMAPS: Record<string, { label: string; attribution: string; build: () =
  * Registered as a component-level provider on the page hosting the map
  * (one Map instance per /gis visit), not `providedIn: 'root'`.
  */
+
+/** Choropleth areas get on-map labels only up to this many. */
+const CHOROPLETH_LABEL_LIMIT = 40;
+
 @Injectable()
 export class MapService {
   private map: OlMap | null = null;
@@ -271,6 +275,7 @@ export class MapService {
   private queryLayer: VectorLayer<VectorSource> | null = null;
   /** Overlay for Buffer / Overlay analysis output. */
   private analysisLayer: VectorLayer<VectorSource> | null = null;
+  private choroplethLayer: VectorLayer<VectorSource> | null = null;
   private readonly wkt = new WKT();
   /** Sketch layer + active interaction for "draw geometry for spatial query". */
   private drawLayer: VectorLayer<VectorSource> | null = null;
@@ -785,6 +790,46 @@ export class MapService {
       );
       source.addFeature(feature);
     });
+  }
+
+  /** Statistics choropleth: area outlines (EPSG:4326 GeoJSON) filled in
+   *  their class colour with a white gap between neighbours, below the
+   *  analysis / query overlays. `null` removes it. Labels (area · value)
+   *  only when there are few enough areas to read. */
+  setChoropleth(areas: { geometry: Record<string, unknown>; color: string; label: string }[] | null, zoom = true): void {
+    if (!areas) {
+      if (this.choroplethLayer) this.map?.removeLayer(this.choroplethLayer);
+      this.choroplethLayer = null;
+      return;
+    }
+    if (!this.choroplethLayer) {
+      this.choroplethLayer = new VectorLayer({ source: new VectorSource(), zIndex: 9990, properties: { choropleth: true } });
+      this.map?.addLayer(this.choroplethLayer);
+    }
+    const source = this.choroplethLayer.getSource() as VectorSource;
+    source.clear();
+    const labelled = areas.length <= CHOROPLETH_LABEL_LIMIT;
+    for (const area of areas) {
+      const feature = this.toMapFeature(area.geometry);
+      if (!feature) continue;
+      feature.setStyle(
+        new Style({
+          fill: new Fill({ color: `${area.color}c7` }),
+          stroke: new Stroke({ color: '#ffffff', width: 1.5 }),
+          text: labelled
+            ? new TextStyle({
+                text: area.label,
+                font: '600 11px system-ui, sans-serif',
+                fill: new Fill({ color: '#1f2933' }),
+                stroke: new Stroke({ color: 'rgba(255, 255, 255, 0.9)', width: 3 }),
+                overflow: false
+              })
+            : undefined
+        })
+      );
+      source.addFeature(feature);
+    }
+    if (zoom) this.zoomToGeometries(areas.map((a) => a.geometry));
   }
 
   private ensureAnalysisSource(): VectorSource {
@@ -1667,6 +1712,7 @@ export class MapService {
     this.clearQueryHighlight();
     this.clearAllLayerCqlFilters();
     this.clearAnalysisGeometry();
+    this.setChoropleth(null);
     this.clearPreviewImage();
     this.clearGoToMarker();
     this.setHoverMarker(null);

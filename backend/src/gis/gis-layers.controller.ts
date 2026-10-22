@@ -34,6 +34,7 @@ import { LayerReportDto } from './dto/layer-report.dto';
 import { SetLayerPermissionDto } from './dto/set-layer-permission.dto';
 import { LayerStyleSpecDto } from './dto/layer-style.dto';
 import type { ClassificationMethod } from './dto/layer-style.dto';
+import type { GroupMeasure } from './field-stats.service';
 
 /** Uploaded marker icons are inlined per feature at render time — keep
  *  them small (matches StyleService.MAX_ICON_BYTES). */
@@ -185,6 +186,63 @@ export class GisLayersController {
   @Get('layers/:id/analytics/fields')
   analyticsFields(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
     return this.gisLayersService.layerAnalyticsFields(appUser, id);
+  }
+
+  @RequireMunicipalityMember()
+  @Get('layers/:id/analytics/profile')
+  analyticsProfile(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+  ) {
+    return this.gisLayersService.layerProfile(appUser, id);
+  }
+
+  @RequireMunicipalityMember()
+  @Get('layers/:id/analytics/group')
+  analyticsGroup(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @Query('by') by: string | undefined,
+    @Query('areaLayer') areaLayerId: string | undefined,
+    @Query('areaField') areaField: string | undefined,
+    @Query('measure') measure: string | undefined,
+    @Query('measureField') measureField: string | undefined,
+    @Query('shapes') shapes: string | undefined,
+  ) {
+    const m = (measure ?? 'count') as GroupMeasure;
+    if (!['count', 'sum', 'avg', 'length', 'area'].includes(m)) {
+      throw new BadRequestException('Unknown measure.');
+    }
+    if (!by && !areaLayerId) {
+      throw new BadRequestException('by or areaLayer is required.');
+    }
+    return this.gisLayersService.layerGroupBy(appUser, id, {
+      by,
+      areaLayerId,
+      areaField,
+      measure: m,
+      measureField,
+      shapes: shapes === 'true',
+    });
+  }
+
+  @RequireMunicipalityMember()
+  @Get('layers/:id/analytics/area-shape')
+  analyticsAreaShape(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @Query('field') field: string | undefined,
+    @Query('value') value: string | undefined,
+  ) {
+    if (!field) {
+      throw new BadRequestException('field is required.');
+    }
+    return this.gisLayersService.layerAreaShape(
+      appUser,
+      id,
+      field,
+      value ?? null,
+    );
   }
 
   @RequireMunicipalityMember()

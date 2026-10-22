@@ -54,6 +54,78 @@ export interface FieldSummary {
   otherCount?: number;
 }
 
+/** What a field is good for in an overview, inferred from its values —
+ *  layers are user data, so nothing is keyed on layer or field names
+ *  beyond the generic identifier pattern. */
+export type FieldRole =
+  'id' | 'category' | 'measure' | 'date' | 'text' | 'constant' | 'empty';
+
+export interface FieldProfile {
+  name: string;
+  kind: FieldKind;
+  role: FieldRole;
+  nonNull: number;
+  distinct: number;
+  numeric?: { min: number; max: number; sum: number; mean: number };
+}
+
+export interface LayerProfile {
+  total: number;
+  geometry: {
+    kind: 'point' | 'line' | 'polygon' | 'mixed' | null;
+    lengthKm?: number;
+    areaHa?: number;
+  };
+  fields: FieldProfile[];
+  /** Top values of the most informative category fields. */
+  categories: {
+    field: string;
+    distinct: number;
+    values: { value: string; count: number }[];
+    otherCount: number;
+  }[];
+  /** Feature counts per month / year for date fields. */
+  timelines: {
+    field: string;
+    unit: 'month' | 'year';
+    points: { period: string; count: number }[];
+  }[];
+}
+
+/** Overview limits: fields profiled, category / timeline cards built,
+ *  values per category card. */
+const PROFILE_FIELDS = 80;
+const PROFILE_CATEGORIES = 4;
+const PROFILE_TIMELINES = 2;
+const PROFILE_TOP_VALUES = 6;
+/** A field with at most this many values (or few relative to the rows)
+ *  reads as a category rather than a measure / free text. */
+const CATEGORY_MAX_DISTINCT = 50;
+
+/** Group by: what is measured per group. */
+export type GroupMeasure = 'count' | 'sum' | 'avg' | 'length' | 'area';
+
+export interface GroupResult {
+  measure: GroupMeasure;
+  /** null key = features with no value / outside every area. */
+  groups: { key: string | null; count: number; value: number }[];
+  /** Everything past the shown groups (not for averages). */
+  other?: { groups: number; count: number; value: number };
+  /** Area outlines (EPSG:4326 GeoJSON geometry) per key, for a choropleth. */
+  shapes?: { key: string | null; geometry: Record<string, unknown> }[];
+}
+
+/** A table that backs a layer, with its tenant scope. */
+export interface StatsSource {
+  table: string;
+  workspaceId: string | null;
+}
+
+const GROUP_LIMIT = 30;
+const AREA_GROUP_LIMIT = 200;
+/** Area outlines sent back as a CQL filter stay well under the CQL cap. */
+const AREA_WKT_MAX = 6000;
+
 /**
  * Geometry / attribute discovery and classification statistics for the
  * style editor, straight from PostGIS — the exact table backing the layer
@@ -284,7 +356,438 @@ export class FieldStatsService {
     };
   }
 
+  /** Overview of a whole layer: geometry totals, every field's role
+   *  (from its fill, cardinality and value shape) and the data behind the
+   *  auto-built cards — top values of the best category fields and
+   *  month / year counts of date fields. */
+  async profile(
+    table: string,
+    workspaceId: string | null,
+  ): Promise<LayerProfile> {
+    this.assertTable(table);
+    const attributes = (await this.attributes(table, workspaceId)).slice(
+      0,
+      PROFILE_FIELDS,
+    );
+    const scope =
+      workspaceId && this.isDemoTable(table)
+        ? { clause: `WHERE gis_workspace_id = $1`, params: [workspaceId] }
+        : { clause: '', params: [] as string[] };
+    const colOf = (name: string) => `"${name.replace(/"/g, '')}"`;
+
+    const selects = ['COUNT(*) AS total'];
+    attributes.forEach((a, i) => {
+      const c = colOf(a.name);
+      selects.push(
+        `COUNT(${c}) AS n${i}`,
+        `COUNT(DISTINCT ${c}::text) AS d${i}`,
+      );
+      if (a.kind === 'number') {
+        selects.push(
+          `MIN(${c})::float8 AS min${i}`,
+          `MAX(${c})::float8 AS max${i}`,
+          `SUM(${c})::float8 AS sum${i}`,
+          `AVG(${c})::float8 AS avg${i}`,
+          `bool_and(${c}::numeric = trunc(${c}::numeric)) AS int${i}`,
+        );
+      }
+    });
+    const [row] = await this.prisma.$queryRawUnsafe<
+      Record<string, bigint | number | boolean | null>[]
+    >(
+      `SELECT ${selects.join(', ')} FROM "${table}" ${scope.clause}`,
+      ...scope.params,
+    );
+    const total = Number(row?.total ?? 0);
+
+    const fields: FieldProfile[] = attributes.map((a, i) => {
+      const nonNull = Number(row?.[`n${i}`] ?? 0);
+      const distinct = Number(row?.[`d${i}`] ?? 0);
+      const numeric =
+        a.kind === 'number' && nonNull > 0
+          ? {
+              min: Number(row?.[`min${i}`] ?? 0),
+              max: Number(row?.[`max${i}`] ?? 0),
+              sum: Number(row?.[`sum${i}`] ?? 0),
+              mean: Number(row?.[`avg${i}`] ?? 0),
+            }
+          : undefined;
+      const integer = row?.[`int${i}`] === true;
+      return {
+        name: a.name,
+        kind: a.kind,
+        role: fieldRole(a, nonNull, distinct, numeric, integer),
+        nonNull,
+        distinct,
+        ...(numeric ? { numeric } : {}),
+      };
+    });
+
+    const categoryFields = fields
+      .filter((f) => f.role === 'category')
+      .map((f) => ({
+        f,
+        // Well filled, with a handful of values, makes the best chart.
+        score:
+          (f.nonNull / Math.max(total, 1)) *
+          (f.distinct <= 12 ? 1 : 12 / f.distinct),
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, PROFILE_CATEGORIES)
+      .map(({ f }) => f);
+    const notNull = (c: string) =>
+      `${scope.clause ? `${scope.clause} AND` : 'WHERE'} ${c} IS NOT NULL`;
+
+    const categories: LayerProfile['categories'] = [];
+    for (const f of categoryFields) {
+      const c = colOf(f.name);
+      const top = await this.prisma.$queryRawUnsafe<
+        { value: string; count: bigint }[]
+      >(
+        `SELECT ${c}::text AS value, COUNT(*) AS count FROM "${table}" ${notNull(c)}
+          GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT ${PROFILE_TOP_VALUES}`,
+        ...scope.params,
+      );
+      const values = top.map((t) => ({
+        value: t.value,
+        count: Number(t.count),
+      }));
+      const shown = values.reduce((sum, v) => sum + v.count, 0);
+      categories.push({
+        field: f.name,
+        distinct: f.distinct,
+        values,
+        otherCount: f.nonNull - shown,
+      });
+    }
+
+    const timelines: LayerProfile['timelines'] = [];
+    const dateFields = fields
+      .filter((f) => f.role === 'date')
+      .filter((f) => {
+        // date_trunc needs a date or timestamp, not a bare time of day.
+        const type = attributes.find((a) => a.name === f.name)?.type ?? '';
+        return /^(date|timestamp)/i.test(type);
+      })
+      .slice(0, PROFILE_TIMELINES);
+    for (const f of dateFields) {
+      const c = colOf(f.name);
+      const [span] = await this.prisma.$queryRawUnsafe<
+        { days: number | null }[]
+      >(
+        `SELECT EXTRACT(EPOCH FROM (MAX(${c})::timestamp - MIN(${c})::timestamp)) / 86400 AS days
+           FROM "${table}" ${scope.clause}`,
+        ...scope.params,
+      );
+      const unit = Number(span?.days ?? 0) > 3 * 365 ? 'year' : 'month';
+      const points = await this.prisma.$queryRawUnsafe<
+        { period: string; count: bigint }[]
+      >(
+        `SELECT to_char(date_trunc('${unit}', ${c}::timestamp), '${unit === 'year' ? 'YYYY' : 'YYYY-MM'}') AS period,
+                COUNT(*) AS count
+           FROM "${table}" ${notNull(c)}
+          GROUP BY 1 ORDER BY 1`,
+        ...scope.params,
+      );
+      timelines.push({
+        field: f.name,
+        unit,
+        points: points.map((p) => ({
+          period: p.period,
+          count: Number(p.count),
+        })),
+      });
+    }
+
+    return {
+      total,
+      geometry: await this.geometryProfile(table, scope),
+      fields,
+      categories,
+      timelines,
+    };
+  }
+
+  /** Group by: `measure` per value of `by` (an attribute of the layer),
+   *  or per feature of an area layer when `area` is given — each feature
+   *  goes to the area holding its point-on-surface, so nothing is counted
+   *  twice. Every field is whitelisted like `summary`. */
+  async groupBy(
+    target: StatsSource,
+    options: {
+      by?: string;
+      area?: StatsSource & { field: string };
+      measure: GroupMeasure;
+      measureField?: string;
+      /** Also return each area's outline (area grouping only). */
+      shapes?: boolean;
+    },
+  ): Promise<GroupResult> {
+    this.assertTable(target.table);
+    const attrs = await this.attributes(target.table, target.workspaceId);
+    const colOf = (name: string) => `"${name.replace(/"/g, '')}"`;
+    const need = (
+      list: AttributeInfo[],
+      name: string | undefined,
+      what: string,
+    ) => {
+      const a = name ? list.find((x) => x.name === name) : undefined;
+      if (!a) throw new BadRequestException(`Choose a valid ${what}.`);
+      return a;
+    };
+
+    const { measure } = options;
+    let agg: string;
+    if (measure === 'count') {
+      agg = 'COUNT(t.*)';
+    } else if (measure === 'sum' || measure === 'avg') {
+      const f = need(attrs, options.measureField, 'field to measure');
+      if (f.kind !== 'number') {
+        throw new BadRequestException('Sum and average need a numeric field.');
+      }
+      agg = `${measure === 'sum' ? 'SUM' : 'AVG'}(t.${colOf(f.name)})::float8`;
+    } else {
+      const g = await this.geometryColumn(target.table);
+      if (!g) throw new BadRequestException('This layer has no geometry.');
+      const geog = `(CASE WHEN ST_SRID(t.${g}) = 4326 THEN t.${g} ELSE ST_Transform(t.${g}, 4326) END)::geography`;
+      agg =
+        measure === 'length'
+          ? `SUM(ST_Length(${geog}))::float8 / 1000`
+          : `SUM(ST_Area(${geog}))::float8 / 10000`;
+    }
+
+    type Row = { key: string | null; count: bigint; value: number | null };
+    const toGroups = (rows: Row[]) =>
+      rows.map((r) => ({
+        key: r.key,
+        count: Number(r.count),
+        value: Number(r.value ?? 0),
+      }));
+    const scoped = (source: StatsSource) =>
+      !!source.workspaceId && this.isDemoTable(source.table);
+
+    if (options.area) {
+      const area = options.area;
+      this.assertTable(area.table);
+      const areaAttrs = await this.attributes(area.table, area.workspaceId);
+      const label = need(areaAttrs, area.field, 'area name field');
+      const ag = await this.geometryColumn(area.table);
+      const tg = await this.geometryColumn(target.table);
+      if (!ag || !tg) {
+        throw new BadRequestException('Both layers need a geometry.');
+      }
+      const inArea = `ST_Intersects(a.${ag}, ST_PointOnSurface(ST_Transform(t.${tg}, ST_SRID(a.${ag}))))`;
+      const params: string[] = [];
+      const bind = (value: string) => {
+        params.push(value);
+        return `$${params.length}`;
+      };
+      const tScope = scoped(target)
+        ? `AND t.gis_workspace_id = ${bind(target.workspaceId!)}`
+        : '';
+      const aScope = scoped(area)
+        ? `a.gis_workspace_id = ${bind(area.workspaceId!)}`
+        : '';
+      const rows = await this.prisma.$queryRawUnsafe<Row[]>(
+        `SELECT a.${colOf(label.name)}::text AS key, COUNT(t.*) AS count, COALESCE(${agg}, 0) AS value
+           FROM "${area.table}" a
+           LEFT JOIN "${target.table}" t ON ${inArea} ${tScope}
+          ${aScope ? `WHERE ${aScope}` : ''}
+          GROUP BY 1
+          ORDER BY 3 DESC, 1
+          LIMIT ${AREA_GROUP_LIMIT}`,
+        ...params,
+      );
+      // What fell outside every area.
+      const [outside] = await this.prisma.$queryRawUnsafe<Row[]>(
+        `SELECT NULL AS key, COUNT(t.*) AS count, COALESCE(${agg}, 0) AS value
+           FROM "${target.table}" t
+          WHERE NOT EXISTS (
+                SELECT 1 FROM "${area.table}" a
+                 WHERE ${inArea} ${aScope ? `AND ${aScope}` : ''}) ${tScope}`,
+        ...params,
+      );
+      const groups = toGroups(rows);
+      if (outside && Number(outside.count) > 0) {
+        groups.push(...toGroups([outside]));
+      }
+      if (!options.shapes) return { measure, groups };
+      // Lightly simplified (~5 m) so a ward layer stays a small payload.
+      const shapeParams = scoped(area) ? [area.workspaceId!] : [];
+      const shapes = await this.prisma.$queryRawUnsafe<
+        { key: string | null; geometry: string | null }[]
+      >(
+        `SELECT a.${colOf(label.name)}::text AS key,
+                ST_AsGeoJSON(ST_SimplifyPreserveTopology(ST_Transform(ST_Union(a.${ag}), 4326), 0.00005), 6) AS geometry
+           FROM "${area.table}" a
+          ${shapeParams.length ? 'WHERE a.gis_workspace_id = $1' : ''}
+          GROUP BY 1
+          LIMIT ${AREA_GROUP_LIMIT}`,
+        ...shapeParams,
+      );
+      return {
+        measure,
+        groups,
+        shapes: shapes
+          .filter((r) => r.geometry)
+          .map((r) => ({
+            key: r.key,
+            geometry: JSON.parse(r.geometry!) as Record<string, unknown>,
+          })),
+      };
+    }
+
+    const by = need(attrs, options.by, 'field to group by');
+    const params = scoped(target) ? [target.workspaceId!] : [];
+    const where = params.length ? 'WHERE t.gis_workspace_id = $1' : '';
+    const rows = await this.prisma.$queryRawUnsafe<Row[]>(
+      `SELECT t.${colOf(by.name)}::text AS key, COUNT(t.*) AS count, ${agg} AS value
+         FROM "${target.table}" t ${where}
+        GROUP BY 1
+        ORDER BY 3 DESC NULLS LAST, 1
+        LIMIT ${GROUP_LIMIT + 1}`,
+      ...params,
+    );
+    const groups = toGroups(rows.slice(0, GROUP_LIMIT));
+    if (rows.length <= GROUP_LIMIT || measure === 'avg') {
+      return { measure, groups };
+    }
+    const [all] = await this.prisma.$queryRawUnsafe<
+      { groups: bigint; count: bigint; value: number | null }[]
+    >(
+      `SELECT COUNT(DISTINCT t.${colOf(by.name)}::text) AS groups, COUNT(t.*) AS count, ${agg} AS value
+         FROM "${target.table}" t ${where}`,
+      ...params,
+    );
+    const shownCount = groups.reduce((sum, g) => sum + g.count, 0);
+    const shownValue = groups.reduce((sum, g) => sum + g.value, 0);
+    return {
+      measure,
+      groups,
+      other: {
+        groups:
+          Number(all?.groups ?? 0) -
+          groups.filter((g) => g.key !== null).length,
+        count: Number(all?.count ?? 0) - shownCount,
+        value: Number(all?.value ?? 0) - shownValue,
+      },
+    };
+  }
+
+  /** One area's outline (all features whose `field` equals `value`,
+   *  unioned) as EPSG:4326 WKT, simplified until it fits a CQL filter. */
+  async areaShape(
+    source: StatsSource,
+    field: string,
+    value: string | null,
+  ): Promise<{ wkt: string | null }> {
+    this.assertTable(source.table);
+    const attr = (await this.attributes(source.table, source.workspaceId)).find(
+      (a) => a.name === field,
+    );
+    if (!attr) {
+      throw new BadRequestException('Choose a valid area name field.');
+    }
+    const g = await this.geometryColumn(source.table);
+    if (!g) throw new BadRequestException('This layer has no geometry.');
+    const col = `"${field.replace(/"/g, '')}"`;
+    const params: string[] = [];
+    const conds: string[] = [];
+    if (value === null) {
+      conds.push(`${col} IS NULL`);
+    } else {
+      params.push(value);
+      conds.push(`${col}::text = $${params.length}`);
+    }
+    if (source.workspaceId && this.isDemoTable(source.table)) {
+      params.push(source.workspaceId);
+      conds.push(`gis_workspace_id = $${params.length}`);
+    }
+    const tolerances = [0, 0.00002, 0.0001, 0.0005, 0.002, 0.01];
+    const texts = tolerances
+      .map(
+        (t) =>
+          `ST_AsText(${t ? `ST_SimplifyPreserveTopology(u.g, ${t})` : 'u.g'}, 6)`,
+      )
+      .join(', ');
+    const [row] = await this.prisma.$queryRawUnsafe<
+      { texts: string[] | null }[]
+    >(
+      `WITH u AS (
+         SELECT ST_Transform(ST_Union(${g}), 4326) AS g
+           FROM "${source.table}" WHERE ${conds.join(' AND ')}
+       )
+       SELECT ARRAY[${texts}] AS texts FROM u WHERE u.g IS NOT NULL`,
+      ...params,
+    );
+    const candidates = row?.texts ?? [];
+    const wkt = candidates.find((t) => t && t.length <= AREA_WKT_MAX) ?? null;
+    if (candidates.length && !wkt) {
+      throw new BadRequestException('This area is too detailed to filter by.');
+    }
+    return { wkt };
+  }
+
   // ---- helpers ---------------------------------------------------
+
+  /** The table's first geometry column, quoted — or null. */
+  private async geometryColumn(table: string): Promise<string | null> {
+    const [row] = await this.prisma.$queryRawUnsafe<{ column_name: string }[]>(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = $1 AND udt_name = 'geometry'
+        ORDER BY ordinal_position LIMIT 1`,
+      table,
+    );
+    return row ? `"${row.column_name.replace(/"/g, '')}"` : null;
+  }
+
+  /** Dominant geometry kind and, for lines / polygons, the geodesic total
+   *  length (km) / area (ha). Totals are skipped when the SRID is unknown. */
+  private async geometryProfile(
+    table: string,
+    scope: { clause: string; params: string[] },
+  ): Promise<LayerProfile['geometry']> {
+    const g = await this.geometryColumn(table);
+    if (!g) return { kind: null };
+    const types = await this.prisma.$queryRawUnsafe<{ t: string | null }[]>(
+      `SELECT DISTINCT GeometryType(${g}) AS t FROM "${table}" ${scope.clause}`,
+      ...scope.params,
+    );
+    const kinds = new Set(
+      types
+        .map((r) => (r.t ?? '').toUpperCase())
+        .filter(Boolean)
+        .map((t) =>
+          t.includes('POINT')
+            ? 'point'
+            : t.includes('LINE')
+              ? 'line'
+              : t.includes('POLYGON')
+                ? 'polygon'
+                : 'mixed',
+        ),
+    );
+    const kind =
+      kinds.size === 0
+        ? null
+        : kinds.size === 1
+          ? ([...kinds][0] as 'point' | 'line' | 'polygon' | 'mixed')
+          : 'mixed';
+    if (kind !== 'line' && kind !== 'polygon') return { kind };
+    const geog = `(CASE WHEN ST_SRID(${g}) = 4326 THEN ${g} ELSE ST_Transform(${g}, 4326) END)::geography`;
+    try {
+      const [m] = await this.prisma.$queryRawUnsafe<{ v: number | null }[]>(
+        kind === 'line'
+          ? `SELECT SUM(ST_Length(${geog}))::float8 / 1000 AS v FROM "${table}" ${scope.clause}`
+          : `SELECT SUM(ST_Area(${geog}))::float8 / 10000 AS v FROM "${table}" ${scope.clause}`,
+        ...scope.params,
+      );
+      const v = Number(m?.v ?? 0);
+      return kind === 'line' ? { kind, lengthKm: v } : { kind, areaHa: v };
+    } catch {
+      return { kind };
+    }
+  }
 
   /** Jenks natural breaks on a random sample of up to 1000 values (the
    *  O(k·n²) optimisation stays fast); the outer bounds are the true min/max. */
@@ -382,12 +885,54 @@ export class FieldStatsService {
   }
 }
 
+/** Identifier columns (objectid, fid, valve_id …): counting or averaging
+ *  them says nothing. */
+const ID_NAME = /(^|_)(id|fid|gid|gisid|objectid|uuid)$|^object_?id$/i;
+
+/** Infers a field's overview role from its type, fill and value shape. */
+export function fieldRole(
+  attribute: AttributeInfo,
+  nonNull: number,
+  distinct: number,
+  numeric: { min: number; max: number } | undefined,
+  integer: boolean,
+): FieldRole {
+  if (nonNull === 0) return 'empty';
+  if (distinct <= 1) return 'constant';
+  if (attribute.kind === 'boolean') return 'category';
+  if (attribute.kind === 'date') return 'date';
+  if (ID_NAME.test(attribute.name)) return 'id';
+  const fewValues =
+    distinct <= CATEGORY_MAX_DISTINCT && distinct <= Math.max(nonNull * 0.5, 2);
+  if (attribute.kind === 'number') {
+    // Unique whole numbers packed into a run (1..n) are a key, not a measure.
+    if (
+      integer &&
+      numeric &&
+      distinct === nonNull &&
+      nonNull > 20 &&
+      numeric.max - numeric.min + 1 <= nonNull * 1.5
+    ) {
+      return 'id';
+    }
+    return integer && fewValues ? 'category' : 'measure';
+  }
+  if (attribute.kind === 'string' || attribute.kind === 'other') {
+    return fewValues ? 'category' : 'text';
+  }
+  return 'text';
+}
+
 /** Fisher–Jenks optimal classification of sorted `data` into `k` classes —
  *  returns the k + 1 class boundaries. */
 function jenks(data: number[], k: number): number[] {
   const n = data.length;
-  const lower = Array.from({ length: n + 1 }, () => new Array<number>(k + 1).fill(0));
-  const variance = Array.from({ length: n + 1 }, () => new Array<number>(k + 1).fill(Infinity));
+  const lower = Array.from({ length: n + 1 }, () =>
+    new Array<number>(k + 1).fill(0),
+  );
+  const variance = Array.from({ length: n + 1 }, () =>
+    new Array<number>(k + 1).fill(Infinity),
+  );
   for (let j = 1; j <= k; j++) {
     lower[1][j] = 1;
     variance[1][j] = 0;

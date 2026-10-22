@@ -376,6 +376,9 @@
             [class.gis-ws__panel--hidden]="bottomTool() !== 'statistics'"
             [layers]="layers()"
             [allowedModuleIds]="myModuleIds()"
+            [queryFilter]="activeQueryFilter()"
+            (filterApply)="onQueryRun($event)"
+            (filterClear)="onQueryCleared()"
           />
         }
         @if (activeBottomTool(); as tool) {

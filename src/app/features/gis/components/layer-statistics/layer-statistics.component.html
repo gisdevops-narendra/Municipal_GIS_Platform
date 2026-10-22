@@ -1,19 +1,269 @@
+<div class="shell">
+  <div class="shell__bar">
+    <p-select
+      class="stats__select shell__layer"
+      [options]="layerOptions()"
+      optionLabel="label"
+      optionValue="value"
+      [ngModel]="layerId()"
+      (ngModelChange)="selectLayer($event)"
+      [filter]="layerOptions().length > 8"
+      placeholder="Choose a layer"
+      appendTo="body"
+    />
+    <div class="shell__tabs" role="tablist" aria-label="Statistics view">
+      <button type="button" role="tab" class="shell__tab" [class.is-active]="mode() === 'overview'" [attr.aria-selected]="mode() === 'overview'" (click)="mode.set('overview')">
+        <i class="pi pi-th-large" aria-hidden="true"></i> Overview
+      </button>
+      <button type="button" role="tab" class="shell__tab" [class.is-active]="mode() === 'group'" [attr.aria-selected]="mode() === 'group'" (click)="mode.set('group')">
+        <i class="pi pi-sitemap" aria-hidden="true"></i> Group by
+      </button>
+      <button type="button" role="tab" class="shell__tab" [class.is-active]="mode() === 'field'" [attr.aria-selected]="mode() === 'field'" (click)="mode.set('field')">
+        <i class="pi pi-chart-bar" aria-hidden="true"></i> Field explorer
+      </button>
+    </div>
+    @if (filterOnLayer(); as f) {
+      <span class="shell__filter" [attr.title]="f.label">
+        <i class="pi pi-filter-fill" aria-hidden="true"></i>
+        <span class="shell__filter-text">Map filtered: {{ f.label }}</span>
+        <button type="button" class="shell__filter-clear" aria-label="Clear map filter" (click)="clearFilter()">
+          <i class="pi pi-times" aria-hidden="true"></i>
+        </button>
+      </span>
+    } @else {
+      <span class="shell__hint">Click a bar to filter the map</span>
+    }
+  </div>
+
+  @if (mode() === 'overview') {
+    <div class="ov">
+      @if (layerOptions().length === 0) {
+        <p class="stats__message">No vector layers to analyse.</p>
+      } @else if (profileError()) {
+        <p class="stats__message stats__message--error" role="alert">{{ profileError() }}</p>
+      } @else if (!profile()) {
+        <p class="stats__message">Profiling layer…</p>
+      } @else {
+        @if (showStats()) {
+          <dl class="ov__kpis">
+            @for (kpi of kpis(); track kpi.label) {
+              <div class="ov__kpi" [attr.title]="kpi.exact ?? null">
+                <dt>{{ kpi.label }}</dt>
+                <dd>{{ kpi.value }}</dd>
+              </div>
+            }
+          </dl>
+        }
+
+        <div class="ov__grid">
+          @if (showChart()) {
+            @for (card of categoryCards(); track card.field) {
+              <article class="ov__card">
+                <header class="ov__card-head">
+                  <span class="ov__card-title">By {{ card.field }}</span>
+                  <span class="ov__card-meta">{{ card.distinct }} values</span>
+                  <button type="button" class="ov__more" title="Explore this field" (click)="exploreField(card.field)">
+                    <i class="pi pi-arrow-up-right" aria-hidden="true"></i>
+                  </button>
+                </header>
+                <ul class="ov__bars">
+                  @for (bar of card.bars; track bar.key) {
+                    <li>
+                      @if (bar.muted) {
+                        <span class="ov__bar-row" [attr.title]="bar.label + ': ' + bar.countLabel">
+                          <span class="ov__bar-label">{{ bar.label }}</span>
+                          <span class="ov__bar-track"><span class="ov__bar ov__bar--muted" [style.width.%]="bar.share * 100"></span></span>
+                          <span class="ov__bar-value">{{ bar.countLabel }}</span>
+                        </span>
+                      } @else {
+                        <button
+                          type="button"
+                          class="ov__bar-row ov__bar-row--action"
+                          [class.is-applied]="isApplied('f:' + card.field + ':' + bar.label)"
+                          [attr.title]="'Show only ' + card.field + ' = ' + bar.label + ' on the map'"
+                          (click)="applyValueFilter(card.field, bar.label)"
+                        >
+                          <span class="ov__bar-label">{{ bar.label }}</span>
+                          <span class="ov__bar-track"><span class="ov__bar" [style.width.%]="bar.share * 100"></span></span>
+                          <span class="ov__bar-value">{{ bar.countLabel }}</span>
+                        </button>
+                      }
+                    </li>
+                  }
+                </ul>
+              </article>
+            }
+
+            @for (card of timelineCards(); track card.field) {
+              <article class="ov__card">
+                <header class="ov__card-head">
+                  <span class="ov__card-title">{{ card.field }} by {{ card.unit }}</span>
+                  <span class="ov__card-meta">{{ card.range }}</span>
+                  <button type="button" class="ov__more" title="Explore this field" (click)="exploreField(card.field)">
+                    <i class="pi pi-arrow-up-right" aria-hidden="true"></i>
+                  </button>
+                </header>
+                <div class="ov__trend">
+                  @for (p of card.points; track p.period) {
+                    <span class="ov__trend-col" [attr.title]="p.period + ': ' + p.countLabel">
+                      <span class="ov__trend-fill" [style.height.%]="p.share * 100"></span>
+                    </span>
+                  }
+                </div>
+              </article>
+            }
+          }
+
+          @if (showStats()) {
+            @for (m of measureCards(); track m.field) {
+              <article class="ov__card ov__card--measure">
+                <header class="ov__card-head">
+                  <span class="ov__card-title">{{ m.field }}</span>
+                  <button type="button" class="ov__more" title="Explore this field" (click)="exploreField(m.field)">
+                    <i class="pi pi-arrow-up-right" aria-hidden="true"></i>
+                  </button>
+                </header>
+                <dl class="ov__measure">
+                  <div><dt>Total</dt><dd [attr.title]="m.sumExact">{{ m.sum }}</dd></div>
+                  <div><dt>Average</dt><dd [attr.title]="m.meanExact">{{ m.mean }}</dd></div>
+                  <div><dt>Range</dt><dd>{{ m.range }}</dd></div>
+                </dl>
+              </article>
+            }
+
+            @if (quality().length) {
+              <article class="ov__card">
+                <header class="ov__card-head">
+                  <span class="ov__card-title">Data completeness</span>
+                  <span class="ov__card-meta">{{ quality().length }} fields with gaps</span>
+                </header>
+                <ul class="ov__bars">
+                  @for (q of quality(); track q.field) {
+                    <li class="ov__bar-row" [attr.title]="q.field + ': ' + q.note">
+                      <span class="ov__bar-label">{{ q.field }}</span>
+                      <span class="ov__bar-track">
+                        <span class="ov__bar" [class.ov__bar--warn]="q.share < 0.5" [style.width.%]="q.share * 100"></span>
+                      </span>
+                      <span class="ov__bar-value">{{ q.percent }}</span>
+                    </li>
+                  }
+                </ul>
+              </article>
+            }
+          }
+
+          @if (!categoryCards().length && !measureCards().length && !timelineCards().length && !quality().length) {
+            <p class="stats__message">No fields here lend themselves to an overview — try the Field explorer.</p>
+          }
+        </div>
+
+        @if (skipped(); as note) {
+          <p class="ov__note">{{ note }}</p>
+        }
+      }
+    </div>
+  } @else if (mode() === 'group') {
+    <div class="grp">
+      <div class="grp__controls">
+        <div class="grp__control">
+          <span class="stats__label">Group by</span>
+          <div class="grp__seg" role="radiogroup" aria-label="Group by">
+            <button type="button" role="radio" class="grp__seg-btn" [class.is-active]="groupSource() === 'field'" [attr.aria-checked]="groupSource() === 'field'" (click)="setGroupSource('field')">Field</button>
+            <button type="button" role="radio" class="grp__seg-btn" [class.is-active]="groupSource() === 'area'" [attr.aria-checked]="groupSource() === 'area'" [disabled]="!areaLayerOptions().length" [attr.title]="areaLayerOptions().length ? null : 'No other polygon layer to use as areas'" (click)="setGroupSource('area')">Area layer</button>
+          </div>
+        </div>
+
+        @if (groupSource() === 'field') {
+          <label class="grp__control">
+            <span class="stats__label">Field</span>
+            <p-select class="stats__select" [options]="groupFieldOptions()" optionLabel="label" optionValue="value" [ngModel]="groupField()" (ngModelChange)="setGroupField($event)" [filter]="groupFieldOptions().length > 8" placeholder="Choose a field" appendTo="body" />
+          </label>
+        } @else {
+          <label class="grp__control">
+            <span class="stats__label">Area layer</span>
+            <p-select class="stats__select" [options]="areaLayerOptions()" optionLabel="label" optionValue="value" [ngModel]="areaLayerId()" (ngModelChange)="setAreaLayer($event)" [filter]="areaLayerOptions().length > 8" placeholder="Choose a polygon layer" appendTo="body" />
+          </label>
+          <label class="grp__control">
+            <span class="stats__label">Area name</span>
+            <p-select class="stats__select" [options]="areaFieldOptions()" optionLabel="label" optionValue="value" [ngModel]="areaField()" (ngModelChange)="setAreaField($event)" [filter]="areaFieldOptions().length > 8" placeholder="Field naming each area" [disabled]="!areaFieldOptions().length" appendTo="body" />
+          </label>
+        }
+
+        <label class="grp__control">
+          <span class="stats__label">Measure</span>
+          <p-select class="stats__select" [options]="measureOptions()" optionLabel="label" optionValue="value" [ngModel]="measure()" (ngModelChange)="setMeasure($event)" appendTo="body" />
+        </label>
+        @if (measure() === 'sum' || measure() === 'avg') {
+          <label class="grp__control">
+            <span class="stats__label">Of field</span>
+            <p-select class="stats__select" [options]="measureFieldOptions()" optionLabel="label" optionValue="value" [ngModel]="measureField()" (ngModelChange)="setMeasureField($event)" [filter]="measureFieldOptions().length > 8" appendTo="body" />
+          </label>
+        }
+      </div>
+
+      <div class="grp__result">
+        @if (groupError()) {
+          <p class="stats__message stats__message--error" role="alert">{{ groupError() }}</p>
+        } @else if (groupLoading()) {
+          <p class="stats__message">Calculating…</p>
+        } @else if (groupSource() === 'field' && !groupFieldOptions().length) {
+          <p class="stats__message">This layer has no field that groups features — try an area layer.</p>
+        } @else if (groupResult()) {
+          <div class="grp__title">
+            <span>{{ groupTitle() }}</span>
+            @if (filtering()) {
+              <span class="grp__busy">Filtering map…</span>
+            }
+            @if (groupSource() === 'area' && choroplethClasses().length) {
+              <button type="button" class="stats__toggle grp__map-btn" [attr.aria-pressed]="choroplethOn()" [class.is-on]="choroplethOn()" (click)="toggleChoropleth()">
+                <i [class]="choroplethOn() ? 'pi pi-eye-slash' : 'pi pi-map'" aria-hidden="true"></i>
+                {{ choroplethOn() ? 'Hide map shading' : 'Shade areas on map' }}
+              </button>
+            }
+          </div>
+          @if (choroplethOn() && choroplethClasses().length) {
+            <ul class="grp__legend" aria-label="Map legend">
+              @for (c of choroplethClasses(); track c.color) {
+                <li><span class="grp__swatch" [style.background]="c.color"></span>{{ c.label }}</li>
+              }
+            </ul>
+          }
+          @if (!groupBars().length) {
+            <p class="stats__message">Nothing to group.</p>
+          } @else {
+            <ul class="ov__bars grp__bars">
+              @for (bar of groupBars(); track bar.key) {
+                <li>
+                  @if (bar.filterable) {
+                    <button
+                      type="button"
+                      class="ov__bar-row ov__bar-row--action"
+                      [class.is-applied]="isApplied(groupSource() === 'area' ? 'a:' + bar.key : 'f:' + groupField() + ':' + (bar.key ?? ''))"
+                      [attr.title]="'Show only ' + bar.label + ' on the map'"
+                      (click)="applyGroupFilter(bar)"
+                    >
+                      <span class="ov__bar-label">{{ bar.label }}</span>
+                      <span class="ov__bar-track"><span class="ov__bar" [class.ov__bar--muted]="bar.muted" [style.width.%]="bar.share * 100"></span></span>
+                      <span class="ov__bar-value">{{ bar.valueLabel }}</span>
+                    </button>
+                  } @else {
+                    <span class="ov__bar-row" [attr.title]="bar.label + ': ' + bar.valueLabel">
+                      <span class="ov__bar-label">{{ bar.label }}</span>
+                      <span class="ov__bar-track"><span class="ov__bar ov__bar--muted" [style.width.%]="bar.share * 100"></span></span>
+                      <span class="ov__bar-value">{{ bar.valueLabel }}</span>
+                    </span>
+                  }
+                </li>
+              }
+            </ul>
+          }
+        }
+      </div>
+    </div>
+  } @else {
 <div class="stats">
   <div class="stats__side">
-    <div class="stats__controls">
-      <label class="stats__field">
-        <span class="stats__label">Layer</span>
-        <p-select
-          class="stats__select"
-          [options]="layerOptions()"
-          optionLabel="label"
-          optionValue="value"
-          [ngModel]="layerId()"
-          (ngModelChange)="selectLayer($event)"
-          placeholder="Choose a layer"
-          appendTo="body"
-        />
-      </label>
+    <div class="stats__controls stats__controls--single">
       <label class="stats__field">
         <span class="stats__label">Field</span>
         <p-select
@@ -146,5 +396,7 @@
         }
       </div>
     }
+  }
+</div>
   }
 </div>

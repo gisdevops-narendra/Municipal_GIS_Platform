@@ -4,7 +4,7 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { GisLayer } from '../models/gis-layer.model';
 import { LayerExportFormat } from '../models/layer-export.model';
-import { AnalyticsField, FieldSummary } from '../models/layer-analytics.model';
+import { AnalyticsField, FieldSummary, GroupRequest, GroupResult, LayerProfile } from '../models/layer-analytics.model';
 import { GisLayerPermissionMatrix, GisPermission } from '../models/gis-layer-permission.model';
 import { ManagedRole } from '../models/municipality-user.model';
 
@@ -51,6 +51,25 @@ export class GisLayersService {
   /** Analytics (VIEW-gated server-side): the layer's attribute fields. */
   analyticsFields(id: string): Observable<AnalyticsField[]> {
     return this.http.get<AnalyticsField[]>(`${this.baseUrl}/${id}/analytics/fields`);
+  }
+
+  /** Analytics: whole-layer profile behind the auto-built overview. */
+  analyticsProfile(id: string): Observable<LayerProfile> {
+    return this.http.get<LayerProfile>(`${this.baseUrl}/${id}/analytics/profile`);
+  }
+
+  /** Analytics: a measure per attribute value or per area of another layer. */
+  analyticsGroup(id: string, request: GroupRequest): Observable<GroupResult> {
+    const params: Record<string, string> = {};
+    for (const [key, value] of Object.entries(request)) {
+      if (value) params[key] = value;
+    }
+    return this.http.get<GroupResult>(`${this.baseUrl}/${id}/analytics/group`, { params });
+  }
+
+  /** Analytics: one area's outline (EPSG:4326 WKT) for a map filter. */
+  analyticsAreaShape(id: string, field: string, value: string): Observable<{ wkt: string | null }> {
+    return this.http.get<{ wkt: string | null }>(`${this.baseUrl}/${id}/analytics/area-shape`, { params: { field, value } });
   }
 
   /** Analytics: whole-layer summary of one field. */

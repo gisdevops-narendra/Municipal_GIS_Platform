@@ -14,7 +14,7 @@ import { GeoServerService } from './geoserver.service';
 import { GisAuthorizationService } from './gis-authorization.service';
 import { StorageService } from './storage.service';
 import { StyleService, type UploadedIcon } from './style.service';
-import { FieldStatsService } from './field-stats.service';
+import { FieldStatsService, GroupMeasure } from './field-stats.service';
 import { isSafeGeneratedTableName } from './layer-naming.util';
 import { rasterFilePath } from './raster-paths.util';
 import * as path from 'path';
@@ -49,12 +49,13 @@ export type LayerExportFormat = keyof typeof LAYER_EXPORT_FORMATS;
  *  one child module per format (seed-modules.ts). */
 export const EXPORT_DATA_MODULE_ID = 226;
 export const EXPORT_FILTER_MODULE_ID = 1035;
-export const LAYER_EXPORT_FORMAT_MODULE_IDS: Record<LayerExportFormat, number> = {
-  geojson: 231,
-  csv: 227,
-  shapefile: 228,
-  kml: 230,
-};
+export const LAYER_EXPORT_FORMAT_MODULE_IDS: Record<LayerExportFormat, number> =
+  {
+    geojson: 231,
+    csv: 227,
+    shapefile: 228,
+    kml: 230,
+  };
 
 interface DemoLayerDefinition {
   code: string;
@@ -293,9 +294,13 @@ export class GisLayersService {
     }
     const base = layer.code.toLowerCase();
     if (filter && !modules.has(EXPORT_FILTER_MODULE_ID)) {
-      throw new ForbiddenException('Your module access does not include Export with Filter.');
+      throw new ForbiddenException(
+        'Your module access does not include Export with Filter.',
+      );
     }
-    const cqlFilter = filter ? await this.exportFilterCql(layer, filter) : undefined;
+    const cqlFilter = filter
+      ? await this.exportFilterCql(layer, filter)
+      : undefined;
     if (format === 'geojson') {
       const geojson = await this.geoServer.getFeaturesAsGeoJson(
         layer.geoserverWorkspace,
@@ -326,29 +331,49 @@ export class GisLayersService {
     filter: { field: string; op: string; value: string },
   ): Promise<string> {
     const columns = layer.postgisTable
-      ? await this.prisma.$queryRawUnsafe<{ column_name: string; data_type: string }[]>(
+      ? await this.prisma.$queryRawUnsafe<
+          { column_name: string; data_type: string }[]
+        >(
           `SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1`,
           layer.postgisTable,
         )
       : [];
     const column = columns.find((c) => c.column_name === filter.field);
-    if (!column) throw new BadRequestException(`Unknown field "${filter.field}".`);
+    if (!column)
+      throw new BadRequestException(`Unknown field "${filter.field}".`);
     const numeric = /int|numeric|double|real/.test(column.data_type);
     const value = String(filter.value ?? '');
-    if (numeric && filter.op !== 'contains' && !Number.isFinite(Number(value))) {
-      throw new BadRequestException(`"${filter.field}" is numeric — enter a number.`);
+    if (
+      numeric &&
+      filter.op !== 'contains' &&
+      !Number.isFinite(Number(value))
+    ) {
+      throw new BadRequestException(
+        `"${filter.field}" is numeric — enter a number.`,
+      );
     }
-    const lit = numeric && filter.op !== 'contains' ? String(Number(value)) : `'${value.replace(/'/g, "''")}'`;
+    const lit =
+      numeric && filter.op !== 'contains'
+        ? String(Number(value))
+        : `'${value.replace(/'/g, "''")}'`;
     const f = `"${column.column_name.replace(/"/g, '')}"`;
     switch (filter.op) {
-      case '=': return `${f} = ${lit}`;
-      case '!=': return `${f} <> ${lit}`;
-      case '>': return `${f} > ${lit}`;
-      case '<': return `${f} < ${lit}`;
-      case 'contains': return `strToLowerCase(${f}) LIKE '%${value.toLowerCase().replace(/'/g, "''").replace(/%/g, '')}%'`;
-      case 'empty': return `${f} IS NULL`;
-      case 'notempty': return `${f} IS NOT NULL`;
-      default: throw new BadRequestException('Unknown filter operator.');
+      case '=':
+        return `${f} = ${lit}`;
+      case '!=':
+        return `${f} <> ${lit}`;
+      case '>':
+        return `${f} > ${lit}`;
+      case '<':
+        return `${f} < ${lit}`;
+      case 'contains':
+        return `strToLowerCase(${f}) LIKE '%${value.toLowerCase().replace(/'/g, "''").replace(/%/g, '')}%'`;
+      case 'empty':
+        return `${f} IS NULL`;
+      case 'notempty':
+        return `${f} IS NOT NULL`;
+      default:
+        throw new BadRequestException('Unknown filter operator.');
     }
   }
 
@@ -466,10 +491,18 @@ export class GisLayersService {
    *  Owner-only, like delete. */
   async renameLayer(appUser: AppUser, layerId: string, name: string) {
     if (appUser.systemRole !== 'MUNICIPALITY_OWNER') {
-      throw new ForbiddenException('Only the municipality owner may rename a layer.');
+      throw new ForbiddenException(
+        'Only the municipality owner may rename a layer.',
+      );
     }
-    const layer = await this.findLayerInMunicipality(appUser.municipalityId, layerId);
-    await this.prisma.gISLayer.update({ where: { id: layer.id }, data: { name } });
+    const layer = await this.findLayerInMunicipality(
+      appUser.municipalityId,
+      layerId,
+    );
+    await this.prisma.gISLayer.update({
+      where: { id: layer.id },
+      data: { name },
+    });
     this.refreshAiIndex(appUser.municipalityId);
     return { id: layer.id, name };
   }
@@ -506,7 +539,9 @@ export class GisLayersService {
         await this.geoServer
           .deleteStyle(layer.geoserverWorkspace, layer.styleName)
           .catch((error: Error) =>
-            this.logger.warn(`Deleted raster ${layer.id} but not its style: ${error.message}`),
+            this.logger.warn(
+              `Deleted raster ${layer.id} but not its style: ${error.message}`,
+            ),
           );
       }
     } else {
@@ -550,7 +585,10 @@ export class GisLayersService {
     await rm(
       path.join(
         path.resolve(
-          this.config.get<string>('GIS_UPLOAD_STORAGE_DIR', './storage/uploads'),
+          this.config.get<string>(
+            'GIS_UPLOAD_STORAGE_DIR',
+            './storage/uploads',
+          ),
           '..',
           'attachments',
         ),
@@ -725,6 +763,53 @@ export class GisLayersService {
     return this.fieldStats.summary(table, field, workspaceId);
   }
 
+  /** Analytics: whole-layer profile for the auto-built overview (VIEW-gated). */
+  async layerProfile(appUser: AppUser, layerId: string) {
+    const { table, workspaceId } = await this.analyticsSource(appUser, layerId);
+    return this.fieldStats.profile(table, workspaceId);
+  }
+
+  /** Analytics: `measure` per attribute value, or per feature of an area
+   *  layer (VIEW-gated on both layers). */
+  async layerGroupBy(
+    appUser: AppUser,
+    layerId: string,
+    options: {
+      by?: string;
+      areaLayerId?: string;
+      areaField?: string;
+      measure: GroupMeasure;
+      measureField?: string;
+      shapes?: boolean;
+    },
+  ) {
+    const target = await this.analyticsSource(appUser, layerId);
+    const area = options.areaLayerId
+      ? {
+          ...(await this.analyticsSource(appUser, options.areaLayerId)),
+          field: options.areaField ?? '',
+        }
+      : undefined;
+    return this.fieldStats.groupBy(target, {
+      by: options.by,
+      area,
+      measure: options.measure,
+      measureField: options.measureField,
+      shapes: options.shapes,
+    });
+  }
+
+  /** Analytics: one area's outline as a CQL-sized WKT (VIEW-gated). */
+  async layerAreaShape(
+    appUser: AppUser,
+    layerId: string,
+    field: string,
+    value: string | null,
+  ) {
+    const source = await this.analyticsSource(appUser, layerId);
+    return this.fieldStats.areaShape(source, field, value);
+  }
+
   /** Report Generation: the VIEW-checked layer (with its department) and
    *  its attribute fields — the whitelist a report's columns must come from. */
   async reportSource(appUser: AppUser, layerId: string) {
@@ -779,14 +864,18 @@ export class GisLayersService {
     }
     const permissions = await this.gisAuth.getPermissions(appUser, layer);
     if (!permissions.has('VIEW')) {
-      throw new ForbiddenException('You do not have permission to view this layer.');
+      throw new ForbiddenException(
+        'You do not have permission to view this layer.',
+      );
     }
     if (
       need === 'edit' &&
       !permissions.has('UPLOAD') &&
       !permissions.has('MANAGE')
     ) {
-      throw new ForbiddenException('You do not have permission to edit this layer.');
+      throw new ForbiddenException(
+        'You do not have permission to edit this layer.',
+      );
     }
     const { table, workspaceId } = this.styleSource(layer);
     if (!table || (need === 'edit' && !isSafeGeneratedTableName(table))) {
@@ -827,7 +916,10 @@ export class GisLayersService {
         `"${layer.name}" is not a routing layer. Routing works only on line layers marked as a routing (road network) layer when they were uploaded.`,
       );
     }
-    return { name: layer.name, ...(await this.analyticsSource(appUser, layerId)) };
+    return {
+      name: layer.name,
+      ...(await this.analyticsSource(appUser, layerId)),
+    };
   }
 
   async layerStyleAttributes(appUser: AppUser, layerId: string) {
