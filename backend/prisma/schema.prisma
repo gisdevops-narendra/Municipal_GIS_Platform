@@ -261,6 +261,8 @@ model GISLayer {
   /// Created from scratch in Draw & Mark (not uploaded / derived) — listed
   /// and managed there; Edit Features handles every other layer.
   drawnLayer     Boolean               @default(false) @map("drawn_layer")
+  /// Saved from an AI Assistant answer — listed in its own Layers-panel group.
+  aiGenerated    Boolean               @default(false) @map("ai_generated")
   /// Attribute domains / validation enforced by the Edit panel:
   /// `{ [field]: { required?, values?: string[], min?, max? } }`.
   fieldRules     Json?                 @map("field_rules")

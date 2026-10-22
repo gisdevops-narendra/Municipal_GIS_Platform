@@ -130,6 +130,17 @@
       </div>
     }
 
+    @if (aiLayers.length > 0) {
+      <div class="layer-panel__group">
+        <h3 class="layer-panel__group-title">AI Assistant</h3>
+        <ul class="layer-panel__list">
+          @for (layer of aiLayers; track layer.id) {
+            <ng-container *ngTemplateOutlet="row; context: { $implicit: layer, showDepartment: true }" />
+          }
+        </ul>
+      </div>
+    }
+
     @if (rasterAnalysisLayers.length > 0) {
       <div class="layer-panel__group">
         <h3 class="layer-panel__group-title">Raster Analysis</h3>

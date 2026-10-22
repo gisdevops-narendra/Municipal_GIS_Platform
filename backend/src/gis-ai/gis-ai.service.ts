@@ -816,6 +816,7 @@ export class GisAiService {
       geometryType: target.geometryType as GisGeometryType,
       description: `Saved from the AI Assistant — ${compiled.summary}`,
       rasterAnalysis: false,
+      aiGenerated: true,
     });
   }
 

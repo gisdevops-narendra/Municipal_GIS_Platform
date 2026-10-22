@@ -99,9 +99,18 @@
                 <p class="aic__note"><i class="pi pi-info-circle" aria-hidden="true"></i> {{ note }}</p>
               }
               @if (msg.response?.options?.length) {
-                <div class="aic__choices">
+                <div class="aic__choices" role="list">
                   @for (option of msg.response!.options!; track option.label) {
-                    <button type="button" class="aic__chip" [disabled]="sending()" (click)="choose(option)">{{ option.label }}</button>
+                    @let parts = optionParts(option.label);
+                    <button type="button" role="listitem" class="aic__choice" [disabled]="sending()" (click)="choose(option)">
+                      <span class="aic__choice-text">
+                        <span class="aic__choice-title">{{ parts.title }}</span>
+                        @if (parts.detail) {
+                          <span class="aic__choice-detail">{{ parts.detail }}</span>
+                        }
+                      </span>
+                      <i class="pi pi-chevron-right" aria-hidden="true"></i>
+                    </button>
                   }
                 </div>
               }

@@ -675,6 +675,7 @@ export class GisLayersService {
       rasterAnalysis: layer.rasterAnalysis,
       routingEnabled: layer.routingEnabled,
       drawnLayer: layer.drawnLayer,
+      aiGenerated: layer.aiGenerated,
       bbox:
         layer.bboxMinX !== null &&
         layer.bboxMinY !== null &&

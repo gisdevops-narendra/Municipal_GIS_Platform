@@ -45,6 +45,8 @@ export interface GisLayer {
   routingEnabled?: boolean;
   /** Created from scratch in Draw & Mark — managed there, not in Edit Features. */
   drawnLayer?: boolean;
+  /** Saved from an AI Assistant answer — its own Layers-panel group. */
+  aiGenerated?: boolean;
   /** EPSG:4326 (lon/lat) extent captured from GeoServer at publish time, or
    *  null if unavailable (e.g. a layer with zero features yet). */
   bbox: GisLayerBoundingBox | null;

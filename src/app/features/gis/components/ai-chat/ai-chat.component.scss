@@ -450,26 +450,50 @@
 
 .aic__choices {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-direction: column;
   margin-top: 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  overflow: hidden;
 }
 
-.aic__chip {
+/* One clarification answer: the choice, its sample values beneath. */
+.aic__choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: none;
   font: inherit;
-  font-size: 11.5px;
   text-align: left;
-  padding: 5px 11px;
-  border: 1px solid var(--color-primary-500);
-  border-radius: 999px;
-  background: var(--color-surface);
-  color: var(--color-primary-700);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.12s;
+
+  & + & {
+    border-top: 1px solid var(--color-line);
+  }
+
+  > .pi {
+    flex: none;
+    font-size: 10px;
+    color: var(--color-ink-500);
+  }
 
   &:hover:not(:disabled) {
-    background: var(--color-primary-600);
-    color: #fff;
+    background: var(--color-surface-alt);
+
+    .aic__choice-title,
+    > .pi {
+      color: var(--color-primary-700);
+    }
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-primary-600);
+    outline-offset: -2px;
   }
 
   &:disabled {
@@ -477,6 +501,32 @@
     cursor: default;
   }
 }
+
+.aic__choice-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.aic__choice-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-ink-900);
+  overflow-wrap: anywhere;
+}
+
+.aic__choice-detail {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-ink-500);
+}
+
 
 /* ---------- result cards ---------- */
 .aic__card {

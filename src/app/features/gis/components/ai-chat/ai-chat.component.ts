@@ -301,6 +301,12 @@ export class AiChatComponent {
 
   /** A clarification / "Did you mean" chip: re-ask with the filled-in
    *  question, or run the option's ready plan — no retyping. */
+  /** "field — e.g. a, b" → the choice and its sample values, shown on two lines. */
+  optionParts(label: string): { title: string; detail: string | null } {
+    const at = label.indexOf(' — ');
+    return at < 0 ? { title: label, detail: null } : { title: label.slice(0, at), detail: label.slice(at + 3) };
+  }
+
   choose(option: AiClarifyOption): void {
     if (this.sending()) return;
     if (option.operation) {

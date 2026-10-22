@@ -518,6 +518,8 @@ export class RasterService {
       rasterAnalysis: boolean;
       /** Table CRS when it differs from the workspace default. */
       srs?: string;
+      /** Saved from an AI Assistant answer. */
+      aiGenerated?: boolean;
     },
   ) {
     const { owner, workspace, code, table } = output;
@@ -539,6 +541,7 @@ export class RasterService {
           description: params.description,
           layerType: 'VECTOR',
           rasterAnalysis: params.rasterAnalysis,
+          aiGenerated: params.aiGenerated ?? false,
           geoserverWorkspace: workspace.geoserverWorkspace,
           geoserverLayer,
           geometryType: params.geometryType,
