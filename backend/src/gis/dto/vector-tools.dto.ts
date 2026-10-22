@@ -1,3 +1,4 @@
+import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -12,8 +13,45 @@ import {
   IsUUID,
   Max,
   MaxLength,
+  Matches,
   Min,
+  ValidateNested,
 } from 'class-validator';
+
+export const BLANK_FIELD_TYPES = ['text', 'integer', 'decimal', 'date', 'boolean'] as const;
+export type BlankFieldType = (typeof BLANK_FIELD_TYPES)[number];
+
+export class BlankLayerFieldDto {
+  @IsString()
+  @Matches(/^[A-Za-z_][A-Za-z0-9_]{0,62}$/, {
+    message: 'Field names use letters, digits and _ and start with a letter or _.',
+  })
+  name!: string;
+
+  @IsIn(BLANK_FIELD_TYPES)
+  type!: BlankFieldType;
+}
+
+/** POST /api/gis/layers/blank — an empty, editable vector layer. */
+export class CreateBlankLayerDto {
+  @IsString()
+  @MaxLength(120)
+  name!: string;
+
+  @IsIn(['POINT', 'LINE', 'POLYGON'])
+  geometryType!: 'POINT' | 'LINE' | 'POLYGON';
+
+  /** Storage CRS (EPSG:n); the workspace default when omitted. */
+  @IsOptional()
+  @Matches(/^EPSG:\d{4,6}$/i, { message: 'The CRS must look like EPSG:32643.' })
+  crs?: string;
+
+  @IsArray()
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => BlankLayerFieldDto)
+  fields!: BlankLayerFieldDto[];
+}
 
 /** POST /api/gis/layers/:id/features — geometry is GeoJSON in EPSG:4326. */
 export class CreateFeatureDto {

@@ -24,6 +24,8 @@ export interface LayerPanelDepartmentGroup {
  * Task 9 §3 — department layers are further sub-grouped by their own
  * department (e.g. separate "Roads", "Water" headings) rather than one
  * flat bucket, so a user can tell at a glance which department owns what.
+ * Layers created in Draw & Mark (`layer.drawnLayer`) and Raster Analysis
+ * outputs get their own "Drawn Layers" / "Raster Analysis" groups instead.
  * The grouping comes entirely from backend metadata (`layer.ownershipType`
  * / `layer.departmentId`/`departmentName`) — nothing here is hard-coded
  * per layer or department name. Reads/writes visibility entirely through
@@ -144,7 +146,12 @@ export class LayerPanelComponent {
   }
 
   get canonicalLayers(): GisLayer[] {
-    return this.layers.filter((layer) => layer.ownershipType === 'CANONICAL' && !layer.rasterAnalysis);
+    return this.layers.filter((layer) => layer.ownershipType === 'CANONICAL' && !layer.rasterAnalysis && !layer.drawnLayer);
+  }
+
+  /** Layers created from scratch in Draw & Mark, whoever owns them. */
+  get drawnLayers(): GisLayer[] {
+    return this.layers.filter((layer) => layer.drawnLayer && !layer.rasterAnalysis);
   }
 
   /** Raster Analysis uploads, downloads and results, whoever owns them. */
@@ -155,7 +162,7 @@ export class LayerPanelComponent {
   get departmentGroups(): LayerPanelDepartmentGroup[] {
     const groups = new Map<string, LayerPanelDepartmentGroup>();
     for (const layer of this.layers) {
-      if (layer.ownershipType !== 'DEPARTMENT' || layer.rasterAnalysis) continue;
+      if (layer.ownershipType !== 'DEPARTMENT' || layer.rasterAnalysis || layer.drawnLayer) continue;
       const departmentId = layer.departmentId ?? 'unassigned';
       const departmentName = layer.departmentName ?? 'Unassigned';
       const existing = groups.get(departmentId);

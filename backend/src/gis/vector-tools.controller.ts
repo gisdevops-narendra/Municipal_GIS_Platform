@@ -21,6 +21,7 @@ import { CurrentAppUser } from '../auth/decorators/current-app-user.decorator';
 import type { AppUser } from '../auth/types/app-user.type';
 import { VectorToolsService } from './vector-tools.service';
 import {
+  CreateBlankLayerDto,
   CreateFeatureDto,
   GeoprocessDto,
   ImpactReportDto,
@@ -35,6 +36,12 @@ import {
 @Controller('gis')
 export class VectorToolsController {
   constructor(private readonly vectorTools: VectorToolsService) {}
+
+  @RequireMunicipalityMember()
+  @Post('layers/blank')
+  createBlankLayer(@CurrentAppUser() appUser: AppUser, @Body() dto: CreateBlankLayerDto) {
+    return this.vectorTools.createBlankLayer(appUser, dto);
+  }
 
   @RequireMunicipalityMember()
   @Get('layers/:id/edit-schema')

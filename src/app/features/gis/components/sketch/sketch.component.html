@@ -1,3 +1,40 @@
+@if (canDigitize()) {
+  <div class="sketch__tabs" role="tablist" aria-label="Draw and Mark">
+    <button type="button" role="tab" class="sketch__tab" [class.is-active]="tab() === 'create'" [attr.aria-selected]="tab() === 'create'" (click)="setTab('create')">
+      <i class="pi pi-plus-circle" aria-hidden="true"></i> Create
+    </button>
+    <button type="button" role="tab" class="sketch__tab" [class.is-active]="tab() === 'modify'" [attr.aria-selected]="tab() === 'modify'" (click)="setTab('modify')">
+      <i class="pi pi-pen-to-square" aria-hidden="true"></i> Modify
+      @if (digitize?.fe?.isDirty()) {
+        <span class="sketch__dot" aria-label="unsaved changes"></span>
+      }
+    </button>
+    <button type="button" role="tab" class="sketch__tab" [class.is-active]="tab() === 'sketch'" [attr.aria-selected]="tab() === 'sketch'" (click)="setTab('sketch')">
+      <i class="pi pi-pencil" aria-hidden="true"></i> Sketches
+    </button>
+  </div>
+
+  <!-- Kept mounted on the Sketches tab so an edit session survives. -->
+  <app-layer-digitize
+    [class.sketch__hidden]="tab() === 'sketch'"
+    [view]="tab() === 'modify' ? 'modify' : 'create'"
+    (viewChange)="setTab($event)"
+    [layers]="layers"
+    [allowedModuleIds]="allowedModuleIdsValue()"
+    [defaultCrs]="defaultCrs"
+    [canManage]="canManage"
+    [active]="isActive() && tab() !== 'sketch'"
+    (layerCreated)="layerCreated.emit($event)"
+    (renameLayer)="renameLayer.emit($event)"
+    (deleteLayer)="deleteLayer.emit($event)"
+    (openTable)="openTable.emit($event)"
+    [tableEdits]="tableEdits"
+    (editingLayerChange)="editingLayerChange.emit($event)"
+    (featuresSaved)="featuresSaved.emit()"
+  />
+}
+
+@if (tab() === 'sketch') {
 <div class="sketch">
   @if (kinds().length === 0) {
     <p class="sketch__hint">You don't have access to the Draw or Marking tools.</p>
@@ -59,7 +96,7 @@
     }
 
     <div class="sketch__list-head">
-      <span class="sketch__label">Saved ({{ sketches().length }})</span>
+      <span class="sketch__label">Sketches ({{ sketches().length }})</span>
       @if (sketches().length > 0) {
         <div class="sketch__list-actions">
           <button type="button" class="sketch__link" (click)="exportGeoJson()">Export GeoJSON</button>
@@ -69,7 +106,7 @@
     </div>
 
     @if (sketches().length === 0) {
-      <p class="sketch__hint sketch__hint--muted">Nothing drawn yet. Saved sketches stay on the map in this browser.</p>
+      <p class="sketch__hint sketch__hint--muted">Nothing drawn yet. Sketches are temporary — Reset or reloading the page clears them; use Feature layers to keep data.</p>
     } @else {
       <ul class="sketch__list">
         @for (sketch of sketches(); track sketch.id) {
@@ -103,3 +140,4 @@
     }
   }
 </div>
+}

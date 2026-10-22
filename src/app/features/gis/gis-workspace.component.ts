@@ -38,7 +38,6 @@ import { QueryBuilderComponent } from './components/query-builder/query-builder.
 import { MeasureComponent } from './components/measure/measure.component';
 import { BookmarksComponent } from './components/bookmarks/bookmarks.component';
 import { BufferOverlayComponent } from './components/buffer-overlay/buffer-overlay.component';
-import { FeatureEditComponent } from './components/feature-edit/feature-edit.component';
 import { GeoprocessingComponent } from './components/geoprocessing/geoprocessing.component';
 import { DataToolsComponent } from './components/data-tools/data-tools.component';
 import { DATA_TOOL_MODULE_IDS } from './services/data-tools.service';
@@ -122,10 +121,10 @@ const TOOLS: WsTool[] = [
   { id: 'query', label: 'Query Builder', icon: 'pi pi-filter', group: 'analysis', dock: 'left', available: true, moduleId: 2 },
   { id: 'measure', label: 'Measure', icon: 'pi pi-arrows-h', group: 'analysis', dock: 'left', available: true, moduleId: 11 },
   { id: 'buffer', label: 'Buffer & Overlay', icon: 'pi pi-circle', group: 'analysis', dock: 'left', available: true, moduleId: 6 },
-  { id: 'edit', label: 'Edit Features', icon: 'pi pi-pen-to-square', group: 'analysis', dock: 'left', available: true, moduleId: EDIT_PANEL_MODULE_ID },
   { id: 'geoprocessing', label: 'Geoprocessing', icon: 'pi pi-cog', group: 'analysis', dock: 'left', available: true, moduleId: GEOPROCESSING_MODULE_ID },
   { id: 'data', label: 'Data Tools', icon: 'pi pi-database', group: 'analysis', dock: 'left', available: true, anyModuleIds: DATA_TOOL_MODULE_IDS },
-  { id: 'sketch', label: 'Draw & Mark', icon: 'pi pi-pencil', group: 'analysis', dock: 'left', available: true, anyModuleIds: [DRAW_MODULE_ID, MARKING_TOOL_MODULE_ID] },
+  // Draw & Mark also hosts feature editing (Edit Panel module) — there is no separate Edit Features tool.
+  { id: 'sketch', label: 'Draw & Mark', icon: 'pi pi-pencil', group: 'analysis', dock: 'left', available: true, anyModuleIds: [DRAW_MODULE_ID, MARKING_TOOL_MODULE_ID, EDIT_PANEL_MODULE_ID] },
   { id: 'advanced', label: 'Advanced Tools', icon: 'pi pi-directions', group: 'analysis', dock: 'left', available: true, anyModuleIds: [BASIC_ROUTING_MODULE_ID, NEAREST_FACILITY_MODULE_ID, NETWORK_TRACING_MODULE_ID, SERVICE_AREA_MODULE_ID] },
   { id: 'raster', label: 'Raster Analysis', icon: 'pi pi-images', group: 'analysis', dock: 'left', available: true, anyModuleIds: RASTER_TOOL_MODULE_IDS },
   { id: 'statistics', label: 'Statistics', icon: 'pi pi-chart-bar', group: 'analysis', dock: 'bottom', available: true, anyModuleIds: [ANALYTICS_MODULE_ID, DATA_VISUALISATION_MODULE_ID] },
@@ -160,7 +159,6 @@ const TOOLS: WsTool[] = [
     MeasureComponent,
     BookmarksComponent,
     BufferOverlayComponent,
-    FeatureEditComponent,
     GeoprocessingComponent,
     DataToolsComponent,
     AdvancedToolsComponent,
@@ -333,6 +331,12 @@ export class GisWorkspaceComponent {
   /** Active Query Builder result — drives the WMS filter, the map highlight,
    *  and the Attribute Table's locked filter. */
   readonly activeQueryFilter = signal<AttributeExternalFilter | null>(null);
+  /** Draw & Mark edit session: the layer being edited (its Attribute Table
+   *  cells become editable), a tick when the edit panel writes features,
+   *  and the cell edits saved in the table (for the open feature). */
+  readonly editingLayerId = signal<string | null>(null);
+  readonly featuresWrittenTick = signal(0);
+  readonly tableEdits = signal<{ layerId: string; changes: Record<number, Record<string, string>> } | null>(null);
   /** The Attribute Table's current selection — a Report Generation scope. */
   readonly tableSelection = signal<TableSelection | null>(null);
 
@@ -553,6 +557,14 @@ export class GisWorkspaceComponent {
   }
 
   /** Raster Analysis published a new layer (upload or tool output). */
+  /** Opens the Attribute Table on one layer (Draw & Mark). */
+  openAttributeTable(layerId: string): void {
+    this.highlightLayerId.set(layerId);
+    this.bottomTool.set('attributes');
+    this.rememberOpened(this.openedBottomTools, 'attributes');
+    this.refreshMapSize();
+  }
+
   onLayerCreated(layer: GisLayer | undefined): void {
     this.loadLayers();
     if (layer?.bbox) setTimeout(() => this.mapService.zoomToLayer(layer), 300);
@@ -690,7 +702,7 @@ export class GisWorkspaceComponent {
     this.notify.confirm({
       header: 'Reset the map?',
       message:
-        'Clears every tool result, selection, filter, drawing and measurement, closes all panels and returns to the initial view. Saved layers, sketches and bookmarks are kept.',
+        'Clears every tool result, selection, filter, sketch, drawing and measurement, closes all panels and returns to the initial view. Saved layers and bookmarks are kept.',
       confirmLabel: 'Reset',
       destructive: true,
       accept: () => this.resetWorkspace()
@@ -705,6 +717,8 @@ export class GisWorkspaceComponent {
     this.tableSelection.set(null);
     this.featureInfoResults.set([]);
     this.highlightLayerId.set(null);
+    this.editingLayerId.set(null);
+    this.tableEdits.set(null);
     this.reportLayer.set(null);
     this.styleTargetLayer.set(null);
     this.pendingSelect.set(null);
@@ -714,6 +728,7 @@ export class GisWorkspaceComponent {
     this.openedBottomTools.set(new Set());
     // Next tick: after the panels' own teardown has run.
     setTimeout(() => {
+      this.sketchService.clearAll();
       this.mapService.resetMap();
       this.leftTool.set('layers');
       this.openedLeftTools.set(new Set(['layers']));

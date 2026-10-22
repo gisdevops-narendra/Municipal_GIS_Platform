@@ -1,0 +1,230 @@
+<div class="bo dg">
+  @if (creating()) {
+    <!-- ===== 1. Create layer ===== -->
+    <section class="dg__card">
+      <header class="dg__card-head">
+        <span class="dg__step">New layer</span>
+        <button type="button" class="bo__icon-btn" aria-label="Cancel" (click)="cancelCreate()">
+          <i class="pi pi-times" aria-hidden="true"></i>
+        </button>
+      </header>
+
+      <label class="bo__field">
+        <span class="bo__label">Layer name</span>
+        <input pInputText class="bo__input" maxlength="120" placeholder="e.g. Street lights survey" [(ngModel)]="newName" />
+      </label>
+
+      <div class="bo__field">
+        <span class="bo__label">Geometry type</span>
+        <div class="dg__geoms" role="radiogroup" aria-label="Geometry type">
+          @for (g of geometryOptions; track g.value) {
+            <button
+              type="button"
+              role="radio"
+              class="dg__geom"
+              [class.is-active]="newGeometry === g.value"
+              [attr.aria-checked]="newGeometry === g.value"
+              (click)="newGeometry = g.value"
+            >
+              <i [class]="g.icon" aria-hidden="true"></i>
+              {{ g.label }}
+            </button>
+          }
+        </div>
+      </div>
+
+      <label class="bo__field">
+        <span class="bo__label">Coordinate reference system</span>
+        <p-select class="bo__select" [options]="crsOptions()" optionLabel="label" optionValue="value" [(ngModel)]="newCrs" appendTo="body" />
+      </label>
+      @if (newCrs === otherCrs) {
+        <input pInputText class="bo__input" placeholder="EPSG:24378" [(ngModel)]="customCrs" aria-label="EPSG code" />
+      }
+
+      <div class="bo__field">
+        <span class="bo__label">Attribute fields</span>
+        <div class="dg__fields">
+          @for (f of fields(); track f.key) {
+            <div class="dg__field-row">
+              <input
+                class="bo__input dg__field-name"
+                [class.is-invalid]="f.name && fieldProblem(f)"
+                maxlength="63"
+                placeholder="field_name"
+                [ngModel]="f.name"
+                (ngModelChange)="updateField(f.key, { name: $event })"
+                [attr.aria-label]="'Field name'"
+              />
+              <select class="bo__input dg__field-type" [ngModel]="f.type" (ngModelChange)="updateField(f.key, { type: $event })" aria-label="Field type">
+                @for (t of fieldTypes; track t.value) {
+                  <option [value]="t.value">{{ t.label }}</option>
+                }
+              </select>
+              <button type="button" class="bo__icon-btn" aria-label="Remove field" (click)="removeField(f.key)">
+                <i class="pi pi-trash" aria-hidden="true"></i>
+              </button>
+            </div>
+            @if (f.name && fieldProblem(f); as problem) {
+              <span class="dg__field-error">{{ problem }}</span>
+            }
+          } @empty {
+            <p class="bo__hint">No fields — features will only have geometry.</p>
+          }
+        </div>
+        <button type="button" class="bo__chip dg__add-field" (click)="addField()">
+          <i class="pi pi-plus" aria-hidden="true"></i>Add field
+        </button>
+        <p class="bo__hint">An id (ogc_fid) and the geometry are added automatically. More fields can be added later in Data Tools.</p>
+      </div>
+
+      @if (formError(); as message) {
+        <p class="dg__error" role="alert">{{ message }}</p>
+      }
+
+      <div class="dg__actions">
+        <button pButton type="button" class="p-button-sm" icon="pi pi-check" label="Create layer" [loading]="saving()" (click)="create()"></button>
+        <button pButton type="button" class="p-button-sm p-button-text" label="Cancel" [disabled]="saving()" (click)="cancelCreate()"></button>
+      </div>
+    </section>
+  } @else {
+    <!-- ===== CREATE: feature templates (one per editable layer) ===== -->
+    @if (view() === 'create') {
+      <div class="dg__create">
+        @if (drawingTemplate(); as d) {
+          <div class="dg__banner" role="status">
+            <span class="dg__pulse" aria-hidden="true"></span>
+            <div class="dg__banner-text">
+              <strong>Drawing in {{ d.name }}</strong>
+              <span>{{ d.geometry === 'POINT' ? 'Click on the map to place the point.' : 'Click to add vertices · double-click to finish.' }}</span>
+            </div>
+            <button type="button" class="dg__banner-cancel" (click)="fe?.cancel()">Cancel</button>
+          </div>
+        }
+
+        <div class="dg__bar">
+          <span class="dg__search">
+            <i class="pi pi-search" aria-hidden="true"></i>
+            <input type="search" placeholder="Find a layer" aria-label="Find a layer" [ngModel]="search()" (ngModelChange)="search.set($event)" />
+          </span>
+          @if (canCreate()) {
+            <button pButton type="button" class="p-button-sm dg__new" icon="pi pi-plus" label="New layer" (click)="startCreate()"></button>
+          }
+        </div>
+
+        @if (!canEdit()) {
+          <p class="bo__hint">Drawing features needs the Edit Panel module — ask your administrator for access.</p>
+        } @else {
+          <p class="dg__lead">Pick a layer to draw a new feature in it.</p>
+        }
+
+        @for (group of templateGroups(); track group.label) {
+          <section class="dg__group">
+            <button type="button" class="dg__group-head" [attr.aria-expanded]="isGroupOpen(group.label)" (click)="toggleGroup(group.label)">
+              <i class="pi" [class.pi-chevron-down]="isGroupOpen(group.label)" [class.pi-chevron-right]="!isGroupOpen(group.label)" aria-hidden="true"></i>
+              <span>{{ group.label }}</span>
+              <span class="dg__count">{{ group.items.length }}</span>
+            </button>
+            @if (isGroupOpen(group.label)) {
+              <ul class="dg__templates">
+                @for (t of group.items; track t.id) {
+                  <li>
+                    <button
+                      type="button"
+                      class="dg__template"
+                      [class.is-active]="isDrawing(t.id)"
+                      [disabled]="!canEdit()"
+                      [attr.aria-pressed]="isDrawing(t.id)"
+                      [attr.title]="'Draw a new ' + geometryLabel(t.geometry).toLowerCase() + ' in ' + t.name"
+                      (click)="isDrawing(t.id) ? fe?.cancel() : startTemplate(t.id)"
+                    >
+                      @switch (t.geometry) {
+                        @case ('POINT') {
+                          <svg class="dg__glyph" viewBox="0 0 18 18" aria-hidden="true"><path d="M9 1.6a5.1 5.1 0 0 0-5.1 5.1C3.9 10.4 9 16.4 9 16.4s5.1-6 5.1-9.7A5.1 5.1 0 0 0 9 1.6Zm0 7.1a2 2 0 1 1 0-4 2 2 0 0 1 0 4Z" fill="currentColor" /></svg>
+                        }
+                        @case ('LINE') {
+                          <svg class="dg__glyph" viewBox="0 0 18 18" aria-hidden="true"><polyline points="2,14.5 6.5,7.5 11,11 16,3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                        }
+                        @default {
+                          <svg class="dg__glyph" viewBox="0 0 18 18" aria-hidden="true"><polygon points="3,6.5 9,2.5 15.5,6 14,15 4.5,15" fill="currentColor" fill-opacity="0.22" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" /></svg>
+                        }
+                      }
+                      <span class="dg__template-name">{{ t.name }}</span>
+                      @if (isDrawing(t.id)) {
+                        <span class="dg__tag">Drawing</span>
+                      } @else {
+                        <span class="dg__kind">{{ geometryLabel(t.geometry) }}</span>
+                      }
+                    </button>
+                  </li>
+                }
+              </ul>
+            }
+          </section>
+        } @empty {
+          <div class="dg__empty">
+            <i class="pi pi-inbox" aria-hidden="true"></i>
+            <p>{{ search() ? 'No layer matches “' + search() + '”.' : 'No editable layers yet — click New layer to create one.' }}</p>
+          </div>
+        }
+      </div>
+    }
+
+    <!-- ===== MODIFY: the editing layer + the selected feature ===== -->
+    <div class="dg__modify" [class.dg__hidden]="view() !== 'modify'">
+      <div class="dg__layer-row">
+        <p-select
+          class="bo__select dg__layer-select"
+          [options]="layerGroups()"
+          [group]="true"
+          optionLabel="label"
+          optionValue="value"
+          [ngModel]="layerId()"
+          (ngModelChange)="selectLayer($event)"
+          [filter]="layerCount() > 8"
+          placeholder="Choose a layer to modify"
+          appendTo="body"
+          ariaLabel="Layer to modify"
+        >
+          <ng-template let-option #item>
+            <span class="dg__opt"><i [class]="kindIcon(option.geometry)" aria-hidden="true"></i>{{ option.label }}</span>
+          </ng-template>
+        </p-select>
+        @if (layer()) {
+          <button type="button" class="bo__icon-btn dg__more" aria-label="Layer options" (click)="openLayerMenu($event, layerMenu)">
+            <i class="pi pi-ellipsis-v" aria-hidden="true"></i>
+          </button>
+        }
+      </div>
+      @if (renaming()) {
+        <div class="dg__rename-row">
+          <input class="bo__input dg__rename" maxlength="120" [(ngModel)]="renameText" (keydown.enter)="confirmRename()" (keydown.escape)="renaming.set(false)" aria-label="New layer name" />
+          <button type="button" class="bo__icon-btn" aria-label="Save name" (click)="confirmRename()"><i class="pi pi-check" aria-hidden="true"></i></button>
+          <button type="button" class="bo__icon-btn" aria-label="Cancel rename" (click)="renaming.set(false)"><i class="pi pi-times" aria-hidden="true"></i></button>
+        </div>
+      }
+
+      @if (layer(); as l) {
+        @if (canEdit()) {
+          <app-feature-edit
+            #fe
+            [fixedLayerId]="l.id"
+            [layers]="layersSignal()"
+            [allowedModuleIds]="allowed()"
+            [active]="active"
+            [externalEdits]="tableEdits"
+            (saved)="featuresSaved.emit()"
+            (targetOpened)="setView('modify')"
+          />
+        } @else {
+          <p class="bo__hint">Modifying features needs the Edit Panel module — ask your administrator for access.</p>
+        }
+      } @else {
+        <div class="dg__empty">
+          <i class="pi pi-pen-to-square" aria-hidden="true"></i>
+          <p>Choose a layer above, then select a feature on the map to move, reshape, delete or change its attributes.</p>
+        </div>
+      }
+    </div>
+    <p-menu #layerMenu [model]="layerMenuItems()" [popup]="true" appendTo="body" />
+  }
+</div>

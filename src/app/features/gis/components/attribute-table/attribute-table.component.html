@@ -10,7 +10,7 @@
         optionLabel="label"
         optionValue="value"
         [ngModel]="activeLayerId()"
-        (onChange)="selectLayer($event.value)"
+        (onChange)="onLayerPick($event.value)"
         appendTo="body"
         [ariaLabel]="'Layer'"
       />
@@ -46,6 +46,22 @@
             <i class="pi pi-times" aria-hidden="true"></i>
           </button>
         </span>
+      }
+
+      @if (canEditCells()) {
+        <span class="attr-table__edit" role="status">
+          <i class="pi pi-pencil" aria-hidden="true"></i>
+          @if (pendingCount()) {
+            <span>{{ pendingCount() }} unsaved edit{{ pendingCount() === 1 ? '' : 's' }}</span>
+            <button pButton type="button" class="p-button-sm attr-table__edit-save" icon="pi pi-check" label="Save" [loading]="savingEdits()" (click)="saveEdits()"></button>
+            <button type="button" class="attr-table__link" [disabled]="savingEdits()" (click)="discardEdits()">Discard</button>
+          } @else {
+            <span>Editing · double-click a cell to change it</span>
+          }
+        </span>
+        @if (editError(); as message) {
+          <span class="attr-table__edit-error" role="alert">{{ message }}</span>
+        }
       }
 
       <span class="attr-table__report">{{ pageReport() }}</span>
@@ -201,9 +217,36 @@
             @for (field of visibleFields(); track field.name) {
               <td
                 [class.attr-table__td--num]="isNumeric(field)"
-                [class.attr-table__td--null]="isNull(row.values[field.name])"
+                [class.attr-table__td--null]="isNull(cellValue(row, field))"
+                [class.attr-table__td--editable]="canEditCells() && isEditableField(field)"
+                [class.attr-table__td--dirty]="isCellDirty(row, field)"
+                (dblclick)="startCellEdit(row, field, $event)"
               >
-                {{ formatValue(field, row.values[field.name]) }}
+                @if (isEditingCell(row, field)) {
+                  @switch (field.type) {
+                    @case ('boolean') {
+                      <select class="attr-table__cell-input" [(ngModel)]="cellDraft" (click)="$event.stopPropagation()" (blur)="commitCell(row, field)" (keydown.enter)="commitCell(row, field)" (keydown.escape)="cancelCell()">
+                        <option value="">—</option>
+                        <option value="true">true</option>
+                        <option value="false">false</option>
+                      </select>
+                    }
+                    @case ('date') {
+                      <input type="date" class="attr-table__cell-input" [(ngModel)]="cellDraft" (click)="$event.stopPropagation()" (blur)="commitCell(row, field)" (keydown.enter)="commitCell(row, field)" (keydown.escape)="cancelCell()" />
+                    }
+                    @case ('integer') {
+                      <input type="number" step="1" class="attr-table__cell-input" [(ngModel)]="cellDraft" (click)="$event.stopPropagation()" (blur)="commitCell(row, field)" (keydown.enter)="commitCell(row, field)" (keydown.escape)="cancelCell()" />
+                    }
+                    @case ('number') {
+                      <input type="number" step="any" class="attr-table__cell-input" [(ngModel)]="cellDraft" (click)="$event.stopPropagation()" (blur)="commitCell(row, field)" (keydown.enter)="commitCell(row, field)" (keydown.escape)="cancelCell()" />
+                    }
+                    @default {
+                      <input type="text" class="attr-table__cell-input" [(ngModel)]="cellDraft" (click)="$event.stopPropagation()" (blur)="commitCell(row, field)" (keydown.enter)="commitCell(row, field)" (keydown.escape)="cancelCell()" />
+                    }
+                  }
+                } @else {
+                  {{ formatValue(field, cellValue(row, field)) }}
+                }
               </td>
             }
           </tr>

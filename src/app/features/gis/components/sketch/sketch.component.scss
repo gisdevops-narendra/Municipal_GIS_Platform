@@ -213,3 +213,56 @@
     color: var(--color-ink-500);
   }
 }
+
+/* Draw & Mark: Feature layers | Sketches */
+.sketch__tabs {
+  display: flex;
+  margin-bottom: 12px;
+  padding: 2px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.sketch__tab {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  border: none;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: none;
+  color: var(--color-ink-700);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+
+  .pi {
+    font-size: 11px;
+  }
+
+  &.is-active {
+    background: var(--color-surface);
+    color: var(--color-primary-700);
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-primary-600);
+    outline-offset: 1px;
+  }
+}
+
+.sketch__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #d97706;
+}
+
+.sketch__hidden {
+  display: none;
+}

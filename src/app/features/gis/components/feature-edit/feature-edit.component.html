@@ -1,4 +1,5 @@
-<div class="bo">
+<div class="bo ed">
+  @if (!fixed()) {
   <label class="bo__field">
     <span class="bo__label">Layer to edit</span>
     <p-select
@@ -10,13 +11,10 @@
       (ngModelChange)="selectLayer($event)"
       [showClear]="true"
       [filter]="true"
-      placeholder="Choose a layer"
+      placeholder="Choose an existing layer"
       appendTo="body"
     />
   </label>
-
-  @if (collectAllowed()) {
-    <a routerLink="/collect" class="bo__hint"><i class="pi pi-mobile" aria-hidden="true"></i> Collecting on site? Open Field Collection on your phone.</a>
   }
 
   @if (busy() === 'schema') {
@@ -24,28 +22,53 @@
   }
 
   @if (schema(); as s) {
-    @if (!target()) {
-      <div class="bo__operand-actions">
-        <button type="button" class="bo__chip" [class.bo__chip--busy]="busy() === 'draw'" (click)="addFeature()">
-          <i class="pi pi-plus" aria-hidden="true"></i>Add {{ s.geometryType?.toLowerCase() }}
+    <!-- Editing toolbar — always available, like a desktop GIS: add the next
+         feature or pick another one without closing the current one first
+         (unsaved edits are confirmed before they are discarded). -->
+    <div class="ed__tools" role="toolbar" aria-label="Modify tools">
+      <button type="button" class="ed__tool" [class.is-active]="busy() === 'pick'" [attr.aria-pressed]="busy() === 'pick'" title="Select a feature on the map" (click)="busy() === 'pick' ? cancel() : pickFeature()">
+        <i class="pi pi-arrow-up-left" aria-hidden="true"></i>
+        <span>Select</span>
+      </button>
+      <button type="button" class="ed__tool" [class.is-active]="!!target() && editTool() === 'move'" [disabled]="!target()" title="Drag the whole feature" (click)="setEditTool('move')">
+        <i class="pi pi-arrows-alt" aria-hidden="true"></i>
+        <span>Move</span>
+      </button>
+      <button type="button" class="ed__tool" [class.is-active]="!!target() && editTool() === 'reshape'" [disabled]="!target()" title="Drag, add or remove vertices" (click)="setEditTool('reshape')">
+        <i class="pi pi-share-alt" aria-hidden="true"></i>
+        <span>Reshape</span>
+      </button>
+      <button type="button" class="ed__tool ed__tool--danger" [disabled]="!target() || target()?.id === null || !!busy()" title="Delete the selected feature" (click)="deleteWithConfirm()">
+        <i class="pi pi-trash" aria-hidden="true"></i>
+        <span>Delete</span>
+      </button>
+      <button type="button" class="ed__tool" [class.is-on]="snapping()" [attr.aria-pressed]="snapping()" title="Snap to this layer's features in view" (click)="toggleSnapping()">
+        <i class="pi pi-link" aria-hidden="true"></i>
+        <span>Snap</span>
+      </button>
+      @if (parcelAllowed() && !target()) {
+        <button type="button" class="ed__tool" [class.is-active]="cogoOpen()" [attr.aria-pressed]="cogoOpen()" (click)="toggleCogo()">
+          <i class="pi pi-compass" aria-hidden="true"></i>
+          <span>COGO</span>
         </button>
-        <button type="button" class="bo__chip" [class.bo__chip--busy]="busy() === 'pick'" (click)="pickFeature()">
-          <i class="pi pi-pencil" aria-hidden="true"></i>Select feature to edit
-        </button>
-        @if (parcelAllowed()) {
-          <button type="button" class="bo__chip" [class.bo__chip--busy]="cogoOpen()" (click)="toggleCogo()">
-            <i class="pi pi-compass" aria-hidden="true"></i>Bearings (COGO)
-          </button>
-        }
-      </div>
-      @if (busy() === 'draw') {
-        <p class="bo__hint">Draw the new {{ s.geometryType?.toLowerCase() }} on the map (double-click to finish a line / polygon).</p>
-        <button type="button" class="bo__cancel" (click)="cancel()">Cancel</button>
-      } @else if (busy() === 'pick') {
-        <p class="bo__hint">Click {{ cogoOpen() ? 'the start point' : 'a feature of this layer' }} on the map.</p>
-        <button type="button" class="bo__cancel" (click)="cancel()">Cancel</button>
       }
+    </div>
 
+    @if (busy() === 'draw' || busy() === 'pick') {
+      <div class="ed__status" role="status">
+        <span class="ed__pulse" aria-hidden="true"></span>
+        <span class="ed__status-text">
+          @if (busy() === 'draw') {
+            {{ s.geometryType === 'POINT' ? 'Click on the map to place the point.' : 'Click to add vertices — double-click to finish the ' + s.geometryType?.toLowerCase() + '.' }}
+          } @else {
+            Click {{ cogoOpen() ? 'the start point' : 'a feature of this layer' }} on the map.
+          }
+        </span>
+        <button type="button" class="ed__status-cancel" (click)="cancel()">Cancel</button>
+      </div>
+    }
+
+    @if (!target()) {
       @if (cogoOpen()) {
         <div class="bo__section">
           <span class="bo__section-title">COGO traverse</span>
@@ -67,30 +90,57 @@
             <i class="pi pi-check" aria-hidden="true"></i>Build {{ s.geometryType?.toLowerCase() }}
           </button>
         </div>
+      } @else if (!busy()) {
+        <div class="ed__idle">
+          <i class="pi pi-map" aria-hidden="true"></i>
+          <span>Click <strong>Select</strong>, then a {{ s.geometryType?.toLowerCase() }} on the map to change its shape or attributes. New features are drawn from <strong>Create</strong>.</span>
+        </div>
       }
     }
 
     @if (target(); as t) {
-      <div class="fe__head">
-        <span class="fe__title">{{ t.id === null ? 'New feature' : 'Feature #' + t.id }}</span>
-        @if (geometryDirty()) { <span class="fe__badge">geometry changed</span> }
-      </div>
-      @if (cogoInfo() && t.id === null) {
-        <p class="bo__hint">{{ cogoInfo() }}</p>
-      }
-      <p class="bo__hint">Drag vertices on the map to reshape; click on an edge to add a vertex, Alt+click a vertex to remove it.</p>
+      <section class="ed__card" [class.is-dirty]="isDirty()">
+        <header class="ed__card-head">
+          <span class="ed__card-title">{{ t.id === null ? 'New ' + (s.geometryType?.toLowerCase() ?? 'feature') : 'Feature #' + t.id }}</span>
+          @if (t.id === null) {
+            <span class="ed__state ed__state--new"><span class="ed__dot"></span>Not saved</span>
+          } @else if (isDirty()) {
+            <span class="ed__state ed__state--dirty"><span class="ed__dot"></span>Unsaved changes</span>
+          } @else {
+            <span class="ed__state ed__state--saved"><span class="ed__dot"></span>Saved</span>
+          }
+        </header>
 
-      @if (t.id !== null && (historyAllowed() || filesAllowed())) {
-        <div class="bo__modes" role="tablist">
-          <button type="button" class="bo__mode" [class.bo__mode--active]="tab() === 'attributes'" (click)="setTab('attributes')">Attributes</button>
-          @if (historyAllowed()) {
-            <button type="button" class="bo__mode" [class.bo__mode--active]="tab() === 'history'" (click)="setTab('history')">History</button>
+        @if (geometryDirty()) {
+          <span class="ed__geom-flag">Shape edited — save to keep it</span>
+        }
+        <p class="ed__tip">
+          <i class="pi pi-info-circle" aria-hidden="true"></i>
+          @if (editTool() === 'move') {
+            Drag the feature to its new position.
+          } @else if (s.geometryType === 'POINT') {
+            Drag the point to reposition it.
+          } @else {
+            Drag a vertex to reshape · click an edge to add a vertex · Alt+click a vertex to remove it.
           }
-          @if (filesAllowed()) {
-            <button type="button" class="bo__mode" [class.bo__mode--active]="tab() === 'files'" (click)="setTab('files')">Files</button>
-          }
-        </div>
-      }
+        </p>
+        @if (cogoInfo() && t.id === null) {
+          <p class="bo__hint">{{ cogoInfo() }}</p>
+        }
+
+        @if (t.id !== null && (historyAllowed() || filesAllowed())) {
+          <div class="ed__tabs" role="tablist">
+            <button type="button" role="tab" class="ed__tab" [class.is-active]="tab() === 'attributes'" (click)="setTab('attributes')">Attributes</button>
+            @if (historyAllowed()) {
+              <button type="button" role="tab" class="ed__tab" [class.is-active]="tab() === 'history'" (click)="setTab('history')">History</button>
+            }
+            @if (filesAllowed()) {
+              <button type="button" role="tab" class="ed__tab" [class.is-active]="tab() === 'files'" (click)="setTab('files')">Files</button>
+            }
+          </div>
+        } @else {
+          <span class="ed__section-label">Attributes</span>
+        }
 
       @if (tab() === 'attributes' || t.id === null) {
         <div class="fe__form">
@@ -195,39 +245,30 @@
         </div>
       }
 
-      <div class="bo__controls">
-        <button
-          pButton
-          type="button"
-          [label]="t.id === null ? 'Add feature' : 'Save'"
-          icon="pi pi-check"
-          class="p-button-sm bo__run"
-          [loading]="busy() === 'save'"
-          [disabled]="!!busy()"
-          (click)="save()"
-        ></button>
-        @if (t.id !== null) {
+        <footer class="ed__actions">
           <button
             pButton
             type="button"
-            [label]="confirmDelete() ? 'Confirm delete' : 'Delete'"
-            icon="pi pi-trash"
-            class="p-button-sm p-button-danger"
-            [class.p-button-outlined]="!confirmDelete()"
-            [loading]="busy() === 'delete'"
-            [disabled]="!!busy() && busy() !== 'delete'"
-            (click)="remove()"
+            [label]="t.id === null ? 'Save feature' : 'Save changes'"
+            icon="pi pi-check"
+            class="p-button-sm"
+            [loading]="busy() === 'save'"
+            [disabled]="!!busy() || (t.id !== null && !isDirty())"
+            (click)="save()"
           ></button>
-        }
-        <button pButton type="button" label="Cancel" class="p-button-sm p-button-text" [disabled]="busy() === 'save'" (click)="cancel()"></button>
-      </div>
+          <button pButton type="button" label="Cancel" class="p-button-sm p-button-text" [disabled]="busy() === 'save'" (click)="cancel()"></button>
+        </footer>
+      </section>
     }
   }
 
-  @if (notice()) {
-    <p class="bo__result">{{ notice() }}</p>
+  @if (error(); as message) {
+    <p class="ed__note ed__note--error" role="alert"><i class="pi pi-exclamation-circle" aria-hidden="true"></i>{{ message }}</p>
+  } @else if (notice()) {
+    <p class="ed__note" role="status"><i class="pi pi-check-circle" aria-hidden="true"></i>{{ notice() }}</p>
   }
-  @if (error()) {
-    <p-message severity="error" [text]="error()!" styleClass="w-full" />
+
+  @if (collectAllowed()) {
+    <a routerLink="/collect" class="ed__collect"><i class="pi pi-mobile" aria-hidden="true"></i> Collecting on site? Open Field Collection on your phone</a>
   }
 </div>

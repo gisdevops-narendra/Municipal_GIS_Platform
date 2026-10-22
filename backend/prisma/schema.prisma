@@ -258,6 +258,9 @@ model GISLayer {
   /// Area (and its network is pre-built). Only ever set when the uploader
   /// explicitly marked a LINE layer as a routing layer; off otherwise.
   routingEnabled Boolean               @default(false) @map("routing_enabled")
+  /// Created from scratch in Draw & Mark (not uploaded / derived) — listed
+  /// and managed there; Edit Features handles every other layer.
+  drawnLayer     Boolean               @default(false) @map("drawn_layer")
   /// Attribute domains / validation enforced by the Edit panel:
   /// `{ [field]: { required?, values?: string[], min?, max? } }`.
   fieldRules     Json?                 @map("field_rules")

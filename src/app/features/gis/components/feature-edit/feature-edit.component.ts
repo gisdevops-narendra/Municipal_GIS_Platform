@@ -1,4 +1,4 @@
-import { Component, Input, OnDestroy, computed, inject, signal } from '@angular/core';
+import { Component, EventEmitter, Input, OnDestroy, Output, computed, inject, signal } from '@angular/core';
 import { NotificationService } from '../../../../core/services/notification.service';
 import { FormsModule } from '@angular/forms';
 import { DatePipe, DecimalPipe } from '@angular/common';
@@ -11,6 +11,7 @@ import { MessageModule } from 'primeng/message';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { downloadBlob } from '../../../../core/utils/download-blob';
 import { MapService } from '../../services/map.service';
+import { AttributeTableService } from '../../services/attribute-table.service';
 import {
   ATTACHMENTS_MODULE_ID,
   EDIT_HISTORY_MODULE_ID,
@@ -23,6 +24,7 @@ import {
   VectorToolsService
 } from '../../services/vector-tools.service';
 import { misclosure, parseCogoLegs, traverse } from './cogo';
+import { geometryProblem } from './geometry-check';
 
 type InputKind = 'number' | 'date' | 'boolean' | 'text' | 'list';
 type Tab = 'attributes' | 'history' | 'files';
@@ -43,6 +45,11 @@ interface EditTarget {
  * UPLOAD / MANAGE permission enforced server-side). Field rules drive the
  * form (value lists, required fields). Optional modules add the per-feature
  * edit History, file Attachments, and Parcel tools (split, merge, COGO).
+ *
+ * While drawing or editing, vertices snap to the layer's other features in
+ * view; a feature can be reshaped or moved as a whole, and its geometry is
+ * checked (vertex count, zero length / area, self-crossing) before saving.
+ * Draw & Mark embeds this panel locked to one layer (`fixedLayerId`).
  */
 @Component({
   selector: 'app-feature-edit',
@@ -55,6 +62,7 @@ export class FeatureEditComponent implements OnDestroy {
   private readonly mapService = inject(MapService);
   private readonly vectorTools = inject(VectorToolsService);
   private readonly notify = inject(NotificationService);
+  private readonly attributeTables = inject(AttributeTableService);
 
   @Input() set layers(value: GisLayer[]) {
     this.layersSignal.set(value ?? []);
@@ -65,6 +73,34 @@ export class FeatureEditComponent implements OnDestroy {
     this.allowedSignal.set(value ?? new Set());
   }
   private readonly allowedSignal = signal<ReadonlySet<number>>(new Set());
+
+  /** Locks the panel to one layer (Draw & Mark) — no layer picker. */
+  @Input() set fixedLayerId(value: string | null) {
+    const wasFixed = this.fixed();
+    this.fixed.set(!!value);
+    if (value && value !== this.layerId()) this.selectLayer(value);
+    if (!value && wasFixed) this.selectLayer(null);
+  }
+  readonly fixed = signal(false);
+
+  /** Fires after features of the layer were written (save / delete /
+   *  split / merge) — the Attribute Table reloads. */
+  @Output() saved = new EventEmitter<void>();
+  /** A feature was opened for editing (just drawn, or picked). */
+  @Output() targetOpened = new EventEmitter<void>();
+  /** Start drawing once the requested layer's schema has loaded. */
+  private pendingAdd = false;
+
+  /** Attribute edits saved from the Attribute Table: the open feature
+   *  takes them over unless it has unsaved edits of its own. */
+  @Input() set externalEdits(value: { layerId: string; changes: Record<number, Record<string, string>> } | null) {
+    const t = this.target();
+    if (!value || !t || t.id === null || value.layerId !== this.layerId() || this.isDirty()) return;
+    const props = value.changes[t.id];
+    if (!props) return;
+    this.target.set({ ...t, original: { ...t.original, ...props }, values: { ...t.values, ...props } });
+    this.notice.set(`Feature #${t.id} was updated from the attribute table.`);
+  }
 
   /** Hidden panel: stop drawing / picking and drop the edit target. */
   @Input() set active(value: boolean) {
@@ -114,6 +150,11 @@ export class FeatureEditComponent implements OnDestroy {
     return this.geometryDirty() || Object.entries(t.values).some(([k, v]) => v !== t.original[k]);
   });
 
+  /** Reshape (vertices) or move (whole feature) the edit target. */
+  readonly editTool = signal<'reshape' | 'move'>('reshape');
+  /** Snap to the layer's other features while drawing / editing. */
+  readonly snapping = signal(true);
+
   readonly canSplitMerge = computed(() => this.schema()?.geometryType !== 'POINT');
 
   private sub?: Subscription;
@@ -135,6 +176,10 @@ export class FeatureEditComponent implements OnDestroy {
         if (this.layerId() !== layerId) return; // another layer picked meanwhile
         this.schema.set(schema);
         this.busy.set(null);
+        if (this.pendingAdd) {
+          this.pendingAdd = false;
+          this.addFeature();
+        }
       },
       error: (err: HttpErrorResponse) => this.layerId() === layerId && this.fail(err)
     });
@@ -172,12 +217,80 @@ export class FeatureEditComponent implements OnDestroy {
       },
       complete: () => this.busy.set(null)
     });
+    this.loadSnap();
+  }
+
+  /** Create view: draw a new feature on `layerId` (loading it first if
+   *  needed). */
+  requestAdd(layerId: string): void {
+    if (this.layerId() === layerId && this.schema()) {
+      this.addFeature();
+      return;
+    }
+    this.pendingAdd = true;
+    if (this.layerId() !== layerId) this.selectLayer(layerId);
+  }
+
+  /** Modify toolbar delete — one confirmation dialog, then delete. */
+  deleteWithConfirm(): void {
+    const id = this.target()?.id;
+    if (id === null || id === undefined) return;
+    this.notify.confirm({
+      header: `Delete feature #${id}?`,
+      message: 'The feature and its attributes are removed from the layer.',
+      confirmLabel: 'Delete',
+      destructive: true,
+      accept: () => {
+        this.confirmDelete.set(true);
+        this.remove();
+      }
+    });
+  }
+
+  /** Toolbar icon for "Add <geometry>". */
+  addIcon(type: string | null | undefined): string {
+    return type === 'POINT' ? 'pi pi-map-marker' : type === 'LINE' ? 'pi pi-wave-pulse' : 'pi pi-stop';
+  }
+
+    setEditTool(tool: 'reshape' | 'move'): void {
+    this.editTool.set(tool);
+    this.mapService.setEditTool(tool);
+  }
+
+  toggleSnapping(): void {
+    this.snapping.set(!this.snapping());
+    if (this.snapping()) this.loadSnap();
+    else this.mapService.setSnapGeometries(null);
+  }
+
+  /** Loads the layer's features in view as snap targets (capped). */
+  private loadSnap(): void {
+    const layer = this.layersSignal().find((l) => l.id === this.layerId());
+    const extent = this.mapService.getViewExtent4326();
+    if (!this.snapping() || !layer || !extent) return;
+    const layerId = layer.id;
+    this.attributeTables.loadMetadata(layer).subscribe({
+      next: ({ geometryField }) => {
+        const [minX, minY, maxX, maxY] = extent;
+        const cql = `BBOX("${geometryField}", ${minX}, ${minY}, ${maxX}, ${maxY}, 'EPSG:4326')`;
+        this.attributeTables.fetchIds(layer, geometryField, cql, SNAP_FEATURE_LIMIT).subscribe({
+          next: ({ rows }) => {
+            if (this.layerId() !== layerId || !this.snapping()) return;
+            this.mapService.setSnapGeometries(rows.map((r) => r.geometry as Record<string, unknown> | null));
+          },
+          error: () => undefined // snapping is a convenience; editing works without it
+        });
+      },
+      error: () => undefined
+    });
   }
 
   private startNew(geometry: Record<string, unknown>): void {
     const schema = this.schema();
     if (!schema) return;
     this.mapService.setEditFeature(geometry);
+    this.editTool.set('reshape');
+    this.targetOpened.emit();
     const empty = Object.fromEntries(schema.fields.map((f) => [f.name, '']));
     this.target.set({
       id: null,
@@ -194,6 +307,7 @@ export class FeatureEditComponent implements OnDestroy {
     if (this.isDirty()) return this.confirmDiscard(() => this.pickFeature());
     this.cancel();
     this.busy.set('pick');
+    this.loadSnap();
     this.sub = this.mapService.pickMapPoint().subscribe(({ lonLat, toleranceM }) => {
       this.vectorTools.featureAt(layerId, lonLat, toleranceM).subscribe({
         next: ({ feature }) => {
@@ -212,6 +326,8 @@ export class FeatureEditComponent implements OnDestroy {
   private load(feature: EditableFeature): void {
     const values = this.stringify(feature.properties);
     this.mapService.setEditFeature(feature.geometry);
+    this.editTool.set('reshape');
+    this.targetOpened.emit();
     this.target.set({
       id: feature.id,
       original: values,
@@ -247,6 +363,11 @@ export class FeatureEditComponent implements OnDestroy {
       this.notice.set('Nothing changed.');
       return;
     }
+    const problem = geometryProblem(geometry);
+    if (problem) {
+      this.error.set(problem);
+      return;
+    }
     const missing = (this.schema()?.fields ?? [])
       .filter((f) => this.isRequired(f.name) && !t.values[f.name]?.trim())
       .map((f) => f.name);
@@ -267,7 +388,9 @@ export class FeatureEditComponent implements OnDestroy {
       next: (feature) => {
         this.busy.set(null);
         this.mapService.refreshLayerStyle(layerId);
+        this.saved.emit();
         this.load(feature);
+        this.loadSnap();
         this.notice.set(t.id === null ? `Feature #${feature.id} added.` : `Feature #${feature.id} saved.`);
       },
       error: (err: HttpErrorResponse) => this.fail(err)
@@ -286,6 +409,7 @@ export class FeatureEditComponent implements OnDestroy {
     this.vectorTools.deleteFeature(layerId, id).subscribe({
       next: () => {
         this.mapService.refreshLayerStyle(layerId);
+        this.saved.emit();
         this.cancel();
         this.notice.set(`Feature #${id} deleted.`);
       },
@@ -314,6 +438,7 @@ export class FeatureEditComponent implements OnDestroy {
     this.mapService.cancelDraw();
     this.mapService.cancelMapPick();
     this.mapService.clearEditFeature();
+    this.mapService.setSnapGeometries(null);
     this.target.set(null);
     this.history.set(null);
     this.attachments.set(null);
@@ -339,6 +464,7 @@ export class FeatureEditComponent implements OnDestroy {
           next: ({ features }) => {
             this.busy.set(null);
             this.mapService.refreshLayerStyle(layerId);
+        this.saved.emit();
             this.load(features[0]);
             this.notice.set(
               `Split into ${features.length} features (#${features.map((f) => f.id).join(', #')}); the first stays selected.`
@@ -382,6 +508,7 @@ export class FeatureEditComponent implements OnDestroy {
       next: (feature) => {
         this.busy.set(null);
         this.mapService.refreshLayerStyle(layerId);
+        this.saved.emit();
         this.load(feature);
         this.notice.set(`Merged ${others.length + 1} features into #${feature.id}.`);
       },
@@ -545,3 +672,6 @@ export class FeatureEditComponent implements OnDestroy {
     this.error.set(Array.isArray(message) ? message.join(' ') : (message ?? 'The request failed.'));
   }
 }
+
+/** Snap targets loaded per draw / edit session. */
+const SNAP_FEATURE_LIMIT = 2000;

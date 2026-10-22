@@ -16,7 +16,7 @@ import {
 import { NgClass } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Subject, Subscription, debounceTime, filter as rxFilter } from 'rxjs';
+import { Subject, Subscription, concatMap, debounceTime, filter as rxFilter, from, toArray } from 'rxjs';
 import { TableModule } from 'primeng/table';
 import { PaginatorModule, PaginatorState } from 'primeng/paginator';
 import { ButtonModule } from 'primeng/button';
@@ -28,6 +28,8 @@ import { MessageModule } from 'primeng/message';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { MapService } from '../../services/map.service';
 import { AttributeTableService } from '../../services/attribute-table.service';
+import { VectorToolsService } from '../../services/vector-tools.service';
+import { NotificationService } from '../../../../core/services/notification.service';
 import {
   ATTRIBUTE_PAGE_SIZES,
   AttributeField,
@@ -100,6 +102,8 @@ const IDENTIFIER_FIELD = /(^|_)(id|fid|gid|objectid|code|no|num|number|year|yea|
 export class AttributeTableComponent implements OnChanges, OnDestroy {
   private readonly service = inject(AttributeTableService);
   private readonly mapService = inject(MapService);
+  private readonly vectorTools = inject(VectorToolsService);
+  private readonly notify = inject(NotificationService);
 
   /** Backed by a signal so `layerOptions` recomputes when the list arrives
    *  or changes — a plain field would be read once by `computed()` and
@@ -121,7 +125,15 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
   @Input() externalFilter: AttributeExternalFilter | null = null;
   @Output() externalFilterCleared = new EventEmitter<void>();
   /** The current selection (ids of the active layer), for Report Generation. */
-  @Output() selectionChange = new EventEmitter<{ layerId: string; featureIds: string[] }>();
+  /** The layer in a Draw & Mark edit session — its cells become editable
+   *  (double-click), with edits buffered until Save, as in QGIS. */
+  @Input() editableLayerId: string | null = null;
+  /** Bumped when features were written elsewhere (the edit panel). */
+  @Input() refreshKey = 0;
+  /** Saved cell edits, per feature id, for the edit panel's open feature. */
+  @Output() featuresEdited = new EventEmitter<{ layerId: string; changes: Record<number, Record<string, string>> }>();
+
+    @Output() selectionChange = new EventEmitter<{ layerId: string; featureIds: string[] }>();
 
   readonly baseFilter = signal<AttributeExternalFilter | null>(null);
 
@@ -160,6 +172,17 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
   readonly showSelectedOnly = signal(false);
   readonly switching = signal(false);
   readonly fieldsMenuOpen = signal(false);
+
+  // ----- cell editing (edit session) -----
+  private readonly editableId = signal<string | null>(null);
+  readonly canEditCells = computed(() => !!this.editableId() && this.editableId() === this.activeLayerId());
+  readonly editingCell = signal<{ rowId: string; field: string } | null>(null);
+  cellDraft = '';
+  /** Unsaved cell values: feature id → field → value ('' = empty). */
+  readonly pending = signal<ReadonlyMap<string, Record<string, string>>>(new Map());
+  readonly pendingCount = computed(() => [...this.pending().values()].reduce((n, r) => n + Object.keys(r).length, 0));
+  readonly savingEdits = signal(false);
+  readonly editError = signal<string | null>(null);
 
   private readonly geomCache = new Map<string, GeoJsonGeometry | null>();
   private readonly search$ = new Subject<string>();
@@ -224,7 +247,18 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
       this.applyExternalFilter();
       return;
     }
-    if (changes['layers'] || changes['initialLayerId']) {
+    if (changes['editableLayerId']) {
+      if (this.pendingCount() && this.editableLayerId !== this.editableId()) this.discardEdits();
+      this.editableId.set(this.editableLayerId);
+    }
+    if (changes['refreshKey'] && !changes['refreshKey'].firstChange && !this.pendingCount()) {
+      this.refresh();
+    }
+    // Opened for a specific layer (Draw & Mark → Table): show that one.
+    const initial = changes['initialLayerId'];
+    if (initial && !initial.firstChange && this.initialLayerId && this.layerOptions().some((o) => o.value === this.initialLayerId)) {
+      this.selectLayer(this.initialLayerId);
+    } else if (changes['layers'] || initial) {
       this.pickDefaultLayer();
     }
     if (changes['mapClickFeatures'] && this.mapClickFeatures?.length) {
@@ -285,10 +319,23 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
     this.selectLayer(preferred.value);
   }
 
+  /** Layer picked in the toolbar — asks before dropping unsaved cell edits. */
+  onLayerPick(layerId: string | null): void {
+    if (!this.pendingCount()) return this.selectLayer(layerId);
+    this.notify.confirm({
+      header: 'Discard unsaved edits?',
+      message: `${this.pendingCount()} cell edit(s) on this layer have not been saved.`,
+      confirmLabel: 'Discard',
+      destructive: true,
+      accept: () => this.selectLayer(layerId)
+    });
+  }
+
   selectLayer(layerId: string | null): void {
     if (layerId === this.activeLayerId()) {
       return;
     }
+    this.discardEdits();
     this.cancelMapSelect();
     this.selectNote.set(null);
     this.activeLayerId.set(layerId);
@@ -669,7 +716,109 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
 
   // ----- value formatting -----
 
-  isNull(value: unknown): boolean {
+  // ----- cell editing -----
+
+  /** Identifier columns are never edited. */
+  isEditableField(field: AttributeField): boolean {
+    return field.type !== 'id' && field.name !== 'ogc_fid' && field.name !== 'fid';
+  }
+
+  /** The value to show: an unsaved edit wins over the loaded value. */
+  cellValue(row: AttributeRow, field: AttributeField): unknown {
+    const edited = this.pending().get(row.featureId)?.[field.name];
+    if (edited === undefined) return row.values[field.name];
+    return edited === '' ? null : edited;
+  }
+
+  isCellDirty(row: AttributeRow, field: AttributeField): boolean {
+    return this.pending().get(row.featureId)?.[field.name] !== undefined;
+  }
+
+  isEditingCell(row: AttributeRow, field: AttributeField): boolean {
+    const cell = this.editingCell();
+    return !!cell && cell.rowId === row.featureId && cell.field === field.name;
+  }
+
+  startCellEdit(row: AttributeRow, field: AttributeField, event: Event): void {
+    if (!this.canEditCells() || !this.isEditableField(field) || this.savingEdits()) return;
+    event.stopPropagation();
+    this.editingCell.set({ rowId: row.featureId, field: field.name });
+    this.cellDraft = this.toInput(field, this.cellValue(row, field));
+    setTimeout(() => (document.querySelector('.attr-table__cell-input') as HTMLElement | null)?.focus());
+  }
+
+  commitCell(row: AttributeRow, field: AttributeField): void {
+    if (!this.isEditingCell(row, field)) return;
+    this.editingCell.set(null);
+    const original = this.toInput(field, row.values[field.name]);
+    const next = new Map(this.pending());
+    const edits = { ...(next.get(row.featureId) ?? {}) };
+    if (this.cellDraft === original) delete edits[field.name];
+    else edits[field.name] = this.cellDraft;
+    if (Object.keys(edits).length) next.set(row.featureId, edits);
+    else next.delete(row.featureId);
+    this.pending.set(next);
+    this.editError.set(null);
+  }
+
+  cancelCell(): void {
+    this.editingCell.set(null);
+  }
+
+  /** Writes every buffered edit (one request per feature, in order). */
+  saveEdits(): void {
+    const layerId = this.activeLayerId();
+    const entries = [...this.pending().entries()];
+    if (!layerId || !entries.length) return;
+    const changes: Record<number, Record<string, string>> = {};
+    for (const [rowId, props] of entries) {
+      const fid = Number(rowId.split('.').pop());
+      if (!Number.isInteger(fid)) {
+        this.editError.set('These records cannot be edited here.');
+        return;
+      }
+      changes[fid] = props;
+    }
+    this.savingEdits.set(true);
+    this.editError.set(null);
+    from(Object.entries(changes))
+      .pipe(
+        concatMap(([fid, properties]) => this.vectorTools.updateFeature(layerId, Number(fid), { properties })),
+        toArray()
+      )
+      .subscribe({
+        next: () => {
+          this.savingEdits.set(false);
+          this.pending.set(new Map());
+          this.mapService.refreshLayerStyle(layerId);
+          this.featuresEdited.emit({ layerId, changes });
+          this.refresh();
+        },
+        error: (err: HttpErrorResponse) => {
+          this.savingEdits.set(false);
+          const message = err.error?.message;
+          this.editError.set(
+            (Array.isArray(message) ? message.join('. ') : message) ?? 'Could not save the edits. Nothing after the failed record was saved.'
+          );
+          this.refresh();
+        }
+      });
+  }
+
+  discardEdits(): void {
+    this.editingCell.set(null);
+    this.pending.set(new Map());
+    this.editError.set(null);
+  }
+
+  /** A value as the edit input holds it (and as the Edit panel sends it). */
+  private toInput(field: AttributeField, value: unknown): string {
+    if (value === null || value === undefined) return '';
+    if (field.type === 'date') return String(value).slice(0, 10);
+    return String(value);
+  }
+
+    isNull(value: unknown): boolean {
     return value === null || value === undefined || value === '';
   }
 

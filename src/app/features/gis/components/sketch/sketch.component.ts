@@ -1,4 +1,4 @@
-import { Component, Input, OnDestroy, computed, inject, signal } from '@angular/core';
+import { Component, EventEmitter, Input, OnDestroy, Output, ViewChild, computed, inject, signal } from '@angular/core';
 import { NotificationService } from '../../../../core/services/notification.service';
 import { FormsModule } from '@angular/forms';
 import { Subscription } from 'rxjs';
@@ -15,6 +15,9 @@ import {
   SketchKind
 } from '../../models/sketch.model';
 import { downloadBlob } from '../../../../core/utils/download-blob';
+import { GisLayer } from '../../../../core/models/gis-layer.model';
+import { LayerDigitizeComponent } from '../layer-digitize/layer-digitize.component';
+import { EDIT_PANEL_MODULE_ID } from '../../services/vector-tools.service';
 
 interface KindOption {
   kind: SketchKind;
@@ -39,15 +42,17 @@ const MARKER_KIND: KindOption = {
 };
 
 /**
- * Draw & Mark tool — sketch shapes (Draw module) and drop labelled pins
- * (Marking Tool module) on the map. Sketches persist per workspace in the
- * browser (SketchService) and render on their own map overlay; each kind is
- * offered only when its module is granted.
+ * Draw & Mark tool — the app's single feature-editing tool. "Feature layers"
+ * is the GIS digitizing workflow: create a layer with its fields (Draw
+ * module), or pick any existing one, then draw and edit real, server-stored
+ * features (LayerDigitizeComponent, Edit Panel module). "Sketches" are quick
+ * temporary markups: shapes (Draw module) and labelled pins (Marking Tool
+ * module), kept for this session only (SketchService) on their own overlay.
  */
 @Component({
   selector: 'app-sketch',
   standalone: true,
-  imports: [FormsModule, ButtonModule, InputTextModule, TooltipModule],
+  imports: [FormsModule, ButtonModule, InputTextModule, TooltipModule, LayerDigitizeComponent],
   templateUrl: './sketch.component.html',
   styleUrl: './sketch.component.scss'
 })
@@ -66,11 +71,40 @@ export class SketchComponent implements OnDestroy {
     this.allowed.set(value ?? new Set());
   }
   private readonly allowed = signal<ReadonlySet<number>>(new Set());
+  readonly allowedModuleIdsValue = this.allowed.asReadonly();
 
   /** The panel stays mounted while hidden — pause an in-progress draw then,
-   *  but keep the saved sketches on the map. */
+   *  but keep the session's sketches on the map. */
   @Input() set active(value: boolean) {
+    this.isActive.set(value);
     if (!value) this.cancelDrawing();
+  }
+  readonly isActive = signal(false);
+
+  // ----- Feature layers (passed through to LayerDigitizeComponent) -----
+  @Input() layers: GisLayer[] = [];
+  @Input() defaultCrs = '';
+  @Input() canManage = false;
+  @Output() layerCreated = new EventEmitter<GisLayer>();
+  @Output() renameLayer = new EventEmitter<{ layer: GisLayer; name: string }>();
+  @Output() deleteLayer = new EventEmitter<GisLayer>();
+  @Output() openTable = new EventEmitter<string>();
+  @Output() editingLayerChange = new EventEmitter<string | null>();
+  @Output() featuresSaved = new EventEmitter<void>();
+  @Input() tableEdits: { layerId: string; changes: Record<number, Record<string, string>> } | null = null;
+
+  /** Feature layers: creating needs the Draw module, editing the Edit
+   *  Panel module; Sketches need Draw or Marking. */
+  readonly canDigitize = computed(() => this.allowed().has(DRAW_MODULE_ID) || this.allowed().has(EDIT_PANEL_MODULE_ID));
+  @ViewChild(LayerDigitizeComponent) digitize?: LayerDigitizeComponent;
+
+  /** One tab row: Create / Modify (feature layers) and Sketches. */
+  readonly tabChoice = signal<'create' | 'modify' | 'sketch' | null>(null);
+  readonly tab = computed(() => this.tabChoice() ?? (this.canDigitize() ? 'create' : 'sketch'));
+
+  setTab(tab: 'create' | 'modify' | 'sketch'): void {
+    if (tab !== 'sketch') this.cancelDrawing();
+    this.tabChoice.set(tab);
   }
 
   readonly colors = SKETCH_COLORS;

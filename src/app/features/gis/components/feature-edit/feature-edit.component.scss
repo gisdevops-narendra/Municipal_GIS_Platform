@@ -133,3 +133,370 @@
   cursor: pointer;
   overflow-wrap: anywhere;
 }
+
+/* ================= Editing workflow (Draw & Mark) ================= */
+.ed {
+  gap: 12px;
+}
+
+/* Toolbar: icon-over-label tool buttons, one active at a time. */
+.ed__tools {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(52px, 1fr));
+  gap: 6px;
+}
+
+.ed__tool {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 50px;
+  padding: 7px 2px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-ink-700);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+
+  .pi {
+    font-size: 15px;
+    color: var(--color-ink-500);
+  }
+
+  &:hover {
+    border-color: var(--color-primary-600);
+    color: var(--color-ink-900);
+  }
+
+  &.is-active {
+    border-color: var(--color-primary-600);
+    background: var(--color-primary-600);
+    color: #fff;
+
+    .pi {
+      color: #fff;
+    }
+  }
+
+  &.is-on .pi {
+    color: var(--color-primary-600);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+    border-color: var(--color-line);
+    color: var(--color-ink-700);
+  }
+
+  &--danger:hover:not(:disabled) {
+    border-color: var(--color-error-600);
+    color: var(--color-error-600);
+
+    .pi {
+      color: var(--color-error-600);
+    }
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-primary-600);
+    outline-offset: 1px;
+  }
+}
+
+/* Live status while a map tool waits for input. */
+.ed__status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  border: 1px dashed var(--color-primary-600);
+  font-size: 12px;
+  color: var(--color-ink-900);
+}
+
+.ed__pulse {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-primary-600);
+  animation: ed-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes ed-pulse {
+  50% {
+    opacity: 0.3;
+    transform: scale(0.7);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ed__pulse {
+    animation: none;
+  }
+}
+
+.ed__status-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.ed__status-cancel {
+  flex: none;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--color-primary-700);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--color-surface);
+  }
+}
+
+.ed__idle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed var(--color-line);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-ink-500);
+
+  .pi {
+    margin-top: 2px;
+    font-size: 14px;
+  }
+}
+
+/* The feature being created / edited. */
+.ed__card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 12px 0;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 4%);
+
+  &.is-dirty {
+    border-color: #d97706;
+  }
+}
+
+.ed__card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ed__card-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--color-ink-900);
+}
+
+.ed__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--color-surface-alt);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--color-ink-700);
+}
+
+.ed__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.ed__state--saved {
+  color: #1f7a4d;
+}
+
+.ed__state--dirty {
+  color: #b45309;
+}
+
+.ed__state--new {
+  color: var(--color-primary-700);
+}
+
+.ed__geom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ed__seg {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.ed__seg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border: none;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: none;
+  color: var(--color-ink-700);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+
+  .pi {
+    font-size: 10.5px;
+  }
+
+  &.is-active {
+    background: var(--color-surface);
+    color: var(--color-primary-700);
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
+  }
+}
+
+.ed__geom-flag {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #b45309;
+}
+
+.ed__tip {
+  display: flex;
+  gap: 6px;
+  margin: -2px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-ink-500);
+
+  .pi {
+    margin-top: 1px;
+    font-size: 10.5px;
+  }
+}
+
+.ed__tabs {
+  display: flex;
+  gap: 16px;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.ed__tab {
+  margin-bottom: -1px;
+  padding: 6px 0;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--color-ink-500);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+
+  &.is-active {
+    border-bottom-color: var(--color-primary-600);
+    color: var(--color-ink-900);
+    font-weight: 600;
+  }
+}
+
+.ed__section-label {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--color-line);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-500);
+}
+
+.ed .fe__form .bo__input {
+  height: 32px;
+  font-size: 12.5px;
+}
+
+/* Sticky action bar at the foot of the card. */
+.ed__actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 -12px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--color-line);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: var(--color-surface);
+}
+
+.ed__delete {
+  margin-left: auto;
+}
+
+.ed__note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  font-size: 12px;
+  color: var(--color-ink-900);
+
+  .pi {
+    margin-top: 1px;
+    color: #1f7a4d;
+  }
+
+  &--error .pi {
+    color: var(--color-error-600);
+  }
+
+  &--error {
+    color: var(--color-error-600);
+  }
+}
+
+.ed__collect {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--color-ink-500);
+  text-decoration: none;
+
+  &:hover {
+    color: var(--color-primary-700);
+    text-decoration: underline;
+  }
+}

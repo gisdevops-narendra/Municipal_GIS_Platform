@@ -15,10 +15,11 @@ import { ModuleAccessService } from '../module-access/module-access.service';
 import { GisLayersService } from './gis-layers.service';
 import { RasterService } from './raster.service';
 import { GisAuthorizationService } from './gis-authorization.service';
-import type { GeoprocessDto } from './dto/vector-tools.dto';
+import type { CreateBlankLayerDto, GeoprocessDto } from './dto/vector-tools.dto';
 
 /** Module Access catalog ids (seed-modules.ts). */
 export const EDIT_PANEL_MODULE_ID = 55;
+export const DRAW_MODULE_ID = 32;
 export const EDIT_HISTORY_MODULE_ID = 1001;
 export const GEOPROCESSING_MODULE_ID = 1002;
 /** Sub-modules of Geoprocessing for the tools added later (seed-modules.ts). */
@@ -60,6 +61,19 @@ const MULTI_TYPE: Record<GisGeometryType, string> = {
   POLYGON: 'MultiPolygon',
 };
 
+/** Field types offered when creating a layer → PostgreSQL column types
+ *  (the Edit panel already maps these back to number / date / boolean
+ *  inputs). */
+const BLANK_COLUMN_TYPE: Record<string, string> = {
+  text: 'text',
+  integer: 'integer',
+  decimal: 'double precision',
+  date: 'date',
+  boolean: 'boolean',
+};
+/** Columns the platform manages itself. */
+const RESERVED_FIELDS = new Set(['geom', 'ogc_fid', 'fid', 'gis_workspace_id']);
+
 export interface Column {
   name: string;
   dataType: string;
@@ -95,6 +109,55 @@ export class VectorToolsService {
     private readonly moduleAccess: ModuleAccessService,
     private readonly config: ConfigService,
   ) {}
+
+  // ----- New layer (Draw & Mark) -----
+
+  /** Creates an empty, editable vector layer — `ogc_fid` key, the user's
+   *  fields, a Multi* `geom` in the chosen CRS — and publishes it. */
+  async createBlankLayer(appUser: AppUser, dto: CreateBlankLayerDto) {
+    await this.requireModule(appUser, DRAW_MODULE_ID, 'Draw');
+    const names = new Set<string>();
+    const columns = dto.fields.map((f) => {
+      const name = f.name.trim().toLowerCase();
+      if (RESERVED_FIELDS.has(name)) {
+        throw new BadRequestException(`"${name}" is reserved — choose another field name.`);
+      }
+      if (names.has(name)) throw new BadRequestException(`The field "${name}" is listed twice.`);
+      names.add(name);
+      return `${q(name)} ${BLANK_COLUMN_TYPE[f.type]}`;
+    });
+
+    const output = await this.raster.prepareVectorOutput(appUser, dto.name.trim());
+    const srid = this.workspaceSrid(dto.crs ?? output.workspace.defaultCrs);
+    const [known] = await this.prisma.$queryRawUnsafe<{ ok: boolean }[]>(
+      `SELECT EXISTS (SELECT 1 FROM spatial_ref_sys WHERE srid = $1) AS ok`,
+      srid,
+    );
+    if (!known?.ok) throw new BadRequestException(`EPSG:${srid} is not a known coordinate system.`);
+
+    await this.prisma.$executeRawUnsafe(
+      `CREATE TABLE "${output.table}" (
+         ogc_fid SERIAL PRIMARY KEY,
+         ${columns.map((c) => `${c},`).join('\n         ')}
+         geom geometry(${MULTI_TYPE[dto.geometryType]}, ${srid})
+       )`,
+    );
+    const layer = await this.raster.publishVectorTable(appUser, output, {
+      name: dto.name.trim(),
+      geometryType: dto.geometryType,
+      description: 'Created with Draw & Mark',
+      rasterAnalysis: false,
+      srs: `EPSG:${srid}`,
+    });
+    // GeoServer reports a degenerate extent for an empty table — keep none
+    // until the first feature is saved (see createFeature). Flag it as a
+    // Draw & Mark layer.
+    await this.prisma.gISLayer.update({
+      where: { id: layer.id },
+      data: { bboxMinX: null, bboxMinY: null, bboxMaxX: null, bboxMaxY: null, drawnLayer: true },
+    });
+    return { ...layer, bbox: null, drawnLayer: true };
+  }
 
   // ----- Feature Editing -----
 
@@ -163,6 +226,18 @@ export class VectorToolsService {
       );
       const feature = await this.readFeature(tx, source.table, row.id);
       await this.recordHistory(tx, appUser, userName, layerId, row.id, 'INSERT', null, feature);
+      // A layer created empty has no extent yet — take it from its first feature.
+      if (source.layer.bboxMinX === null) {
+        await tx.$executeRawUnsafe(
+          `UPDATE gis_layers SET bbox_min_x = ST_XMin(e), bbox_min_y = ST_YMin(e),
+                  bbox_max_x = ST_XMax(e), bbox_max_y = ST_YMax(e)
+             FROM (SELECT ST_Transform(ST_SetSRID(ST_Extent(geom)::geometry,
+                                  Find_SRID('public', '${source.table}', 'geom')), 4326) AS e
+                     FROM "${source.table}") x
+            WHERE id = $1 AND e IS NOT NULL`,
+          layerId,
+        );
+      }
       return feature;
     });
   }

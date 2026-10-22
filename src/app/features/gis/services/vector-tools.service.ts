@@ -73,10 +73,26 @@ export interface GeoprocessRequest {
 
 /** Feature Editing, Edit History, Geoprocessing and Impact Report
  *  (VectorToolsController). Permissions are enforced server-side. */
+/** Field types a new Draw & Mark layer can have. */
+export type BlankFieldType = 'text' | 'integer' | 'decimal' | 'date' | 'boolean';
+
+export interface BlankLayerRequest {
+  name: string;
+  geometryType: GisGeometryType;
+  /** EPSG:n — the workspace default when omitted. */
+  crs?: string;
+  fields: { name: string; type: BlankFieldType }[];
+}
+
 @Injectable({ providedIn: 'root' })
 export class VectorToolsService {
   private readonly http = inject(HttpClient);
   private readonly baseUrl = `${environment.apiUrl}/gis`;
+
+  /** Creates and publishes an empty, editable vector layer. */
+  createBlankLayer(request: BlankLayerRequest): Observable<GisLayer> {
+    return this.http.post<GisLayer>(`${this.baseUrl}/layers/blank`, request);
+  }
 
   editSchema(layerId: string): Observable<EditSchema> {
     return this.http.get<EditSchema>(`${this.baseUrl}/layers/${layerId}/edit-schema`);

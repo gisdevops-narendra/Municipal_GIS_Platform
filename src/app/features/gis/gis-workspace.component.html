@@ -152,15 +152,6 @@
           />
         }
 
-        @if (openedLeftTools().has('edit') && layersReady()) {
-          <app-feature-edit
-            [class.gis-ws__panel--hidden]="leftTool() !== 'edit'"
-            [active]="leftTool() === 'edit'"
-            [layers]="layers()"
-            [allowedModuleIds]="myModuleIds()"
-          />
-        }
-
         @if (openedLeftTools().has('geoprocessing') && layersReady()) {
           <app-geoprocessing
             [allowedModuleIds]="myModuleIds()"
@@ -222,6 +213,16 @@
             [active]="leftTool() === 'sketch'"
             [workspaceKey]="workspace()?.code ?? ''"
             [allowedModuleIds]="myModuleIds()"
+            [layers]="layers()"
+            [defaultCrs]="workspace()?.defaultCrs ?? ''"
+            [canManage]="isOwner()"
+            (layerCreated)="onLayerCreated($event)"
+            (renameLayer)="renameLayer($event.layer, $event.name)"
+            (deleteLayer)="deleteLayer($event)"
+            (openTable)="openAttributeTable($event)"
+            [tableEdits]="tableEdits()"
+            (editingLayerChange)="editingLayerId.set($event)"
+            (featuresSaved)="featuresWrittenTick.set(featuresWrittenTick() + 1)"
           />
         }
 
@@ -369,6 +370,9 @@
             [externalFilter]="activeQueryFilter()"
             (externalFilterCleared)="onQueryCleared()"
             (selectionChange)="tableSelection.set($event)"
+            [editableLayerId]="editingLayerId()"
+            [refreshKey]="featuresWrittenTick()"
+            (featuresEdited)="tableEdits.set($event)"
           />
         }
         @if (openedBottomTools().has('statistics') && layersReady()) {

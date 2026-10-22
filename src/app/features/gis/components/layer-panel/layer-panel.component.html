@@ -119,6 +119,17 @@
       </div>
     }
 
+    @if (drawnLayers.length > 0) {
+      <div class="layer-panel__group">
+        <h3 class="layer-panel__group-title">Drawn Layers</h3>
+        <ul class="layer-panel__list">
+          @for (layer of drawnLayers; track layer.id) {
+            <ng-container *ngTemplateOutlet="row; context: { $implicit: layer, showDepartment: true }" />
+          }
+        </ul>
+      </div>
+    }
+
     @if (rasterAnalysisLayers.length > 0) {
       <div class="layer-panel__group">
         <h3 class="layer-panel__group-title">Raster Analysis</h3>

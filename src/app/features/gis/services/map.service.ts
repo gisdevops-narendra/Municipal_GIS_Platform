@@ -18,6 +18,7 @@ import WKT from 'ol/format/WKT';
 import Draw, { createBox } from 'ol/interaction/Draw';
 import Modify from 'ol/interaction/Modify';
 import Snap from 'ol/interaction/Snap';
+import Translate from 'ol/interaction/Translate';
 import DragPan from 'ol/interaction/DragPan';
 import PointerInteraction from 'ol/interaction/Pointer';
 import KeyboardPan from 'ol/interaction/KeyboardPan';
@@ -396,7 +397,11 @@ export class MapService {
     this.drawLayer = null;
     this.editLayer = null;
     this.editModify = null;
+    this.editTranslate = null;
     this.editSnap = null;
+    this.snapInteraction = null;
+    this.snapSource = null;
+    this.choroplethLayer = null;
     this.editPickKey = null;
     this.measureLayer = null;
     this.gotoLayer = null;
@@ -913,6 +918,7 @@ export class MapService {
         subscriber.complete();
       });
       this.map?.addInteraction(this.drawInteraction);
+      this.raiseSnap();
       return () => this.cancelDraw();
     });
   }
@@ -934,7 +940,12 @@ export class MapService {
   private editLayer: VectorLayer<VectorSource> | null = null;
   private editModify: Modify | null = null;
   private editSnap: Snap | null = null;
+  private editTranslate: Translate | null = null;
   private editPickKey: EventsKey | null = null;
+  /** Snapping to other features of the layer being edited (not drawn —
+   *  a bare source the Snap interaction reads). */
+  private snapSource: VectorSource | null = null;
+  private snapInteraction: Snap | null = null;
   /** Bumped whenever the user moves a vertex of the feature being edited. */
   readonly editGeometryRevision = signal(0);
 
@@ -951,11 +962,53 @@ export class MapService {
     });
     source.addFeature(new Feature(geometry));
     if (!editable || !this.map) return;
-    this.editModify = new Modify({ source });
-    this.editModify.on('modifyend', () => this.editGeometryRevision.update((n) => n + 1));
+    this.setEditTool('reshape');
+  }
+
+  /** Edit target tool: `reshape` drags / adds / removes vertices, `move`
+   *  drags the whole feature. Both snap to the feature itself and to the
+   *  layer's other features (`setSnapGeometries`). */
+  setEditTool(tool: 'reshape' | 'move'): void {
+    const source = this.editLayer?.getSource();
+    if (!this.map || !source?.getFeatures().length) return;
+    this.stopEditInteractions();
+    const bump = () => this.editGeometryRevision.update((n) => n + 1);
+    if (tool === 'move') {
+      this.editTranslate = new Translate({ layers: [this.editLayer!] });
+      this.editTranslate.on('translateend', bump);
+      this.map.addInteraction(this.editTranslate);
+    } else {
+      this.editModify = new Modify({ source });
+      this.editModify.on('modifyend', bump);
+      this.map.addInteraction(this.editModify);
+    }
     this.editSnap = new Snap({ source });
-    this.map.addInteraction(this.editModify);
     this.map.addInteraction(this.editSnap);
+    this.raiseSnap();
+  }
+
+  /** Geometries (EPSG:4326 GeoJSON) to snap to while drawing or editing;
+   *  `null` turns layer snapping off. */
+  setSnapGeometries(geometries: (Record<string, unknown> | null)[] | null): void {
+    if (this.snapInteraction && this.map) this.map.removeInteraction(this.snapInteraction);
+    this.snapInteraction = null;
+    this.snapSource?.clear();
+    if (!geometries || !this.map) return;
+    this.snapSource ??= new VectorSource();
+    for (const geometry of geometries) {
+      const feature = this.toMapFeature(geometry);
+      if (feature) this.snapSource.addFeature(feature);
+    }
+    this.snapInteraction = new Snap({ source: this.snapSource, pixelTolerance: 12 });
+    this.map.addInteraction(this.snapInteraction);
+  }
+
+  /** OpenLayers snaps only through a Snap added after the Draw / Modify /
+   *  Translate it serves — re-add the layer snap on top. */
+  private raiseSnap(): void {
+    if (!this.snapInteraction || !this.map) return;
+    this.map.removeInteraction(this.snapInteraction);
+    this.map.addInteraction(this.snapInteraction);
   }
 
   /** The edit target's current geometry as GeoJSON (EPSG:4326). */
@@ -1006,9 +1059,11 @@ export class MapService {
   private stopEditInteractions(): void {
     if (this.map) {
       if (this.editModify) this.map.removeInteraction(this.editModify);
+      if (this.editTranslate) this.map.removeInteraction(this.editTranslate);
       if (this.editSnap) this.map.removeInteraction(this.editSnap);
     }
     this.editModify = null;
+    this.editTranslate = null;
     this.editSnap = null;
   }
 

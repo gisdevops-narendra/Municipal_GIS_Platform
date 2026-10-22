@@ -1,33 +1,42 @@
 import { Injectable, inject } from '@angular/core';
 import { AuthService } from '../../../core/services/auth.service';
-import { readUserScoped, userScopedKey } from './user-scoped-storage';
+import { userScopedKey } from './user-scoped-storage';
 import { nextUid } from '../models/query-builder.model';
 import { Sketch, SketchKind } from '../models/sketch.model';
 
 const MAX_SKETCHES = 200;
+/** Where sketches used to be persisted — removed on startup. */
+const LEGACY_STORAGE_PREFIX = 'mgp.sketches';
 
 /**
- * Persists Draw & Mark sketches per workspace in `localStorage` — the same
- * client-side storage the app uses for bookmarks and saved queries (so they
- * are per browser, not shared). When a server endpoint exists, only this
- * service changes.
+ * Draw & Mark sketches are temporary markup: kept in memory per workspace
+ * and user for this session only, so a map Reset (`clearAll`) or a page
+ * reload removes them. Anything meant to last belongs in a Draw & Mark
+ * layer, which is stored on the server.
  */
 @Injectable({ providedIn: 'root' })
 export class SketchService {
   private readonly auth = inject(AuthService);
+  private readonly store = new Map<string, Sketch[]>();
+
+  constructor() {
+    // Sketches were once kept in localStorage — drop those leftovers.
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key?.startsWith(LEGACY_STORAGE_PREFIX)) localStorage.removeItem(key);
+      }
+    } catch {
+      /* storage unavailable — nothing to clean */
+    }
+  }
 
   private key(workspaceKey: string): string {
-    return userScopedKey('mgp.sketches', workspaceKey, this.auth.user()?.id);
+    return userScopedKey(LEGACY_STORAGE_PREFIX, workspaceKey, this.auth.user()?.id);
   }
 
   list(workspaceKey: string): Sketch[] {
-    try {
-      const raw = readUserScoped('mgp.sketches', workspaceKey, this.auth.user()?.id);
-      const parsed = raw ? (JSON.parse(raw) as Sketch[]) : [];
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
+    return this.store.get(this.key(workspaceKey)) ?? [];
   }
 
   add(
@@ -57,6 +66,11 @@ export class SketchService {
     this.persist(workspaceKey, []);
   }
 
+  /** Map Reset: every workspace's sketches go. */
+  clearAll(): void {
+    this.store.clear();
+  }
+
   /** All sketches as one GeoJSON FeatureCollection (EPSG:4326). */
   toFeatureCollection(sketches: Sketch[]): Record<string, unknown> {
     return {
@@ -70,10 +84,6 @@ export class SketchService {
   }
 
   private persist(workspaceKey: string, sketches: Sketch[]): void {
-    try {
-      localStorage.setItem(this.key(workspaceKey), JSON.stringify(sketches.slice(0, MAX_SKETCHES)));
-    } catch {
-      /* storage unavailable / full — non-critical */
-    }
+    this.store.set(this.key(workspaceKey), sketches.slice(0, MAX_SKETCHES));
   }
 }

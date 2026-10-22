@@ -511,7 +511,14 @@ export class RasterService {
   async publishVectorTable(
     appUser: AppUser,
     output: Awaited<ReturnType<RasterService['prepareVectorOutput']>>,
-    params: { name: string; geometryType: GisGeometryType; description?: string; rasterAnalysis: boolean },
+    params: {
+      name: string;
+      geometryType: GisGeometryType;
+      description?: string;
+      rasterAnalysis: boolean;
+      /** Table CRS when it differs from the workspace default. */
+      srs?: string;
+    },
   ) {
     const { owner, workspace, code, table } = output;
     await this.prisma.$executeRawUnsafe(
@@ -522,7 +529,7 @@ export class RasterService {
       const bbox = await this.geoServer.ensureFeatureType(
         workspace.geoserverWorkspace,
         `${workspace.geoserverWorkspace}_postgis`,
-        { name: geoserverLayer, nativeName: table, title: params.name, srs: workspace.defaultCrs },
+        { name: geoserverLayer, nativeName: table, title: params.name, srs: params.srs ?? workspace.defaultCrs },
       );
       const layer = await this.prisma.gISLayer.create({
         data: {
