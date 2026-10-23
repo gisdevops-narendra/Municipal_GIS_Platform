@@ -31,6 +31,7 @@ import {
 import { StyleService } from './style.service';
 import { LayerReportService } from './layer-report.service';
 import { LayerReportDto } from './dto/layer-report.dto';
+import { ExportSelectionDto } from './dto/selection.dto';
 import { SetLayerPermissionDto } from './dto/set-layer-permission.dto';
 import { LayerStyleSpecDto } from './dto/layer-style.dto';
 import type { ClassificationMethod } from './dto/layer-style.dto';
@@ -122,6 +123,29 @@ export class GisLayersController {
         id,
         requested as LayerExportFormat,
         field && op ? { field, op, value: value ?? '' } : undefined,
+      );
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(body);
+  }
+
+  /** Export selected: only the given features, same checks as above —
+   *  POSTed because a selection's id list can be long. */
+  @RequireMunicipalityMember()
+  @Post('layers/:id/export')
+  async exportSelection(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @Body() dto: ExportSelectionDto,
+    @Res() res: Response,
+  ) {
+    const { filename, body, contentType } =
+      await this.gisLayersService.exportLayer(
+        appUser,
+        id,
+        dto.format,
+        undefined,
+        dto.featureIds,
       );
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

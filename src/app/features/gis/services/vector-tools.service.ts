@@ -151,6 +151,11 @@ export class VectorToolsService {
     return this.http.get<FeatureHistoryEntry[]>(`${this.baseUrl}/layers/${layerId}/history`, { params });
   }
 
+  /** Save selection as layer: the chosen features published as a new layer. */
+  saveSelection(layerId: string, featureIds: number[], name: string): Observable<GisLayer> {
+    return this.http.post<GisLayer>(`${this.baseUrl}/layers/${layerId}/save-selection`, { featureIds, name });
+  }
+
   geoprocess(request: GeoprocessRequest): Observable<GisLayer> {
     return this.http.post<GisLayer>(`${this.baseUrl}/geoprocessing`, request);
   }

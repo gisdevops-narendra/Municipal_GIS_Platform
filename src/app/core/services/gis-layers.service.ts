@@ -48,6 +48,12 @@ export class GisLayersService {
     });
   }
 
+  /** Export selected: only these features (keys, the numeric part of the
+   *  WFS ids) — POSTed since a selection can be long. */
+  exportSelected(id: string, format: LayerExportFormat, featureIds: number[]): Observable<Blob> {
+    return this.http.post(`${this.baseUrl}/${id}/export`, { format, featureIds }, { responseType: 'blob' });
+  }
+
   /** Analytics (VIEW-gated server-side): the layer's attribute fields. */
   analyticsFields(id: string): Observable<AnalyticsField[]> {
     return this.http.get<AnalyticsField[]>(`${this.baseUrl}/${id}/analytics/fields`);

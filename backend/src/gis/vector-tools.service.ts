@@ -16,6 +16,7 @@ import { GisLayersService } from './gis-layers.service';
 import { RasterService } from './raster.service';
 import { GisAuthorizationService } from './gis-authorization.service';
 import type { CreateBlankLayerDto, GeoprocessDto } from './dto/vector-tools.dto';
+import type { SaveSelectionDto } from './dto/selection.dto';
 
 /** Module Access catalog ids (seed-modules.ts). */
 export const EDIT_PANEL_MODULE_ID = 55;
@@ -342,6 +343,48 @@ export class VectorToolsService {
       name: dto.outputName,
       geometryType,
       description,
+      rasterAnalysis: false,
+    });
+  }
+
+  /** Save selection as layer: the chosen features (all attributes) copied
+   *  into a new published layer. A copy is an export of the data, so the
+   *  source layer's EXPORT permission is required. */
+  async saveSelection(appUser: AppUser, layerId: string, dto: SaveSelectionDto) {
+    const a = await this.gisLayers.vectorSource(appUser, layerId, 'view');
+    if (!(await this.gisAuth.canExport(appUser, a.layer))) {
+      throw new ForbiddenException('You do not have permission to copy features out of this layer.');
+    }
+    const geometryType = this.geometryTypeOf(a);
+    const keys = (
+      await this.prisma.$queryRawUnsafe<{ column_name: string }[]>(
+        `SELECT column_name FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = $1 AND column_name = 'ogc_fid'`,
+        a.table,
+      )
+    ).length;
+    if (!keys) throw new BadRequestException('This layer has no feature key, so a selection cannot be saved from it.');
+
+    const output = await this.raster.prepareVectorOutput(appUser, dto.name, dto.departmentId);
+    const srid = this.workspaceSrid(output.workspace.defaultCrs);
+    const ga = await this.geomIn('a', a.table, srid);
+    const cols = this.outputColumns(await this.columns(a.table), 'a', '', new Set(['geom', 'ogc_fid']));
+    await this.prisma.$executeRawUnsafe(
+      `CREATE TABLE "${output.table}" AS
+         SELECT ${this.list(cols)}ST_Multi(${ga})::geometry(${MULTI_TYPE[geometryType]}, ${srid}) AS geom
+           FROM ${a.from} a WHERE a.ogc_fid = ANY($1::int[]) ORDER BY a.ogc_fid`,
+      [...new Set(dto.featureIds)],
+    );
+    await this.prisma.$executeRawUnsafe(`ALTER TABLE "${output.table}" ADD COLUMN ogc_fid SERIAL PRIMARY KEY`);
+    const [{ n }] = await this.prisma.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM "${output.table}"`);
+    if (n === 0) {
+      await this.prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS "${output.table}"`);
+      throw new BadRequestException('None of the selected features were found.');
+    }
+    return this.raster.publishVectorTable(appUser, output, {
+      name: dto.name,
+      geometryType,
+      description: `${n} selected feature${n === 1 ? '' : 's'} of ${a.layer.name}`,
       rasterAnalysis: false,
     });
   }

@@ -29,6 +29,7 @@ import {
   SplitFeatureDto,
   UpdateFeatureDto,
 } from './dto/vector-tools.dto';
+import { SaveSelectionDto } from './dto/selection.dto';
 
 /** Feature Editing, Edit History, Geoprocessing and Impact Report. Layer
  *  permissions (VIEW / UPLOAD|MANAGE / EXPORT) and Module Access are both
@@ -171,6 +172,16 @@ export class VectorToolsController {
     @Query('featureId', new ParseIntPipe({ optional: true })) featureId?: number,
   ) {
     return this.vectorTools.history(appUser, id, featureId);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('layers/:id/save-selection')
+  saveSelection(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @Body() dto: SaveSelectionDto,
+  ) {
+    return this.vectorTools.saveSelection(appUser, id, dto);
   }
 
   @RequireMunicipalityMember()

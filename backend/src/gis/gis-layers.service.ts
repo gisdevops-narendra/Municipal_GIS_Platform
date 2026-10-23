@@ -49,6 +49,17 @@ export type LayerExportFormat = keyof typeof LAYER_EXPORT_FORMATS;
  *  one child module per format (seed-modules.ts). */
 export const EXPORT_DATA_MODULE_ID = 226;
 export const EXPORT_FILTER_MODULE_ID = 1035;
+
+/** A selection (feature keys) as this layer's own WFS feature ids —
+ *  built here, so featureID can never name another feature type. */
+export function selectionFeatureIds(geoserverLayer: string, fids: number[]): string[] {
+  const unique = [...new Set(fids)];
+  if (unique.length === 0) {
+    throw new BadRequestException('Select at least one feature.');
+  }
+  return unique.map((fid) => `${geoserverLayer}.${fid}`);
+}
+
 /** Module Access catalog id for the Heatmap & Clusters tool. */
 export const HEATMAP_MODULE_ID = 1036;
 export const LAYER_EXPORT_FORMAT_MODULE_IDS: Record<LayerExportFormat, number> =
@@ -274,6 +285,8 @@ export class GisLayersService {
     layerId: string,
     format: LayerExportFormat = 'geojson',
     filter?: { field: string; op: string; value: string },
+    /** Export selected: feature keys of this layer (filter is ignored). */
+    featureIds?: number[],
   ): Promise<{ filename: string; body: string | Buffer; contentType: string }> {
     const layer = await this.findLayerInMunicipality(
       appUser.municipalityId,
@@ -294,7 +307,11 @@ export class GisLayersService {
         `Your module access does not include ${format} export.`,
       );
     }
-    const base = layer.code.toLowerCase();
+    const ids = featureIds
+      ? selectionFeatureIds(layer.geoserverLayer, featureIds)
+      : undefined;
+    if (ids) filter = undefined;
+    const base = layer.code.toLowerCase() + (ids ? '_selected' : '');
     if (filter && !modules.has(EXPORT_FILTER_MODULE_ID)) {
       throw new ForbiddenException(
         'Your module access does not include Export with Filter.',
@@ -307,7 +324,7 @@ export class GisLayersService {
       const geojson = await this.geoServer.getFeaturesAsGeoJson(
         layer.geoserverWorkspace,
         layer.geoserverLayer,
-        { cqlFilter },
+        { cqlFilter, featureIds: ids },
       );
       return {
         filename: `${base}.geojson`,
@@ -321,7 +338,7 @@ export class GisLayersService {
       layer.geoserverWorkspace,
       layer.geoserverLayer,
       spec.outputFormat,
-      { srsName: spec.srsName, cqlFilter },
+      { srsName: spec.srsName, cqlFilter, featureIds: ids },
     );
     return { filename: `${base}.${spec.extension}`, body, contentType };
   }

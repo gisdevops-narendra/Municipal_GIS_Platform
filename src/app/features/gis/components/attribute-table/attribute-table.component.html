@@ -120,6 +120,39 @@
           (click)="clearSelection()"
         ><i class="pi pi-times-circle" aria-hidden="true"></i></button>
 
+        <span class="attr-table__fields attr-table__selection">
+          <button
+            type="button"
+            class="attr-table__btn"
+            [class.is-active]="selectionMenuOpen()"
+            [disabled]="selectedIds().size === 0"
+            pTooltip="Export selected / Save selection as layer" tooltipPosition="top"
+            (click)="toggleSelectionMenu()"
+          ><i class="pi pi-download" aria-hidden="true"></i></button>
+
+          @if (selectionMenuOpen()) {
+            <div class="attr-table__fields-menu attr-table__selection-menu">
+              <span class="attr-table__fields-title">Export {{ selectedIds().size.toLocaleString() }} selected</span>
+              @for (format of exportFormats(); track format.value) {
+                <button type="button" class="attr-table__fields-row attr-table__selection-row" [disabled]="selectionBusy()" (click)="exportSelected(format)">
+                  <i class="pi pi-file-export" aria-hidden="true"></i>
+                  <span class="attr-table__fields-name">{{ format.label }}</span>
+                </button>
+              } @empty {
+                <span class="attr-table__selection-note">No export formats in your module access.</span>
+              }
+              <span class="attr-table__fields-title">Save selection as layer</span>
+              <form class="attr-table__selection-save" (ngSubmit)="saveSelectionAsLayer()">
+                <input pInputText name="selectionLayerName" class="p-inputtext-sm" placeholder="New layer name" maxlength="120" [(ngModel)]="selectionLayerName" />
+                <button pButton type="submit" icon="pi pi-save" class="p-button-sm" [loading]="selectionBusy()" [disabled]="selectionBusy()" pTooltip="Save as new layer" tooltipPosition="top"></button>
+              </form>
+              @if (selectionError(); as message) {
+                <span class="attr-table__selection-note attr-table__selection-note--error" role="alert">{{ message }}</span>
+              }
+            </div>
+          }
+        </span>
+
         <button
           type="button"
           class="attr-table__btn"

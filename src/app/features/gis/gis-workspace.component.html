@@ -380,6 +380,8 @@
             [editableLayerId]="editingLayerId()"
             [refreshKey]="featuresWrittenTick()"
             (featuresEdited)="tableEdits.set($event)"
+            [allowedModuleIds]="myModuleIds()"
+            (layerCreated)="onLayerCreated($event)"
           />
         }
         @if (openedBottomTools().has('statistics') && layersReady()) {

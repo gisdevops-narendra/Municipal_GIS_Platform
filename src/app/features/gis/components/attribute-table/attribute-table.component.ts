@@ -30,6 +30,9 @@ import { MapService } from '../../services/map.service';
 import { AttributeTableService } from '../../services/attribute-table.service';
 import { VectorToolsService } from '../../services/vector-tools.service';
 import { NotificationService } from '../../../../core/services/notification.service';
+import { GisLayersService } from '../../../../core/services/gis-layers.service';
+import { LAYER_EXPORT_FORMATS, LayerExportFormatOption } from '../../../../core/models/layer-export.model';
+import { blobErrorMessage, downloadBlob } from '../../../../core/utils/download-blob';
 import {
   ATTRIBUTE_PAGE_SIZES,
   AttributeField,
@@ -104,6 +107,7 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
   private readonly mapService = inject(MapService);
   private readonly vectorTools = inject(VectorToolsService);
   private readonly notify = inject(NotificationService);
+  private readonly gisLayers = inject(GisLayersService);
 
   /** Backed by a signal so `layerOptions` recomputes when the list arrives
    *  or changes — a plain field would be read once by `computed()` and
@@ -134,6 +138,13 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
   @Output() featuresEdited = new EventEmitter<{ layerId: string; changes: Record<number, Record<string, string>> }>();
 
     @Output() selectionChange = new EventEmitter<{ layerId: string; featureIds: string[] }>();
+  /** Module Access ids granted to the user — gates Export selected formats. */
+  @Input() set allowedModuleIds(value: ReadonlySet<number>) {
+    this.allowedSignal.set(value ?? new Set());
+  }
+  private readonly allowedSignal = signal<ReadonlySet<number>>(new Set());
+  /** A layer made by Save selection as layer. */
+  @Output() layerCreated = new EventEmitter<GisLayer>();
 
   readonly baseFilter = signal<AttributeExternalFilter | null>(null);
 
@@ -172,6 +183,15 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
   readonly showSelectedOnly = signal(false);
   readonly switching = signal(false);
   readonly fieldsMenuOpen = signal(false);
+
+  // ----- Export selected / Save selection as layer -----
+  readonly selectionMenuOpen = signal(false);
+  readonly exportFormats = computed(() =>
+    LAYER_EXPORT_FORMATS.filter((f) => f.moduleId === undefined || this.allowedSignal().has(f.moduleId))
+  );
+  readonly selectionBusy = signal(false);
+  readonly selectionError = signal<string | null>(null);
+  selectionLayerName = '';
 
   // ----- cell editing (edit session) -----
   private readonly editableId = signal<string | null>(null);
@@ -688,13 +708,78 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
 
   @HostListener('document:pointerdown', ['$event'])
   onDocumentPointerDown(event: Event): void {
-    if (!this.fieldsMenuOpen()) {
-      return;
-    }
     const target = event.target as HTMLElement;
-    if (!target.closest('.attr-table__fields')) {
+    if (this.fieldsMenuOpen() && !target.closest('.attr-table__fields')) {
       this.fieldsMenuOpen.set(false);
     }
+    if (this.selectionMenuOpen() && !target.closest('.attr-table__selection')) {
+      this.selectionMenuOpen.set(false);
+    }
+  }
+
+  toggleSelectionMenu(): void {
+    const open = !this.selectionMenuOpen();
+    this.selectionMenuOpen.set(open);
+    if (open) {
+      this.selectionError.set(null);
+      const layer = this.layers.find((l) => l.id === this.activeLayerId());
+      this.selectionLayerName = layer ? `${layer.name} (selected)` : '';
+    }
+  }
+
+  /** The selection as feature keys (the "<n>" of "<layer>.<n>"), or null
+   *  when a record has no numeric key. */
+  private selectedKeys(): number[] | null {
+    const keys = [...this.selectedIds()].map((id) => Number(id.split('.').pop()));
+    return keys.length && keys.every((k) => Number.isInteger(k) && k > 0) ? keys : null;
+  }
+
+  exportSelected(format: LayerExportFormatOption): void {
+    const layer = this.layers.find((l) => l.id === this.activeLayerId());
+    const keys = this.selectedKeys();
+    if (!layer || this.selectionBusy()) return;
+    if (!keys) return this.selectionError.set('These records cannot be exported by selection.');
+    this.selectionBusy.set(true);
+    this.selectionError.set(null);
+    this.gisLayers.exportSelected(layer.id, format.value, keys).subscribe({
+      next: (blob) => {
+        this.selectionBusy.set(false);
+        this.selectionMenuOpen.set(false);
+        downloadBlob(blob, `${layer.code.toLowerCase()}_selected.${format.extension}`);
+        this.notify.success(`Exported ${keys.length.toLocaleString()} selected feature(s) as ${format.label}.`);
+      },
+      error: async (err: HttpErrorResponse) => {
+        this.selectionBusy.set(false);
+        this.selectionError.set(
+          err.status === 403
+            ? 'You do not have permission to export this layer.'
+            : await blobErrorMessage(err, 'Export failed. Please try again.')
+        );
+      }
+    });
+  }
+
+  saveSelectionAsLayer(): void {
+    const layerId = this.activeLayerId();
+    const keys = this.selectedKeys();
+    const name = this.selectionLayerName.trim();
+    if (!layerId || this.selectionBusy()) return;
+    if (!keys) return this.selectionError.set('These records cannot be saved by selection.');
+    if (!name) return this.selectionError.set('Enter a name for the new layer.');
+    this.selectionBusy.set(true);
+    this.selectionError.set(null);
+    this.vectorTools.saveSelection(layerId, keys, name).subscribe({
+      next: (layer) => {
+        this.selectionBusy.set(false);
+        this.selectionMenuOpen.set(false);
+        this.notify.success(`Saved ${keys.length.toLocaleString()} feature(s) as layer "${layer.name}".`);
+        this.layerCreated.emit(layer);
+      },
+      error: (err: HttpErrorResponse) => {
+        this.selectionBusy.set(false);
+        this.selectionError.set(err.error?.message ?? 'Could not save the selection as a layer.');
+      }
+    });
   }
 
   isFieldVisible(name: string): boolean {

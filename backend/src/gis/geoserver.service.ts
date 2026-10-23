@@ -87,6 +87,8 @@ export class GeoServerService {
       timeoutMs?: number;
       srsName?: string;
       cqlFilter?: string;
+      /** This layer's WFS feature ids (Export selected) — replaces cqlFilter. */
+      featureIds?: string[];
     } = {},
   ): Promise<string> {
     const qualifiedLayer = `${workspace}:${layer}`;
@@ -100,7 +102,11 @@ export class GeoServerService {
     if (options.maxFeatures) {
       params.set('count', String(options.maxFeatures));
     }
-    if (options.cqlFilter) params.set('CQL_FILTER', options.cqlFilter);
+    if (options.featureIds?.length) {
+      params.set('featureID', options.featureIds.join(','));
+    } else if (options.cqlFilter) {
+      params.set('CQL_FILTER', options.cqlFilter);
+    }
     if (options.srsName) {
       // Task 9 search: features/bboxes must come back in EPSG:4326 to
       // match GISLayer.bbox's own convention, regardless of the
@@ -109,9 +115,9 @@ export class GeoServerService {
       // unset and gets GeoServer's native/default CRS, unchanged.
       params.set('srsName', options.srsName);
     }
-    const response = await this.request(
-      `/${encodeURIComponent(workspace)}/wfs?${params.toString()}`,
-      { method: 'GET' },
+    const response = await this.wfsRequest(
+      workspace,
+      params,
       options.timeoutMs ?? 30000,
     );
     if (!response.ok) {
@@ -185,7 +191,12 @@ export class GeoServerService {
     workspace: string,
     layer: string,
     outputFormat: string,
-    options: { srsName?: string; timeoutMs?: number; cqlFilter?: string } = {},
+    options: {
+      srsName?: string;
+      timeoutMs?: number;
+      cqlFilter?: string;
+      featureIds?: string[];
+    } = {},
   ): Promise<{ body: Buffer; contentType: string }> {
     const params = new URLSearchParams({
       service: 'WFS',
@@ -197,10 +208,14 @@ export class GeoServerService {
     if (options.srsName) {
       params.set('srsName', options.srsName);
     }
-    if (options.cqlFilter) params.set('CQL_FILTER', options.cqlFilter);
-    const response = await this.request(
-      `/${encodeURIComponent(workspace)}/wfs?${params.toString()}`,
-      { method: 'GET' },
+    if (options.featureIds?.length) {
+      params.set('featureID', options.featureIds.join(','));
+    } else if (options.cqlFilter) {
+      params.set('CQL_FILTER', options.cqlFilter);
+    }
+    const response = await this.wfsRequest(
+      workspace,
+      params,
       options.timeoutMs ?? 60000,
     );
     if (!response.ok) {
@@ -760,6 +775,27 @@ export class GeoServerService {
       return null;
     }
     return { minX, minY, maxX, maxY };
+  }
+
+  /** WFS KVP request: GET normally; POSTed as a form when it carries a
+   *  featureID list, which can be too long for the request line. */
+  private wfsRequest(
+    workspace: string,
+    params: URLSearchParams,
+    timeoutMs: number,
+  ): Promise<Response> {
+    const path = `/${encodeURIComponent(workspace)}/wfs`;
+    return params.has('featureID')
+      ? this.request(
+          path,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: params.toString(),
+          },
+          timeoutMs,
+        )
+      : this.request(`${path}?${params.toString()}`, { method: 'GET' }, timeoutMs);
   }
 
   private async request(
