@@ -2164,7 +2164,16 @@ export class MapService {
     const size = this.map.getSize();
     if (!size) return null;
     const extent = this.map.getView().calculateExtent(size);
-    return transformExtent(extent, MAP_PROJECTION, LAYER_PROJECTION) as [number, number, number, number];
+    let [minX, minY, maxX, maxY] = transformExtent(extent, MAP_PROJECTION, LAYER_PROJECTION);
+    // Zoomed out past one world, or panned onto a wrapped world copy: shift
+    // back into -180…180 and clamp, as APIs reject longitudes beyond that.
+    if (maxX - minX >= 360) [minX, maxX] = [-180, 180];
+    else {
+      const shift = Math.round((minX + maxX) / 2 / 360) * 360;
+      minX = Math.max(-180, minX - shift);
+      maxX = Math.min(180, maxX - shift);
+    }
+    return [minX, Math.max(-90, minY), maxX, Math.min(90, maxY)];
   }
 
   getViewState(): { center: [number, number]; zoom: number; projection: string } | null {

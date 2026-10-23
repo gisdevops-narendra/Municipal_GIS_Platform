@@ -591,6 +591,10 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
   /** The background job of the current run (layer-producing tools). */
   readonly job = signal<RasterJob | null>(null);
   private jobSub?: Subscription;
+  /** Jobs moved to the background ("Continue in background"): the form is
+   *  free for the next run, and each finished layer is added to the map. */
+  readonly backgroundJobs = signal<RasterJob[]>([]);
+  private readonly backgroundSubs = new Map<string, Subscription>();
   readonly error = signal<string | null>(null);
   readonly message = signal<string | null>(null);
   readonly facts = signal<{ label: string; value: string }[]>([]);
@@ -649,6 +653,7 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.pickSub?.unsubscribe();
+    this.backgroundSubs.forEach((sub) => sub.unsubscribe());
     this.coverageSub?.unsubscribe();
     this.mapService.cancelDraw();
     this.mapService.setSwipe(null);
@@ -2636,6 +2641,10 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
       next: (jobs) => {
         const j = jobs[0];
         if (!j || this.running()) return;
+        // Other jobs still running: follow them in the background.
+        for (const other of jobs.slice(1)) {
+          if (other.status === 'queued' || other.status === 'running') this.watchInBackground(other);
+        }
         const ui = j.clientTool ?? '';
         if (this.tools().some((t) => t.id === ui)) this.openTool(ui as RasterToolId);
         const body = (j.body ?? {}) as Record<string, unknown>;
@@ -2648,6 +2657,52 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
       },
       error: () => undefined
     });
+  }
+
+  sendToBackground(): void {
+    const job = this.job();
+    if (!job) return;
+    this.jobSub?.unsubscribe();
+    this.job.set(null);
+    this.running.set(false);
+    this.watchInBackground({ ...job, body: job.body ?? { outputName: this.outputName.trim() } });
+  }
+
+  private watchInBackground(job: RasterJob): void {
+    this.backgroundJobs.update((list) => [...list, job]);
+    const sub = timer(0, 2000)
+      .pipe(
+        switchMap(() => this.api.job(job.id).pipe(retry({ count: 5, delay: () => timer(3000) }))),
+        takeWhile((j) => j.status === 'queued' || j.status === 'running', true)
+      )
+      .subscribe({
+        next: (j) => {
+          this.backgroundJobs.update((list) => list.map((x) => (x.id === j.id ? { ...j, body: x.body ?? j.body } : x)));
+          if (j.status === 'queued' || j.status === 'running') return;
+          this.dropBackground(j.id);
+          const layer = (j.result as { layer?: GisLayer } | null)?.layer;
+          if (j.status === 'done') {
+            if (layer) this.layerCreated.emit(layer);
+            this.notify.success(layer ? `"${layer.name}" is ready on the map.` : 'A background raster job finished.', 'Raster Analysis');
+          } else if (j.status === 'failed') this.notify.error(j.error ?? 'Raster processing failed.', 'Raster Analysis');
+          this.api.markJobSeen(j.id).subscribe({ error: () => undefined });
+        },
+        error: () => {
+          this.dropBackground(job.id);
+          this.notify.error('Lost track of a background raster job — check the Layers panel later.', 'Raster Analysis');
+        }
+      });
+    this.backgroundSubs.set(job.id, sub);
+  }
+
+  private dropBackground(id: string): void {
+    this.backgroundSubs.get(id)?.unsubscribe();
+    this.backgroundSubs.delete(id);
+    this.backgroundJobs.update((list) => list.filter((x) => x.id !== id));
+  }
+
+  cancelBackgroundJob(job: RasterJob): void {
+    this.api.cancelJob(job.id).subscribe({ error: () => undefined });
   }
 
   cancelJob(): void {

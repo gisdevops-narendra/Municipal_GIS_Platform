@@ -1568,6 +1568,28 @@
       </button>
     </div>
   }
+  @for (b of backgroundJobs(); track b.id) {
+    <div class="ra__job">
+      <div class="ra__progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="b.progress ?? null">
+        @if (b.status === 'running' && b.progress != null) {
+          <div class="ra__progress-bar" [style.width.%]="b.progress"></div>
+        } @else {
+          <div class="ra__progress-bar is-indeterminate"></div>
+        }
+      </div>
+      <div class="ra__job-row">
+        <span class="ra__job-stage">
+          <i class="pi pi-clone" aria-hidden="true"></i>
+          {{ $any(b.body)?.outputName || b.tool }} —
+          @if (b.status === 'queued') { queued{{ b.queuePosition ? ' #' + b.queuePosition : '' }} } @else { {{ b.stage }}… }
+        </span>
+        <span class="ra__job-time">{{ elapsed(b.elapsedMs) }}</span>
+        @if (b.cancellable) {
+          <button type="button" class="bo__cancel" (click)="cancelBackgroundJob(b)" title="Cancel this job"><i class="pi pi-stop-circle"></i></button>
+        }
+      </div>
+    </div>
+  }
   @if (job(); as j) {
     <div class="ra__job">
       <div class="ra__progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="j.progress ?? null">
@@ -1590,10 +1612,13 @@
         }
         <span class="ra__job-time">{{ elapsed(j.elapsedMs) }}</span>
       </div>
-      @if (j.cancellable) {
-        <button type="button" class="bo__cancel" (click)="cancelJob()"><i class="pi pi-stop-circle"></i> Cancel</button>
-      }
-      <p class="bo__hint">Runs on the server — you can keep using the map meanwhile.</p>
+      <div class="ra__export">
+        <button type="button" class="ra__export-btn" (click)="sendToBackground()" title="Keep this job running and start another one"><i class="pi pi-clone"></i> Continue in background</button>
+        @if (j.cancellable) {
+          <button type="button" class="bo__cancel" (click)="cancelJob()"><i class="pi pi-stop-circle"></i> Cancel</button>
+        }
+      </div>
+      <p class="bo__hint">Runs on the server — you can keep using the map meanwhile, or continue it in the background to start another run.</p>
     </div>
   } @else if (running() && tool() !== 'upload') {
     <p class="bo__result">Processing…</p>
@@ -1807,7 +1832,7 @@
       ></button>
       <button pButton type="button" label="Clear" icon="pi pi-eraser" class="p-button-sm p-button-text" [disabled]="running()" (click)="clear()"></button>
     </div>
-  } @else {
+  } @else if (tool() === 'swipe') {
     <div class="bo__controls">
       <button pButton type="button" label="Stop swipe" icon="pi pi-times" class="p-button-sm p-button-text" (click)="clear()"></button>
     </div>

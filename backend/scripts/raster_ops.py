@@ -1476,7 +1476,9 @@ def op_stac_fetch(req):
             scl_path = os.path.join(folder, "scl.tif")
             warp_to_aoi(["/vsicurl/" + assets["scl"]["href"]], scl_path, req, dstSRS=srs, xRes=10, yRes=10,
                         targetAlignedPixels=True, resampleAlg="near", dstNodata=0)
-            scl = gdal.Open(scl_path).GetRasterBand(1).ReadAsArray()
+            scl_ds = gdal.Open(scl_path)
+            scl = scl_ds.GetRasterBand(1).ReadAsArray()
+            scl_ds = None
             cloudy = np.isin(scl, (3, 8, 9, 10))
             valid = scl > 0
             masked_pct = float(cloudy.sum() * 100 / max(valid.sum(), 1))
@@ -1571,7 +1573,9 @@ def landsat_fetch(req):
             qa_path = os.path.join(folder, "qa.tif")
             warp_to_aoi(["/vsicurl/" + assets["qa_pixel"]["href"]], qa_path, req, dstSRS=srs, xRes=30, yRes=30,
                         targetAlignedPixels=True, resampleAlg="near", srcNodata=1, dstNodata=1)
-            qa = gdal.Open(qa_path).GetRasterBand(1).ReadAsArray().astype(np.uint16)
+            qa_ds = gdal.Open(qa_path)
+            qa = qa_ds.GetRasterBand(1).ReadAsArray().astype(np.uint16)
+            qa_ds = None
             cloudy = (qa & LANDSAT_QA_CLOUDY) > 0
             valid = (qa & 1) == 0
             cloudy &= valid
@@ -1713,14 +1717,14 @@ def op_imagery_coverage(req):
     minx, miny, maxx, maxy = req["bbox"]
     polygons = []
     if req["source"] == "oam":
-        found = http_json(f"{OAM_API}?bbox={minx},{miny},{maxx},{maxy}&limit=500")
-        for r in found.get("results", []):
+        found = oam_query(req["bbox"], 500)
+        for r in found:
             g = r.get("geojson") or {}
             if g.get("type") == "Polygon":
                 polygons.append(g["coordinates"])
             elif g.get("type") == "MultiPolygon":
                 polygons.extend(g["coordinates"])
-        count = len(found.get("results", []))
+        count = len(found)
     else:
         index = earthview_index(req["cacheDir"])
         span = max(maxx - minx, maxy - miny)
@@ -1750,13 +1754,38 @@ def op_imagery_coverage(req):
     return {"count": count, "geometry": {"type": "MultiPolygon", "coordinates": polygons} if polygons else None}
 
 
+def oam_query(bbox, limit):
+    """OpenAerialMap images over the bbox, newest first. OAM's search misreads
+    boxes wider than a hemisphere (returning far-away images), so wide boxes
+    are queried in slices and results not touching the bbox are dropped."""
+    minx, miny, maxx, maxy = bbox
+    aoi = ogr.CreateGeometryFromJson(json.dumps({"type": "Polygon", "coordinates": _box(minx, miny, maxx, maxy)}))
+    slices = max(1, math.ceil((maxx - minx) / 90))
+    width = (maxx - minx) / slices
+    results, seen = [], set()
+    for k in range(slices):
+        x0, x1 = minx + k * width, minx + (k + 1) * width
+        found = http_json(f"{OAM_API}?bbox={x0},{miny},{x1},{maxy}&limit={limit}&order_by=acquisition_end&sort=desc")
+        for r in found.get("results", []):
+            g = r.get("geojson")
+            if r.get("_id") in seen or not g:
+                continue
+            fp = ogr.CreateGeometryFromJson(json.dumps(g))
+            if fp is None or not fp.Intersects(aoi):
+                continue
+            seen.add(r.get("_id"))
+            results.append(r)
+    results.sort(key=lambda r: r.get("acquisition_end") or "", reverse=True)
+    return results
+
+
 def oam_search(req):
     minx, miny, maxx, maxy = req["bbox"]
-    found = http_json(f"{OAM_API}?bbox={minx},{miny},{maxx},{maxy}&limit=50&order_by=acquisition_end&sort=desc")
+    found = oam_query(req["bbox"], 50)
     aoi = ogr.CreateGeometryFromJson(json.dumps({"type": "Polygon", "coordinates": [[
         [minx, miny], [maxx, miny], [maxx, maxy], [minx, maxy], [minx, miny]]]}))
     scenes = []
-    for r in found.get("results", []):
+    for r in found:
         footprint = r.get("geojson")
         if not footprint or not r.get("uuid", "").lower().endswith((".tif", ".tiff")):
             continue
