@@ -99,6 +99,45 @@ const span = (s: RasterStats, fallback: [number, number]): [number, number] => {
  * (profile, volumes, line of sight) or publishes the output as a new
  * raster / vector layer with a style that suits it.
  */
+/** Stream network: width and colour grow with Strahler order, scaled to
+ *  the network's own highest order so its main channel is always the
+ *  boldest, darkest line — headwaters thin pale blue, trunk deep navy. */
+const STREAM_BLUES = ['#9ecae1', '#6baed6', '#4292c6', '#2171b5', '#08519c', '#08306b'];
+function streamHierarchyStyle(maxOrder: number) {
+  const top = Math.max(1, Math.round(maxOrder || 1));
+  const lerp = (a: number[], b: number[], f: number) => a.map((v, i) => Math.round(v + (b[i] - v) * f));
+  const rgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const colorAt = (t: number) => {
+    const x = t * (STREAM_BLUES.length - 1);
+    const i = Math.min(Math.floor(x), STREAM_BLUES.length - 2);
+    const c = lerp(rgb(STREAM_BLUES[i]), rgb(STREAM_BLUES[i + 1]), x - i);
+    return `#${c.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+  };
+  const categories = Array.from({ length: top }, (_, k) => {
+    const order = k + 1;
+    const t = top === 1 ? 1 : k / (top - 1);
+    const role = order === 1 ? ' · headwater' : order === top ? ' · main channel' : '';
+    return {
+      value: order,
+      label: `Order ${order}${role}`,
+      symbol: {
+        strokeColor: colorAt(t),
+        strokeWidth: Math.round((0.6 + 3.6 * Math.pow(t, 1.15)) * 10) / 10,
+        strokeOpacity: 0.75 + 0.25 * t,
+        strokeCap: 'round' as const,
+        strokeJoin: 'round' as const,
+      },
+    };
+  });
+  return {
+    version: 1 as const,
+    geometry: 'line' as const,
+    mode: 'categorized' as const,
+    symbol: { strokeColor: '#4292c6', strokeWidth: 1, strokeCap: 'round' as const, strokeJoin: 'round' as const },
+    categorize: { field: 'strahler', categories, includeOther: true },
+  };
+}
+
 @Injectable()
 export class RasterToolsService {
   constructor(private readonly rasters: RasterService) {}
@@ -644,10 +683,14 @@ export class RasterToolsService {
 
   async streamNetwork(appUser: AppUser, dto: StreamNetworkDto) {
     const { file } = await this.rasters.resolveRaster(appUser, dto.layerId);
-    return this.toVectorLayer(appUser, dto.outputName, 'LINE', (output) =>
-      this.rasters.runOp({ op: 'streams', path: file, band: dto.band ?? 1, thresholdKm2: dto.thresholdKm2, output }),
-      { strokeColor: '#2171b5', strokeWidth: 1.8 },
+    const published = await this.toVectorLayer(appUser, dto.outputName, 'LINE', (output) =>
+      this.rasters.runOp<{ maxOrder: number; orders: { order: number }[] }>({
+        op: 'streams', path: file, band: dto.band ?? 1, thresholdKm2: dto.thresholdKm2, output,
+      }),
+      { strokeColor: '#2171b5', strokeWidth: 1.2, strokeCap: 'round', strokeJoin: 'round' },
     );
+    await this.rasters.applyVectorStyle(published.layer.id, streamHierarchyStyle((published.result as { maxOrder: number }).maxOrder));
+    return published;
   }
 
   // ----- Decision Support -----

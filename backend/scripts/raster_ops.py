@@ -2251,6 +2251,21 @@ def op_change_matrix(req):
 
 # ------------------------------------------- 11. stream network
 
+def _chaikin(points, iterations=2):
+    """Corner-cutting smoothing: rounds the cell-to-cell staircase of a
+    traced stream while keeping both ends (so segments stay joined)."""
+    for _ in range(iterations):
+        if len(points) < 3:
+            return points
+        out = [points[0]]
+        for (x0, y0), (x1, y1) in zip(points, points[1:]):
+            out.append((0.75 * x0 + 0.25 * x1, 0.75 * y0 + 0.25 * y1))
+            out.append((0.25 * x0 + 0.75 * x1, 0.25 * y0 + 0.75 * y1))
+        out.append(points[-1])
+        points = out
+    return points
+
+
 def op_streams(req):
     src = gdal.Open(req["path"])
     ds = src
@@ -2304,6 +2319,26 @@ def op_streams(req):
     # downstream until the next one (or the outlet).
     starts = [i for i in strahler if len(inflow.get(i, [])) != 1
               or strahler[inflow[i][0]] != strahler[i]]
+    # Trace every segment first (cell indices), then write them lowest order
+    # first: the map draws in feature order, so main channels sit on top of
+    # the tributaries joining them.
+    cell = math.sqrt(area)
+    traced = []
+    for s0 in starts:
+        path = [s0]
+        i = s0
+        while True:
+            d = int(down[i])
+            if d < 0 or not stream[d]:
+                break
+            path.append(d)
+            if len(inflow.get(d, [])) != 1 or strahler[d] != strahler[s0]:
+                break
+            i = d
+        if len(path) >= 2:
+            traced.append((strahler[s0], path))
+    traced.sort(key=lambda t: t[0])
+
     driver = ogr.GetDriverByName("GPKG")
     if os.path.exists(req["output"]):
         driver.DeleteDataSource(req["output"])
@@ -2314,31 +2349,24 @@ def op_streams(req):
     segments = 0
     max_order = 0
     by_order = {}  # Strahler order -> [segments, length_m], for the results screen
-    for s0 in starts:
+    for k, path in traced:
+        # Diagonal steps are √2 cells long.
+        length_m = 0.0
+        for a_, b_ in zip(path, path[1:]):
+            (ra, ca), (rb, cb) = divmod(a_, w), divmod(b_, w)
+            length_m += cell * (math.sqrt(2) if ra != rb and ca != cb else 1.0)
         line = ogr.Geometry(ogr.wkbLineString)
-        line.AddPoint_2D(*xy(s0))
-        i, n = s0, 1
-        while True:
-            d = int(down[i])
-            if d < 0 or not stream[d]:
-                break
-            line.AddPoint_2D(*xy(d))
-            n += 1
-            if len(inflow.get(d, [])) != 1 or strahler[d] != strahler[s0]:
-                break
-            i = d
-        if n < 2:
-            continue
+        for x, y in _chaikin([xy(i) for i in path]):
+            line.AddPoint_2D(x, y)
         feature = ogr.Feature(layer.GetLayerDefn())
-        feature.SetField("strahler", strahler[s0])
-        feature.SetField("upstream_km2", float(upstream_km2[i]))
-        length_m = float((n - 1) * math.sqrt(area))
+        feature.SetField("strahler", int(k))
+        feature.SetField("upstream_km2", float(upstream_km2[path[-2]]))
         feature.SetField("length_m", length_m)
         feature.SetGeometry(line)
         layer.CreateFeature(feature)
         segments += 1
-        max_order = max(max_order, strahler[s0])
-        entry = by_order.setdefault(int(strahler[s0]), [0, 0.0])
+        max_order = max(max_order, int(k))
+        entry = by_order.setdefault(int(k), [0, 0.0])
         entry[0] += 1
         entry[1] += length_m
     vds = None
