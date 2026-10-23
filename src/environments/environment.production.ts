@@ -19,5 +19,10 @@ export const environment = {
     clientId: 'municipal-gis-frontend'
   },
   apiUrl: 'http://localhost:3000/api',
-  geoserverUrl: 'http://localhost:8600/geoserver'
+  geoserverUrl: 'http://localhost:8600/geoserver',
+  /** Optional Cesium ion access token (https://ion.cesium.com — free tier):
+   *  turns on world 3D terrain and 3D buildings in the 3D View. Empty →
+   *  imagery and GIS layers on the globe without terrain. Public by design
+   *  (restrict it to this site's URL in the ion dashboard). */
+  cesiumIonToken: ''
 };

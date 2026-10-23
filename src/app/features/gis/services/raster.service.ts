@@ -433,6 +433,12 @@ export class RasterService {
     return this.http.post<RasterMonitor>(`${this.baseUrl}/monitors/${id}/acknowledge`, {});
   }
 
+  /** 3D View: a DEM layer's height grid for the globe; null when the
+   *  layer is not an elevation raster. */
+  globeTerrain(layerId: string): Observable<TerrainMeshData | null> {
+    return this.http.get<TerrainMeshData | null>(`${this.baseUrl}/${layerId}/terrain`);
+  }
+
   mesh(layerId: string, band: number, size = 260): Observable<TerrainMeshData> {
     return this.http.get<TerrainMeshData>(`${this.baseUrl}/${layerId}/mesh`, { params: { band, size } });
   }

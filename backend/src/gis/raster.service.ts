@@ -201,6 +201,20 @@ export class RasterService {
     return this.runOp({ op: 'mesh', path: file, band, size });
   }
 
+  /** 3D View: an elevation raster's heights (≤ 700² grid + bbox) for the
+   *  globe's terrain — null for any raster that is not a DEM (imagery,
+   *  indices, slope …), so its values are never mistaken for heights. */
+  async globeTerrain(appUser: AppUser, layerId: string) {
+    const { file, layer } = await this.resolveRaster(appUser, layerId);
+    const spec = layer.styleSpec as { mode?: string; ramp?: string } | null;
+    const text = `${layer.name} ${layer.description ?? ''}`;
+    const tinted = spec?.mode === 'ramp' && ['elevation', 'terrain'].includes(spec.ramp ?? '');
+    const named = /\b(dem|dtm|dsm|elevation|srtm|copernicus|altitude|terrain)\b/i.test(text);
+    const derived = /slope|aspect|hillshade|curvature|rugged|roughness|\btpi\b|\btri\b|contour/i.test(layer.name);
+    if ((!tinted && !named) || derived) return null;
+    return this.runOp({ op: 'mesh', path: file, band: 1, size: 700 });
+  }
+
   async identify(appUser: AppUser, layerId: string, point: [number, number]) {
     const { file } = await this.resolveRaster(appUser, layerId);
     return this.runOp({ op: 'identify', path: file, point });

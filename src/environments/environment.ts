@@ -38,5 +38,10 @@ export const environment = {
    *  own default config). Workspace/layer *names* always come from the
    *  backend's tenant-scoped APIs, never hardcoded here — this is only the
    *  "which server" part, analogous to apiUrl/keycloak.url above. */
-  geoserverUrl: `http://${host}:8600/geoserver`
+  geoserverUrl: `http://${host}:8600/geoserver`,
+  /** Optional Cesium ion access token (https://ion.cesium.com — free tier):
+   *  turns on world 3D terrain and 3D buildings in the 3D View. Empty →
+   *  imagery and GIS layers on the globe without terrain. Public by design
+   *  (restrict it to this site's URL in the ion dashboard). */
+  cesiumIonToken: ''
 };

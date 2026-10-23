@@ -169,7 +169,7 @@ const MODULES: ModuleSeed[] = [
   { module_id: 1034, module_name: 'Grid Analysis (Square / Hexagon)', isactive: true, module_parent_id: 1002, node_path: '1002.1034', sub_module: null, default_module: false, display_priority: 4, type: 'mainleft' },
   { module_id: 1035, module_name: 'Export with Filter', isactive: true, module_parent_id: 226, node_path: '226.1035', sub_module: null, default_module: false, display_priority: 6, type: 'mainleft' },
   { module_id: 67, module_name: 'Time Series', isactive: true, module_parent_id: null, node_path: '67', sub_module: null, default_module: null, display_priority: 24, type: 'mainleft' },
-  { module_id: 74, module_name: '3D Button', isactive: true, module_parent_id: null, node_path: '74', sub_module: null, default_module: null, display_priority: 25, type: 'mainleft' },
+  { module_id: 74, module_name: '3D View', isactive: true, module_parent_id: 18, node_path: '18.74', sub_module: null, default_module: null, display_priority: 11, type: 'mainright' },
   { module_id: 221, module_name: 'Lidar View', isactive: true, module_parent_id: null, node_path: '221', sub_module: null, default_module: null, display_priority: 26, type: 'mainleft' },
   { module_id: 185, module_name: 'Activity Log', isactive: true, module_parent_id: null, node_path: '185', sub_module: null, default_module: null, display_priority: 27, type: 'mainleft' },
 ];

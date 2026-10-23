@@ -40,7 +40,7 @@ import type { Coordinate } from 'ol/coordinate';
 import { fromLonLat, get as getProjection, getPointResolution, toLonLat, transform, transformExtent } from 'ol/proj';
 import { createEmpty, extend as extendExtent, isEmpty as isEmptyExtent } from 'ol/extent';
 import type Geometry from 'ol/geom/Geometry';
-import { forkJoin, map as rxMap, Observable, of } from 'rxjs';
+import { firstValueFrom, forkJoin, map as rxMap, Observable, of } from 'rxjs';
 import type { EventsKey } from 'ol/events';
 import { unByKey } from 'ol/Observable';
 import { environment } from '../../../../environments/environment';
@@ -48,6 +48,8 @@ import { SettingsService } from '../../../core/services/settings.service';
 import { GisLayer } from '../../../core/models/gis-layer.model';
 import { Sketch } from '../models/sketch.model';
 import './projections';
+import { DemGrid, Extent4326, Globe3d, GlobeContext } from './globe-3d';
+import { RasterService } from './raster.service';
 
 const MAP_PROJECTION = 'EPSG:3857';
 const LAYER_PROJECTION = 'EPSG:4326';
@@ -325,6 +327,7 @@ export class MapService {
   private baseLayer: BaseLayer | null = null;
   private readonly managedLayers = new Map<string, ManagedLayer>();
   private readonly auth = inject(AuthService);
+  private readonly rasterApi = inject(RasterService);
   /** Draw order of the data layers, top first. Rasters default to the
    *  bottom so they never hide vector data; the user can reorder. */
   readonly layerOrder = signal<string[]>([]);
@@ -468,6 +471,9 @@ export class MapService {
   }
 
   destroy(): void {
+    this.globe?.destroy();
+    this.globe = null;
+    this.is3d.set(false);
     this.cancelDraw();
     this.clearMeasure();
     this.map?.setTarget(undefined);
@@ -550,6 +556,7 @@ export class MapService {
     // replaces the param object wholesale (and resets the loader), so clearing
     // a filter really does bring the full layer back.
     source.setParams(params);
+    this.syncGlobe();
   }
 
   clearAllLayerCqlFilters(): void {
@@ -567,9 +574,11 @@ export class MapService {
   readonly styleChanged = signal(0);
 
   refreshLayerStyle(layerId: string): void {
+    this.demCache.delete(layerId); // a new ramp can make it (not) a DEM
     const source = this.managedLayers.get(layerId)?.olLayer.getSource();
     source?.updateParams({ _style: Date.now() });
     this.styleChanged.update((n) => n + 1);
+    this.syncGlobe();
   }
 
   // ----- buffer / overlay analysis -----
@@ -1779,6 +1788,7 @@ export class MapService {
     if (!entry) return;
     entry.olLayer.setVisible(visible);
     this.layerVisibility.update((current) => ({ ...current, [layerId]: visible }));
+    this.syncGlobe();
   }
 
   // ----- Raster Analysis: Swipe / Compare -----
@@ -1954,6 +1964,7 @@ export class MapService {
   }
 
   zoomIn(): void {
+    if (this.globe) return this.globe.zoom(1);
     const view = this.map?.getView();
     if (!view) return;
     const zoom = view.getZoom();
@@ -1961,6 +1972,7 @@ export class MapService {
   }
 
   zoomOut(): void {
+    if (this.globe) return this.globe.zoom(-1);
     const view = this.map?.getView();
     if (!view) return;
     const zoom = view.getZoom();
@@ -1968,6 +1980,10 @@ export class MapService {
   }
 
   resetView(): void {
+    if (this.globe) {
+      const initial = this.initialExtent3857;
+      return this.globe.flyTo(initial ? (transformExtent(initial, MAP_PROJECTION, 'EPSG:4326') as Extent4326) : null);
+    }
     const view = this.map?.getView();
     if (!view) return;
     if (this.initialExtent3857) {
@@ -2216,6 +2232,127 @@ export class MapService {
     return pointResolution / 0.00028;
   }
 
+  // ----- 3D mode (Cesium globe in the map's own container) -----
+
+  /** The map is showing the 3D globe. */
+  readonly is3d = signal(false);
+  readonly globeBusy = signal(false);
+  /** Vertical exaggeration of the 3D relief (1 = true scale). */
+  readonly globeExaggeration = signal(1.5);
+  private globe: Globe3d | null = null;
+  /** Which DEM layer shapes the globe now, and every layer's height grid
+   *  fetched so far (null = not an elevation raster) — a second switch to
+   *  3D or re-showing a DEM needs no new download. */
+  private globeDemId: string | null = null;
+  private readonly demCache = new Map<string, Promise<DemGrid | null>>();
+
+  /** Switches the map between 2D and 3D in place, keeping the area in view. */
+  async set3d(on: boolean): Promise<void> {
+    if (!this.map || on === this.is3d() || this.globeBusy()) return;
+    if (!on) {
+      const extent = this.globe?.viewExtent();
+      this.globe?.destroy();
+      this.globe = null;
+      this.globeDemId = null;
+      this.is3d.set(false);
+      if (extent) this.zoomToExtent4326(extent);
+      return;
+    }
+    const host = this.map.getTargetElement();
+    if (!host) return;
+    this.globeBusy.set(true);
+    try {
+      const dem = await this.findDem();
+      this.globeDemId = dem?.id ?? null;
+      this.globe = await Globe3d.create(host, this.globeContext(), dem?.grid ?? null, this.globeExaggeration());
+      this.is3d.set(true);
+    } catch (error) {
+      this.notifyGlobeError?.((error as Error).message);
+    } finally {
+      this.globeBusy.set(false);
+    }
+  }
+
+  /** The globe's terrain: the topmost visible DEM layer's heights (the
+   *  backend says which rasters are elevation) — null when none is shown. */
+  private async findDem(): Promise<{ id: string; grid: DemGrid } | null> {
+    const rasters = this.layerOrder()
+      .map((id) => this.managedLayers.get(id))
+      .filter((entry): entry is ManagedLayer => !!entry && entry.olLayer.getVisible() && entry.layer.layerType === 'RASTER');
+    for (const { layer } of rasters) {
+      if (!this.demCache.has(layer.id)) {
+        this.demCache.set(
+          layer.id,
+          firstValueFrom(this.rasterApi.globeTerrain(layer.id))
+            .then((grid) => (grid as DemGrid | null) ?? null)
+            .catch(() => {
+              this.demCache.delete(layer.id); // a failed fetch may be retried
+              return null;
+            })
+        );
+      }
+      const grid = await this.demCache.get(layer.id);
+      if (grid) return { id: layer.id, grid };
+    }
+    return null;
+  }
+
+  /** In 3D, follows DEM layers being shown / hidden / reordered. */
+  private async refreshGlobeTerrain(): Promise<void> {
+    if (!this.globe) return;
+    const dem = await this.findDem();
+    if (!this.globe || (dem?.id ?? null) === this.globeDemId) return;
+    this.globeDemId = dem?.id ?? null;
+    this.globe.setTerrain(dem?.grid ?? null);
+  }
+
+  setGlobeExaggeration(factor: number): void {
+    this.globeExaggeration.set(factor);
+    this.globe?.setExaggeration(factor);
+  }
+
+  /** Set by the shell to show 3D start-up problems (no WebGL, offline). */
+  notifyGlobeError?: (message: string) => void;
+
+  /** Re-mirrors layers / filters / basemap onto the globe after a change. */
+  private syncGlobe(): void {
+    if (!this.globe) return;
+    this.globe.sync(this.globeContext());
+    void this.refreshGlobeTerrain();
+  }
+
+  /** What the globe mirrors: the view in lon/lat, the basemap's tile URLs
+   *  and the visible data layers bottom → top with their live WMS
+   *  parameters (CQL filters, style cache-busters) and opacity. */
+  private globeContext(): GlobeContext {
+    const size = this.map?.getSize();
+    const view = this.map?.getView();
+    const extent = view && size ? (transformExtent(view.calculateExtent(size), MAP_PROJECTION, 'EPSG:4326') as Extent4326) : null;
+    const urls: string[] = [];
+    const collect = (layer: unknown) => {
+      const group = layer as { getLayers?: () => { getArray: () => unknown[] } };
+      if (group.getLayers) return group.getLayers().getArray().forEach(collect);
+      const source = (layer as { getSource?: () => { getUrls?: () => string[] | null } | null }).getSource?.();
+      const first = source?.getUrls?.()?.[0];
+      if (first) urls.push(first.replace('{r}', '').replace('{-y}', '{reverseY}'));
+    };
+    if (this.baseLayer) collect(this.baseLayer);
+    const credit = (BASEMAPS[this.activeBasemap()]?.attribution ?? '').replace(/<[^>]+>/g, '');
+    const layers = [...this.layerOrder()]
+      .reverse()
+      .map((id) => this.managedLayers.get(id))
+      .filter((entry): entry is ManagedLayer => !!entry && entry.olLayer.getVisible())
+      .map(({ layer, olLayer }) => {
+        const params: Record<string, string> = {};
+        for (const [key, value] of Object.entries(olLayer.getSource()?.getParams() ?? {})) {
+          if (value !== undefined && value !== null && !['TILED', 'VERSION', 'FORMAT'].includes(key)) params[key] = String(value);
+        }
+        return { id: layer.id, url: `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wms`, params, opacity: olLayer.getOpacity() };
+      });
+    return { extent, basemap: { urls, credit }, layers };
+  }
+
+
   /** Snapshot of the current view + visible WMS layers for the Print
    *  Layout panel. Overlays (measurement, query highlight, analysis,
    *  selection) and the basemap are excluded here — the backend adds the
@@ -2262,6 +2399,7 @@ export class MapService {
     this.baseLayer = definition.build();
     this.map.getLayers().insertAt(0, this.baseLayer);
     this.activeBasemap.set(id);
+    this.syncGlobe();
   }
 
   /** Task 9 §4/§17: zooms to one layer's own EPSG:4326 bbox (dashboard
@@ -2294,6 +2432,7 @@ export class MapService {
   }
 
   zoomToExtent4326(bbox: [number, number, number, number]): void {
+    if (this.globe) return this.globe.flyTo(bbox);
     const view = this.map?.getView();
     if (!view) return;
     const extent = transformExtent(bbox, LAYER_PROJECTION, MAP_PROJECTION);
@@ -2449,6 +2588,7 @@ export class MapService {
     const order = this.layerOrder();
     // Data layers sit between the basemap (0) and the overlays (9997+).
     order.forEach((id, index) => this.managedLayers.get(id)?.olLayer.setZIndex(100 + order.length - index));
+    this.syncGlobe();
   }
 
   private layerOrderKey(): string {

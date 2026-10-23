@@ -63,6 +63,9 @@ const MAX_RASTER_BYTES =
 
 /** Raster Analysis. Every call VIEW-checks the rasters it reads; tools
  *  that create a layer need the caller's UPLOAD permission. */
+/** Module Access: 3D View in Map Tools. */
+const THREE_D_VIEW_MODULE_ID = 74;
+
 @Controller('gis/raster')
 export class RasterController {
   constructor(
@@ -285,6 +288,13 @@ export class RasterController {
   @Get(':layerId/info')
   info(@CurrentAppUser() appUser: AppUser, @Param('layerId') layerId: string) {
     return this.rasters.info(appUser, layerId);
+  }
+
+  /** 3D View (Map Tools, module 74): a DEM layer's heights as terrain. */
+  @RequireRasterModule([THREE_D_VIEW_MODULE_ID])
+  @Get(':layerId/terrain')
+  globeTerrain(@CurrentAppUser() appUser: AppUser, @Param('layerId', ParseUUIDPipe) layerId: string) {
+    return this.rasters.globeTerrain(appUser, layerId);
   }
 
   @RequireRasterModule([RASTER_MODULES.view3d])

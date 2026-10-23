@@ -9,12 +9,14 @@ import { MapService } from '../../services/map.service';
 import { CoordinateSystemOption, GOTO_COORDINATE_SYSTEMS } from '../../services/projections';
 import { CrsInfo, CrsService } from '../../services/crs.service';
 import { CrsPickerComponent } from '../crs-picker/crs-picker.component';
+import { NotificationService } from '../../../../core/services/notification.service';
 import type { SelectMode, SelectShape } from '../attribute-table/attribute-table.component';
 
 /** Module Access catalog ids (seed-modules.ts) for the gated controls. */
 const NAV_HISTORY_MODULE_ID = 59;
 const GOTO_XY_MODULE_ID = 12;
 const OTHER_CRS = 'other';
+const THREE_D_VIEW_MODULE_ID = 74;
 const SELECTION_TOOL_MODULE_ID = 57;
 const ZOOM_IN_MODULE_ID = 19;
 const ZOOM_OUT_MODULE_ID = 20;
@@ -35,7 +37,12 @@ const INFORMATION_TOOL_MODULE_ID = 58;
   styleUrl: './map-controls.component.scss'
 })
 export class MapControlsComponent {
-  private readonly mapService = inject(MapService);
+  protected readonly mapService = inject(MapService);
+  private readonly notify = inject(NotificationService);
+
+  constructor() {
+    this.mapService.notifyGlobeError = (message) => this.notify.error(message, '3D view');
+  }
 
   /** Module Access ids granted to the current user; gates Nav History and
    *  Go To X:Y the same way the workspace gates its tools. */
@@ -44,14 +51,16 @@ export class MapControlsComponent {
   }
   private readonly allowed = signal<ReadonlySet<number>>(new Set());
 
-  readonly showNavHistory = computed(() => this.allowed().has(NAV_HISTORY_MODULE_ID));
-  readonly showGoTo = computed(() => this.allowed().has(GOTO_XY_MODULE_ID));
-  readonly showSelection = computed(() => this.allowed().has(SELECTION_TOOL_MODULE_ID));
+  // 2D-only tools step aside while the map shows the 3D globe.
+  readonly showNavHistory = computed(() => this.allowed().has(NAV_HISTORY_MODULE_ID) && !this.mapService.is3d());
+  readonly showGoTo = computed(() => this.allowed().has(GOTO_XY_MODULE_ID) && !this.mapService.is3d());
+  readonly show3d = computed(() => this.allowed().has(THREE_D_VIEW_MODULE_ID));
+  readonly showSelection = computed(() => this.allowed().has(SELECTION_TOOL_MODULE_ID) && !this.mapService.is3d());
   readonly showZoomIn = computed(() => this.allowed().has(ZOOM_IN_MODULE_ID));
   readonly showZoomOut = computed(() => this.allowed().has(ZOOM_OUT_MODULE_ID));
   readonly showResetView = computed(() => this.allowed().has(RESET_VIEW_MODULE_ID));
   readonly showFullscreen = computed(() => this.allowed().has(FULLSCREEN_MODULE_ID));
-  readonly showIdentify = computed(() => this.allowed().has(INFORMATION_TOOL_MODULE_ID));
+  readonly showIdentify = computed(() => this.allowed().has(INFORMATION_TOOL_MODULE_ID) && !this.mapService.is3d());
   readonly identifyActive = this.mapService.identifyActive;
 
   toggleIdentify(): void {

@@ -130,3 +130,12 @@
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+
+/* ---------- 3D relief popover ---------- */
+.relief {
+  width: 220px;
+
+  input[type='range'] {
+    width: 100%;
+  }
+}
