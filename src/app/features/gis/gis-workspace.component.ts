@@ -1,6 +1,9 @@
 import { AnalysisReportComponent } from './components/analysis-report/analysis-report.component';
 import { NotificationService } from '../../core/services/notification.service';
 import { RasterService } from './services/raster.service';
+
+/** Raster Analysis → Raster Styling (seed-modules.ts). */
+const RASTER_STYLE_MODULE_ID = 912;
 import { SettingsService } from '../../core/services/settings.service';
 import { Component, WritableSignal, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -502,7 +505,20 @@ export class GisWorkspaceComponent {
 
   // ----- layer styling -----
 
+  /** Raster Analysis → Raster Styling request (raster "Style layer"). */
+  readonly rasterStyleRequest = signal<{ layerId: string; n: number } | null>(null);
+
   openStyleEditor(layer: GisLayer): void {
+    // A raster's symbology (RGB band combination, stretched band, classes)
+    // lives in Raster Styling; the generic style editor only has opacity.
+    if (layer.layerType === 'RASTER' && this.myModuleIds().has(RASTER_STYLE_MODULE_ID)) {
+      this.styleTargetLayer.set(null);
+      this.leftTool.set('raster');
+      this.rememberOpened(this.openedLeftTools, 'raster');
+      this.rasterStyleRequest.set({ layerId: layer.id, n: (this.rasterStyleRequest()?.n ?? 0) + 1 });
+      this.refreshMapSize();
+      return;
+    }
     this.styleTargetLayer.set(layer);
     this.refreshMapSize();
   }

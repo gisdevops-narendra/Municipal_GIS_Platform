@@ -636,7 +636,15 @@ class AoiDto {
   bbox!: [number, number, number, number];
 }
 
+/** Scene ids: Sentinel-2 (Earth Search) or Landsat 8/9 C2 L2 (Planetary Computer). */
+const SCENE_ID = /^(S2[A-D]_[A-Z0-9_]{10,80}|L[CO]0[89]_L2SP_\d{6}_\d{8}_\d{2}_T[12])$/;
+
 export class SentinelSearchDto extends AoiDto {
+  /** Imagery catalogue — Sentinel-2 L2A (default) or Landsat 8/9. */
+  @IsOptional()
+  @IsIn(['sentinel2', 'landsat'])
+  collection?: 'sentinel2' | 'landsat';
+
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
   from!: string;
 
@@ -651,8 +659,8 @@ export class SentinelSearchDto extends AoiDto {
 }
 
 export class OnlineRasterDto extends AoiDto {
-  @IsIn(['dem', 'landcover', 'sentinel2', 'composite', 'population', 'water'])
-  source!: 'dem' | 'landcover' | 'sentinel2' | 'composite' | 'population' | 'water';
+  @IsIn(['dem', 'landcover', 'sentinel2', 'landsat', 'composite', 'population', 'water'])
+  source!: 'dem' | 'landcover' | 'sentinel2' | 'landsat' | 'composite' | 'population' | 'water';
 
   /** Composite: date range, cloud limit and number of scenes. */
   @IsOptional()
@@ -680,12 +688,12 @@ export class OnlineRasterDto extends AoiDto {
   @IsObject()
   polygon?: GeoJsonPolygon;
 
-  /** Sentinel-2 scene id from the search. */
+  /** Sentinel-2 / Landsat scene id from the search. */
   @IsOptional()
-  @Matches(/^S2[A-D]_[A-Z0-9_]{10,80}$/)
+  @Matches(SCENE_ID)
   sceneId?: string;
 
-  /** Sentinel-2: blank out cloud / shadow pixels (scene classification). */
+  /** Sentinel-2 / Landsat: blank out cloud / shadow pixels (SCL / QA_PIXEL). */
   @IsOptional()
   @IsBoolean()
   maskClouds?: boolean;
@@ -696,8 +704,12 @@ export class OnlineRasterDto extends AoiDto {
 }
 
 export class SentinelPreviewDto extends AoiDto {
-  @Matches(/^S2[A-D]_[A-Z0-9_]{10,80}$/)
+  @Matches(SCENE_ID)
   sceneId!: string;
+
+  @IsOptional()
+  @IsIn(['sentinel2', 'landsat'])
+  collection?: 'sentinel2' | 'landsat';
 }
 
 // ----- Imagery (v2) / Terrain (v2) -----

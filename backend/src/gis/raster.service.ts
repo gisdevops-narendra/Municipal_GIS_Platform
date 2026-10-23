@@ -54,7 +54,7 @@ export interface RasterInfo {
 const OP_STAGES: Record<string, string> = {
   online_dem: 'Downloading Copernicus DEM tiles',
   online_landcover: 'Downloading ESA WorldCover tiles',
-  stac_fetch: 'Downloading Sentinel-2 bands',
+  stac_fetch: 'Downloading satellite bands',
   mosaic: 'Merging rasters',
   resample: 'Resampling',
   classify: 'Clustering pixels (k-means)',

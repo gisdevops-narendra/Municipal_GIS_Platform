@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, ViewChild, inject, signal } from '@angular/core';
+import { Component, EventEmitter, Input, Output, ViewChild, effect, inject, signal, untracked } from '@angular/core';
 import { MenuItem } from 'primeng/api';
 import { Menu, MenuModule } from 'primeng/menu';
 import { NgTemplateOutlet } from '@angular/common';
@@ -9,6 +9,7 @@ import { SelectModule } from 'primeng/select';
 import { TooltipModule } from 'primeng/tooltip';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { MapService } from '../../services/map.service';
+import { RasterInfo, RasterService } from '../../services/raster.service';
 
 export interface LayerPanelDepartmentGroup {
   departmentId: string;
@@ -44,6 +45,7 @@ export interface LayerPanelDepartmentGroup {
 })
 export class LayerPanelComponent {
   private readonly mapService = inject(MapService);
+  private readonly rasterService = inject(RasterService);
 
   @Input({ required: true }) layers: GisLayer[] = [];
   /** Task 9 §4: a layer arriving here via a dashboard deep link gets a
@@ -196,6 +198,49 @@ export class LayerPanelComponent {
     const next = new Set(this.openLegends());
     next.has(layerId) ? next.delete(layerId) : next.add(layerId);
     this.openLegends.set(next);
+    const layer = this.layers.find((l) => l.id === layerId);
+    if (next.has(layerId) && layer?.layerType === 'RASTER') this.loadRasterInfo(layerId);
+  }
+
+  /** Raster legend details: its bands and, for an RGB image (e.g. a
+   *  Sentinel-2 download), which band drives each channel — GeoServer
+   *  draws no legend for an RGB style. Re-read on each open (restyles). */
+  readonly rasterInfo = signal<ReadonlyMap<string, RasterInfo>>(new Map());
+
+  /** A restyle (e.g. new RGB bands) updates the open raster legends. */
+  private readonly reloadOnRestyle = effect(() => {
+    if (this.mapService.styleChanged() === 0) return;
+    untracked(() => {
+      for (const id of this.openLegends()) {
+        if (this.layers.find((l) => l.id === id)?.layerType === 'RASTER') this.loadRasterInfo(id);
+      }
+    });
+  });
+
+  onSymbology(layer: GisLayer): void {
+    this.styleLayer.emit(layer);
+  }
+
+  private loadRasterInfo(layerId: string): void {
+    this.rasterService.info(layerId).subscribe({
+      next: (info) => this.rasterInfo.update((m) => new Map(m).set(layerId, info)),
+      // No raster module access / unreadable file: the plain legend stays.
+      error: () => undefined
+    });
+  }
+
+  /** "Band 3 · Red (B4)". */
+  bandLabel(info: RasterInfo, band: number): string {
+    const b = info.bands.find((x) => x.band === band);
+    const name = b?.description || (b?.color && !['Undefined', 'Gray'].includes(b.color) ? b.color : '');
+    return `Band ${band}${name ? ` · ${name}` : ''}`;
+  }
+
+  /** "0 – 8 432" value range of a band, when known. */
+  bandRange(min: number | null, max: number | null): string {
+    if (min === null || max === null) return '';
+    const fmt = (v: number) => (Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : String(Math.round(v * 1000) / 1000));
+    return `${fmt(min)} – ${fmt(max)}`;
   }
 
   isVisible(layerId: string): boolean {

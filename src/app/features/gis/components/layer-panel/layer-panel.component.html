@@ -72,13 +72,43 @@
       </span>
       @if (isLegendOpen(layer.id)) {
         <div class="layer-panel__legend">
-          <img
-            [src]="legendUrl(layer)"
-            [alt]="layer.name + ' legend'"
-            (error)="$any($event.target).hidden = true; legendFailed.add(layer.id)"
-          />
-          @if (legendFailed.has(layer.id)) {
-            <span class="layer-panel__legend-empty">No legend available for this layer.</span>
+          @let info = rasterInfo().get(layer.id);
+          @if (info?.styleSpec?.mode === 'rgb' && info?.styleSpec?.bands; as rgb) {
+            <span class="layer-panel__legend-title">True / false colour image</span>
+            <ul class="layer-panel__bands">
+              @for (channel of ['Red', 'Green', 'Blue']; track channel; let i = $index) {
+                <li>
+                  <span class="layer-panel__swatch" [class]="'layer-panel__swatch layer-panel__swatch--' + channel.toLowerCase()"></span>
+                  <span class="layer-panel__band-channel">{{ channel }}</span>
+                  <span>{{ bandLabel(info!, rgb[i]) }}</span>
+                </li>
+              }
+            </ul>
+          } @else {
+            <img
+              [src]="legendUrl(layer)"
+              [alt]="layer.name + ' legend'"
+              (error)="$any($event.target).hidden = true; legendFailed.add(layer.id)"
+            />
+            @if (legendFailed.has(layer.id) && !info) {
+              <span class="layer-panel__legend-empty">No legend available for this layer.</span>
+            }
+          }
+          @if (info && canStyle) {
+            <button type="button" class="layer-panel__legend-link" (click)="onSymbology(layer)">
+              <i class="pi pi-palette" aria-hidden="true"></i> Symbology — change bands / colours
+            </button>
+          }
+          @if (info && info.bandCount > 1) {
+            <span class="layer-panel__legend-title">{{ info.bandCount }} bands</span>
+            <ul class="layer-panel__bands">
+              @for (b of info.bands; track b.band) {
+                <li>
+                  <span>{{ bandLabel(info, b.band) }}</span>
+                  <span class="layer-panel__band-range">{{ bandRange(b.min, b.max) }}</span>
+                </li>
+              }
+            </ul>
           }
         </div>
       }

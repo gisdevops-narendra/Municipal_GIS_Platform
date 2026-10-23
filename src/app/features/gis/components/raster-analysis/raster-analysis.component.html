@@ -233,8 +233,8 @@
         <div class="bo__row">
           @for (c of ['Red', 'Green', 'Blue']; track c; let i = $index) {
             <label class="bo__field bo__field--grow">
-              <span class="bo__label">{{ c }} band</span>
-              <input type="number" class="bo__input" min="1" [max]="info()?.bandCount ?? 3" [(ngModel)]="rgbBands[i]" />
+              <span class="bo__label">{{ c }} channel</span>
+              <p-select class="bo__select" [options]="bandOptions()" optionLabel="label" optionValue="value" [(ngModel)]="rgbBands[i]" appendTo="body" />
             </label>
           }
         </div>
@@ -591,6 +591,11 @@
           <span class="ra__source-name">Satellite image</span>
           <span class="ra__source-meta">Sentinel-2 · 10 m</span>
         </button>
+        <button type="button" class="ra__source" [class.is-active]="onlineSource === 'landsat'" (click)="setOnlineSource('landsat')">
+          <i class="pi pi-globe" aria-hidden="true"></i>
+          <span class="ra__source-name">Satellite image</span>
+          <span class="ra__source-meta">Landsat 8/9 · 30 m</span>
+        </button>
         <button type="button" class="ra__source" [class.is-active]="onlineSource === 'population'" (click)="setOnlineSource('population')">
           <i class="pi pi-users" aria-hidden="true"></i>
           <span class="ra__source-name">Population</span>
@@ -605,11 +610,13 @@
 
       <ng-container *ngTemplateOutlet="aoiInput"></ng-container>
 
-      @if (onlineSource === 'sentinel2') {
-        <div class="bo__modes" role="tablist">
-          <button type="button" class="bo__mode" [class.bo__mode--active]="s2Mode === 'scene'" (click)="s2Mode = 'scene'">Single scene</button>
-          <button type="button" class="bo__mode" [class.bo__mode--active]="s2Mode === 'composite'" (click)="s2Mode = 'composite'; outputName = 'Sentinel-2 cloud-free composite'">Cloud-free composite</button>
-        </div>
+      @if (onlineSource === 'sentinel2' || onlineSource === 'landsat') {
+        @if (onlineSource === 'sentinel2') {
+          <div class="bo__modes" role="tablist">
+            <button type="button" class="bo__mode" [class.bo__mode--active]="s2Mode === 'scene'" (click)="s2Mode = 'scene'">Single scene</button>
+            <button type="button" class="bo__mode" [class.bo__mode--active]="s2Mode === 'composite'" (click)="s2Mode = 'composite'; outputName = 'Sentinel-2 cloud-free composite'">Cloud-free composite</button>
+          </div>
+        }
         <div class="bo__row">
           <label class="bo__field bo__field--grow">
             <span class="bo__label">From</span>
@@ -624,7 +631,7 @@
           <span class="bo__label">Max cloud cover {{ s2Cloud }} %</span>
           <input type="range" min="0" max="100" step="5" [(ngModel)]="s2Cloud" />
         </label>
-        @if (s2Mode === 'composite') {
+        @if (onlineSource === 'sentinel2' && s2Mode === 'composite') {
           <label class="bo__field">
             <span class="bo__label">Scenes to combine (up to {{ compositeScenes }})</span>
             <input type="range" min="3" max="15" step="1" [(ngModel)]="compositeScenes" />
@@ -663,7 +670,11 @@
             }
           }
         }
-        <p class="bo__hint">Click a scene to preview it on the map. Bands saved: 1 Blue · 2 Green · 3 Red · 4 NIR · 5 SWIR — ready for NDVI, NDWI, NDBI, SAVI and classification. Max 2 500 km².</p>
+        @if (onlineSource === 'landsat') {
+          <p class="bo__hint">Landsat 8/9 Collection 2 surface reflectance (USGS, via Microsoft Planetary Computer), a new scene every ~8 days. Click a scene to preview it on the map. Bands saved: 1 Blue · 2 Green · 3 Red · 4 NIR · 5 SWIR — ready for NDVI, NDWI, NDBI, SAVI and classification. Max 10 000 km².</p>
+        } @else {
+          <p class="bo__hint">Click a scene to preview it on the map. Bands saved: 1 Blue · 2 Green · 3 Red · 4 NIR · 5 SWIR — ready for NDVI, NDWI, NDBI, SAVI and classification. Max 2 500 km².</p>
+        }
       } @else if (onlineSource === 'population') {
         <p class="bo__hint">Estimated people per ≈30 m pixel, built from census data and building footprints. The result reports the total population of the area. Max 5 000 km².</p>
       } @else if (onlineSource === 'water') {

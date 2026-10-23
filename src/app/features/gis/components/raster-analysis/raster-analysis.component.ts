@@ -63,7 +63,7 @@ interface ToolDef {
 /** Raster Analysis (69) and its sub-modules, in catalog order. */
 export const RASTER_TOOLS: ToolDef[] = [
   { id: 'upload', label: 'Raster Upload & Publish', group: 'Raster Data', section: 'Get Data', moduleId: 911, icon: 'pi pi-upload', description: 'Publish a GeoTIFF (DEM, satellite or drone image) as a map layer.' },
-  { id: 'online', label: 'Download from Online Sources', group: 'Raster Data', section: 'Get Data', moduleId: 919, icon: 'pi pi-cloud-download', description: 'Free elevation (Copernicus DEM), land cover (ESA WorldCover) or Sentinel-2 imagery for any area.' },
+  { id: 'online', label: 'Download from Online Sources', group: 'Raster Data', section: 'Get Data', moduleId: 919, icon: 'pi pi-cloud-download', description: 'Free elevation (Copernicus DEM), land cover (ESA WorldCover) or Sentinel-2 / Landsat imagery for any area.' },
   { id: 'style', label: 'Raster Styling', group: 'Raster Data', section: 'Inspect & Export', moduleId: 912, icon: 'pi pi-palette', description: 'Colour a raster with a ramp, stretch and opacity.' },
   { id: 'identify', label: 'Pixel Identify', group: 'Raster Data', section: 'Inspect & Export', moduleId: 913, icon: 'pi pi-info-circle', description: 'Click the map to read pixel values from every band.' },
   { id: 'stats', label: 'Statistics & Histogram', group: 'Raster Data', section: 'Inspect & Export', moduleId: 914, icon: 'pi pi-chart-bar', description: 'Value distribution, percentiles and NoData coverage of a band.' },
@@ -144,6 +144,8 @@ type Slot = 'a' | 'b' | 'line' | 'polygon' | 'observer' | 'training';
 /** Rail icon + short caption per tool category. */
 export type SpectralIndexKind = 'ndvi' | 'ndwi' | 'ndbi' | 'savi' | 'evi';
 export type IndexBand = 'blue' | 'green' | 'red' | 'nir' | 'swir';
+export type OnlineSource = 'dem' | 'landcover' | 'sentinel2' | 'landsat' | 'population' | 'water';
+
 export type IndexSensor = 'sentinel2' | 'landsat89' | 'landsat457' | 'other';
 
 /** Spectral indices: bands needed (as raster_ops' INDEX_FORMULAS), formula
@@ -255,6 +257,16 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
   @Input() set active(value: boolean) {
     if (!value && this.picking()) this.cancelPick();
   }
+
+  /** "Style layer" on a raster (Layers panel): open Raster Styling for it.
+   *  `n` makes a repeat request for the same layer count. */
+  @Input() set styleRequest(value: { layerId: string; n: number } | null) {
+    if (!value || value.n === this.styleRequestN) return;
+    this.styleRequestN = value.n;
+    this.openTool('style');
+    if (this.layerId() !== value.layerId) this.selectLayer(value.layerId);
+  }
+  private styleRequestN = 0;
 
   @Output() layerCreated = new EventEmitter<GisLayer>();
 
@@ -404,7 +416,7 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
   boundaryValue = '';
 
   // online data
-  onlineSource: 'dem' | 'landcover' | 'sentinel2' | 'population' | 'water' = 'dem';
+  onlineSource: OnlineSource = 'dem';
   aoiMode: 'view' | 'draw' | 'layer' | 'point' = 'view';
   aoiLayerId: string | null = null;
   readonly extentLayers = computed(() =>
@@ -804,6 +816,18 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
     const named = (re: RegExp) => info.bands.find((b) => re.test(bandName(b)))?.band;
     const r = named(/\bred\b/i), g = named(/\bgreen\b/i), bl = named(/\bblue\b/i);
     this.rgbBands = r && g && bl ? [r, g, bl] : info.bandCount >= 3 ? [1, 2, 3] : [1, 1, 1];
+    // Raster Styling opens on the layer's current symbology.
+    if (current?.mode === 'rgb' && current.bands?.length === 3) {
+      this.rgbBands = [...current.bands];
+      this.rgbStretch = current.stretch ?? this.rgbStretch;
+    } else if (current?.mode === 'ramp') {
+      this.band = current.band ?? this.band;
+      this.styleRamp = current.ramp ?? this.styleRamp;
+      this.styleMin = current.min ?? this.styleMin;
+      this.styleMax = current.max ?? this.styleMax;
+      this.styleInvert = !!current.invert;
+    }
+    if (current?.opacity !== undefined) this.styleOpacity = current.opacity;
     this.indexSensor = this.detectIndexSensor(info) ?? this.indexSensor;
     this.applyIndexBandDefaults();
   }
@@ -814,7 +838,7 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
       return;
     }
     if (this.tool() === 'online') {
-      this.outputName = { dem: 'Elevation (Copernicus DEM)', landcover: 'Land cover (ESA WorldCover)', sentinel2: 'Sentinel-2 image', population: 'Population (Meta HRSL)', water: 'Surface water occurrence (JRC)' }[
+      this.outputName = { dem: 'Elevation (Copernicus DEM)', landcover: 'Land cover (ESA WorldCover)', sentinel2: 'Sentinel-2 image', landsat: 'Landsat 8/9 image', population: 'Population (Meta HRSL)', water: 'Surface water occurrence (JRC)' }[
         this.onlineSource
       ];
       return;
@@ -908,7 +932,13 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
     return 'ABCDEF'[index];
   }
 
-  setOnlineSource(source: 'dem' | 'landcover' | 'sentinel2' | 'population' | 'water'): void {
+  setOnlineSource(source: OnlineSource): void {
+    if (source !== this.onlineSource) {
+      this.scenes.set(null);
+      this.sceneId.set(null);
+      this.clearPreview();
+      this.mapService.clearAnalysisGeometry();
+    }
     this.onlineSource = source;
     this.resetResult();
     this.suggestOutputName();
@@ -933,6 +963,11 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
     return polygon ? { bbox: geometryBbox(polygon), polygon } : null;
   }
 
+  /** Scene catalogue behind the "Satellite image" sources. */
+  get sceneCollection(): 'sentinel2' | 'landsat' {
+    return this.onlineSource === 'landsat' ? 'landsat' : 'sentinel2';
+  }
+
   searchScenes(): void {
     const aoi = this.aoi();
     if (!aoi) return this.error.set(this.aoiHint());
@@ -942,7 +977,7 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
     this.clearPreview();
     this.mapService.clearAnalysisGeometry();
     this.searching.set(true);
-    this.api.sentinelSearch({ bbox: aoi.bbox, from: this.s2From, to: this.s2To, maxCloud: this.s2Cloud }).subscribe({
+    this.api.sentinelSearch({ bbox: aoi.bbox, from: this.s2From, to: this.s2To, maxCloud: this.s2Cloud, collection: this.sceneCollection }).subscribe({
       next: (r) => {
         this.searching.set(false);
         this.scenes.set(r.scenes);
@@ -960,14 +995,15 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
    *  a true-colour quick-look over the chosen area. */
   pickScene(scene: SentinelScene): void {
     this.sceneId.set(scene.id);
-    this.outputName = `Sentinel-2 ${scene.datetime?.slice(0, 10) ?? scene.id}`;
+    const sensor = this.onlineSource === 'landsat' ? (scene.platform ?? 'landsat').replace('landsat-', 'Landsat ') : 'Sentinel-2';
+    this.outputName = `${sensor} ${scene.datetime?.slice(0, 10) ?? scene.id}`;
     const aoi = this.aoi();
     this.mapService.setAnalysisGeometry(scene.footprint);
     if (!aoi) return;
     if (this.aoiMode !== 'view') this.mapService.zoomToExtent4326(aoi.bbox);
     this.previewSub?.unsubscribe();
     this.previewing.set(scene.id);
-    this.previewSub = this.api.sentinelPreview(scene.id, aoi.bbox).subscribe({
+    this.previewSub = this.api.sentinelPreview(scene.id, aoi.bbox, this.sceneCollection).subscribe({
       next: (blob) => {
         if (this.sceneId() !== scene.id) return;
         this.previewing.set(null);
@@ -1802,6 +1838,7 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
         const aoi = this.aoi();
         if (!aoi) return this.error.set(this.aoiHint());
         if (this.onlineSource === 'sentinel2' && this.s2Mode === 'scene' && !this.sceneId()) return this.error.set('Search and pick a Sentinel-2 scene first.');
+        if (this.onlineSource === 'landsat' && !this.sceneId()) return this.error.set('Search and pick a Landsat scene first.');
         if (!this.outputName.trim()) return this.error.set('Enter a name for the new layer.');
         if (this.onlineSource === 'sentinel2' && this.s2Mode === 'composite') {
           return this.runLayerTool('online', {
@@ -1817,8 +1854,8 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
         return this.runLayerTool('online', {
           source: this.onlineSource,
           ...aoi,
-          sceneId: this.onlineSource === 'sentinel2' ? this.sceneId() : undefined,
-          maskClouds: this.onlineSource === 'sentinel2' ? this.maskClouds : undefined,
+          sceneId: this.onlineSource === 'sentinel2' || this.onlineSource === 'landsat' ? this.sceneId() : undefined,
+          maskClouds: this.onlineSource === 'sentinel2' || this.onlineSource === 'landsat' ? this.maskClouds : undefined,
           outputName: this.outputName.trim()
         });
       }

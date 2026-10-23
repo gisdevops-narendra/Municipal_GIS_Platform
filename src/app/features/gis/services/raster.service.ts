@@ -284,13 +284,13 @@ export class RasterService {
     return this.http.post<CutFillResult>(`${this.baseUrl}/cut-fill`, body);
   }
 
-  sentinelSearch(body: { bbox: number[]; from: string; to: string; maxCloud: number }): Observable<{ scenes: SentinelScene[] }> {
+  sentinelSearch(body: { bbox: number[]; from: string; to: string; maxCloud: number; collection?: 'sentinel2' | 'landsat' }): Observable<{ scenes: SentinelScene[] }> {
     return this.http.post<{ scenes: SentinelScene[] }>(`${this.baseUrl}/online/sentinel2/search`, body);
   }
 
   /** True-colour PNG of a scene over the area (EPSG:4326 bbox). */
-  sentinelPreview(sceneId: string, bbox: number[]): Observable<Blob> {
-    return this.http.post(`${this.baseUrl}/online/sentinel2/preview`, { sceneId, bbox }, { responseType: 'blob' });
+  sentinelPreview(sceneId: string, bbox: number[], collection: 'sentinel2' | 'landsat' = 'sentinel2'): Observable<Blob> {
+    return this.http.post(`${this.baseUrl}/online/sentinel2/preview`, { sceneId, bbox, collection }, { responseType: 'blob' });
   }
 
   vectorFields(layerId: string): Observable<VectorField[]> {

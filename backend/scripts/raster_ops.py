@@ -1383,15 +1383,19 @@ def op_online_landcover(req):
 
 
 def op_stac_search(req):
+    landsat = req.get("collection") == "landsat"
+    query = {"eo:cloud_cover": {"lte": req.get("maxCloud", 20)}}
+    if landsat:
+        query["platform"] = {"in": ["landsat-8", "landsat-9"]}
     body = {
-        "collections": ["sentinel-2-l2a"],
+        "collections": ["landsat-c2-l2" if landsat else "sentinel-2-l2a"],
         "bbox": req["bbox"],
         "datetime": f"{req['from']}T00:00:00Z/{req['to']}T23:59:59Z",
-        "query": {"eo:cloud_cover": {"lte": req.get("maxCloud", 20)}},
+        "query": query,
         "sortby": [{"field": "properties.eo:cloud_cover", "direction": "asc"}],
         "limit": 30,
     }
-    found = http_json(f"{STAC_URL}/search", body)
+    found = http_json(f"{PC_STAC_URL if landsat else STAC_URL}/search", body)
     scenes = []
     minx, miny, maxx, maxy = req["bbox"]
     aoi = ogr.CreateGeometryFromJson(json.dumps({
@@ -1408,7 +1412,8 @@ def op_stac_search(req):
             "cloud": props.get("eo:cloud_cover"),
             "coverage": coverage,
             "platform": props.get("platform"),
-            "thumbnail": (item.get("assets", {}).get("thumbnail") or {}).get("href"),
+            # Planetary Computer blobs need a token; its rendered preview is public.
+            "thumbnail": (item.get("assets", {}).get("rendered_preview" if landsat else "thumbnail") or {}).get("href"),
             "footprint": item["geometry"],
         })
     scenes.sort(key=lambda sc: (-round(sc["coverage"] / 10), sc["cloud"] if sc["cloud"] is not None else 100))
@@ -1418,15 +1423,17 @@ def op_stac_search(req):
 def op_stac_preview(req):
     """True-colour PNG of the scene over the area, in EPSG:4326, for a quick
     look on the map before downloading."""
-    item = http_json(f"{STAC_URL}/collections/sentinel-2-l2a/items/{req['sceneId']}")
-    visual = (item.get("assets", {}).get("visual") or {}).get("href")
-    if not visual:
-        raise OpError("The scene has no true-colour image.")
     minx, miny, maxx, maxy = req["bbox"]
     lat = math.radians((miny + maxy) / 2)
     aspect = ((maxx - minx) * math.cos(lat)) / (maxy - miny)
     size = int(req.get("size", 1024))
     width, height = (size, max(int(size / aspect), 1)) if aspect >= 1 else (max(int(size * aspect), 1), size)
+    if req.get("collection") == "landsat":
+        return landsat_preview(req, width, height)
+    item = http_json(f"{STAC_URL}/collections/sentinel-2-l2a/items/{req['sceneId']}")
+    visual = (item.get("assets", {}).get("visual") or {}).get("href")
+    if not visual:
+        raise OpError("The scene has no true-colour image.")
     mem = gdal.Warp(
         "", "/vsicurl/" + visual, format="MEM", dstSRS="EPSG:4326",
         outputBounds=(minx, miny, maxx, maxy), width=width, height=height,
@@ -1437,6 +1444,8 @@ def op_stac_preview(req):
 
 
 def op_stac_fetch(req):
+    if req.get("collection") == "landsat":
+        return landsat_fetch(req)
     if aoi_area_km2(req["bbox"]) > 2500:
         raise OpError("The area is too large for a 10 m Sentinel-2 download (max 2 500 km²).")
     item = http_json(f"{STAC_URL}/collections/sentinel-2-l2a/items/{req['sceneId']}")
@@ -1489,6 +1498,102 @@ def op_stac_fetch(req):
             "cloud": props.get("eo:cloud_cover"), "bands": [label for _, label in S2_BANDS],
             "maskedPct": masked_pct,
             "width": width, "height": height}
+
+
+# --------------------------------------- Landsat 8/9 (Planetary Computer)
+
+LANDSAT_COLLECTION = "landsat-c2-l2"
+LANDSAT_BANDS = [("blue", "Blue (B2)"), ("green", "Green (B3)"), ("red", "Red (B4)"),
+                 ("nir08", "NIR (B5)"), ("swir16", "SWIR (B6)")]
+# QA_PIXEL bits: 1 dilated cloud, 2 cirrus, 3 cloud, 4 cloud shadow.
+LANDSAT_QA_CLOUDY = 0b11110
+
+
+def landsat_item(scene_id):
+    """The scene with its asset hrefs signed for anonymous access."""
+    item = http_json(f"{PC_STAC_URL}/collections/{LANDSAT_COLLECTION}/items/{scene_id}")
+    token = http_json(PC_TOKEN_URL.format(collection=LANDSAT_COLLECTION))["token"]
+    for asset in item.get("assets", {}).values():
+        if "blob.core.windows.net" in asset.get("href", ""):
+            asset["href"] = pc_sign(asset["href"], token)
+    return item
+
+
+def landsat_preview(req, width, height):
+    item = landsat_item(req["sceneId"])
+    assets = item.get("assets", {})
+    if not all(k in assets for k in ("red", "green", "blue")):
+        raise OpError("The scene has no true-colour bands.")
+    minx, miny, maxx, maxy = req["bbox"]
+    rgb = []
+    for key in ("red", "green", "blue"):
+        ds = gdal.Warp("", "/vsicurl/" + assets[key]["href"], format="MEM", dstSRS="EPSG:4326",
+                       outputBounds=(minx, miny, maxx, maxy), width=width, height=height,
+                       resampleAlg="average", srcNodata=0, dstNodata=0, outputType=gdal.GDT_UInt16)
+        rgb.append(ds.GetRasterBand(1).ReadAsArray())
+    alpha = np.where((rgb[0] > 0) | (rgb[1] > 0) | (rgb[2] > 0), 255, 0).astype(np.uint8)
+    mem = gdal.GetDriverByName("MEM").Create("", width, height, 4, gdal.GDT_Byte)
+    for i, dn in enumerate(rgb, start=1):
+        # Reflectance 0–0.3 → 0–255 (surface reflectance = DN × 0.0000275 − 0.2).
+        refl = dn.astype(np.float32) * 0.0000275 - 0.2
+        mem.GetRasterBand(i).WriteArray(np.clip(refl / 0.3 * 255, 0, 255).astype(np.uint8))
+    mem.GetRasterBand(4).WriteArray(alpha)
+    gdal.Translate(req["output"], mem, format="PNG")
+    return {"width": width, "height": height}
+
+
+def landsat_fetch(req):
+    if aoi_area_km2(req["bbox"]) > 10000:
+        raise OpError("The area is too large for a 30 m Landsat download (max 10 000 km²).")
+    item = landsat_item(req["sceneId"])
+    assets = item.get("assets", {})
+    missing = [key for key, _ in LANDSAT_BANDS if key not in assets]
+    if missing:
+        raise OpError(f"The scene is missing bands: {', '.join(missing)}.")
+    folder = tempfile.mkdtemp()
+    try:
+        srs = gdal.Open("/vsicurl/" + assets["red"]["href"]).GetProjection()
+        parts = []
+        for key, _ in LANDSAT_BANDS:
+            part = os.path.join(folder, f"{key}.tif")
+            warp_to_aoi(["/vsicurl/" + assets[key]["href"]], part, req, dstSRS=srs, xRes=30, yRes=30,
+                        targetAlignedPixels=True, resampleAlg="near", srcNodata=0, dstNodata=0,
+                        outputType=gdal.GDT_UInt16)
+            parts.append(part)
+        masked_pct = None
+        if req.get("maskClouds") and "qa_pixel" in assets:
+            qa_path = os.path.join(folder, "qa.tif")
+            warp_to_aoi(["/vsicurl/" + assets["qa_pixel"]["href"]], qa_path, req, dstSRS=srs, xRes=30, yRes=30,
+                        targetAlignedPixels=True, resampleAlg="near", srcNodata=1, dstNodata=1)
+            qa = gdal.Open(qa_path).GetRasterBand(1).ReadAsArray().astype(np.uint16)
+            cloudy = (qa & LANDSAT_QA_CLOUDY) > 0
+            valid = (qa & 1) == 0
+            cloudy &= valid
+            masked_pct = float(cloudy.sum() * 100 / max(valid.sum(), 1))
+            for part in parts:
+                ds = gdal.Open(part, 1)
+                band = ds.GetRasterBand(1)
+                arr = band.ReadAsArray()
+                if arr.shape == cloudy.shape:
+                    arr[cloudy] = 0
+                    band.WriteArray(arr)
+                ds = None
+        vrt = gdal.BuildVRT(os.path.join(folder, "stack.vrt"), parts, separate=True)
+        out = gdal.Translate(req["output"], vrt, format="GTiff", creationOptions=GTIFF_OPTIONS, noData=0)
+        for i, (_, label) in enumerate(LANDSAT_BANDS, start=1):
+            out.GetRasterBand(i).SetDescription(label)
+        width, height = out.RasterXSize, out.RasterYSize
+        if not out.GetRasterBand(3).ReadAsArray().any():
+            raise OpError("The scene has no data inside this area.")
+        out = None
+        vrt = None
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+    props = item.get("properties", {})
+    platform = (props.get("platform") or "landsat").replace("landsat-", "Landsat ")
+    return {"source": f"{platform} Collection 2 Level-2", "sceneId": item["id"], "date": props.get("datetime"),
+            "cloud": props.get("eo:cloud_cover"), "bands": [label for _, label in LANDSAT_BANDS],
+            "maskedPct": masked_pct, "width": width, "height": height}
 
 
 # ------------------------------------------- shared online helpers (v2)

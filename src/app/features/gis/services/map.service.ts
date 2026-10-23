@@ -519,9 +519,13 @@ export class MapService {
   /** Forces a WMS layer to re-fetch from GeoServer — call after its style
    *  changes server-side so the styled render replaces the cached tiles.
    *  Works for a managed GIS layer id or the wizard's `preview` layer. */
+  /** Bumped on every restyle — legends that show style details re-read. */
+  readonly styleChanged = signal(0);
+
   refreshLayerStyle(layerId: string): void {
     const source = this.managedLayers.get(layerId)?.olLayer.getSource();
     source?.updateParams({ _style: Date.now() });
+    this.styleChanged.update((n) => n + 1);
   }
 
   // ----- buffer / overlay analysis -----

@@ -474,11 +474,15 @@ export class RasterToolsService {
 
   // ----- Online Data -----
 
-  /** Sentinel-2 L2A scenes over the area (Earth Search STAC, no key). */
+  /** Sentinel-2 L2A (Earth Search) or Landsat 8/9 C2 L2 (Planetary Computer)
+   *  scenes over the area — both free, no key. */
   async sentinelSearch(dto: SentinelSearchDto) {
     this.assertBbox(dto.bbox);
     if (dto.from > dto.to) throw new BadRequestException('"From" must be before "To".');
-    return this.rasters.runOp({ op: 'stac_search', bbox: dto.bbox, from: dto.from, to: dto.to, maxCloud: dto.maxCloud ?? 20 });
+    return this.rasters.runOp({
+      op: 'stac_search', collection: dto.collection ?? 'sentinel2', bbox: dto.bbox,
+      from: dto.from, to: dto.to, maxCloud: dto.maxCloud ?? 20,
+    });
   }
 
   /** PNG quick-look of a scene over the area (EPSG:4326 bbox). */
@@ -487,19 +491,19 @@ export class RasterToolsService {
     const output = this.rasters.tempPath(appUser.municipalityId, '.png');
     await this.ensureDir(output);
     try {
-      await this.rasters.runOp({ op: 'stac_preview', sceneId: dto.sceneId, bbox: dto.bbox, output });
+      await this.rasters.runOp({ op: 'stac_preview', collection: dto.collection ?? 'sentinel2', sceneId: dto.sceneId, bbox: dto.bbox, output });
       return await readFile(output);
     } finally {
       await this.rasters.removeTemp(output, `${output}.aux.xml`);
     }
   }
 
-  /** Downloads open data (Copernicus DEM, ESA WorldCover, Sentinel-2) for
+  /** Downloads open data (Copernicus DEM, ESA WorldCover, Sentinel-2, Landsat) for
    *  the area and publishes it as a raster layer. */
   async onlineRaster(appUser: AppUser, dto: OnlineRasterDto) {
     this.assertBbox(dto.bbox);
-    if (dto.source === 'sentinel2' && !dto.sceneId) {
-      throw new BadRequestException('Search and pick a Sentinel-2 scene first.');
+    if ((dto.source === 'sentinel2' || dto.source === 'landsat') && !dto.sceneId) {
+      throw new BadRequestException(`Search and pick a ${dto.source === 'landsat' ? 'Landsat' : 'Sentinel-2'} scene first.`);
     }
     const request = { bbox: dto.bbox, polygon: dto.polygon, sceneId: dto.sceneId, maskClouds: dto.maskClouds ?? true };
     return this.toRasterLayer(appUser, dto.outputName, async (output) => {
@@ -532,7 +536,8 @@ export class RasterToolsService {
         });
         return { style: { mode: 'rgb', bands: [3, 2, 1], stretch: 'histogram' }, result: r };
       }
-      const r = await this.rasters.runOp({ op: 'stac_fetch', ...request, output });
+      const collection = dto.source === 'landsat' ? 'landsat' : 'sentinel2';
+      const r = await this.rasters.runOp({ op: 'stac_fetch', collection, ...request, output });
       return { style: { mode: 'rgb', bands: [3, 2, 1], stretch: 'histogram' }, result: r };
     });
   }
