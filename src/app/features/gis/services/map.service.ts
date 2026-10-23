@@ -2435,13 +2435,11 @@ export class MapService {
       .sort((a, b) => rank(b) - rank(a) || a.displayOrder - b.displayOrder);
     const order = [...saved];
     for (const layer of fresh) {
-      // New vectors go above existing rasters; new rasters go to the bottom.
-      if (layer.layerType === 'RASTER') {
-        order.push(layer.id);
-      } else {
-        const firstRaster = order.findIndex((id) => this.managedLayers.get(id)?.layer.layerType === 'RASTER');
-        order.splice(firstRaster < 0 ? order.length : firstRaster, 0, layer.id);
-      }
+      // New layers go above the existing rasters (vectors stay above all
+      // rasters) — a new raster, e.g. an analysis result, lands on top of
+      // the older rasters instead of hidden beneath them.
+      const firstRaster = order.findIndex((id) => this.managedLayers.get(id)?.layer.layerType === 'RASTER');
+      order.splice(firstRaster < 0 ? order.length : firstRaster, 0, layer.id);
     }
     this.layerOrder.set(order);
     this.applyZIndexes();
