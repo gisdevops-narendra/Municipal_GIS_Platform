@@ -235,6 +235,13 @@
           />
         }
 
+        @if (openedLeftTools().has('heatmap') && layersReady()) {
+          <app-density-map
+            [class.gis-ws__panel--hidden]="leftTool() !== 'heatmap'"
+            [layers]="layers()"
+          />
+        }
+
         @if (openedLeftTools().has('export') && layersReady()) {
           <app-export-data
             [class.gis-ws__panel--hidden]="leftTool() !== 'export'"

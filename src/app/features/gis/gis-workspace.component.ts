@@ -55,8 +55,9 @@ import { PrintLayoutComponent } from './components/print-layout/print-layout.com
 import { ExportDataComponent } from './components/export-data/export-data.component';
 import { SketchComponent } from './components/sketch/sketch.component';
 import { LayerStatisticsComponent } from './components/layer-statistics/layer-statistics.component';
+import { DensityMapComponent } from './components/density-map/density-map.component';
 import { LayerReportComponent, TableSelection } from './components/layer-report/layer-report.component';
-import { ANALYTICS_MODULE_ID, DATA_VISUALISATION_MODULE_ID } from '../../core/models/layer-analytics.model';
+import { ANALYTICS_MODULE_ID, DATA_VISUALISATION_MODULE_ID, HEATMAP_MODULE_ID } from '../../core/models/layer-analytics.model';
 import {
   AI_ASSISTANT_MODULE_ID,
   BASEMAP_MODULE_ID,
@@ -127,6 +128,7 @@ const TOOLS: WsTool[] = [
   { id: 'sketch', label: 'Draw & Mark', icon: 'pi pi-pencil', group: 'analysis', dock: 'left', available: true, anyModuleIds: [DRAW_MODULE_ID, MARKING_TOOL_MODULE_ID, EDIT_PANEL_MODULE_ID] },
   { id: 'advanced', label: 'Advanced Tools', icon: 'pi pi-directions', group: 'analysis', dock: 'left', available: true, anyModuleIds: [BASIC_ROUTING_MODULE_ID, NEAREST_FACILITY_MODULE_ID, NETWORK_TRACING_MODULE_ID, SERVICE_AREA_MODULE_ID] },
   { id: 'raster', label: 'Raster Analysis', icon: 'pi pi-images', group: 'analysis', dock: 'left', available: true, anyModuleIds: RASTER_TOOL_MODULE_IDS },
+  { id: 'heatmap', label: 'Heatmap & Clusters', icon: 'pi pi-sun', group: 'analysis', dock: 'left', available: true, moduleId: HEATMAP_MODULE_ID },
   { id: 'statistics', label: 'Statistics', icon: 'pi pi-chart-bar', group: 'analysis', dock: 'bottom', available: true, anyModuleIds: [ANALYTICS_MODULE_ID, DATA_VISUALISATION_MODULE_ID] },
   { id: 'print', label: 'Print Layout', icon: 'pi pi-print', group: 'output', dock: 'left', available: true, moduleId: 3 },
   { id: 'reports', label: 'Reports', icon: 'pi pi-file', group: 'output', dock: 'left', available: true, moduleId: 251 },
@@ -168,6 +170,7 @@ const TOOLS: WsTool[] = [
     ExportDataComponent,
     SketchComponent,
     LayerStatisticsComponent,
+    DensityMapComponent,
     LayerReportComponent,
     StyleEditorComponent
   ],

@@ -7,6 +7,8 @@ import Point from 'ol/geom/Point';
 import TileLayer from 'ol/layer/Tile';
 import ImageLayer from 'ol/layer/Image';
 import VectorLayer from 'ol/layer/Vector';
+import HeatmapLayer from 'ol/layer/Heatmap';
+import Cluster from 'ol/source/Cluster';
 import OSM from 'ol/source/OSM';
 import XYZ from 'ol/source/XYZ';
 import ImageWMS from 'ol/source/ImageWMS';
@@ -232,6 +234,17 @@ const BASEMAPS: Record<string, { label: string; attribution: string; build: () =
 /** Status bar cursor readout: decimal degrees, degrees-minutes-seconds, or a projected CRS. */
 export type CoordFormat = 'dd' | 'dms' | 'crs';
 
+/** Heatmap & Clusters display options. */
+export interface DensityOptions {
+  mode: 'heatmap' | 'clusters';
+  /** Heatmap kernel radius / blur, px. */
+  radius: number;
+  blur: number;
+  /** Cluster merge distance, px. */
+  distance: number;
+  opacity: number;
+}
+
 /** Choropleth areas get on-map labels only up to this many. */
 const CHOROPLETH_LABEL_LIMIT = 40;
 
@@ -281,6 +294,11 @@ export class MapService {
   /** Overlay for Buffer / Overlay analysis output. */
   private analysisLayer: VectorLayer<VectorSource> | null = null;
   private choroplethLayer: VectorLayer<VectorSource> | null = null;
+  /** Heatmap & Clusters overlay — one of the two, over a shared point source. */
+  private densityLayer: HeatmapLayer | VectorLayer<Cluster> | null = null;
+  private densitySource: VectorSource | null = null;
+  private densityMaxWeight = 1;
+  private readonly clusterStyles = new Map<number, Style>();
   private readonly wkt = new WKT();
   /** Sketch layer + active interaction for "draw geometry for spatial query". */
   private drawLayer: VectorLayer<VectorSource> | null = null;
@@ -416,6 +434,8 @@ export class MapService {
     this.selectionLayer = null;
     this.queryLayer = null;
     this.analysisLayer = null;
+    this.densityLayer = null;
+    this.densitySource = null;
     this.drawLayer = null;
     this.editLayer = null;
     this.editModify = null;
@@ -857,6 +877,111 @@ export class MapService {
       source.addFeature(feature);
     }
     if (zoom) this.zoomToGeometries(areas.map((a) => a.geometry));
+  }
+
+  // ----- Heatmap & Clusters -----
+
+  /** Shows `points` ([lon, lat, weight], EPSG:4326) as a heatmap or as
+   *  clusters, replacing any previous density overlay. */
+  showDensity(points: [number, number, number][], maxWeight: number, options: DensityOptions): void {
+    if (!this.map) return;
+    this.densityMaxWeight = maxWeight > 0 ? maxWeight : 1;
+    this.densitySource = new VectorSource({
+      features: points.map(([lon, lat, weight]) => new Feature({ geometry: new Point(fromLonLat([lon, lat])), weight }))
+    });
+    this.buildDensityLayer(options);
+  }
+
+  /** Re-applies display options to the current density overlay. */
+  updateDensity(options: DensityOptions): void {
+    if (!this.densityLayer || !this.densitySource) return;
+    const isHeatmap = this.densityLayer instanceof HeatmapLayer;
+    if (isHeatmap !== (options.mode === 'heatmap')) {
+      this.buildDensityLayer(options);
+      return;
+    }
+    this.densityLayer.setOpacity(options.opacity);
+    if (this.densityLayer instanceof HeatmapLayer) {
+      this.densityLayer.setRadius(options.radius);
+      this.densityLayer.setBlur(options.blur);
+    } else {
+      this.densityLayer.getSource()?.setDistance(options.distance);
+    }
+  }
+
+  clearDensity(): void {
+    if (this.densityLayer) this.map?.removeLayer(this.densityLayer);
+    this.densityLayer = null;
+    this.densitySource = null;
+  }
+
+  /** Zooms to the features of the density layer's current extent. */
+  zoomToDensity(): void {
+    const extent = this.densitySource?.getExtent();
+    if (!this.map || !extent || isEmptyExtent(extent)) return;
+    this.map.getView().fit(extent, { size: this.map.getSize(), padding: [40, 40, 40, 40], maxZoom: 17, duration: 300 });
+  }
+
+  private buildDensityLayer(options: DensityOptions): void {
+    if (this.densityLayer) this.map?.removeLayer(this.densityLayer);
+    const source = this.densitySource!;
+    const maxWeight = this.densityMaxWeight;
+    const common = { zIndex: 9990, opacity: options.opacity, properties: { analysisOverlay: true } };
+    this.densityLayer =
+      options.mode === 'heatmap'
+        ? new HeatmapLayer({
+            ...common,
+            source,
+            radius: options.radius,
+            blur: options.blur,
+            weight: (feature) => Math.min(1, Math.max(0, Number(feature.get('weight')) / maxWeight))
+          })
+        : new VectorLayer({
+            ...common,
+            source: new Cluster({ source, distance: options.distance }),
+            style: (feature) => this.clusterStyle((feature.get('features') as Feature[]).length)
+          });
+    this.map?.addLayer(this.densityLayer);
+  }
+
+  /** Cluster bubble sized and coloured by member count (styles cached). */
+  private clusterStyle(count: number): Style {
+    let style = this.clusterStyles.get(count);
+    if (!style) {
+      const radius = count === 1 ? 5 : Math.min(28, 9 + Math.log10(count) * 7);
+      const color = count === 1 ? '#2f6fb0' : count < 10 ? '#3a9a5b' : count < 100 ? '#d08a1c' : '#c2412d';
+      style = new Style({
+        image: new CircleStyle({
+          radius,
+          fill: new Fill({ color }),
+          stroke: new Stroke({ color: 'rgba(255, 255, 255, 0.9)', width: count === 1 ? 1.5 : 3 })
+        }),
+        text:
+          count === 1
+            ? undefined
+            : new TextStyle({
+                text: count >= 1000 ? `${(count / 1000).toFixed(count >= 10000 ? 0 : 1)}k` : String(count),
+                font: '600 11px sans-serif',
+                fill: new Fill({ color: '#fff' })
+              })
+      });
+      this.clusterStyles.set(count, style);
+    }
+    return style;
+  }
+
+  /** Clicking a multi-feature cluster zooms to its members; true if handled. */
+  private zoomToClusterAt(pixel: number[]): boolean {
+    const layer = this.densityLayer;
+    if (!this.map || !layer || layer instanceof HeatmapLayer) return false;
+    const hit = this.map.forEachFeatureAtPixel(pixel, (feature) => feature, { layerFilter: (l) => l === layer });
+    const members = (hit?.get('features') as Feature[] | undefined) ?? [];
+    if (members.length < 2) return false;
+    const extent = createEmpty();
+    for (const member of members) extendExtent(extent, member.getGeometry()!.getExtent());
+    const view = this.map.getView();
+    view.fit(extent, { size: this.map.getSize(), padding: [60, 60, 60, 60], maxZoom: (view.getZoom() ?? 0) + 3, duration: 300 });
+    return true;
   }
 
   private ensureAnalysisSource(): VectorSource {
@@ -1553,6 +1678,7 @@ export class MapService {
       ) {
         return;
       }
+      if (this.zoomToClusterAt(event.pixel)) return;
       handler(event.coordinate);
     });
   }
@@ -1822,6 +1948,7 @@ export class MapService {
     this.clearQueryHighlight();
     this.clearAllLayerCqlFilters();
     this.clearAnalysisGeometry();
+    this.clearDensity();
     this.setChoropleth(null);
     this.clearPreviewImage();
     this.clearGoToMarker();

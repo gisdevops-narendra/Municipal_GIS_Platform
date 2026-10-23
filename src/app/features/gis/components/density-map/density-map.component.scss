@@ -1,0 +1,149 @@
+:host {
+  display: block;
+}
+
+.density {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  font-size: 12.5px;
+}
+
+.density__field,
+.density__slider {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.density__label {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-500);
+
+  b {
+    font-weight: 600;
+    color: var(--color-ink-700);
+    text-transform: none;
+  }
+}
+
+.density__select.p-select,
+.density__select ::ng-deep .p-select {
+  width: 100%;
+  height: 30px;
+}
+
+.density__select ::ng-deep .p-select-label {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.density__slider input[type='range'] {
+  width: 100%;
+  accent-color: var(--color-primary-600);
+}
+
+.density__modes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.density__mode {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  color: var(--color-ink-700);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease;
+
+  .pi {
+    font-size: 11px;
+  }
+
+  &:hover {
+    color: var(--color-ink-900);
+  }
+
+  &.is-active {
+    border-color: var(--color-primary-600);
+    color: var(--color-primary-700);
+    font-weight: 600;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-primary-600);
+    outline-offset: 1px;
+  }
+}
+
+.density__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.density__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  color: var(--color-ink-700);
+}
+
+.density__warn {
+  color: var(--color-warning-700, #a15c07);
+}
+
+.density__legend {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Matches OpenLayers' default heatmap gradient. */
+.density__ramp {
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(to right, #00f, #0ff, #0f0, #ff0, #f00);
+}
+
+.density__ramp-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  color: var(--color-ink-500);
+}
+
+.density__error {
+  margin: 0;
+  color: var(--color-error-600);
+}
+
+.density__hint {
+  margin: 0;
+  color: var(--color-ink-700);
+
+  &--muted {
+    font-size: 11.5px;
+    color: var(--color-ink-500);
+  }
+}

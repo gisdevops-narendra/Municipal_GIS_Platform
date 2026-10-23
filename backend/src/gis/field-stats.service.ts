@@ -121,6 +121,18 @@ export interface StatsSource {
   workspaceId: string | null;
 }
 
+/** Heatmap & Clusters: one point per feature, capped so the payload stays small. */
+const DENSITY_POINT_LIMIT = 50000;
+
+export interface DensityPoints {
+  /** [lon, lat, weight] in EPSG:4326; weight is 1 without a weight field. */
+  points: [number, number, number][];
+  total: number;
+  truncated: boolean;
+  /** Largest weight among the points (1 without a weight field). */
+  maxWeight: number;
+}
+
 const GROUP_LIMIT = 30;
 const AREA_GROUP_LIMIT = 200;
 /** Area outlines sent back as a CQL filter stay well under the CQL cap. */
@@ -726,6 +738,61 @@ export class FieldStatsService {
       throw new BadRequestException('This area is too detailed to filter by.');
     }
     return { wkt };
+  }
+
+  /** Heatmap & Clusters: one EPSG:4326 point per feature (a point on the
+   *  surface for lines / polygons), optionally weighted by a numeric field. */
+  async densityPoints(
+    table: string,
+    weightField: string | undefined,
+    workspaceId: string | null,
+  ): Promise<DensityPoints> {
+    this.assertTable(table);
+    const g = await this.geometryColumn(table);
+    if (!g) {
+      throw new BadRequestException('This layer has no geometry.');
+    }
+    let weight = '1::float8';
+    if (weightField) {
+      const attribute = (await this.attributes(table, workspaceId)).find(
+        (a) => a.name === weightField,
+      );
+      if (!attribute || attribute.kind !== 'number') {
+        throw new BadRequestException(
+          `"${weightField}" is not a numeric attribute of this layer.`,
+        );
+      }
+      weight = `"${weightField.replace(/"/g, '')}"::float8`;
+    }
+    const scope =
+      workspaceId && this.isDemoTable(table)
+        ? { clause: `AND gis_workspace_id = $1`, params: [workspaceId] }
+        : { clause: '', params: [] as string[] };
+    const pt = `ST_Transform(CASE WHEN GeometryType(${g}) LIKE '%POINT' THEN ST_Centroid(${g}) ELSE ST_PointOnSurface(${g}) END, 4326)`;
+    const rows = await this.prisma.$queryRawUnsafe<
+      { x: number; y: number; w: number | null; total: bigint }[]
+    >(
+      `SELECT ST_X(p)::float8 AS x, ST_Y(p)::float8 AS y, w, COUNT(*) OVER () AS total
+         FROM (SELECT ${pt} AS p, ${weight} AS w
+                 FROM "${table}"
+                WHERE ${g} IS NOT NULL AND NOT ST_IsEmpty(${g}) ${scope.clause}) s
+        WHERE w IS NOT NULL AND w > 0
+        LIMIT ${DENSITY_POINT_LIMIT}`,
+      ...scope.params,
+    );
+    const total = Number(rows[0]?.total ?? 0);
+    let maxWeight = 0;
+    const points = rows.map((r): [number, number, number] => {
+      const w = Number(r.w);
+      if (w > maxWeight) maxWeight = w;
+      return [r.x, r.y, w];
+    });
+    return {
+      points,
+      total,
+      truncated: total > points.length,
+      maxWeight: maxWeight || 1,
+    };
   }
 
   // ---- helpers ---------------------------------------------------

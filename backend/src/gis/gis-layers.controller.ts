@@ -258,6 +258,20 @@ export class GisLayersController {
     return this.gisLayersService.layerFieldSummary(appUser, id, field);
   }
 
+  @RequireMunicipalityMember()
+  @Get('layers/:id/analytics/points')
+  analyticsPoints(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @Query('weight') weight: string | undefined,
+  ) {
+    return this.gisLayersService.layerDensityPoints(
+      appUser,
+      id,
+      weight || undefined,
+    );
+  }
+
   // ---- Styling (GIS Layer Styling — YSLD). Gated by MANAGE in the service. ----
 
   @RequireMunicipalityMember()

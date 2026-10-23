@@ -49,6 +49,8 @@ export type LayerExportFormat = keyof typeof LAYER_EXPORT_FORMATS;
  *  one child module per format (seed-modules.ts). */
 export const EXPORT_DATA_MODULE_ID = 226;
 export const EXPORT_FILTER_MODULE_ID = 1035;
+/** Module Access catalog id for the Heatmap & Clusters tool. */
+export const HEATMAP_MODULE_ID = 1036;
 export const LAYER_EXPORT_FORMAT_MODULE_IDS: Record<LayerExportFormat, number> =
   {
     geojson: 231,
@@ -763,6 +765,24 @@ export class GisLayersService {
   async layerFieldSummary(appUser: AppUser, layerId: string, field: string) {
     const { table, workspaceId } = await this.analyticsSource(appUser, layerId);
     return this.fieldStats.summary(table, field, workspaceId);
+  }
+
+  /** Heatmap & Clusters: one weighted point per feature (VIEW-gated, and
+   *  needs the Heatmap & Clusters module). */
+  async layerDensityPoints(
+    appUser: AppUser,
+    layerId: string,
+    weightField?: string,
+  ) {
+    const modules =
+      await this.moduleAccess.getEffectiveModuleIdsForAppUser(appUser);
+    if (!modules.has(HEATMAP_MODULE_ID)) {
+      throw new ForbiddenException(
+        'Your module access does not include Heatmap & Clusters.',
+      );
+    }
+    const { table, workspaceId } = await this.analyticsSource(appUser, layerId);
+    return this.fieldStats.densityPoints(table, weightField, workspaceId);
   }
 
   /** Analytics: whole-layer profile for the auto-built overview (VIEW-gated). */

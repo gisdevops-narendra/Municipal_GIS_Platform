@@ -4,7 +4,7 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { GisLayer } from '../models/gis-layer.model';
 import { LayerExportFormat } from '../models/layer-export.model';
-import { AnalyticsField, FieldSummary, GroupRequest, GroupResult, LayerProfile } from '../models/layer-analytics.model';
+import { AnalyticsField, DensityPoints, FieldSummary, GroupRequest, GroupResult, LayerProfile } from '../models/layer-analytics.model';
 import { GisLayerPermissionMatrix, GisPermission } from '../models/gis-layer-permission.model';
 import { ManagedRole } from '../models/municipality-user.model';
 
@@ -51,6 +51,11 @@ export class GisLayersService {
   /** Analytics (VIEW-gated server-side): the layer's attribute fields. */
   analyticsFields(id: string): Observable<AnalyticsField[]> {
     return this.http.get<AnalyticsField[]>(`${this.baseUrl}/${id}/analytics/fields`);
+  }
+
+  /** Heatmap & Clusters: one point per feature, optionally weighted by a numeric field. */
+  densityPoints(id: string, weight?: string): Observable<DensityPoints> {
+    return this.http.get<DensityPoints>(`${this.baseUrl}/${id}/analytics/points`, { params: weight ? { weight } : {} });
   }
 
   /** Analytics: whole-layer profile behind the auto-built overview. */

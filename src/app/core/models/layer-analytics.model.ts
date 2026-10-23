@@ -78,3 +78,14 @@ export interface GroupRequest {
 /** Module Access catalog ids (seed-modules.ts). */
 export const ANALYTICS_MODULE_ID = 186;
 export const DATA_VISUALISATION_MODULE_ID = 229;
+/** Module Access catalog id for the Heatmap & Clusters tool. */
+export const HEATMAP_MODULE_ID = 1036;
+
+/** Heatmap & Clusters: one EPSG:4326 point per feature. */
+export interface DensityPoints {
+  /** [lon, lat, weight]; weight is 1 without a weight field. */
+  points: [number, number, number][];
+  total: number;
+  truncated: boolean;
+  maxWeight: number;
+}

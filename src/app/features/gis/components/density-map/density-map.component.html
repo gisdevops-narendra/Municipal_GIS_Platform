@@ -1,0 +1,105 @@
+<div class="density">
+  @if (layerOptions().length === 0) {
+    <p class="density__hint">No vector layers to map.</p>
+  } @else {
+    <label class="density__field">
+      <span class="density__label">Layer</span>
+      <p-select
+        class="density__select"
+        [options]="layerOptions()"
+        optionLabel="label"
+        optionValue="value"
+        [ngModel]="selectedLayer()?.id"
+        (ngModelChange)="selectLayer($event)"
+        [filter]="layerOptions().length > 8"
+        appendTo="body"
+      />
+    </label>
+
+    <div class="density__field">
+      <span class="density__label">Display as</span>
+      <div class="density__modes" role="radiogroup" aria-label="Display mode">
+        <button type="button" role="radio" class="density__mode" [class.is-active]="mode() === 'heatmap'"
+          [attr.aria-checked]="mode() === 'heatmap'" (click)="setMode('heatmap')">
+          <i class="pi pi-sun"></i> Heatmap
+        </button>
+        <button type="button" role="radio" class="density__mode" [class.is-active]="mode() === 'clusters'"
+          [attr.aria-checked]="mode() === 'clusters'" (click)="setMode('clusters')">
+          <i class="pi pi-circle-fill"></i> Clusters
+        </button>
+      </div>
+    </div>
+
+    @if (mode() === 'heatmap') {
+      <label class="density__field">
+        <span class="density__label">Weight by</span>
+        <p-select
+          class="density__select"
+          [options]="weightOptions()"
+          optionLabel="label"
+          optionValue="value"
+          [ngModel]="weightField()"
+          (ngModelChange)="weightField.set($event)"
+          [filter]="weightOptions().length > 8"
+          appendTo="body"
+        />
+      </label>
+
+      <label class="density__slider">
+        <span class="density__label">Radius <b>{{ radius() }} px</b></span>
+        <input type="range" min="3" max="50" [ngModel]="radius()" (ngModelChange)="radius.set(+$event); restyle()" />
+      </label>
+      <label class="density__slider">
+        <span class="density__label">Blur <b>{{ blur() }} px</b></span>
+        <input type="range" min="0" max="50" [ngModel]="blur()" (ngModelChange)="blur.set(+$event); restyle()" />
+      </label>
+    } @else {
+      <label class="density__slider">
+        <span class="density__label">Cluster distance <b>{{ distance() }} px</b></span>
+        <input type="range" min="10" max="120" [ngModel]="distance()" (ngModelChange)="distance.set(+$event); restyle()" />
+      </label>
+    }
+
+    <label class="density__slider">
+      <span class="density__label">Opacity <b>{{ (opacity() * 100).toFixed(0) }}%</b></span>
+      <input type="range" min="0.1" max="1" step="0.05" [ngModel]="opacity()" (ngModelChange)="opacity.set(+$event); restyle()" />
+    </label>
+
+    @if (error(); as message) {
+      <p class="density__error" role="alert">{{ message }}</p>
+    }
+
+    <div class="density__actions">
+      <button pButton type="button" class="p-button-sm" icon="pi pi-map" label="Show on map"
+        [loading]="busy()" [disabled]="!selectedLayer()" (click)="show()"></button>
+      @if (shown()) {
+        <button pButton type="button" class="p-button-sm p-button-text" icon="pi pi-search-plus" label="Zoom" (click)="zoomTo()"></button>
+        <button pButton type="button" class="p-button-sm p-button-text" icon="pi pi-times" label="Clear" (click)="clear()"></button>
+      }
+    </div>
+
+    @if (shown(); as s) {
+      <div class="density__summary">
+        <span><b>{{ s.result.points.length.toLocaleString() }}</b> features from {{ s.layer }}</span>
+        @if (s.weight) {
+          <span>Weighted by <b>{{ s.weight }}</b> (max {{ s.result.maxWeight.toLocaleString() }})</span>
+        }
+        @if (s.result.truncated) {
+          <span class="density__warn">Showing the first {{ s.result.points.length.toLocaleString() }} of {{ s.result.total.toLocaleString() }}.</span>
+        }
+      </div>
+      @if (mode() === 'heatmap') {
+        <div class="density__legend">
+          <span class="density__ramp"></span>
+          <div class="density__ramp-labels"><span>Low</span><span>High</span></div>
+        </div>
+      } @else {
+        <p class="density__hint density__hint--muted">Click a cluster to zoom into it.</p>
+      }
+    }
+
+    <p class="density__hint density__hint--muted">
+      Lines and polygons count as one point each. Only features with a positive weight are included.
+    </p>
+  }
+</div>

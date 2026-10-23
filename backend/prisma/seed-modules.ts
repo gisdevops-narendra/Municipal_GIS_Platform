@@ -61,6 +61,7 @@ const MODULES: ModuleSeed[] = [
   { module_id: 57, module_name: 'Selection Tool', isactive: true, module_parent_id: 18, node_path: '18.57', sub_module: null, default_module: true, display_priority: 9, type: 'mainright' },
   { module_id: 17, module_name: 'Basemap', isactive: true, module_parent_id: 18, node_path: '18.17', sub_module: null, default_module: true, display_priority: 10, type: 'mainright' },
   { module_id: 30, module_name: 'Free Search', isactive: true, module_parent_id: 18, node_path: '18.30', sub_module: null, default_module: true, display_priority: 11, type: 'mainright' },
+  { module_id: 1036, module_name: 'Heatmap & Clusters', isactive: true, module_parent_id: null, node_path: '1036', sub_module: null, default_module: false, display_priority: 24, type: 'mainleft' },
   { module_id: 960, module_name: 'Workspace Details', isactive: true, module_parent_id: null, node_path: '960', sub_module: null, default_module: false, display_priority: 13, type: 'mainleft' },
   { module_id: 5, module_name: 'Advanced Tools', isactive: true, module_parent_id: null, node_path: '5', sub_module: null, default_module: null, display_priority: 20, type: 'mainleft' },
   { module_id: 1004, module_name: 'Service Area', isactive: true, module_parent_id: 5, node_path: '5.1004', sub_module: null, default_module: false, display_priority: 4, type: 'mainleft' },
