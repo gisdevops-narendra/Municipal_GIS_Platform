@@ -5,6 +5,8 @@ import View from 'ol/View';
 import Feature from 'ol/Feature';
 import Point from 'ol/geom/Point';
 import TileLayer from 'ol/layer/Tile';
+import LayerGroup from 'ol/layer/Group';
+import type BaseLayer from 'ol/layer/Base';
 import ImageLayer from 'ol/layer/Image';
 import VectorLayer from 'ol/layer/Vector';
 import HeatmapLayer from 'ol/layer/Heatmap';
@@ -152,7 +154,7 @@ export interface PrintMapContext {
  *  use — suitable for a non-production demo/dev deployment like the
  *  others here. Note Esri's tile path is `{z}/{y}/{x}` (y before x),
  *  unlike every other entry below. */
-const BASEMAPS: Record<string, { label: string; attribution: string; build: () => TileLayer<OSM | XYZ> }> = {
+const BASEMAPS: Record<string, { label: string; attribution: string; build: () => BaseLayer }> = {
   osm: {
     label: 'OpenStreetMap',
     attribution: '© OpenStreetMap contributors',
@@ -168,6 +170,48 @@ const BASEMAPS: Record<string, { label: string; attribution: string; build: () =
           attributions: 'Esri, Maxar, Earthstar Geographics, and the GIS community',
           maxZoom: 19
         })
+      })
+  },
+  'esri-clarity': {
+    label: 'Satellite HD (Esri Clarity)',
+    attribution: 'Esri, Maxar, Earthstar Geographics, and the GIS community',
+    // Clarity: Esri's sharpest, least-processed imagery (≈30–50 cm in most cities).
+    build: () =>
+      new TileLayer({
+        source: new XYZ({
+          url: 'https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+          attributions: 'Esri, Maxar, Earthstar Geographics, and the GIS community',
+          maxZoom: 20
+        })
+      })
+  },
+  'esri-hybrid': {
+    label: 'Satellite + labels (Esri)',
+    attribution: 'Esri, Maxar, Earthstar Geographics, HERE, Garmin',
+    build: () =>
+      new LayerGroup({
+        layers: [
+          new TileLayer({
+            source: new XYZ({
+              url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+              attributions: 'Esri, Maxar, Earthstar Geographics, and the GIS community',
+              maxZoom: 19
+            })
+          }),
+          new TileLayer({
+            source: new XYZ({
+              url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+              attributions: 'Esri, HERE, Garmin',
+              maxZoom: 19
+            })
+          }),
+          new TileLayer({
+            source: new XYZ({
+              url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
+              maxZoom: 19
+            })
+          })
+        ]
       })
   },
   'esri-streets': {
@@ -278,7 +322,7 @@ export class MapService {
     const overrides = this.settings.map().layerVisibility ?? {};
     return layer.code in overrides ? overrides[layer.code] : layer.visibleByDefault;
   }
-  private baseLayer: TileLayer<OSM | XYZ> | null = null;
+  private baseLayer: BaseLayer | null = null;
   private readonly managedLayers = new Map<string, ManagedLayer>();
   private readonly auth = inject(AuthService);
   /** Draw order of the data layers, top first. Rasters default to the

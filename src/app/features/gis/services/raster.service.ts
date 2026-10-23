@@ -137,6 +137,9 @@ export interface ZonalResult {
   truncated: boolean;
 }
 
+/** Searchable imagery catalogues behind Online Sources. */
+export type SceneCollection = 'sentinel2' | 'landsat' | 'oam';
+
 export interface SentinelScene {
   id: string;
   datetime: string | null;
@@ -145,6 +148,8 @@ export interface SentinelScene {
   platform: string | null;
   thumbnail: string | null;
   footprint: GeoJsonGeometry;
+  /** OpenAerialMap: ground sample distance (m). */
+  gsd?: number | null;
 }
 
 export interface VectorField {
@@ -284,12 +289,17 @@ export class RasterService {
     return this.http.post<CutFillResult>(`${this.baseUrl}/cut-fill`, body);
   }
 
-  sentinelSearch(body: { bbox: number[]; from: string; to: string; maxCloud: number; collection?: 'sentinel2' | 'landsat' }): Observable<{ scenes: SentinelScene[] }> {
+  sentinelSearch(body: { bbox: number[]; from: string; to: string; maxCloud: number; collection?: SceneCollection }): Observable<{ scenes: SentinelScene[] }> {
     return this.http.post<{ scenes: SentinelScene[] }>(`${this.baseUrl}/online/sentinel2/search`, body);
   }
 
+  /** Where EarthView / OpenAerialMap imagery exists inside the bbox. */
+  imageryCoverage(source: 'earthview' | 'oam', bbox: number[]): Observable<{ count: number; geometry: Record<string, unknown> | null }> {
+    return this.http.post<{ count: number; geometry: Record<string, unknown> | null }>(`${this.baseUrl}/online/coverage`, { source, bbox });
+  }
+
   /** True-colour PNG of a scene over the area (EPSG:4326 bbox). */
-  sentinelPreview(sceneId: string, bbox: number[], collection: 'sentinel2' | 'landsat' = 'sentinel2'): Observable<Blob> {
+  sentinelPreview(sceneId: string, bbox: number[], collection: SceneCollection = 'sentinel2'): Observable<Blob> {
     return this.http.post(`${this.baseUrl}/online/sentinel2/preview`, { sceneId, bbox, collection }, { responseType: 'blob' });
   }
 

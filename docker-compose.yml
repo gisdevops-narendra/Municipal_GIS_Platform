@@ -253,6 +253,7 @@ services:
       # storage". Configurable, never hard-coded in application code.
       GIS_UPLOAD_STORAGE_DIR: /app/storage/uploads
       GIS_UPLOAD_MAX_FILE_SIZE_MB: ${GIS_UPLOAD_MAX_FILE_SIZE_MB:-500}
+      GIS_RASTER_MAX_FILE_SIZE_MB: ${GIS_RASTER_MAX_FILE_SIZE_MB:-8192}
       GIS_UPLOAD_MAX_EXTRACTED_ZIP_SIZE_MB: ${GIS_UPLOAD_MAX_EXTRACTED_ZIP_SIZE_MB:-2000}
       GIS_UPLOAD_MAX_ZIP_FILE_COUNT: ${GIS_UPLOAD_MAX_ZIP_FILE_COUNT:-100}
       # When "true", newly registered municipalities are seeded with the

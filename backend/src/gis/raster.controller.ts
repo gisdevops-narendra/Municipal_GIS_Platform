@@ -31,6 +31,7 @@ import {
   OnlineRasterDto,
   SentinelPreviewDto,
   SentinelSearchDto,
+  ImageryCoverageDto,
   ProximityDto,
   RasterizeDto,
   RasterStatisticsDto,
@@ -55,7 +56,10 @@ import {
 } from './dto/raster.dto';
 
 const UPLOAD_TMP_DIR = `${process.env.GIS_UPLOAD_STORAGE_DIR ?? './storage/uploads'}/tmp-uploads`;
-const MAX_RASTER_BYTES = Number(process.env.GIS_UPLOAD_MAX_FILE_SIZE_MB ?? '500') * 1024 * 1024;
+/** Rasters get their own, larger cap: drone / SVAMITVA orthophotos run to
+ *  several GB (written straight to disk, never held in memory). */
+const MAX_RASTER_BYTES =
+  Number(process.env.GIS_RASTER_MAX_FILE_SIZE_MB ?? process.env.GIS_UPLOAD_MAX_FILE_SIZE_MB ?? '8192') * 1024 * 1024;
 
 /** Raster Analysis. Every call VIEW-checks the rasters it reads; tools
  *  that create a layer need the caller's UPLOAD permission. */
@@ -344,6 +348,12 @@ export class RasterController {
   @HttpCode(200)
   sentinelSearch(@Body() dto: SentinelSearchDto) {
     return this.tools.sentinelSearch(dto);
+  }
+
+  @RequireRasterModule([RASTER_MODULES.online])
+  @Post('online/coverage')
+  imageryCoverage(@Body() dto: ImageryCoverageDto) {
+    return this.tools.imageryCoverage(dto);
   }
 
   @RequireRasterModule([RASTER_MODULES.online])

@@ -1271,7 +1271,7 @@ WORLDCOVER_CLASSES = {
 }
 
 gdal.SetConfigOption("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
-gdal.SetConfigOption("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif,.TIF,.vrt")
+gdal.SetConfigOption("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif,.TIF,.vrt,.parquet")
 gdal.SetConfigOption("GDAL_HTTP_MAX_RETRY", "3")
 gdal.SetConfigOption("GDAL_HTTP_RETRY_DELAY", "1")
 
@@ -1383,6 +1383,8 @@ def op_online_landcover(req):
 
 
 def op_stac_search(req):
+    if req.get("collection") == "oam":
+        return oam_search(req)
     landsat = req.get("collection") == "landsat"
     query = {"eo:cloud_cover": {"lte": req.get("maxCloud", 20)}}
     if landsat:
@@ -1430,6 +1432,8 @@ def op_stac_preview(req):
     width, height = (size, max(int(size / aspect), 1)) if aspect >= 1 else (max(int(size * aspect), 1), size)
     if req.get("collection") == "landsat":
         return landsat_preview(req, width, height)
+    if req.get("collection") == "oam":
+        return oam_preview(req, width, height)
     item = http_json(f"{STAC_URL}/collections/sentinel-2-l2a/items/{req['sceneId']}")
     visual = (item.get("assets", {}).get("visual") or {}).get("href")
     if not visual:
@@ -1446,6 +1450,8 @@ def op_stac_preview(req):
 def op_stac_fetch(req):
     if req.get("collection") == "landsat":
         return landsat_fetch(req)
+    if req.get("collection") == "oam":
+        return oam_fetch(req)
     if aoi_area_km2(req["bbox"]) > 2500:
         raise OpError("The area is too large for a 10 m Sentinel-2 download (max 2 500 km²).")
     item = http_json(f"{STAC_URL}/collections/sentinel-2-l2a/items/{req['sceneId']}")
@@ -1594,6 +1600,243 @@ def landsat_fetch(req):
     return {"source": f"{platform} Collection 2 Level-2", "sceneId": item["id"], "date": props.get("datetime"),
             "cloud": props.get("eo:cloud_cover"), "bands": [label for _, label in LANDSAT_BANDS],
             "maskedPct": masked_pct, "width": width, "height": height}
+
+
+# ------------------------------------- very high resolution (open licence)
+
+EARTHVIEW_BASE = "https://satellogic-earthview.s3.us-west-2.amazonaws.com/"
+EARTHVIEW_INDEX = EARTHVIEW_BASE + "colab/satellogic-earthview-items.parquet"
+OAM_API = "https://api.openaerialmap.org/meta"
+
+
+def earthview_index(cache_dir):
+    """Local GeoPackage copy of EarthView's 7 M-tile GeoParquet index (spatially
+    indexed). Built once (~260 MB download); later searches are instant."""
+    folder = os.path.join(cache_dir, "earthview")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "index.gpkg")
+    if os.path.exists(path):
+        return path
+    import fcntl
+    with open(os.path.join(folder, ".lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not os.path.exists(path):
+            part = path + ".part"
+            if os.path.exists(part):
+                os.remove(part)
+            gdal.VectorTranslate(part, "/vsicurl/" + EARTHVIEW_INDEX, format="GPKG",
+                                 layerName="tiles", selectFields=["json_path", "date"])
+            os.replace(part, path)
+    return path
+
+
+def op_online_earthview(req):
+    """Satellogic EarthView 1 m mosaic over the area: the newest capture of
+    every 384 m tile (Jul–Dec 2022, CC BY 4.0)."""
+    bbox = req["bbox"]
+    if aoi_area_km2(bbox) > 50:
+        raise OpError("The area is too large for a 1 m download (max 50 km²) — zoom in or draw a smaller area.")
+    analytic = req.get("product") == "analytic"
+    ds = ogr.Open(earthview_index(req["cacheDir"]))
+    layer = ds.GetLayer(0)
+    layer.SetSpatialFilterRect(*bbox)
+    newest = {}
+    for f in layer:
+        json_path = f.GetField("json_path")
+        key = json_path.split("/date=")[0]
+        date = f.GetField("date") or ""
+        if key not in newest or date > newest[key][0]:
+            newest[key] = (date, json_path)
+    ds = None
+    if not newest:
+        raise OpError("Satellogic EarthView has no 1 m imagery for this area — it covers selected regions only.")
+    suffix = "_TOA.tif" if analytic else "_VISUAL.tif"
+    tiles = sorted(newest.values())  # oldest first: newer captures are drawn on top
+    sources = ["/vsicurl/" + EARTHVIEW_BASE + jp.replace("/json/", "/tif/").replace("_metadata.json", suffix)
+               for _, jp in tiles]
+    srs = utm_for_bbox(bbox)
+    warp_to_aoi(sources, req["output"], req, dstSRS=srs.ExportToWkt(), xRes=1, yRes=1,
+                targetAlignedPixels=True, resampleAlg="bilinear", srcNodata=0, dstNodata=0,
+                outputType=gdal.GDT_UInt16 if analytic else gdal.GDT_Byte)
+    out = gdal.Open(req["output"], 1)
+    labels = ["Red", "Green", "Blue", "NIR"] if analytic else ["Red", "Green", "Blue"]
+    for i, label in enumerate(labels[: out.RasterCount], start=1):
+        out.GetRasterBand(i).SetDescription(label)
+    if not analytic:
+        # VISUAL tiles fade into no-data through near-black compression fringe
+        # (values 1–5) — clear it so tile edges don't show as a ragged border.
+        data = out.ReadAsArray()
+        data[:, data.max(axis=0) < 8] = 0
+        for i in range(out.RasterCount):
+            out.GetRasterBand(i + 1).WriteArray(data[i])
+    if not out.GetRasterBand(1).ReadAsArray().any():
+        raise OpError("Satellogic EarthView has no 1 m imagery inside this area.")
+    width, height = out.RasterXSize, out.RasterYSize
+    out = None
+    dates = sorted({str(d)[:10].replace("/", "-") for d, _ in tiles})
+    return {"source": "Satellogic EarthView (1 m, CC BY 4.0)", "tiles": len(tiles), "dates": dates,
+            "bands": labels, "width": width, "height": height}
+
+
+def _box(minx, miny, maxx, maxy):
+    return [[[minx, miny], [maxx, miny], [maxx, maxy], [minx, maxy], [minx, miny]]]
+
+
+def earthview_rtree(con):
+    """Name of the index's R-tree table (rtree_<table>_<geometry column>)."""
+    table, column = con.execute("SELECT table_name, column_name FROM gpkg_geometry_columns").fetchone()
+    return f"rtree_{table}_{column}"
+
+
+def earthview_cells(index, cell):
+    """Coverage grid of the EarthView index (cells of `cell` degrees holding
+    any tile), computed once from the GeoPackage R-tree and cached as JSON."""
+    path = os.path.join(os.path.dirname(index), f"cells_{cell}.json")
+    if not os.path.exists(path):
+        import sqlite3
+        con = sqlite3.connect(index)
+        rows = con.execute(
+            "SELECT DISTINCT CAST(((minx + maxx) / 2 + 180) / ? AS INT), CAST(((miny + maxy) / 2 + 90) / ? AS INT) "
+            f"FROM {earthview_rtree(con)}", (cell, cell)).fetchall()
+        con.close()
+        with open(path + ".part", "w") as fh:
+            json.dump(rows, fh)
+        os.replace(path + ".part", path)
+    with open(path) as fh:
+        return json.load(fh)
+
+
+def op_imagery_coverage(req):
+    """Where very-high-resolution imagery exists inside the map view, as one
+    EPSG:4326 MultiPolygon: EarthView tile boxes (or a coarse grid when zoomed
+    out) or OpenAerialMap image footprints."""
+    minx, miny, maxx, maxy = req["bbox"]
+    polygons = []
+    if req["source"] == "oam":
+        found = http_json(f"{OAM_API}?bbox={minx},{miny},{maxx},{maxy}&limit=500")
+        for r in found.get("results", []):
+            g = r.get("geojson") or {}
+            if g.get("type") == "Polygon":
+                polygons.append(g["coordinates"])
+            elif g.get("type") == "MultiPolygon":
+                polygons.extend(g["coordinates"])
+        count = len(found.get("results", []))
+    else:
+        index = earthview_index(req["cacheDir"])
+        span = max(maxx - minx, maxy - miny)
+        if span <= 3:
+            # Zoomed in: exact 384 m tile boxes, or ~1 km cells over a few degrees.
+            import sqlite3
+            con = sqlite3.connect(index)
+            where = "WHERE maxx >= ? AND minx <= ? AND maxy >= ? AND miny <= ?"
+            if span <= 0.3:
+                rows = con.execute(f"SELECT DISTINCT minx, miny, maxx, maxy FROM {earthview_rtree(con)} {where} LIMIT 20000",
+                                   (minx, maxx, miny, maxy)).fetchall()
+                polygons = [_box(*r) for r in rows]
+            else:
+                cell = 0.01
+                rows = con.execute(
+                    "SELECT DISTINCT CAST(((minx + maxx) / 2 + 180) / ? AS INT), CAST(((miny + maxy) / 2 + 90) / ? AS INT) "
+                    f"FROM {earthview_rtree(con)} {where}", (cell, cell, minx, maxx, miny, maxy)).fetchall()
+                polygons = [_box(i * cell - 180, j * cell - 90, (i + 1) * cell - 180, (j + 1) * cell - 90) for i, j in rows]
+            con.close()
+        else:
+            cell = 0.05 if span <= 15 else 0.5
+            for i, j in earthview_cells(index, cell):
+                x, y = i * cell - 180, j * cell - 90
+                if x + cell >= minx and x <= maxx and y + cell >= miny and y <= maxy:
+                    polygons.append(_box(x, y, x + cell, y + cell))
+        count = len(polygons)
+    return {"count": count, "geometry": {"type": "MultiPolygon", "coordinates": polygons} if polygons else None}
+
+
+def oam_search(req):
+    minx, miny, maxx, maxy = req["bbox"]
+    found = http_json(f"{OAM_API}?bbox={minx},{miny},{maxx},{maxy}&limit=50&order_by=acquisition_end&sort=desc")
+    aoi = ogr.CreateGeometryFromJson(json.dumps({"type": "Polygon", "coordinates": [[
+        [minx, miny], [maxx, miny], [maxx, maxy], [minx, maxy], [minx, miny]]]}))
+    scenes = []
+    for r in found.get("results", []):
+        footprint = r.get("geojson")
+        if not footprint or not r.get("uuid", "").lower().endswith((".tif", ".tiff")):
+            continue
+        fp = ogr.CreateGeometryFromJson(json.dumps(footprint))
+        coverage = fp.Intersection(aoi).GetArea() / aoi.GetArea() * 100 if aoi.GetArea() else 0
+        gsd = r.get("gsd")
+        scenes.append({
+            "id": r["_id"],
+            "datetime": r.get("acquisition_end") or r.get("acquisition_start"),
+            "cloud": None,
+            "coverage": coverage,
+            "platform": " · ".join(x for x in [r.get("title"), r.get("platform"),
+                                               f"{gsd * 100:.0f} cm" if gsd else None] if x),
+            "thumbnail": (r.get("properties") or {}).get("thumbnail"),
+            "footprint": footprint,
+            "gsd": gsd,
+        })
+    scenes.sort(key=lambda sc: (-round(sc["coverage"] / 10), sc["gsd"] or 1))
+    return {"scenes": scenes}
+
+
+def oam_item(scene_id):
+    item = http_json(f"{OAM_API}/{scene_id}").get("results")
+    if not isinstance(item, dict) or not item.get("uuid"):
+        raise OpError("The OpenAerialMap image was not found.")
+    return item
+
+
+def oam_preview(req, width, height):
+    item = oam_item(req["sceneId"])
+    minx, miny, maxx, maxy = req["bbox"]
+    mem = gdal.Warp("", "/vsicurl/" + item["uuid"], format="MEM", dstSRS="EPSG:4326",
+                    outputBounds=(minx, miny, maxx, maxy), width=width, height=height,
+                    resampleAlg="average", dstAlpha=True)
+    count = mem.RasterCount
+    rgb = gdal.Translate("", mem, format="MEM", bandList=[1, 2, 3, count] if count >= 4 else [1, 1, 1, count])
+    gdal.Translate(req["output"], rgb, format="PNG", outputType=gdal.GDT_Byte)
+    return {"width": width, "height": height}
+
+
+def oam_fetch(req):
+    bbox = req["bbox"]
+    if aoi_area_km2(bbox) > 100:
+        raise OpError("The area is too large for an aerial image download (max 100 km²).")
+    item = oam_item(req["sceneId"])
+    src = "/vsicurl/" + item["uuid"]
+    # Native resolution, coarsened only so the output stays ≤ ~150 M pixels.
+    area_m2 = aoi_area_km2(bbox) * 1e6
+    pixel = max(float(item.get("gsd") or 0.1), math.sqrt(area_m2 / 1.5e8))
+    pixel = round(pixel, 3)
+    srs = utm_for_bbox(bbox)
+    folder = tempfile.mkdtemp()
+    try:
+        warped = os.path.join(folder, "warped.tif")
+        warp_to_aoi([src], warped, req, dstSRS=srs.ExportToWkt(), xRes=pixel, yRes=pixel,
+                    targetAlignedPixels=True, resampleAlg="average", dstAlpha=True)
+        ds = gdal.Open(warped)
+        count = ds.RasterCount
+        alpha = ds.GetRasterBand(count).ReadAsArray()
+        if not alpha.any():
+            raise OpError("The image has no data inside this area.")
+        bands = [1, 2, 3] if count >= 4 else [1, 1, 1]  # grey images → 3 equal bands
+        out = gdal.Translate(req["output"], ds, format="GTiff", creationOptions=GTIFF_OPTIONS,
+                             bandList=bands, outputType=gdal.GDT_Byte)
+        for i in range(1, out.RasterCount + 1):
+            band = out.GetRasterBand(i)
+            arr = band.ReadAsArray()
+            arr[(alpha == 0)] = 0
+            arr[(alpha > 0) & (arr == 0)] = 1  # keep real black pixels distinct from nodata
+            band.WriteArray(arr)
+            band.SetNoDataValue(0)
+            band.SetDescription(["Red", "Green", "Blue"][i - 1])
+        width, height = out.RasterXSize, out.RasterYSize
+        out = None
+        ds = None
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+    return {"source": f"OpenAerialMap · {item.get('provider') or 'contributor'} ({(item.get('properties') or {}).get('license', 'CC BY 4.0')})",
+            "title": item.get("title"), "date": item.get("acquisition_end"),
+            "pixelM": pixel, "width": width, "height": height}
 
 
 # ------------------------------------------- shared online helpers (v2)
@@ -2826,7 +3069,7 @@ def op_no2(req):
     total = np.zeros((gh, gw))
     count = np.zeros((gh, gw))
     used = []
-    gdal.SetConfigOption("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif,.TIF,.vrt,.nc")
+    gdal.SetConfigOption("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif,.TIF,.vrt,.nc,.parquet")
     for item in items:
         href = "/vsicurl/" + pc_sign(item["assets"]["no2"]["href"], token)
         try:
@@ -2924,6 +3167,8 @@ OPS = {
     "idw": op_idw, "heatmap": op_heatmap, "proximity": op_proximity,
     "index": op_index, "classify": op_classify,
     "online_dem": op_online_dem, "online_landcover": op_online_landcover,
+    "online_earthview": op_online_earthview,
+    "imagery_coverage": op_imagery_coverage,
     "stac_search": op_stac_search, "stac_fetch": op_stac_fetch, "stac_preview": op_stac_preview,
     "s2_composite": op_s2_composite, "index_series": op_index_series, "lst": op_lst,
     "supervised": op_supervised, "change_matrix": op_change_matrix, "streams": op_streams,

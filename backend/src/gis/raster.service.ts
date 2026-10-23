@@ -55,6 +55,7 @@ const OP_STAGES: Record<string, string> = {
   online_dem: 'Downloading Copernicus DEM tiles',
   online_landcover: 'Downloading ESA WorldCover tiles',
   stac_fetch: 'Downloading satellite bands',
+  online_earthview: 'Downloading Satellogic EarthView 1 m tiles (first use also fetches the tile index)',
   mosaic: 'Merging rasters',
   resample: 'Resampling',
   classify: 'Clustering pixels (k-means)',
@@ -366,6 +367,11 @@ export class RasterService {
     });
   }
 
+  /** Shared download cache (e.g. the EarthView tile index), across municipalities. */
+  cacheDir(): string {
+    return path.join(this.storageRoot, '_cache');
+  }
+
   tempPath(municipalityId: string, extension: string): string {
     return path.join(this.storageRoot, municipalityId, 'rasters', 'tmp', `${randomUUID()}${extension}`);
   }
@@ -394,8 +400,8 @@ export class RasterService {
     await fsp.mkdir(path.dirname(file), { recursive: true });
     await execFileAsync(
       'gdal_translate',
-      ['-q', '-of', 'COG', '-co', 'COMPRESS=DEFLATE', '-co', 'BIGTIFF=IF_SAFER', params.sourcePath, file],
-      { timeout: OP_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 },
+      ['-q', '-of', 'COG', ...(await this.cogOptions(params.sourcePath)), '-co', 'BIGTIFF=IF_SAFER', params.sourcePath, file],
+      { timeout: OP_TIMEOUT_MS * 4, maxBuffer: 16 * 1024 * 1024 },
     ).catch((error: { stderr?: string }) => {
       this.logger.warn(`gdal_translate failed: ${error.stderr ?? ''}`);
       throw new BadRequestException('The raster could not be converted.');
@@ -583,6 +589,28 @@ export class RasterService {
       where: { id: layer.id },
       data: { styleName, styleSpec: spec as object },
     });
+  }
+
+  /** COG creation options. 8-bit RGB(A) imagery — drone / aerial
+   *  orthophotos — is stored as JPEG with a transparency mask (≈5–10× smaller
+   *  than DEFLATE, and faster to serve); everything else stays lossless. */
+  private async cogOptions(source: string): Promise<string[]> {
+    const lossless = ['-co', 'COMPRESS=DEFLATE'];
+    try {
+      const { stdout } = await execFileAsync('gdalinfo', ['-json', source], { maxBuffer: 64 * 1024 * 1024 });
+      const bands = (JSON.parse(stdout) as { bands?: { type?: string; colorInterpretation?: string }[] }).bands ?? [];
+      const rgb = bands.slice(0, 3);
+      const isPhoto =
+        rgb.length === 3 &&
+        bands.every((b) => b.type === 'Byte') &&
+        ['Red', 'Green', 'Blue'].every((c, i) => rgb[i].colorInterpretation === c) &&
+        (bands.length === 3 || (bands.length === 4 && bands[3].colorInterpretation === 'Alpha'));
+      if (!isPhoto) return lossless;
+      const alpha = bands.length === 4 ? ['-b', '1', '-b', '2', '-b', '3', '-mask', '4'] : [];
+      return [...alpha, '-co', 'COMPRESS=JPEG', '-co', 'QUALITY=90'];
+    } catch {
+      return lossless;
+    }
   }
 
   private async defaultStyle(file: string): Promise<RasterStyleSpec> {

@@ -32,6 +32,7 @@ import {
   RasterStatistics,
   RasterStyleSpec,
   SentinelScene,
+  SceneCollection,
   VectorField,
   ZonalResult,
   ZoneRow
@@ -63,7 +64,7 @@ interface ToolDef {
 /** Raster Analysis (69) and its sub-modules, in catalog order. */
 export const RASTER_TOOLS: ToolDef[] = [
   { id: 'upload', label: 'Raster Upload & Publish', group: 'Raster Data', section: 'Get Data', moduleId: 911, icon: 'pi pi-upload', description: 'Publish a GeoTIFF (DEM, satellite or drone image) as a map layer.' },
-  { id: 'online', label: 'Download from Online Sources', group: 'Raster Data', section: 'Get Data', moduleId: 919, icon: 'pi pi-cloud-download', description: 'Free elevation (Copernicus DEM), land cover (ESA WorldCover) or Sentinel-2 / Landsat imagery for any area.' },
+  { id: 'online', label: 'Download from Online Sources', group: 'Raster Data', section: 'Get Data', moduleId: 919, icon: 'pi pi-cloud-download', description: 'Free elevation (Copernicus DEM), land cover (ESA WorldCover) Sentinel-2 / Landsat, 1 m EarthView or drone imagery (OpenAerialMap) for any area.' },
   { id: 'style', label: 'Raster Styling', group: 'Raster Data', section: 'Inspect & Export', moduleId: 912, icon: 'pi pi-palette', description: 'Colour a raster with a ramp, stretch and opacity.' },
   { id: 'identify', label: 'Pixel Identify', group: 'Raster Data', section: 'Inspect & Export', moduleId: 913, icon: 'pi pi-info-circle', description: 'Click the map to read pixel values from every band.' },
   { id: 'stats', label: 'Statistics & Histogram', group: 'Raster Data', section: 'Inspect & Export', moduleId: 914, icon: 'pi pi-chart-bar', description: 'Value distribution, percentiles and NoData coverage of a band.' },
@@ -144,7 +145,7 @@ type Slot = 'a' | 'b' | 'line' | 'polygon' | 'observer' | 'training';
 /** Rail icon + short caption per tool category. */
 export type SpectralIndexKind = 'ndvi' | 'ndwi' | 'ndbi' | 'savi' | 'evi';
 export type IndexBand = 'blue' | 'green' | 'red' | 'nir' | 'swir';
-export type OnlineSource = 'dem' | 'landcover' | 'sentinel2' | 'landsat' | 'population' | 'water';
+export type OnlineSource = 'dem' | 'landcover' | 'sentinel2' | 'landsat' | 'earthview' | 'oam' | 'population' | 'water';
 
 export type IndexSensor = 'sentinel2' | 'landsat89' | 'landsat457' | 'other';
 
@@ -438,6 +439,10 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
 
   // v2: composite, series, heat, supervised, change matrix, streams, observers
   s2Mode: 'scene' | 'composite' = 'scene';
+  earthviewProduct: 'visual' | 'analytic' = 'visual';
+  readonly coverageLoading = signal(false);
+  readonly coverageOn = signal(false);
+  private coverageSub?: Subscription;
   compositeScenes = 8;
   seriesKind: 'ndvi' | 'ndwi' | 'ndbi' = 'ndvi';
   seriesFrom = isoDate(-365);
@@ -644,6 +649,7 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.pickSub?.unsubscribe();
+    this.coverageSub?.unsubscribe();
     this.mapService.cancelDraw();
     this.mapService.setSwipe(null);
     this.mapService.setSpyglass(null);
@@ -838,7 +844,7 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
       return;
     }
     if (this.tool() === 'online') {
-      this.outputName = { dem: 'Elevation (Copernicus DEM)', landcover: 'Land cover (ESA WorldCover)', sentinel2: 'Sentinel-2 image', landsat: 'Landsat 8/9 image', population: 'Population (Meta HRSL)', water: 'Surface water occurrence (JRC)' }[
+      this.outputName = { dem: 'Elevation (Copernicus DEM)', landcover: 'Land cover (ESA WorldCover)', sentinel2: 'Sentinel-2 image', landsat: 'Landsat 8/9 image', earthview: 'Satellogic EarthView 1 m', oam: 'OpenAerialMap image', population: 'Population (Meta HRSL)', water: 'Surface water occurrence (JRC)' }[
         this.onlineSource
       ];
       return;
@@ -934,6 +940,8 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
 
   setOnlineSource(source: OnlineSource): void {
     if (source !== this.onlineSource) {
+      this.coverageOn.set(false);
+      this.coverageSub?.unsubscribe();
       this.scenes.set(null);
       this.sceneId.set(null);
       this.clearPreview();
@@ -964,8 +972,51 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
   }
 
   /** Scene catalogue behind the "Satellite image" sources. */
-  get sceneCollection(): 'sentinel2' | 'landsat' {
-    return this.onlineSource === 'landsat' ? 'landsat' : 'sentinel2';
+  get sceneCollection(): SceneCollection {
+    return this.onlineSource === 'landsat' || this.onlineSource === 'oam' ? this.onlineSource : 'sentinel2';
+  }
+
+  /** Sources downloaded as one picked scene / image. */
+  get sceneSource(): boolean {
+    return this.onlineSource === 'sentinel2' || this.onlineSource === 'landsat' || this.onlineSource === 'oam';
+  }
+
+  /** Outline where EarthView / OpenAerialMap actually has imagery inside
+   *  the current map view, so the user can pan to a covered area first.
+   *  Stays on — refreshing as the map moves — until the source changes. */
+  showCoverage(): void {
+    this.coverageOn.set(true);
+    this.loadCoverage();
+  }
+
+  private readonly coverageRefresh = effect(() => {
+    this.mapService.viewRevision();
+    if (untracked(() => this.coverageOn() && this.tool() === 'online')) untracked(() => this.loadCoverage());
+  });
+
+  private loadCoverage(): void {
+    const bbox = this.mapService.getViewExtent4326();
+    if (!bbox) return;
+    const source = this.onlineSource === 'oam' ? 'oam' : 'earthview';
+    this.error.set(null);
+    this.coverageSub?.unsubscribe();
+    this.coverageLoading.set(true);
+    this.coverageSub = this.api.imageryCoverage(source, bbox).subscribe({
+      next: (r) => {
+        this.coverageLoading.set(false);
+        this.mapService.setAnalysisGeometry(r.geometry);
+        this.message.set(
+          r.geometry
+            ? 'Outlined areas have imagery — zoom in until you see individual tiles, then draw your area over them. The outlines refresh as you move the map.'
+            : 'No imagery in this map view — zoom out to find covered areas.'
+        );
+      },
+      error: (err: HttpErrorResponse) => {
+        this.coverageLoading.set(false);
+        this.coverageOn.set(false);
+        this.fail(err);
+      }
+    });
   }
 
   searchScenes(): void {
@@ -982,7 +1033,12 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
         this.searching.set(false);
         this.scenes.set(r.scenes);
         if (r.scenes.length) this.pickScene(r.scenes[0]);
-        else this.message.set('No scenes match — widen the dates or allow more cloud.');
+        else
+          this.message.set(
+            this.onlineSource === 'oam'
+              ? 'No OpenAerialMap imagery over this area yet — try a wider area, or upload your own drone orthophoto.'
+              : 'No scenes match — widen the dates or allow more cloud.'
+          );
       },
       error: (err: HttpErrorResponse) => {
         this.searching.set(false);
@@ -996,7 +1052,10 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
   pickScene(scene: SentinelScene): void {
     this.sceneId.set(scene.id);
     const sensor = this.onlineSource === 'landsat' ? (scene.platform ?? 'landsat').replace('landsat-', 'Landsat ') : 'Sentinel-2';
-    this.outputName = `${sensor} ${scene.datetime?.slice(0, 10) ?? scene.id}`;
+    this.outputName =
+      this.onlineSource === 'oam'
+        ? `OpenAerialMap ${scene.platform?.split(' · ')[0] ?? ''} ${scene.datetime?.slice(0, 10) ?? ''}`.replace(/\s+/g, ' ').trim().slice(0, 80)
+        : `${sensor} ${scene.datetime?.slice(0, 10) ?? scene.id}`;
     const aoi = this.aoi();
     this.mapService.setAnalysisGeometry(scene.footprint);
     if (!aoi) return;
@@ -1839,6 +1898,7 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
         if (!aoi) return this.error.set(this.aoiHint());
         if (this.onlineSource === 'sentinel2' && this.s2Mode === 'scene' && !this.sceneId()) return this.error.set('Search and pick a Sentinel-2 scene first.');
         if (this.onlineSource === 'landsat' && !this.sceneId()) return this.error.set('Search and pick a Landsat scene first.');
+        if (this.onlineSource === 'oam' && !this.sceneId()) return this.error.set('Search and pick an OpenAerialMap image first.');
         if (!this.outputName.trim()) return this.error.set('Enter a name for the new layer.');
         if (this.onlineSource === 'sentinel2' && this.s2Mode === 'composite') {
           return this.runLayerTool('online', {
@@ -1854,8 +1914,9 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
         return this.runLayerTool('online', {
           source: this.onlineSource,
           ...aoi,
-          sceneId: this.onlineSource === 'sentinel2' || this.onlineSource === 'landsat' ? this.sceneId() : undefined,
+          sceneId: this.sceneSource ? this.sceneId() : undefined,
           maskClouds: this.onlineSource === 'sentinel2' || this.onlineSource === 'landsat' ? this.maskClouds : undefined,
+          product: this.onlineSource === 'earthview' ? this.earthviewProduct : undefined,
           outputName: this.outputName.trim()
         });
       }
@@ -2386,7 +2447,11 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
           if (r.layer.layerType === 'RASTER') this.pendingInputId = r.layer.id;
           const t = (r.result as { transitions?: { fromLabel: string; toLabel: string; areaM2: number; from: number; to: number }[] })?.transitions;
           if (t) this.transitions.set(t.filter((x) => x.from !== x.to).slice(0, 30));
-          if (this.tool() === 'online') this.clearPreview();
+          if (this.tool() === 'online') {
+            this.clearPreview();
+            this.coverageOn.set(false);
+            this.coverageSub?.unsubscribe();
+          }
           this.facts.set(describe(r.result));
           this.mapService.clearAnalysisGeometry();
           this.layerCreated.emit(r.layer);

@@ -31,6 +31,7 @@ import type {
   OnlineRasterDto,
   SentinelPreviewDto,
   SentinelSearchDto,
+  ImageryCoverageDto,
   ProximityDto,
   RasterizeDto,
   RasterStatisticsDto,
@@ -485,6 +486,12 @@ export class RasterToolsService {
     });
   }
 
+  /** Where EarthView / OpenAerialMap imagery exists inside the map view. */
+  async imageryCoverage(dto: ImageryCoverageDto) {
+    this.assertBbox(dto.bbox);
+    return this.rasters.runOp({ op: 'imagery_coverage', source: dto.source, bbox: dto.bbox, cacheDir: this.rasters.cacheDir() });
+  }
+
   /** PNG quick-look of a scene over the area (EPSG:4326 bbox). */
   async sentinelPreview(appUser: AppUser, dto: SentinelPreviewDto): Promise<Buffer> {
     this.assertBbox(dto.bbox);
@@ -502,8 +509,9 @@ export class RasterToolsService {
    *  the area and publishes it as a raster layer. */
   async onlineRaster(appUser: AppUser, dto: OnlineRasterDto) {
     this.assertBbox(dto.bbox);
-    if ((dto.source === 'sentinel2' || dto.source === 'landsat') && !dto.sceneId) {
-      throw new BadRequestException(`Search and pick a ${dto.source === 'landsat' ? 'Landsat' : 'Sentinel-2'} scene first.`);
+    const sceneLabel = { sentinel2: 'Sentinel-2 scene', landsat: 'Landsat scene', oam: 'OpenAerialMap image' } as Record<string, string>;
+    if (sceneLabel[dto.source] && !dto.sceneId) {
+      throw new BadRequestException(`Search and pick a ${sceneLabel[dto.source]} first.`);
     }
     const request = { bbox: dto.bbox, polygon: dto.polygon, sceneId: dto.sceneId, maskClouds: dto.maskClouds ?? true };
     return this.toRasterLayer(appUser, dto.outputName, async (output) => {
@@ -535,6 +543,17 @@ export class RasterToolsService {
           maxCloud: dto.maxCloud ?? 60, maxScenes: dto.maxScenes ?? 10, output,
         });
         return { style: { mode: 'rgb', bands: [3, 2, 1], stretch: 'histogram' }, result: r };
+      }
+      if (dto.source === 'earthview') {
+        const r = await this.rasters.runOp({
+          op: 'online_earthview', ...request, product: dto.product ?? 'visual', cacheDir: this.rasters.cacheDir(), output,
+        });
+        const style: RasterStyleSpec = { mode: 'rgb', bands: [1, 2, 3], stretch: 'histogram' };
+        return { style, result: r };
+      }
+      if (dto.source === 'oam') {
+        const r = await this.rasters.runOp({ op: 'stac_fetch', collection: 'oam', ...request, output });
+        return { style: { mode: 'rgb', bands: [1, 2, 3] }, result: r };
       }
       const collection = dto.source === 'landsat' ? 'landsat' : 'sentinel2';
       const r = await this.rasters.runOp({ op: 'stac_fetch', collection, ...request, output });

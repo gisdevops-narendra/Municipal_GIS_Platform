@@ -636,14 +636,15 @@ class AoiDto {
   bbox!: [number, number, number, number];
 }
 
-/** Scene ids: Sentinel-2 (Earth Search) or Landsat 8/9 C2 L2 (Planetary Computer). */
-const SCENE_ID = /^(S2[A-D]_[A-Z0-9_]{10,80}|L[CO]0[89]_L2SP_\d{6}_\d{8}_\d{2}_T[12])$/;
+/** Scene ids: Sentinel-2 (Earth Search), Landsat 8/9 C2 L2 (Planetary
+ *  Computer) or an OpenAerialMap image id. */
+const SCENE_ID = /^(S2[A-D]_[A-Z0-9_]{10,80}|L[CO]0[89]_L2SP_\d{6}_\d{8}_\d{2}_T[12]|[0-9a-f]{24})$/;
 
 export class SentinelSearchDto extends AoiDto {
-  /** Imagery catalogue — Sentinel-2 L2A (default) or Landsat 8/9. */
+  /** Imagery catalogue — Sentinel-2 L2A (default), Landsat 8/9 or OpenAerialMap. */
   @IsOptional()
-  @IsIn(['sentinel2', 'landsat'])
-  collection?: 'sentinel2' | 'landsat';
+  @IsIn(['sentinel2', 'landsat', 'oam'])
+  collection?: 'sentinel2' | 'landsat' | 'oam';
 
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
   from!: string;
@@ -658,9 +659,19 @@ export class SentinelSearchDto extends AoiDto {
   maxCloud?: number;
 }
 
+export class ImageryCoverageDto extends AoiDto {
+  @IsIn(['earthview', 'oam'])
+  source!: 'earthview' | 'oam';
+}
+
 export class OnlineRasterDto extends AoiDto {
-  @IsIn(['dem', 'landcover', 'sentinel2', 'landsat', 'composite', 'population', 'water'])
-  source!: 'dem' | 'landcover' | 'sentinel2' | 'landsat' | 'composite' | 'population' | 'water';
+  @IsIn(['dem', 'landcover', 'sentinel2', 'landsat', 'earthview', 'oam', 'composite', 'population', 'water'])
+  source!: 'dem' | 'landcover' | 'sentinel2' | 'landsat' | 'earthview' | 'oam' | 'composite' | 'population' | 'water';
+
+  /** EarthView: true-colour 8-bit (visual) or 4-band TOA reflectance (analytic). */
+  @IsOptional()
+  @IsIn(['visual', 'analytic'])
+  product?: 'visual' | 'analytic';
 
   /** Composite: date range, cloud limit and number of scenes. */
   @IsOptional()
@@ -708,8 +719,8 @@ export class SentinelPreviewDto extends AoiDto {
   sceneId!: string;
 
   @IsOptional()
-  @IsIn(['sentinel2', 'landsat'])
-  collection?: 'sentinel2' | 'landsat';
+  @IsIn(['sentinel2', 'landsat', 'oam'])
+  collection?: 'sentinel2' | 'landsat' | 'oam';
 }
 
 // ----- Imagery (v2) / Terrain (v2) -----
