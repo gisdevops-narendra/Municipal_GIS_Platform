@@ -97,6 +97,8 @@ export interface CreateGisUploadRequest {
   /** Mark as a routing (road network) layer — applies to line data only. */
   routingEnabled?: boolean;
   sourceCrs?: string;
+  /** CRS to store the layer in; default the workspace's storage CRS. */
+  targetCrs?: string;
   latitudeField?: string;
   longitudeField?: string;
   xField?: string;

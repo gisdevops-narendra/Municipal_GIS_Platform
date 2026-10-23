@@ -38,7 +38,7 @@
         <p-select class="bo__select" [options]="crsOptions()" optionLabel="label" optionValue="value" [(ngModel)]="newCrs" appendTo="body" />
       </label>
       @if (newCrs === otherCrs) {
-        <input pInputText class="bo__input" placeholder="EPSG:24378" [(ngModel)]="customCrs" aria-label="EPSG code" />
+        <app-crs-picker [(ngModel)]="customCrs" />
       }
 
       <div class="bo__field">

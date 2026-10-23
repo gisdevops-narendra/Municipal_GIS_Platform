@@ -8,6 +8,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -299,4 +300,35 @@ export class StandardiseDto {
 export class AppendDto {
   @IsUUID()
   sourceLayerId!: string;
+}
+
+// ----- Projection -----
+
+const EPSG = /^EPSG:\d{4,6}$/i;
+
+/** POST /api/gis/layers/:id/reproject — transform the coordinates into
+ *  another CRS, as a new layer or in place. */
+export class ReprojectLayerDto {
+  @Matches(EPSG, { message: 'The CRS must look like EPSG:32643.' })
+  targetCrs!: string;
+
+  @IsIn(['new', 'inplace'])
+  mode!: 'new' | 'inplace';
+
+  /** Name of the new layer (mode "new"). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  outputName?: string;
+
+  @IsOptional()
+  @IsUUID()
+  departmentId?: string;
+}
+
+/** POST /api/gis/layers/:id/define-crs — the coordinates are right but the
+ *  layer is labelled with the wrong CRS: relabel without moving them. */
+export class DefineCrsDto {
+  @Matches(EPSG, { message: 'The CRS must look like EPSG:32643.' })
+  crs!: string;
 }

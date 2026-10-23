@@ -13,7 +13,7 @@ export const GEOCODE_MODULE_ID = 1013;
 export const TOPOLOGY_MODULE_ID = 1014;
 export const FIELD_RULES_MODULE_ID = 1015;
 export const VERSIONS_MODULE_ID = 1016;
-export const DATA_TOOL_MODULE_IDS = [1011, 1012, 1013, 1014, 1015, 1016];
+export const DATA_TOOL_MODULE_IDS = [1011, 1012, 1013, 1014, 1015, 1016, 1028];
 
 export type NewFieldType = 'text' | 'double precision' | 'integer' | 'date' | 'boolean';
 
@@ -107,6 +107,16 @@ export class DataToolsService {
     return this.http.get<{ total: number; complete: number; fields: { field: string; type: string; filled: number; empty: number; pct: number }[] }>(
       `${this.baseUrl}/layers/${layerId}/completeness`
     );
+  }
+
+  reproject(layerId: string, body: { targetCrs: string; mode: 'new' | 'inplace'; outputName?: string }) {
+    return this.http.post<{ mode: 'new' | 'inplace'; from: string; to: string; layer?: GisLayer }>(
+      `${this.baseUrl}/layers/${layerId}/reproject`, body
+    );
+  }
+
+  defineCrs(layerId: string, crs: string) {
+    return this.http.post<{ from: string | null; to: string }>(`${this.baseUrl}/layers/${layerId}/define-crs`, { crs });
   }
 
   splitLayer(layerId: string, field: string) {

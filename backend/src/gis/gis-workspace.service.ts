@@ -2,6 +2,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -14,6 +15,7 @@ import {
   slugifyWorkspaceName,
 } from './workspace-naming.util';
 import { UpdateGisWorkspaceDto } from './dto/update-gis-workspace.dto';
+import { CrsService } from './crs.service';
 
 /** Default storage CRS for newly provisioned workspaces. Suitable for the
  *  initial Gujarat/Somnath development environment (UTM zone 43N) — NOT a
@@ -41,6 +43,7 @@ export class GisWorkspaceService {
     private readonly geoServer: GeoServerService,
     private readonly config: ConfigService,
     private readonly gisLayers: GisLayersService,
+    @Optional() private readonly crs?: CrsService,
   ) {}
 
   /**
@@ -182,6 +185,11 @@ export class GisWorkspaceService {
     if (!workspace) {
       throw new NotFoundException('GIS workspace not found.');
     }
+
+    // New uploads are stored in it — any supported EPSG CRS; existing
+    // layers keep theirs (reproject them with the Projection tool).
+    if (dto.defaultCrs !== undefined) await this.crs?.require(dto.defaultCrs, 'Storage CRS');
+    if (dto.displayCrs !== undefined) await this.crs?.require(dto.displayCrs, 'Display CRS');
 
     const updated = await this.prisma.gISWorkspace.update({
       where: { id: workspace.id },

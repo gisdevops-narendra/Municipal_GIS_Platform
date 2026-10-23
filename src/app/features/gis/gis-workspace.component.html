@@ -475,8 +475,8 @@
 
     <div class="gis-ws__form-field">
       <label class="field-label" for="gis-default-crs">Storage CRS</label>
-      <input pInputText id="gis-default-crs" formControlName="defaultCrs" class="w-full" placeholder="EPSG:32643" />
-      <div class="field-hint">Projected CRS used for stored spatial data. Not every municipality uses the same UTM zone.</div>
+      <app-crs-picker inputId="gis-default-crs" formControlName="defaultCrs" />
+      <div class="field-hint">Projected CRS new uploads are stored in by default (each upload can choose another). Existing layers keep theirs — use Data Tools → Projection to reproject them.</div>
       @if (f.defaultCrs.invalid && f.defaultCrs.touched) {
         <div class="field-error">Must look like "EPSG:32643".</div>
       }
@@ -484,7 +484,7 @@
 
     <div class="gis-ws__form-field">
       <label class="field-label" for="gis-display-crs">Display CRS</label>
-      <input pInputText id="gis-display-crs" formControlName="displayCrs" class="w-full" placeholder="EPSG:4326" />
+      <app-crs-picker inputId="gis-display-crs" formControlName="displayCrs" />
       @if (f.displayCrs.invalid && f.displayCrs.touched) {
         <div class="field-error">Must look like "EPSG:4326".</div>
       }

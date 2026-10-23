@@ -492,6 +492,10 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
 
     this.lastClickedIndex = index;
     this.applySelection(ids);
+    // A plain click picks one feature: bring it into view.
+    if (!event.shiftKey && !event.ctrlKey && !event.metaKey) {
+      this.withGeometries([row.featureId], (geometries) => this.mapService.zoomToGeometries(geometries));
+    }
   }
 
   // ----- selection tool: select on the map by shape -----

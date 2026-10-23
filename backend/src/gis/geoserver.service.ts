@@ -445,6 +445,31 @@ export class GeoServerService {
     }
   }
 
+  /** Re-declares a published feature type's CRS after its table was
+   *  reprojected or given a different SRID (Projection tool), recalculating
+   *  the extents; returns the new lon/lat bounding box. */
+  async setFeatureTypeCrs(
+    workspace: string,
+    datastore: string,
+    name: string,
+    srs: string,
+  ): Promise<LonLatBoundingBox | null> {
+    const response = await this.request(
+      `/rest/workspaces/${encodeURIComponent(workspace)}/datastores/${encodeURIComponent(datastore)}/featuretypes/${encodeURIComponent(name)}?recalculate=attribute,nativebbox,latlonbbox`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          featureType: { name, enabled: true, srs, nativeCRS: srs, projectionPolicy: 'FORCE_DECLARED' },
+        }),
+      },
+    );
+    if (!response.ok) {
+      throw await this.toError('changing the feature type CRS', response);
+    }
+    return this.getFeatureTypeBoundingBox(workspace, datastore, name);
+  }
+
   async deleteFeatureType(
     workspace: string,
     datastore: string,

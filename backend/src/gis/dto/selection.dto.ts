@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -28,6 +29,11 @@ class SelectionDto {
 export class ExportSelectionDto extends SelectionDto {
   @IsIn(['geojson', 'csv', 'shapefile', 'kml'])
   format!: 'geojson' | 'csv' | 'shapefile' | 'kml';
+
+  /** Output CRS (KML is always EPSG:4326); default the layer's own. */
+  @IsOptional()
+  @Matches(/^EPSG:\d{4,6}$/i, { message: 'crs must look like "EPSG:4326"' })
+  crs?: string;
 }
 
 /** POST /api/gis/layers/:id/save-selection — a new layer of the selection. */

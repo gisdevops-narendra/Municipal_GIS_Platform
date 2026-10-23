@@ -172,6 +172,12 @@
         appendTo="body"
       />
     </label>
+    @if (crs() === otherCrs) {
+      <label class="goto__field">
+        <span class="goto__label">EPSG code or name</span>
+        <app-crs-picker name="otherCrs" [ngModel]="otherCode()" (ngModelChange)="setOtherCrs($event)" />
+      </label>
+    }
 
     <div class="goto__pair">
       <label class="goto__field">

@@ -27,6 +27,9 @@ export interface GdalInspectResult {
    *  Null means "could not be determined", which callers must never
    *  silently paper over (Task 7 §8). */
   epsgCode: number | null;
+  /** The file declares a CRS (e.g. an ESRI .prj) even when it carries no
+   *  EPSG code — ogr2ogr can still reproject from it. */
+  hasCrs: boolean;
 }
 
 export interface InspectOptions {
@@ -98,6 +101,7 @@ export class GdalService {
         geometryFields?: {
           type?: string;
           coordinateSystem?: {
+            wkt?: string;
             projjson?: { id?: { authority?: string; code?: number } };
           };
         }[];
@@ -122,7 +126,22 @@ export class GdalService {
       featureCount: layer.featureCount ?? 0,
       fields: (layer.fields ?? []).map((f) => ({ name: f.name, type: f.type })),
       epsgCode,
+      hasCrs: !!(geomField?.coordinateSystem?.wkt || geomField?.coordinateSystem?.projjson),
     };
+  }
+
+  /** The EPSG code best matching the CRS a file declares without one
+   *  (typically an ESRI-style .prj), or null when nothing matches well. */
+  async identifyEpsg(filePath: string): Promise<number | null> {
+    try {
+      const out = await this.run('gdalsrsinfo', ['-e', '-o', 'epsg', filePath]);
+      const confidence = /Confidence in this match:\s*(\d+)/i.exec(out);
+      const code = /EPSG:(\d{4,6})/.exec(out);
+      if (!code || (confidence && Number(confidence[1]) < 50)) return null;
+      return Number(code[1]);
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -174,7 +193,7 @@ export class GdalService {
       params.targetCrs,
       '-overwrite',
     ];
-    if (params.sourceCrsOverride) {
+    if (params.sourceCrsOverride && /^EPSG:\d+$/i.test(params.sourceCrsOverride)) {
       args.push('-s_srs', params.sourceCrsOverride);
     }
     for (const oo of params.openOptions ?? []) {
@@ -185,7 +204,7 @@ export class GdalService {
   }
 
   private async run(
-    command: 'ogrinfo' | 'ogr2ogr',
+    command: 'ogrinfo' | 'ogr2ogr' | 'gdalsrsinfo',
     args: string[],
     timeoutMs = 30_000,
   ): Promise<string> {

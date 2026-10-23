@@ -15,6 +15,7 @@ import { MapService } from '../../services/map.service';
 import { GisAiService } from '../../services/gis-ai.service';
 import { SettingsService } from '../../../../core/services/settings.service';
 import { environment } from '../../../../../environments/environment';
+import { CrsPickerComponent } from '../crs-picker/crs-picker.component';
 import { Terrain3dComponent, TerrainMesh } from './terrain-3d.component';
 import {
   GeoJsonGeometry,
@@ -194,7 +195,7 @@ const GROUP_META: Record<string, { short: string; icon: string }> = {
 @Component({
   selector: 'app-raster-analysis',
   standalone: true,
-  imports: [FormsModule, NgTemplateOutlet, DatePipe, ButtonModule, SelectModule, MultiSelectModule, Terrain3dComponent],
+  imports: [FormsModule, NgTemplateOutlet, DatePipe, ButtonModule, SelectModule, MultiSelectModule, Terrain3dComponent, CrsPickerComponent],
   templateUrl: './raster-analysis.component.html',
   styleUrls: ['../buffer-overlay/buffer-overlay.component.scss', './raster-analysis.component.scss']
 })
@@ -2044,8 +2045,8 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
         return this.runLayerTool('mosaic', { layerIds, resampling: this.resampling, outputName: this.outputName.trim() });
       }
       case 'resample': {
-        const targetCrs = this.resampleCrs === 'custom' ? `EPSG:${this.resampleEpsg.replace(/\D/g, '')}` : this.resampleCrs;
-        if (this.resampleCrs === 'custom' && !/^EPSG:\d{4,6}$/.test(targetCrs)) return this.error.set('Enter a valid EPSG code.');
+        const targetCrs = this.resampleCrs === 'custom' ? this.resampleEpsg : this.resampleCrs;
+        if (this.resampleCrs === 'custom' && !/^EPSG:\d{4,6}$/.test(targetCrs)) return this.error.set('Choose the target coordinate system.');
         if (!this.resamplePixel && targetCrs === 'same') return this.error.set('Set a new pixel size and/or a different coordinate system.');
         return this.runLayerTool('resample', {
           layerId,

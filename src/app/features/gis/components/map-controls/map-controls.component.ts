@@ -6,12 +6,15 @@ import { Popover, PopoverModule } from 'primeng/popover';
 import { SelectModule } from 'primeng/select';
 import { InputTextModule } from 'primeng/inputtext';
 import { MapService } from '../../services/map.service';
-import { GOTO_COORDINATE_SYSTEMS } from '../../services/projections';
+import { CoordinateSystemOption, GOTO_COORDINATE_SYSTEMS } from '../../services/projections';
+import { CrsInfo, CrsService } from '../../services/crs.service';
+import { CrsPickerComponent } from '../crs-picker/crs-picker.component';
 import type { SelectMode, SelectShape } from '../attribute-table/attribute-table.component';
 
 /** Module Access catalog ids (seed-modules.ts) for the gated controls. */
 const NAV_HISTORY_MODULE_ID = 59;
 const GOTO_XY_MODULE_ID = 12;
+const OTHER_CRS = 'other';
 const SELECTION_TOOL_MODULE_ID = 57;
 const ZOOM_IN_MODULE_ID = 19;
 const ZOOM_OUT_MODULE_ID = 20;
@@ -27,7 +30,7 @@ const INFORMATION_TOOL_MODULE_ID = 58;
 @Component({
   selector: 'app-map-controls',
   standalone: true,
-  imports: [FormsModule, ButtonModule, TooltipModule, PopoverModule, SelectModule, InputTextModule],
+  imports: [FormsModule, ButtonModule, TooltipModule, PopoverModule, SelectModule, InputTextModule, CrsPickerComponent],
   templateUrl: './map-controls.component.html',
   styleUrl: './map-controls.component.scss'
 })
@@ -99,16 +102,38 @@ export class MapControlsComponent {
 
   @ViewChild('gotoPopover') private gotoPopover?: Popover;
 
-  readonly coordinateSystems = GOTO_COORDINATE_SYSTEMS;
+  private readonly crsService = inject(CrsService);
+  readonly otherCrs = OTHER_CRS;
+  readonly coordinateSystems = [...GOTO_COORDINATE_SYSTEMS, { code: OTHER_CRS, label: 'Any other CRS…' }];
   readonly crs = signal(GOTO_COORDINATE_SYSTEMS[0].code);
+  /** The "Any other CRS…" choice (any EPSG system). */
+  readonly otherCode = signal('');
+  private readonly otherInfo = signal<CrsInfo | null>(null);
   readonly xInput = signal('');
   readonly yInput = signal('');
   readonly gotoError = signal<string | null>(null);
   readonly gotoResult = signal<string | null>(null);
 
-  readonly crsOption = computed(
-    () => GOTO_COORDINATE_SYSTEMS.find((c) => c.code === this.crs()) ?? GOTO_COORDINATE_SYSTEMS[0]
-  );
+  readonly crsOption = computed((): CoordinateSystemOption => {
+    const other = this.otherInfo();
+    if (this.crs() === OTHER_CRS && other) {
+      const geographic = other.kind === 'geographic';
+      return {
+        code: other.code,
+        label: other.name,
+        axes: geographic ? ['Longitude', 'Latitude'] : ['Easting (X)', 'Northing (Y)'],
+        geographic
+      };
+    }
+    return GOTO_COORDINATE_SYSTEMS.find((c) => c.code === this.crs()) ?? GOTO_COORDINATE_SYSTEMS[0];
+  });
+
+  setOtherCrs(code: string): void {
+    this.otherCode.set(code);
+    this.otherInfo.set(null);
+    this.gotoError.set(null);
+    if (code) this.crsService.get(code).subscribe({ next: (crs) => this.otherInfo.set(crs), error: () => undefined });
+  }
 
   zoomIn(): void {
     this.mapService.zoomIn();
@@ -165,12 +190,22 @@ export class MapControlsComponent {
       this.gotoError.set('Longitude must be within ±180 and latitude within ±90.');
       return;
     }
-    const lonLat = this.mapService.goToCoordinate(x, y, option.code);
-    if (!lonLat) {
-      this.gotoError.set('That coordinate is outside the selected coordinate system.');
+    if (this.crs() === OTHER_CRS && !this.otherInfo()) {
+      this.gotoError.set('Choose the coordinate system.');
       return;
     }
-    this.gotoResult.set(`Lon ${lonLat[0].toFixed(6)}, Lat ${lonLat[1].toFixed(6)}`);
+    // Systems beyond the built-in ones get their proj4 definition first.
+    this.crsService.ensureRegistered(option.code).subscribe({
+      next: (ok) => {
+        const lonLat = ok ? this.mapService.goToCoordinate(x, y, option.code) : null;
+        if (!lonLat) {
+          this.gotoError.set(ok ? 'That coordinate is outside the selected coordinate system.' : 'This coordinate system cannot be used here.');
+          return;
+        }
+        this.gotoResult.set(`Lon ${lonLat[0].toFixed(6)}, Lat ${lonLat[1].toFixed(6)}`);
+      },
+      error: () => this.gotoError.set('Could not load the coordinate system.')
+    });
   }
 
   clearGoTo(): void {

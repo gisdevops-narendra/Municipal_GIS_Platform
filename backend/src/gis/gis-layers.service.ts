@@ -25,6 +25,7 @@ import type {
   LayerStyleSpecDto,
 } from './dto/layer-style.dto';
 import { ModuleAccessService } from '../module-access/module-access.service';
+import { CrsService } from './crs.service';
 
 type LayerWithDepartment = GISLayer & {
   department?: { id: string; name: string } | null;
@@ -137,6 +138,7 @@ export class GisLayersService {
     private readonly moduleAccess: ModuleAccessService,
     /** Optional so unit tests need not stub it. */
     @Optional() private readonly ai?: AiClientService,
+    @Optional() private readonly crs?: CrsService,
   ) {}
 
   /**
@@ -287,6 +289,8 @@ export class GisLayersService {
     filter?: { field: string; op: string; value: string },
     /** Export selected: feature keys of this layer (filter is ignored). */
     featureIds?: number[],
+    /** Output CRS — any supported EPSG code; default the layer's own. */
+    crs?: string,
   ): Promise<{ filename: string; body: string | Buffer; contentType: string }> {
     const layer = await this.findLayerInMunicipality(
       appUser.municipalityId,
@@ -320,11 +324,14 @@ export class GisLayersService {
     const cqlFilter = filter
       ? await this.exportFilterCql(layer, filter)
       : undefined;
+    const srsName = crs
+      ? (await this.crs?.require(crs, 'Export CRS'))?.code ?? crs.toUpperCase()
+      : undefined;
     if (format === 'geojson') {
       const geojson = await this.geoServer.getFeaturesAsGeoJson(
         layer.geoserverWorkspace,
         layer.geoserverLayer,
-        { cqlFilter, featureIds: ids },
+        { cqlFilter, featureIds: ids, srsName },
       );
       return {
         filename: `${base}.geojson`,
@@ -338,7 +345,7 @@ export class GisLayersService {
       layer.geoserverWorkspace,
       layer.geoserverLayer,
       spec.outputFormat,
-      { srsName: spec.srsName, cqlFilter, featureIds: ids },
+      { srsName: spec.srsName ?? srsName, cqlFilter, featureIds: ids },
     );
     return { filename: `${base}.${spec.extension}`, body, contentType };
   }

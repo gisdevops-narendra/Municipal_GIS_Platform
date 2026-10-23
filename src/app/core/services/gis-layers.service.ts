@@ -41,17 +41,23 @@ export class GisLayersService {
    *  GeoServer itself and streams it back, never a GeoServer URL handed to
    *  the browser, which would bypass this permission check entirely. */
   /** `filter` exports only matching features (built safely server-side). */
-  export(id: string, format: LayerExportFormat = 'geojson', filter?: { field: string; op: string; value: string }): Observable<Blob> {
+  /** `crs`: output CRS (any EPSG code; KML is always EPSG:4326) — default
+   *  the layer's own. */
+  export(id: string, format: LayerExportFormat = 'geojson', filter?: { field: string; op: string; value: string }, crs?: string): Observable<Blob> {
     return this.http.get(`${this.baseUrl}/${id}/export`, {
-      params: filter ? { format, field: filter.field, op: filter.op, value: filter.value } : { format },
+      params: {
+        format,
+        ...(filter ? { field: filter.field, op: filter.op, value: filter.value } : {}),
+        ...(crs ? { crs } : {})
+      },
       responseType: 'blob'
     });
   }
 
   /** Export selected: only these features (keys, the numeric part of the
    *  WFS ids) — POSTed since a selection can be long. */
-  exportSelected(id: string, format: LayerExportFormat, featureIds: number[]): Observable<Blob> {
-    return this.http.post(`${this.baseUrl}/${id}/export`, { format, featureIds }, { responseType: 'blob' });
+  exportSelected(id: string, format: LayerExportFormat, featureIds: number[], crs?: string): Observable<Blob> {
+    return this.http.post(`${this.baseUrl}/${id}/export`, { format, featureIds, ...(crs ? { crs } : {}) }, { responseType: 'blob' });
   }
 
   /** Analytics (VIEW-gated server-side): the layer's attribute fields. */

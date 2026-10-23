@@ -20,6 +20,7 @@ import { CheckboxModule } from 'primeng/checkbox';
 import { InputNumberModule } from 'primeng/inputnumber';
 import { InputTextModule } from 'primeng/inputtext';
 import { ColorPickerModule } from 'primeng/colorpicker';
+import { ColorPickerCloseDirective } from '../../../../shared/directives/color-picker-close.directive';
 import { SliderModule } from 'primeng/slider';
 import { MessageModule } from 'primeng/message';
 import {
@@ -183,6 +184,7 @@ const ZOOM_TO_DENOM = (z: number): number => 559082264.028 / Math.pow(2, z);
     InputNumberModule,
     InputTextModule,
     ColorPickerModule,
+    ColorPickerCloseDirective,
     SliderModule,
     MessageModule,
   ],

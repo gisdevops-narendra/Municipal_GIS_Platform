@@ -1380,13 +1380,13 @@
           <option value="UTM">UTM (auto zone, metres)</option>
           <option value="EPSG:4326">WGS 84 (EPSG:4326)</option>
           <option value="EPSG:3857">Web Mercator (EPSG:3857)</option>
-          <option value="custom">Other EPSG code…</option>
+          <option value="custom">Any other CRS…</option>
         </select>
       </label>
       @if (resampleCrs === 'custom') {
         <label class="bo__field">
-          <span class="bo__label">EPSG code</span>
-          <input type="text" class="bo__input" placeholder="32643" [(ngModel)]="resampleEpsg" />
+          <span class="bo__label">Target CRS</span>
+          <app-crs-picker [(ngModel)]="resampleEpsg" />
         </label>
       }
       <label class="bo__field">

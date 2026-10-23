@@ -34,6 +34,8 @@ import {
   ChangeTypeDto,
   DuplicatesDto,
   StandardiseDto,
+  ReprojectLayerDto,
+  DefineCrsDto,
 } from './dto/data-tools.dto';
 
 const CSV_LIMIT = { limits: { fileSize: 20 * 1024 * 1024 } };
@@ -43,6 +45,28 @@ const CSV_LIMIT = { limits: { fileSize: 20 * 1024 * 1024 } };
 @Controller('gis')
 export class DataToolsController {
   constructor(private readonly dataTools: DataToolsService) {}
+
+  /** The layer's CRS, extent and suggested systems (Projection tool,
+   *  Export, layer details). */
+  @RequireMunicipalityMember()
+  @Get('layers/:id/crs')
+  layerCrs(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
+    return this.dataTools.layerCrs(appUser, id);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('layers/:id/reproject')
+  @HttpCode(200)
+  reproject(@CurrentAppUser() appUser: AppUser, @Param('id') id: string, @Body() dto: ReprojectLayerDto) {
+    return this.dataTools.reproject(appUser, id, dto);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('layers/:id/define-crs')
+  @HttpCode(200)
+  defineCrs(@CurrentAppUser() appUser: AppUser, @Param('id') id: string, @Body() dto: DefineCrsDto) {
+    return this.dataTools.defineCrs(appUser, id, dto);
+  }
 
   @RequireMunicipalityMember()
   @Post('layers/:id/auto-number')

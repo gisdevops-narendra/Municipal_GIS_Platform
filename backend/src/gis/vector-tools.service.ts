@@ -954,8 +954,11 @@ export class VectorToolsService {
   }
 
   /** `alias.geom` in the output SRID (transformed only when it differs). */
+  /** Source geometry in the output SRID, flattened to 2D — uploads may carry
+   *  Z/M values, but every output column is a plain 2D geometry type. */
   private async geomIn(alias: string, table: string, srid: number): Promise<string> {
-    return (await this.srid(table)) === srid ? `${alias}.geom` : `ST_Transform(${alias}.geom, ${srid})`;
+    const g = `ST_Force2D(${alias}.geom)`;
+    return (await this.srid(table)) === srid ? g : `ST_Transform(${g}, ${srid})`;
   }
 
   private valid(expr: string, type: GisGeometryType): string {

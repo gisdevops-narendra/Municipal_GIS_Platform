@@ -460,6 +460,81 @@
       }
     }
 
+    <!-- ============ PROJECTION ============ -->
+    @case ('projection') {
+      @if (layerId()) {
+        @if (layerCrs(); as info) {
+          <div class="dt__crs">
+            <div class="dt__crs-row">
+              <span class="dt__muted">Current CRS</span>
+              @if (info.crs; as crs) {
+                <span class="dt__crs-code">{{ crs.code }}</span>
+                <span class="dt__crs-name">{{ crs.name }} · {{ crs.kind === 'geographic' ? 'degrees' : crs.unit }}</span>
+              } @else {
+                <span class="dt__crs-name">Not defined — use Define Projection</span>
+              }
+            </div>
+            @if (info.workspaceCrs && info.workspaceCrs !== info.crs?.code) {
+              <div class="dt__crs-row"><span class="dt__muted">Workspace storage CRS</span><span class="dt__crs-name">{{ info.workspaceCrs }}</span></div>
+            }
+            @if (info.extent; as e) {
+              <div class="dt__crs-row">
+                <span class="dt__muted">Extent (lon / lat)</span>
+                <span class="dt__crs-name">{{ e[0].toFixed(4) }}, {{ e[1].toFixed(4) }} → {{ e[2].toFixed(4) }}, {{ e[3].toFixed(4) }}</span>
+              </div>
+            }
+          </div>
+
+          <div class="bo__modes">
+            <button type="button" class="bo__mode" [class.bo__mode--active]="projAction === 'new'" (click)="setProjAction('new')">Reproject → new layer</button>
+            @if (info.editable) {
+              <button type="button" class="bo__mode" [class.bo__mode--active]="projAction === 'inplace'" (click)="setProjAction('inplace')">Reproject this layer</button>
+              <button type="button" class="bo__mode" [class.bo__mode--active]="projAction === 'define'" (click)="setProjAction('define')">Define projection</button>
+            }
+          </div>
+
+          <label class="bo__field">
+            <span class="bo__label">{{ projAction === 'define' ? 'The CRS the coordinates are really in' : 'Target CRS' }}</span>
+            <app-crs-picker [(ngModel)]="projCrs" (ngModelChange)="confirmProjection.set(false)" [suggested]="info.suggestions" />
+          </label>
+          @if (info.suggestions.length) {
+            <div class="dt__crs-chips">
+              @for (c of info.suggestions; track c.code) {
+                <button type="button" class="dt__crs-chip" [class.dt__crs-chip--active]="projCrs === c.code" [title]="c.name"
+                  (click)="projCrs = c.code; confirmProjection.set(false)">{{ c.code }}</button>
+              }
+            </div>
+          }
+
+          @switch (projAction) {
+            @case ('new') {
+              <label class="bo__field"><span class="bo__label">New layer name</span>
+                <input type="text" class="bo__input" maxlength="120" [(ngModel)]="projName" [placeholder]="'Default: layer name (' + (projCrs || 'EPSG:…') + ')'" /></label>
+              <p class="bo__hint">Transforms the coordinates into the chosen CRS as a new layer with all attributes. The original layer is not changed.</p>
+            }
+            @case ('inplace') {
+              <p class="bo__hint">Transforms this layer's coordinates into the chosen CRS. The features stay where they are on the map; their stored coordinates, units and measurements in layer units change. A version is saved first so it can be undone.</p>
+            }
+            @case ('define') {
+              <p class="bo__hint">Use when the layer was imported with the wrong or no CRS and shows up in the wrong place. The coordinates are not changed — only which CRS they are read in. A version is saved first so it can be undone.</p>
+            }
+          }
+
+          @if (confirmProjection()) {
+            <p-message severity="warn" styleClass="w-full"
+              [text]="projAction === 'inplace' ? 'Reproject every feature of this layer to ' + projCrs + '? Click again to confirm.' : 'Relabel this layer as ' + projCrs + '? Its features will move on the map. Click again to confirm.'" />
+          }
+          <div class="bo__controls">
+            <button pButton type="button" class="p-button-sm bo__run" [loading]="running()" (click)="runProjection()"
+              [icon]="projAction === 'define' ? 'pi pi-tag' : 'pi pi-globe'"
+              [label]="projAction === 'new' ? 'Create reprojected layer' : projAction === 'inplace' ? (confirmProjection() ? 'Confirm reproject' : 'Reproject layer') : (confirmProjection() ? 'Confirm define' : 'Define projection')"></button>
+          </div>
+        } @else {
+          <p class="bo__hint">Reading the layer's coordinate system…</p>
+        }
+      }
+    }
+
     <!-- ============ FIELD RULES ============ -->
     @case ('rules') {
       @if (layerId()) {

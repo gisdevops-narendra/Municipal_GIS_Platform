@@ -232,3 +232,47 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+// ----- Projection -----
+.dt__crs {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--p-content-border-color, rgba(127, 127, 127, 0.25));
+  border-radius: 6px;
+  font-size: 0.82rem;
+}
+.dt__crs-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+.dt__crs-code {
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+}
+.dt__crs-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.dt__crs-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: -0.2rem;
+}
+.dt__crs-chip {
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--p-content-border-color, rgba(127, 127, 127, 0.35));
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  &--active {
+    border-color: var(--p-primary-color, #128077);
+    color: var(--p-primary-color, #128077);
+  }
+}

@@ -53,6 +53,12 @@ export class CreateUploadDto {
   @Matches(CRS_PATTERN, { message: 'sourceCrs must look like "EPSG:4326"' })
   sourceCrs?: string;
 
+  /** CRS to store the layer in — any supported EPSG CRS; defaults to the
+   *  workspace's storage CRS. */
+  @IsOptional()
+  @Matches(CRS_PATTERN, { message: 'targetCrs must look like "EPSG:32643"' })
+  targetCrs?: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(100)

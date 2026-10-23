@@ -34,6 +34,8 @@ import { VectorToolsController } from './vector-tools.controller';
 import { VectorToolsService } from './vector-tools.service';
 import { DataToolsController } from './data-tools.controller';
 import { DataToolsService } from './data-tools.service';
+import { CrsController } from './crs.controller';
+import { CrsService } from './crs.service';
 import { UploadReviewService } from './upload-review.service';
 import { UploadSchemaService } from './upload-schema.service';
 
@@ -49,6 +51,7 @@ import { UploadSchemaService } from './upload-schema.service';
     RasterController,
     VectorToolsController,
     DataToolsController,
+    CrsController,
   ],
   providers: [
     GisWorkspaceService,
@@ -74,6 +77,7 @@ import { UploadSchemaService } from './upload-schema.service';
     RasterModuleGuard,
     VectorToolsService,
     DataToolsService,
+    CrsService,
     UploadReviewService,
     UploadSchemaService,
   ],
@@ -84,6 +88,7 @@ import { UploadSchemaService } from './upload-schema.service';
     GeoServerService,
     NetworkService,
     RasterService,
+    CrsService,
   ],
 })
 export class GisModule {}

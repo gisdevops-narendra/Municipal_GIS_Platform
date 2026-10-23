@@ -9,6 +9,7 @@ import { LAYER_EXPORT_FORMATS, LayerExportFormat, LayerExportFormatOption } from
 import { GisLayersService } from '../../../../core/services/gis-layers.service';
 import { NotificationService } from '../../../../core/services/notification.service';
 import { blobErrorMessage, downloadBlob } from '../../../../core/utils/download-blob';
+import { CrsPickerComponent } from '../crs-picker/crs-picker.component';
 
 /**
  * Export Data tool (Module Access: Export Data, with one child module per
@@ -19,7 +20,7 @@ import { blobErrorMessage, downloadBlob } from '../../../../core/utils/download-
 @Component({
   selector: 'app-export-data',
   standalone: true,
-  imports: [FormsModule, ButtonModule, SelectModule],
+  imports: [FormsModule, ButtonModule, SelectModule, CrsPickerComponent],
   templateUrl: './export-data.component.html',
   styleUrl: './export-data.component.scss'
 })
@@ -42,6 +43,8 @@ export class ExportDataComponent {
 
   readonly layerId = signal<string | null>(null);
   readonly format = signal<LayerExportFormat>('geojson');
+  /** Output CRS; '' keeps the layer's own. */
+  crs = '';
   readonly busy = signal(false);
   readonly error = signal<string | null>(null);
 
@@ -102,7 +105,8 @@ export class ExportDataComponent {
     this.busy.set(true);
     this.error.set(null);
     const filter = this.filterOn && this.filterField ? { field: this.filterField, op: this.filterOp, value: this.filterValue } : undefined;
-    this.gisLayersService.export(layer.id, format.value, filter).subscribe({
+    const crs = format.value === 'kml' ? undefined : this.crs || undefined;
+    this.gisLayersService.export(layer.id, format.value, filter, crs).subscribe({
       next: (blob) => {
         this.busy.set(false);
         downloadBlob(blob, `${layer.code.toLowerCase()}.${format.extension}`);

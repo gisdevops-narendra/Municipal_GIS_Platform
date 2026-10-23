@@ -45,6 +45,7 @@ import { BufferOverlayComponent } from './components/buffer-overlay/buffer-overl
 import { GeoprocessingComponent } from './components/geoprocessing/geoprocessing.component';
 import { DataToolsComponent } from './components/data-tools/data-tools.component';
 import { DATA_TOOL_MODULE_IDS } from './services/data-tools.service';
+import { CrsPickerComponent } from './components/crs-picker/crs-picker.component';
 import { EDIT_PANEL_MODULE_ID, GEOPROCESSING_MODULE_ID } from './services/vector-tools.service';
 import {
   AdvancedToolsComponent,
@@ -144,6 +145,7 @@ const TOOLS: WsTool[] = [
   selector: 'app-gis-workspace',
   standalone: true,
   imports: [
+    CrsPickerComponent,
     AnalysisReportComponent,
     ReactiveFormsModule,
     FormsModule,

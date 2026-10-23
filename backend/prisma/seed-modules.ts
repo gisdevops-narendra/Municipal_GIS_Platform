@@ -161,6 +161,7 @@ const MODULES: ModuleSeed[] = [
   { module_id: 1025, module_name: 'Append Features', isactive: true, module_parent_id: 1010, node_path: '1010.1025', sub_module: null, default_module: false, display_priority: 15, type: 'mainleft' },
   { module_id: 1026, module_name: 'Split Layer by Attribute', isactive: true, module_parent_id: 1010, node_path: '1010.1026', sub_module: null, default_module: false, display_priority: 16, type: 'mainleft' },
   { module_id: 1027, module_name: 'Change Log', isactive: true, module_parent_id: 1010, node_path: '1010.1027', sub_module: null, default_module: false, display_priority: 17, type: 'mainleft' },
+  { module_id: 1028, module_name: 'Projection (Reproject / Define CRS)', isactive: true, module_parent_id: 1010, node_path: '1010.1028', sub_module: null, default_module: false, display_priority: 18, type: 'mainleft' },
   { module_id: 1002, module_name: 'Geoprocessing', isactive: true, module_parent_id: null, node_path: '1002', sub_module: null, default_module: false, display_priority: 23, type: 'mainleft' },
   { module_id: 1031, module_name: 'Advanced Overlay (Symmetrical Difference, Merge)', isactive: true, module_parent_id: 1002, node_path: '1002.1031', sub_module: null, default_module: false, display_priority: 1, type: 'mainleft' },
   { module_id: 1032, module_name: 'Proximity Analysis (Nearest Join, Select by Location, Voronoi)', isactive: true, module_parent_id: 1002, node_path: '1002.1032', sub_module: null, default_module: false, display_priority: 2, type: 'mainleft' },

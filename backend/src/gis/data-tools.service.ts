@@ -12,6 +12,7 @@ import { GisAuthorizationService } from './gis-authorization.service';
 import { GeoServerService } from './geoserver.service';
 import { RasterService } from './raster.service';
 import { AddressMatcher } from './address-matcher';
+import { CrsService, type CrsInfo } from './crs.service';
 import { VectorToolsService, type Column, type FieldRules } from './vector-tools.service';
 import { compileFieldExpression, parseCsv } from './field-expression';
 import { generateLayerTableName, isSafeGeneratedTableName } from './layer-naming.util';
@@ -30,6 +31,8 @@ import type {
   ChangeTypeDto,
   DuplicatesDto,
   StandardiseDto,
+  ReprojectLayerDto,
+  DefineCrsDto,
 } from './dto/data-tools.dto';
 
 /** Module Access catalog ids (seed-modules.ts). */
@@ -50,6 +53,7 @@ export const DUPLICATES_MODULE_ID = 1024;
 export const APPEND_MODULE_ID = 1025;
 export const SPLIT_LAYER_MODULE_ID = 1026;
 export const CHANGE_LOG_MODULE_ID = 1027;
+export const PROJECTION_MODULE_ID = 1028;
 
 const NEW_FIELD_TYPES = ['text', 'double precision', 'integer', 'date', 'boolean'] as const;
 const NUMERIC_TYPES = new Set(['integer', 'bigint', 'smallint', 'numeric', 'double precision', 'real']);
@@ -96,6 +100,7 @@ export class DataToolsService {
     private readonly geoServer: GeoServerService,
     private readonly raster: RasterService,
     private readonly vectorTools: VectorToolsService,
+    private readonly crs: CrsService,
   ) {}
 
   // ----- Field Calculator -----
@@ -954,15 +959,136 @@ export class DataToolsService {
     const shared = ['ogc_fid', 'geom', ...(await this.vectorTools.columns(snap.postgisTable)).map((c) => c.name).filter((n) => current.has(n))]
       .map(q)
       .join(', ');
+    // A Projection change since the snapshot: the restored layer takes the
+    // snapshot's CRS back too.
+    const [currentSrid, snapSrid] = [await this.crs.tableSrid(source.table), await this.crs.tableSrid(snap.postgisTable)];
+    const crsChanged = currentSrid !== snapSrid;
+    const realign = crsChanged
+      ? [this.prisma.$executeRawUnsafe(
+          `ALTER TABLE "${source.table}" ALTER COLUMN geom TYPE ${await this.geomTypmod(snap.postgisTable, snapSrid)} USING ST_SetSRID(geom, ${snapSrid})`,
+        )]
+      : [];
     await this.prisma.$transaction([
       this.prisma.$executeRawUnsafe(`DELETE FROM "${source.table}"`),
+      ...realign,
       this.prisma.$executeRawUnsafe(`INSERT INTO "${source.table}" (${shared}) SELECT ${shared} FROM "${snap.postgisTable}"`),
       this.prisma.$executeRawUnsafe(
         `SELECT setval(pg_get_serial_sequence('"${source.table}"', 'ogc_fid'), coalesce(max(ogc_fid), 1)) FROM "${source.table}"`,
       ),
     ]);
-    await this.refreshLayer(source);
+    if (crsChanged && snapSrid) await this.declareCrs(source, snapSrid);
+    else await this.refreshLayer(source);
     return { success: true as const };
+  }
+
+  // ----- Projection -----
+
+  /** The layer's CRS, its extent and the systems that suit it. Not module
+   *  gated — Export and the layer details show it too. */
+  async layerCrs(appUser: AppUser, layerId: string) {
+    const source = await this.gisLayers.vectorSource(appUser, layerId, 'view');
+    const srid = await this.crs.tableSrid(source.table);
+    const workspace = await this.prisma.gISWorkspace.findUnique({
+      where: { id: source.layer.gisWorkspaceId },
+      select: { defaultCrs: true },
+    });
+    const extent = srid ? await this.extent4326(source.from, srid).catch(() => null) : null;
+    return {
+      srid,
+      crs: srid ? ((await this.crs.get(srid)) ?? this.unknownCrs(srid)) : null,
+      workspaceCrs: workspace?.defaultCrs ?? null,
+      extent,
+      suggestions: extent ? await this.crs.suggestFor((extent[0] + extent[2]) / 2, (extent[1] + extent[3]) / 2) : await this.crs.search(''),
+      editable: isSafeGeneratedTableName(source.table),
+    };
+  }
+
+  /** Transforms the coordinates into `targetCrs` — as a new layer (the
+   *  source is untouched; a copy needs EXPORT permission, like Save
+   *  Selection) or in place (a version is saved first, so Versions → Restore
+   *  undoes it). */
+  async reproject(appUser: AppUser, layerId: string, dto: ReprojectLayerDto) {
+    await this.vectorTools.requireModule(appUser, PROJECTION_MODULE_ID, 'Projection');
+    const target = await this.crs.require(dto.targetCrs, 'Target CRS');
+    const source = await this.gisLayers.vectorSource(appUser, layerId, dto.mode === 'inplace' ? 'edit' : 'view');
+    const srid = await this.crs.tableSrid(source.table);
+    if (!srid) throw new BadRequestException('This layer has no CRS — use Define Projection to say which one it is in first.');
+    if (srid === target.srid) throw new BadRequestException(`The layer is already in ${target.code}.`);
+    const from = (await this.crs.get(srid))?.code ?? `EPSG:${srid}`;
+
+    if (dto.mode === 'inplace') {
+      await this.snapshot(appUser, source, `Before reprojecting to ${target.code}`);
+      const typmod = await this.geomTypmod(source.table, target.srid);
+      await this.prisma
+        .$transaction(async (tx) => {
+          await tx.$executeRawUnsafe(
+            `ALTER TABLE "${source.table}" ALTER COLUMN geom TYPE ${typmod} USING ST_Transform(geom, ${target.srid})`,
+          );
+          await this.assertSensible(tx, `"${source.table}"`, target);
+        })
+        .catch((e) => this.projectionError(e, target));
+      await this.declareCrs(source, target.srid, () =>
+        this.prisma.$executeRawUnsafe(
+          `ALTER TABLE "${source.table}" ALTER COLUMN geom TYPE ${typmod.replace(`, ${target.srid})`, `, ${srid})`)} USING ST_Transform(geom, ${srid})`,
+        ),
+      );
+      return { mode: 'inplace' as const, from, to: target.code };
+    }
+
+    if (!(await this.gisAuth.canExport(appUser, source.layer))) {
+      throw new ForbiddenException('You do not have permission to copy features out of this layer.');
+    }
+    const name = dto.outputName?.trim() || `${source.layer.name} (${target.code})`;
+    const output = await this.raster.prepareVectorOutput(appUser, name, dto.departmentId);
+    const cols = (await this.vectorTools.columns(source.table)).map((c) => `a.${q(c.name)}`);
+    const typmod = await this.geomTypmod(source.table, target.srid);
+    await this.prisma
+      .$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(
+          `CREATE TABLE "${output.table}" AS
+             SELECT ${[...cols, `ST_Transform(a.geom, ${target.srid})::${typmod} AS geom`].join(', ')}
+               FROM ${source.from} a ORDER BY a.ogc_fid`,
+        );
+        await this.assertSensible(tx, `"${output.table}"`, target);
+      })
+      .catch((e) => this.projectionError(e, target));
+    await this.prisma.$executeRawUnsafe(`ALTER TABLE "${output.table}" ADD COLUMN ogc_fid SERIAL PRIMARY KEY`);
+    const layer = await this.raster.publishVectorTable(appUser, output, {
+      name,
+      geometryType: source.layer.geometryType ?? 'POLYGON',
+      description: `${source.layer.name} reprojected from ${from} to ${target.code} (${target.name})`,
+      rasterAnalysis: false,
+      srs: target.code,
+    });
+    return { mode: 'new' as const, from, to: target.code, layer };
+  }
+
+  /** Define Projection: the coordinates are right but the layer was
+   *  imported with the wrong (or no) CRS. Relabels them without moving
+   *  them — refused when they cannot be in that CRS. Saved as a version
+   *  first, like an in-place reprojection. */
+  async defineCrs(appUser: AppUser, layerId: string, dto: DefineCrsDto) {
+    await this.vectorTools.requireModule(appUser, PROJECTION_MODULE_ID, 'Projection');
+    const target = await this.crs.require(dto.crs);
+    const source = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
+    const srid = await this.crs.tableSrid(source.table);
+    if (srid === target.srid) throw new BadRequestException(`The layer is already labelled ${target.code}.`);
+    await this.snapshot(appUser, source, `Before defining the projection as ${target.code}`);
+    const typmod = await this.geomTypmod(source.table, target.srid);
+    await this.prisma
+      .$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(
+          `ALTER TABLE "${source.table}" ALTER COLUMN geom TYPE ${typmod} USING ST_SetSRID(geom, ${target.srid})`,
+        );
+        await this.assertSensible(tx, `"${source.table}"`, target);
+      })
+      .catch((e) => this.projectionError(e, target));
+    await this.declareCrs(source, target.srid, () =>
+      this.prisma.$executeRawUnsafe(
+        `ALTER TABLE "${source.table}" ALTER COLUMN geom TYPE ${typmod.replace(`, ${target.srid})`, `, ${srid})`)} USING ST_SetSRID(geom, ${srid})`,
+      ),
+    );
+    return { from: srid ? `EPSG:${srid}` : null, to: target.code };
   }
 
   // ----- internals -----
@@ -1039,6 +1165,80 @@ export class DataToolsService {
   }
 
   /** GeoServer picks up new columns / a new extent. Best effort. */
+  /** `geometry(MultiPolygon[Z|M|ZM], srid)` — the table's geometry type
+   *  and dimensions, in another SRID. */
+  private async geomTypmod(table: string, srid: number): Promise<string> {
+    const [row] = await this.prisma.$queryRawUnsafe<{ type: string | null; dims: number | null }[]>(
+      `SELECT type, coord_dimension AS dims FROM geometry_columns
+        WHERE f_table_schema = 'public' AND f_table_name = $1 AND f_geometry_column = 'geom'`,
+      table,
+    );
+    let type = (row?.type ?? 'GEOMETRY').toUpperCase();
+    if (!type.endsWith('M')) type += row?.dims === 4 ? 'ZM' : row?.dims === 3 ? 'Z' : '';
+    return `geometry(${type}, ${srid})`;
+  }
+
+  /** [minLon, minLat, maxLon, maxLat] of a table / subquery. */
+  private async extent4326(
+    from: string,
+    srid: number,
+    db: Pick<PrismaService, '$queryRawUnsafe'> = this.prisma,
+  ): Promise<[number, number, number, number] | null> {
+    const [row] = await db.$queryRawUnsafe<{ x0: number | null; y0: number; x1: number; y1: number }[]>(
+      `SELECT ST_XMin(e) AS x0, ST_YMin(e) AS y0, ST_XMax(e) AS x1, ST_YMax(e) AS y1
+         FROM (SELECT ST_Transform(ST_SetSRID(ST_Extent(geom)::geometry, ${srid}), 4326) AS e FROM ${from}) s`,
+    );
+    return row?.x0 === null || row?.x0 === undefined ? null : [row.x0, row.y0, row.x1, row.y1].map(Number) as [number, number, number, number];
+  }
+
+  /** Coordinates that land off the globe mean the CRS is wrong for them
+   *  (e.g. metres labelled as degrees) — refuse, rolling back. */
+  private async assertSensible(tx: Prisma.TransactionClient, from: string, crs: CrsInfo) {
+    const e = await this.extent4326(from, crs.srid, tx);
+    if (!e) return;
+    const ok = e.every(Number.isFinite) && e[0] >= -180.5 && e[2] <= 180.5 && e[1] >= -90.5 && e[3] <= 90.5;
+    if (!ok) {
+      throw new BadRequestException(
+        `In ${crs.code} (${crs.name}) these coordinates would fall off the globe — the data is not in that CRS.`,
+      );
+    }
+  }
+
+  private projectionError(error: unknown, crs: CrsInfo): never {
+    if (error instanceof BadRequestException) throw error;
+    const message = (error as Error).message ?? '';
+    if (/transform|proj|latitude|out of range|tolerance condition/i.test(message)) {
+      throw new BadRequestException(`The coordinates cannot be converted to ${crs.code} (${crs.name}) — they lie outside the area it covers.`);
+    }
+    throw error;
+  }
+
+  /** Re-declares the layer's CRS in GeoServer and stores its new extent;
+   *  if GeoServer refuses, `revert` puts the table back first. */
+  private async declareCrs(source: Source, srid: number, revert?: () => Promise<unknown>) {
+    try {
+      const bbox = await this.geoServer.setFeatureTypeCrs(
+        source.layer.geoserverWorkspace,
+        `${source.layer.geoserverWorkspace}_postgis`,
+        source.layer.geoserverLayer,
+        `EPSG:${srid}`,
+      );
+      if (bbox) {
+        await this.prisma.gISLayer.update({
+          where: { id: source.layer.id },
+          data: { bboxMinX: bbox.minX, bboxMinY: bbox.minY, bboxMaxX: bbox.maxX, bboxMaxY: bbox.maxY },
+        });
+      }
+    } catch (error) {
+      if (revert) await revert().catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private unknownCrs(srid: number): CrsInfo {
+    return { code: `EPSG:${srid}`, srid, name: `EPSG:${srid}`, kind: 'projected', unit: 'unknown', proj4: '' };
+  }
+
   private async refreshLayer(source: Source) {
     await this.geoServer
       .refreshFeatureType(

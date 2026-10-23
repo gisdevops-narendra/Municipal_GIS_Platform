@@ -21,6 +21,8 @@ import { StyleEditorComponent } from '../style-editor/style-editor.component';
 import { UploadColumnsComponent } from '../upload-columns/upload-columns.component';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { StyleGeometry } from '../../../../core/models/layer-style.model';
+import { GisWorkspaceService } from '../../../../core/services/gis-workspace.service';
+import { CrsPickerComponent } from '../crs-picker/crs-picker.component';
 
 type WizardStep = 'FILE_INFO' | 'VALIDATION' | 'COLUMNS' | 'PREVIEW';
 
@@ -58,6 +60,7 @@ const ACCEPTED_EXTENSIONS = ['zip', 'geojson', 'json', 'csv'];
     TagModule,
     ProgressBarModule,
     MunicipalMapComponent,
+    CrsPickerComponent,
     StyleEditorComponent,
     UploadColumnsComponent
   ],
@@ -85,6 +88,9 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
   private readonly uploadsService = inject(GisUploadsService);
   private readonly departmentService = inject(DepartmentService);
   private readonly mapService = inject(MapService);
+  private readonly workspaceService = inject(GisWorkspaceService);
+  /** The workspace's storage CRS — the default for new layers. */
+  readonly workspaceCrs = signal('');
 
   readonly step = signal<WizardStep>('FILE_INFO');
   readonly departments = signal<Department[]>([]);
@@ -133,6 +139,7 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
     routingEnabled: [false],
     departmentId: [''],
     sourceCrs: [''],
+    targetCrs: [''],
     latitudeField: [''],
     longitudeField: [''],
     xField: [''],
@@ -140,6 +147,13 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
   });
 
   ngOnInit(): void {
+    this.workspaceService.getWorkspace().subscribe({
+      next: (ws) => {
+        this.workspaceCrs.set(ws.defaultCrs);
+        if (!this.form.controls.targetCrs.value) this.form.controls.targetCrs.setValue(ws.defaultCrs);
+      },
+      error: () => undefined
+    });
     if (this.resume) {
       this.upload.set(this.resume);
       if (this.resume.schema?.confirmedAt) {
@@ -280,7 +294,7 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
       return;
     }
     if ((value.xField || value.yField) && !CRS_PATTERN.test(value.sourceCrs)) {
-      this.submitError.set('Specify a valid sourceCrs (e.g. "EPSG:32643") when using X/Y columns.');
+      this.submitError.set('Choose the Source CRS of the X/Y columns — X/Y is never assumed to be WGS84.');
       return;
     }
 
@@ -296,6 +310,7 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
         routingEnabled: value.routingEnabled,
         departmentId: value.ownershipType === 'DEPARTMENT' ? value.departmentId : undefined,
         sourceCrs: value.sourceCrs || undefined,
+        targetCrs: value.targetCrs && value.targetCrs !== this.workspaceCrs() ? value.targetCrs : undefined,
         latitudeField: value.latitudeField || undefined,
         longitudeField: value.longitudeField || undefined,
         xField: value.xField || undefined,

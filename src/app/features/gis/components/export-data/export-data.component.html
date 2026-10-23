@@ -50,6 +50,13 @@
       </div>
     </div>
 
+    @if (selectedFormat()?.value !== 'kml') {
+      <label class="export__field">
+        <span class="export__label">Coordinate system</span>
+        <app-crs-picker [(ngModel)]="crs" emptyLabel="Layer's own CRS" />
+      </label>
+    }
+
     @if (error(); as message) {
       <p class="export__error" role="alert">{{ message }}</p>
     }
@@ -66,7 +73,7 @@
     ></button>
 
     <p class="export__hint export__hint--muted">
-      Exports every feature in the layer. Shapefiles download as a .zip; KML is always in WGS84 (EPSG:4326).
+      Exports every feature in the layer, reprojected into the chosen coordinate system. Shapefiles download as a .zip (with a .prj); KML is always in WGS84 (EPSG:4326).
     </p>
   }
 </div>

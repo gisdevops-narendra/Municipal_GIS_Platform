@@ -32,6 +32,7 @@ import { GisAuthorizationService } from './gis-authorization.service';
 import { StyleService, type UploadedIcon } from './style.service';
 import { FieldStatsService } from './field-stats.service';
 import { CreateUploadDto } from './dto/create-upload.dto';
+import { CrsService } from './crs.service';
 import type {
   ClassificationMethod,
   LayerStyleSpecDto,
@@ -52,6 +53,9 @@ interface ValidationSummary {
   warnings: string[];
   errors: string[];
 }
+
+/** Source CRS label when the file's own CRS (no EPSG equivalent) is used. */
+const FILE_CRS = "File's own CRS (.prj)";
 
 const LAT_NAMES = ['latitude', 'lat'];
 const LON_NAMES = ['longitude', 'lon', 'lng'];
@@ -104,6 +108,7 @@ export class GisUploadsService {
     @Optional() private readonly review?: UploadReviewService,
     @Optional() private readonly schema?: UploadSchemaService,
     @Optional() private readonly network?: NetworkService,
+    @Optional() private readonly crs?: CrsService,
   ) {}
 
   async create(
@@ -146,6 +151,12 @@ export class GisUploadsService {
       );
     }
 
+    // Any supported EPSG CRS — checked now, not after the import fails.
+    if (this.crs) {
+      if (dto.sourceCrs) await this.crs.require(dto.sourceCrs, 'Source CRS');
+      if (dto.targetCrs) await this.crs.require(dto.targetCrs, 'Storage CRS');
+    }
+
     const upload = await this.prisma.gISLayerUpload.create({
       data: {
         municipalityId: appUser.municipalityId,
@@ -164,7 +175,7 @@ export class GisUploadsService {
         ownershipType: dto.ownershipType,
         routingEnabled: dto.routingEnabled === true,
         sourceCrs: dto.sourceCrs ?? null,
-        targetCrs: workspace.defaultCrs,
+        targetCrs: dto.targetCrs?.toUpperCase() ?? workspace.defaultCrs,
       },
     });
 
@@ -832,10 +843,10 @@ export class GisUploadsService {
         throw new GdalError('The uploaded file contains no features.');
       }
 
-      const sourceCrs = this.resolveSourceCrs(upload, inspected.epsgCode);
+      const sourceCrs = await this.resolveSourceCrs(upload, inspected, sourcePath);
       if (!sourceCrs) {
         throw new GdalError(
-          'Source CRS could not be determined from the file. Re-upload and specify sourceCrs explicitly.',
+          'The file does not say which coordinate system it is in (no .prj). Upload it again and choose its Source CRS.',
         );
       }
 
@@ -1001,14 +1012,20 @@ export class GisUploadsService {
     return inspected.fields.map((f) => f.name);
   }
 
-  private resolveSourceCrs(
+  /** User override → CSV lat/lon default → EPSG code in the file → the
+   *  closest EPSG match for a CRS declared without one (ESRI .prj) → the
+   *  file's own CRS as is (ogr2ogr reprojects from its WKT). */
+  private async resolveSourceCrs(
     upload: GISLayerUpload,
-    detectedEpsg: number | null,
-  ): string | null {
+    inspected: { epsgCode: number | null; hasCrs: boolean },
+    sourcePath: string,
+  ): Promise<string | null> {
     if (upload.sourceCrs) return upload.sourceCrs;
     if (upload.fileFormat === 'CSV') return 'EPSG:4326';
-    if (detectedEpsg) return `EPSG:${detectedEpsg}`;
-    return null;
+    if (inspected.epsgCode) return `EPSG:${inspected.epsgCode}`;
+    if (!inspected.hasCrs) return null;
+    const matched = await this.gdal.identifyEpsg(sourcePath);
+    return matched ? `EPSG:${matched}` : FILE_CRS;
   }
 
   private findShapefile(dir: string, files: string[]): string {

@@ -13,6 +13,7 @@ import { MapService } from '../../services/map.service';
 import { DRAW_MODULE_ID } from '../../models/sketch.model';
 import { BlankFieldType, EDIT_PANEL_MODULE_ID, VectorToolsService } from '../../services/vector-tools.service';
 import { FeatureEditComponent } from '../feature-edit/feature-edit.component';
+import { CrsPickerComponent } from '../crs-picker/crs-picker.component';
 
 interface FieldDraft {
   key: number;
@@ -61,7 +62,7 @@ const RESERVED_FIELDS = new Set(['geom', 'ogc_fid', 'fid', 'gis_workspace_id']);
 @Component({
   selector: 'app-layer-digitize',
   standalone: true,
-  imports: [FormsModule, ButtonModule, SelectModule, InputTextModule, TooltipModule, MenuModule, FeatureEditComponent],
+  imports: [FormsModule, ButtonModule, SelectModule, InputTextModule, TooltipModule, MenuModule, FeatureEditComponent, CrsPickerComponent],
   templateUrl: './layer-digitize.component.html',
   styleUrls: ['../buffer-overlay/buffer-overlay.component.scss', './layer-digitize.component.scss']
 })
@@ -155,7 +156,7 @@ export class LayerDigitizeComponent {
     return [
       ...(this.defaultCrs ? [{ value: this.defaultCrs, label: `${this.defaultCrs} · workspace default` }] : []),
       ...presets,
-      { value: OTHER_CRS, label: 'Other EPSG code…' }
+      { value: OTHER_CRS, label: 'Any other CRS…' }
     ];
   });
 
@@ -334,7 +335,7 @@ export class LayerDigitizeComponent {
     const name = this.newName.trim();
     const crs = this.newCrs === OTHER_CRS ? this.customCrs.trim().toUpperCase() : this.newCrs;
     if (!name) return this.formError.set('Enter a layer name.');
-    if (!/^EPSG:\d{4,6}$/.test(crs)) return this.formError.set('Enter the CRS as EPSG:code, e.g. EPSG:32643.');
+    if (!/^EPSG:\d{4,6}$/.test(crs)) return this.formError.set('Choose the coordinate system.');
     const bad = this.fields().find((f) => this.fieldProblem(f));
     if (bad) return this.formError.set(`Field "${bad.name || '(unnamed)'}": ${this.fieldProblem(bad)}`);
 

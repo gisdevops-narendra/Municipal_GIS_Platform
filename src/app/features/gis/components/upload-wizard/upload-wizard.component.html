@@ -128,6 +128,15 @@
         </label>
       }
 
+      <div class="upload-wizard__field">
+        <label class="field-label" for="wiz-target-crs">Store layer in <span class="upload-wizard__optional">(optional)</span></label>
+        <app-crs-picker inputId="wiz-target-crs" formControlName="targetCrs" />
+        <div class="field-hint">
+          The file's own projection is detected automatically and the data is reprojected into this CRS{{ workspaceCrs() ? ' — workspace default ' + workspaceCrs() : '' }}.
+          Change it only if this layer should be stored in another CRS.
+        </div>
+      </div>
+
       @if (isCsv) {
         <div class="upload-wizard__csv-fields">
           <p class="upload-wizard__hint">
@@ -153,11 +162,13 @@
               <input pInputText id="wiz-y" formControlName="yField" class="w-full" />
             </div>
           </div>
-          <div class="upload-wizard__field">
-            <label class="field-label" for="wiz-source-crs">Source CRS</label>
-            <input pInputText id="wiz-source-crs" formControlName="sourceCrs" class="w-full" placeholder="EPSG:4326" />
-            <div class="field-hint">Required if using X/Y columns — never assumed to be WGS84.</div>
-          </div>
+          @if (f.xField.value || f.yField.value) {
+            <div class="upload-wizard__field">
+              <label class="field-label" for="wiz-source-crs">CRS of the X/Y columns <span class="upload-wizard__req">*</span></label>
+              <app-crs-picker inputId="wiz-source-crs" formControlName="sourceCrs" />
+              <div class="field-hint">A CSV has no projection file, and X/Y values are never assumed to be WGS84.</div>
+            </div>
+          }
         </div>
       }
 

@@ -24,8 +24,10 @@ import {
   TopologyIssue,
   VERSIONS_MODULE_ID
 } from '../../services/data-tools.service';
+import { CrsService, LayerCrs, PROJECTION_MODULE_ID, crsLabel } from '../../services/crs.service';
+import { CrsPickerComponent } from '../crs-picker/crs-picker.component';
 
-type Tool = 'calc' | 'fields' | 'geometry' | 'replace' | 'autonum' | 'convert' | 'standardise' | 'join' | 'geocode' | 'append' | 'split' | 'validate' | 'completeness' | 'duplicates' | 'rules' | 'versions' | 'changelog';
+type Tool = 'calc' | 'fields' | 'geometry' | 'replace' | 'autonum' | 'convert' | 'standardise' | 'join' | 'geocode' | 'append' | 'split' | 'validate' | 'completeness' | 'duplicates' | 'rules' | 'versions' | 'changelog' | 'projection';
 
 interface Field {
   name: string;
@@ -70,7 +72,7 @@ const CHECK_COLORS: Record<TopologyIssue['check'], string> = {
 @Component({
   selector: 'app-data-tools',
   standalone: true,
-  imports: [FormsModule, DatePipe, ButtonModule, SelectModule, MultiSelectModule, MessageModule],
+  imports: [FormsModule, DatePipe, ButtonModule, SelectModule, MultiSelectModule, MessageModule, CrsPickerComponent],
   templateUrl: './data-tools.component.html',
   styleUrls: ['../buffer-overlay/buffer-overlay.component.scss', './data-tools.component.scss']
 })
@@ -78,6 +80,7 @@ export class DataToolsComponent {
   private readonly notify = inject(NotificationService);
   private readonly api = inject(DataToolsService);
   private readonly mapService = inject(MapService);
+  private readonly crsApi = inject(CrsService);
 
   @Input() set layers(value: GisLayer[]) {
     this.layersSignal.set(value ?? []);
@@ -109,12 +112,13 @@ export class DataToolsComponent {
       { value: 'geocode' as Tool, group: 'Import & combine', label: 'Geocode Addresses', moduleId: GEOCODE_MODULE_ID },
       { value: 'append' as Tool, group: 'Import & combine', label: 'Append Features', moduleId: 1025 },
       { value: 'split' as Tool, group: 'Import & combine', label: 'Split Layer by Attribute', moduleId: 1026 },
+      { value: 'projection' as Tool, group: 'Projection', label: 'Projection (Reproject / Define CRS)', moduleId: PROJECTION_MODULE_ID },
       { value: 'versions' as Tool, group: 'History', label: 'Versions', moduleId: VERSIONS_MODULE_ID },
       { value: 'changelog' as Tool, group: 'History', label: 'Change Log', moduleId: 1027 }
     ].filter((t) => this.allowedSignal().has(t.moduleId))
   );
   readonly toolGroups = computed(() =>
-    ['Fields & values', 'Data quality', 'Import & combine', 'History']
+    ['Fields & values', 'Data quality', 'Import & combine', 'Projection', 'History']
       .map((label) => ({ label, items: this.tools().filter((t) => t.group === label) }))
       .filter((g) => g.items.length)
   );
@@ -235,6 +239,14 @@ export class DataToolsComponent {
   // rules
   readonly ruleRows = signal<RuleRow[]>([]);
 
+  // projection
+  projAction: 'new' | 'inplace' | 'define' = 'new';
+  projCrs = '';
+  projName = '';
+  readonly layerCrs = signal<LayerCrs | null>(null);
+  readonly confirmProjection = signal(false);
+  readonly crsLabel = crsLabel;
+
   // versions
   readonly snapshots = signal<LayerSnapshot[] | null>(null);
   snapshotName = '';
@@ -286,6 +298,16 @@ export class DataToolsComponent {
 
   private loadForTool(): void {
     const layerId = this.layerId();
+    if (this.tool() === 'projection') {
+      this.layerCrs.set(null);
+      this.confirmProjection.set(false);
+      if (layerId) {
+        this.crsApi.layerCrs(layerId).subscribe({
+          next: (info) => this.layerId() === layerId && this.layerCrs.set(info),
+          error: (err: HttpErrorResponse) => this.fail(err)
+        });
+      }
+    }
     if (this.tool() === 'versions' && layerId && !this.snapshots()) {
       this.api.snapshots(layerId).subscribe({
         next: (rows) => this.layerId() === layerId && this.snapshots.set(rows),
@@ -646,6 +668,50 @@ export class DataToolsComponent {
     });
   }
 
+
+  // ----- Projection -----
+
+  setProjAction(action: 'new' | 'inplace' | 'define'): void {
+    this.projAction = action;
+    this.confirmProjection.set(false);
+    this.error.set(null);
+  }
+
+  /** In-place changes rewrite the layer, so they take a second click. */
+  runProjection(): void {
+    const layerId = this.layerId();
+    const info = this.layerCrs();
+    if (!layerId || !info) return;
+    const target = this.projCrs;
+    if (!target) return this.error.set('Choose the coordinate system.');
+    if (target === info.crs?.code) return this.error.set(`The layer is already in ${target}.`);
+    if (this.projAction !== 'new' && !this.confirmProjection()) {
+      this.confirmProjection.set(true);
+      return;
+    }
+    this.confirmProjection.set(false);
+    if (this.projAction === 'new') {
+      this.run(this.api.reproject(layerId, { targetCrs: target, mode: 'new', outputName: this.projName.trim() || undefined }), (r) => {
+        this.notice.set(`Created "${r.layer?.name}" in ${r.to} (from ${r.from}). The original layer is unchanged.`);
+        if (r.layer) this.layerCreated.emit(r.layer);
+        this.projName = '';
+      });
+      return;
+    }
+    const request: Observable<{ from: string | null; to: string }> = this.projAction === 'inplace'
+      ? this.api.reproject(layerId, { targetCrs: target, mode: 'inplace' })
+      : this.api.defineCrs(layerId, target);
+    this.run(request, (r) => {
+      this.mapService.refreshLayerStyle(layerId);
+      this.notice.set(
+        this.projAction === 'inplace'
+          ? `Reprojected the layer from ${r.from} to ${r.to}. The previous data was saved as a version — restore it from Versions to undo.`
+          : `The layer is now defined as ${r.to}${r.from ? ` (was ${r.from})` : ''}. The previous data was saved as a version — restore it from Versions to undo.`
+      );
+      this.snapshots.set(null);
+      this.loadForTool();
+    });
+  }
 
   // ----- Auto-number -----
 
