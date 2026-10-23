@@ -620,7 +620,7 @@ export class RasterService {
     return {
       mode: 'ramp',
       band: 1,
-      ramp: band?.type === 'Byte' ? 'grayscale' : 'terrain',
+      ramp: band?.type === 'Byte' ? 'grayscale' : 'elevation',
       min: band?.min ?? 0,
       max: band?.max ?? 1,
     };

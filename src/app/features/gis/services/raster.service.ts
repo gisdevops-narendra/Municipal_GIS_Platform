@@ -244,7 +244,36 @@ export interface LayerResult {
   result: Record<string, unknown>;
 }
 
-export const RASTER_RAMP_NAMES = ['terrain', 'grayscale', 'ndvi', 'diverging', 'water', 'heat', 'aspect', 'spectral'];
+/** Colour ramps the backend offers (raster-style.ts), with display names. */
+export const RASTER_RAMPS: { value: string; label: string }[] = [
+  { value: 'elevation', label: 'Elevation (hypsometric)' },
+  { value: 'terrain', label: 'Terrain' },
+  { value: 'slope', label: 'Slope (flat → steep)' },
+  { value: 'roughness', label: 'Roughness' },
+  { value: 'curvature', label: 'Curvature (valley ↔ ridge)' },
+  { value: 'aspect', label: 'Aspect (compass)' },
+  { value: 'grayscale', label: 'Grayscale' },
+  { value: 'flow', label: 'Flow accumulation' },
+  { value: 'water', label: 'Water' },
+  { value: 'depth', label: 'Water depth' },
+  { value: 'ndvi', label: 'Vegetation (NDVI)' },
+  { value: 'ndwi', label: 'Water index (NDWI)' },
+  { value: 'urban', label: 'Built-up (NDBI)' },
+  { value: 'thermal', label: 'Temperature' },
+  { value: 'change', label: 'Change (loss ↔ gain)' },
+  { value: 'diverging', label: 'Diverging (blue ↔ red)' },
+  { value: 'suitability', label: 'Suitability (low → high)' },
+  { value: 'risk', label: 'Risk / exposure' },
+  { value: 'density', label: 'Density / hotspots' },
+  { value: 'heat', label: 'Heat' },
+  { value: 'distance', label: 'Distance (near → far)' },
+  { value: 'visibility', label: 'Visibility' },
+  { value: 'population', label: 'Population' },
+  { value: 'aqi', label: 'Air quality' },
+  { value: 'height', label: 'Height' },
+  { value: 'viridis', label: 'Viridis (continuous)' },
+  { value: 'spectral', label: 'Spectral' }
+];
 
 /** Raster Analysis API (`/gis/raster`). */
 @Injectable({ providedIn: 'root' })

@@ -22,7 +22,7 @@ import {
   LayerResult,
   LonLat,
   ProfilePoint,
-  RASTER_RAMP_NAMES,
+  RASTER_RAMPS,
   RasterInfo,
   RasterJob,
   RasterMonitor,
@@ -272,7 +272,7 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
 
   @Output() layerCreated = new EventEmitter<GisLayer>();
 
-  readonly ramps = RASTER_RAMP_NAMES;
+  readonly ramps = RASTER_RAMPS;
   readonly tools = computed(() => RASTER_TOOLS.filter((t) => this.allowedSignal().has(t.moduleId)));
   readonly toolGroups = computed(() => {
     const groups: { label: string; short: string; icon: string; items: { label: string; value: RasterToolId; icon: string }[] }[] = [];

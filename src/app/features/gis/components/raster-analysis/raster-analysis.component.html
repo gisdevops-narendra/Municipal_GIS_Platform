@@ -211,8 +211,8 @@
         <label class="bo__field">
           <span class="bo__label">Ramp</span>
           <select class="bo__input" [(ngModel)]="styleRamp">
-            @for (r of ramps; track r) {
-              <option [value]="r">{{ r }}</option>
+            @for (r of ramps; track r.value) {
+              <option [value]="r.value">{{ r.label }}</option>
             }
           </select>
         </label>

@@ -120,10 +120,12 @@ export class RasterToolsService {
           : dto.kind === 'aspect'
             ? { mode: 'ramp', ramp: 'aspect', min: 0, max: 360 }
             : dto.kind === 'TPI' || dto.kind === 'curvature'
-              ? { mode: 'ramp', ramp: 'diverging', min: -m, max: m }
+              ? { mode: 'ramp', ramp: 'curvature', min: -m, max: m }
               : dto.kind === 'multihillshade'
                 ? { mode: 'ramp', ramp: 'grayscale', min: 0, max: 255 }
-              : { mode: 'ramp', ramp: 'heat', min: 0, max: hi };
+                : dto.kind === 'slope'
+                  ? { mode: 'ramp', ramp: 'slope', min: 0, max: hi }
+                  : { mode: 'ramp', ramp: 'roughness', min: 0, max: hi };
       return { style, result: { stats: r.stats } };
     });
   }
@@ -165,7 +167,7 @@ export class RasterToolsService {
       // stats are of log10(km²): stretch the ramp over the main channels.
       const max = Math.pow(10, r.stats.p98 ?? 0);
       return {
-        style: { mode: 'ramp', ramp: 'water', min: max / 100, max },
+        style: { mode: 'ramp', ramp: 'flow', min: max / 100, max },
         result: { maxUpstreamKm2: r.maxUpstreamKm2, resampled: r.resampled },
       };
     });
@@ -178,7 +180,7 @@ export class RasterToolsService {
         op: 'flood', path: file, band: dto.band ?? 1, level: dto.level, seed: dto.seed, output,
       });
       const { stats, ...result } = r;
-      return { style: { mode: 'ramp', ramp: 'water', min: 0, max: stats.max ?? 1, opacity: 0.8 }, result };
+      return { style: { mode: 'ramp', ramp: 'depth', min: 0, max: stats.max ?? 1, opacity: 0.8 }, result };
     });
   }
 
@@ -200,7 +202,7 @@ export class RasterToolsService {
           observerHeight: dto.observerHeight ?? 1.7, targetHeight: dto.targetHeight ?? 0, maxDistance: dto.maxDistance,
         });
         return {
-          style: { mode: 'ramp', ramp: 'heat', min: 1, max: Math.max(r.maxObservers, 2), opacity: 0.7 },
+          style: { mode: 'ramp', ramp: 'visibility', min: 1, max: Math.max(r.maxObservers, 2), opacity: 0.7 },
           result: r,
         };
       });
@@ -228,7 +230,7 @@ export class RasterToolsService {
         op: 'fill_sinks', path: file, band: dto.band ?? 1, output,
       });
       const [min, max] = span(stats, [0, 1]);
-      const style = (layer.styleSpec as RasterStyleSpec | null) ?? { mode: 'ramp', ramp: 'terrain', min, max };
+      const style = (layer.styleSpec as RasterStyleSpec | null) ?? { mode: 'ramp', ramp: 'elevation', min, max };
       return { style: { ...style, band: 1 } as RasterStyleSpec, result: { ...result, stats } };
     });
   }
@@ -279,7 +281,7 @@ export class RasterToolsService {
       });
       const [min, max] = span(r.stats, [0, 1]);
       const style: RasterStyleSpec = dto.field
-        ? { mode: 'ramp', ramp: 'spectral', min, max }
+        ? { mode: 'ramp', ramp: 'viridis', min, max }
         : { mode: 'values', classes: [{ value: 1, color: '#2563eb', label: 'Inside', opacity: 0.7 }] };
       return { style, result: r };
     });
@@ -323,7 +325,7 @@ export class RasterToolsService {
         power: dto.power ?? 2, maxPoints: dto.maxPoints ?? 12, output,
       });
       const [min, max] = span(r.stats, [0, 1]);
-      return { style: { mode: 'ramp', ramp: 'spectral', min, max, invert: true, opacity: 0.85 }, result: r };
+      return { style: { mode: 'ramp', ramp: 'viridis', min, max, opacity: 0.85 }, result: r };
     });
   }
 
@@ -335,7 +337,7 @@ export class RasterToolsService {
         op: 'heatmap', vector: source, weightField: dto.weightField, pixelSize: dto.pixelSize,
         radius: dto.radius, output,
       });
-      return { style: { mode: 'ramp', ramp: 'heat', min: 0, max: r.stats.p98 ?? r.peakPerKm2, opacity: 0.8 }, result: r };
+      return { style: { mode: 'ramp', ramp: 'density', min: 0, max: r.stats.p98 ?? r.peakPerKm2, opacity: 0.8 }, result: r };
     });
   }
 
@@ -345,7 +347,7 @@ export class RasterToolsService {
       const r = await this.rasters.runOp({
         op: 'proximity', vector: source, pixelSize: dto.pixelSize, maxDistance: dto.maxDistance, output,
       });
-      return { style: { mode: 'ramp', ramp: 'heat', min: 0, max: dto.maxDistance, invert: true, opacity: 0.75 }, result: r };
+      return { style: { mode: 'ramp', ramp: 'distance', min: 0, max: dto.maxDistance, opacity: 0.75 }, result: r };
     });
   }
 
@@ -360,7 +362,7 @@ export class RasterToolsService {
     return this.toRasterLayer(appUser, dto.outputName, async (output) => {
       const r = await this.rasters.runOp<{ stats: RasterStats }>({ op: 'calc', inputs, expression: dto.expression, output });
       const [min, max] = span(r.stats, [0, 1]);
-      return { style: { mode: 'ramp', ramp: 'spectral', min, max }, result: { stats: r.stats } };
+      return { style: { mode: 'ramp', ramp: 'viridis', min, max }, result: { stats: r.stats } };
     });
   }
 
@@ -429,7 +431,7 @@ export class RasterToolsService {
       });
       const [lo, hi] = span(stats, [-1, 1]);
       const m = Math.max(Math.abs(lo), Math.abs(hi)) || 1;
-      return { style: { mode: 'ramp', ramp: 'diverging', min: -m, max: m }, result: { ...result, stats } };
+      return { style: { mode: 'ramp', ramp: 'change', min: -m, max: m }, result: { ...result, stats } };
     });
   }
 
@@ -451,9 +453,9 @@ export class RasterToolsService {
       });
       const style: RasterStyleSpec =
         dto.kind === 'ndwi'
-          ? { mode: 'ramp', ramp: 'water', min: -0.3, max: 0.6 }
+          ? { mode: 'ramp', ramp: 'ndwi', min: -0.5, max: 0.5 }
           : dto.kind === 'ndbi'
-            ? { mode: 'ramp', ramp: 'heat', min: -0.3, max: 0.4 }
+            ? { mode: 'ramp', ramp: 'urban', min: -0.4, max: 0.4 }
             : { mode: 'ramp', ramp: 'ndvi', min: -0.2, max: dto.kind === 'evi' ? 0.8 : 0.9 };
       return { style, result: { ...result, stats } };
     });
@@ -518,7 +520,7 @@ export class RasterToolsService {
       if (dto.source === 'dem') {
         const r = await this.rasters.runOp<{ stats: RasterStats }>({ op: 'online_dem', ...request, output });
         const [min, max] = span(r.stats, [0, 100]);
-        return { style: { mode: 'ramp', ramp: 'terrain', min, max }, result: r };
+        return { style: { mode: 'ramp', ramp: 'elevation', min, max }, result: r };
       }
       if (dto.source === 'landcover') {
         const r = await this.rasters.runOp<{ classes: { value: number; label: string }[] }>({ op: 'online_landcover', ...request, output });
@@ -530,7 +532,7 @@ export class RasterToolsService {
       }
       if (dto.source === 'population') {
         const r = await this.rasters.runOp<{ stats: RasterStats }>({ op: 'online_population', ...request, output });
-        return { style: { mode: 'ramp', ramp: 'heat', min: 0, max: r.stats.p98 ?? r.stats.max ?? 10, opacity: 0.85 }, result: r };
+        return { style: { mode: 'ramp', ramp: 'population', min: 0, max: r.stats.p98 ?? r.stats.max ?? 10, opacity: 0.85 }, result: r };
       }
       if (dto.source === 'water') {
         const r = await this.rasters.runOp({ op: 'online_water', ...request, output });
@@ -582,7 +584,7 @@ export class RasterToolsService {
         maxCloud: dto.maxCloud ?? 30, output,
       });
       const [min, max] = span(stats, [20, 50]);
-      return { style: { mode: 'ramp', ramp: 'heat', min, max, opacity: 0.8 }, result: { ...result, stats } };
+      return { style: { mode: 'ramp', ramp: 'thermal', min, max, opacity: 0.8 }, result: { ...result, stats } };
     });
   }
 
@@ -663,7 +665,7 @@ export class RasterToolsService {
     for (const id of dto.excludeLayerIds ?? []) exclude.push((await this.rasters.resolveRaster(appUser, id)).file);
     return this.toRasterLayer(appUser, dto.outputName, async (output) => {
       const result = await this.rasters.runOp({ op: 'suitability', criteria, exclude, output });
-      return { style: { mode: 'ramp', ramp: 'ndvi', min: 0, max: 100, opacity: 0.85 }, result };
+      return { style: { mode: 'ramp', ramp: 'suitability', min: 0, max: 100, opacity: 0.85 }, result };
     });
   }
 
@@ -747,7 +749,7 @@ export class RasterToolsService {
     if (!dto.outputName?.trim()) return { result: await this.rasters.runOp(request) };
     return this.toRasterLayer(appUser, dto.outputName.trim(), async (output) => {
       const result = await this.rasters.runOp({ ...request, output });
-      return { style: { mode: 'ramp', ramp: 'heat', min: 0, max: 50, opacity: 0.85 }, result };
+      return { style: { mode: 'ramp', ramp: 'risk', min: 0, max: 50, opacity: 0.85 }, result };
     });
   }
 
@@ -826,7 +828,7 @@ export class RasterToolsService {
         op: 'no2', bbox: dto.bbox, from: dto.from, to: dto.to, maxOrbits: dto.maxOrbits ?? 20, output,
       });
       const [min, max] = span(stats, [20, 120]);
-      return { style: { mode: 'ramp', ramp: 'heat', min, max, opacity: 0.7 }, result: { ...result, stats } };
+      return { style: { mode: 'ramp', ramp: 'aqi', min, max, opacity: 0.7 }, result: { ...result, stats } };
     });
   }
 
@@ -847,7 +849,7 @@ export class RasterToolsService {
       const { stats, ...result } = await this.rasters.runOp<Record<string, unknown> & { stats: RasterStats }>({
         op: 'heights', dsm: dsm.file, dtm: dtm.file, minHeight: dto.minHeight ?? 0.5, output,
       });
-      return { style: { mode: 'ramp', ramp: 'heat', min: 0, max: stats.p98 ?? 30, opacity: 0.85 }, result: { ...result, stats } };
+      return { style: { mode: 'ramp', ramp: 'height', min: 0, max: stats.p98 ?? 30, opacity: 0.85 }, result: { ...result, stats } };
     });
   }
 
