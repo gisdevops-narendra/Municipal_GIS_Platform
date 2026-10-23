@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, OnDestroy, OnInit, Output, computed, inject, signal } from '@angular/core';
+import { Component, EventEmitter, Input, OnDestroy, OnInit, Output, computed, effect, inject, signal, untracked } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
@@ -23,6 +23,8 @@ import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { StyleGeometry } from '../../../../core/models/layer-style.model';
 import { GisWorkspaceService } from '../../../../core/services/gis-workspace.service';
 import { CrsPickerComponent } from '../crs-picker/crs-picker.component';
+import { CrsInfo, CrsService, crsLabel } from '../../services/crs.service';
+import { readSourceCrs } from '../../services/source-crs';
 
 type WizardStep = 'FILE_INFO' | 'VALIDATION' | 'COLUMNS' | 'PREVIEW';
 
@@ -91,6 +93,30 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
   private readonly workspaceService = inject(GisWorkspaceService);
   /** The workspace's storage CRS — the default for new layers. */
   readonly workspaceCrs = signal('');
+  private readonly crsService = inject(CrsService);
+  /** The chosen file's projection, read before uploading. */
+  readonly sourceProjection = signal<{ state: 'reading' | 'found' | 'custom' | 'missing'; text: string } | null>(null);
+  private sourceToken = 0;
+  /** Names of the CRS codes in the validation summary. */
+  private readonly crsInfo = signal<Record<string, CrsInfo>>({});
+  private readonly loadCrsNames = effect(() => {
+    const summary = this.upload()?.validation.summary;
+    for (const code of [summary?.sourceCrs, summary?.targetCrs]) {
+      if (!code || !/^EPSG:\d+$/i.test(code) || untracked(this.crsInfo)[code]) continue;
+      this.crsService.get(code).subscribe({
+        next: (crs) => crs && this.crsInfo.update((m) => ({ ...m, [code]: crs })),
+        error: () => undefined
+      });
+    }
+  });
+
+  /** "EPSG:32643 · WGS 84 / UTM zone 43N (metre)" — or the label as given
+   *  (e.g. a .prj with no EPSG equivalent). */
+  describeCrs(code: string | null | undefined): string {
+    if (!code) return 'Not detected';
+    const crs = this.crsInfo()[code];
+    return crs ? `${code} · ${crs.name} (${crs.kind === 'geographic' ? 'degrees' : crs.unit})` : code;
+  }
 
   readonly step = signal<WizardStep>('FILE_INFO');
   readonly departments = signal<Department[]>([]);
@@ -218,6 +244,8 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
   clearFile(input: HTMLInputElement): void {
     input.value = '';
     this.selectedFile.set(null);
+    this.sourceProjection.set(null);
+    this.sourceToken++;
     this.submitError.set(null);
   }
 
@@ -243,6 +271,33 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
     this.onOwnershipChange(value);
   }
 
+  /** Shows which projection the file is in (the import detects it again). */
+  private detectSourceProjection(file: File): void {
+    const token = ++this.sourceToken;
+    const show = (value: { state: 'reading' | 'found' | 'custom' | 'missing'; text: string }) =>
+      token === this.sourceToken && this.sourceProjection.set(value);
+    show({ state: 'reading', text: 'Reading…' });
+    const csv = file.name.toLowerCase().endsWith('.csv');
+    readSourceCrs(file)
+      .then((hint) => {
+        if (hint.kind === 'none') {
+          show({ state: 'missing', text: file.name.toLowerCase().endsWith('.zip') ? 'Not found — the ZIP has no .prj file' : 'Not recognised' });
+        } else if (hint.kind === 'epsg') {
+          this.crsService.get(hint.code).subscribe({
+            next: (crs) => show({ state: 'found', text: (crs ? crsLabel(crs) : hint.code) + (csv ? ' (latitude / longitude columns)' : '') }),
+            error: () => show({ state: 'found', text: hint.code })
+          });
+        } else {
+          this.crsService.identify(hint.wkt).subscribe({
+            next: ({ name, crs }) =>
+              show(crs ? { state: 'found', text: crsLabel(crs) } : { state: 'custom', text: `${name ?? 'Custom projection'} (from .prj, no EPSG code)` }),
+            error: () => show({ state: 'custom', text: 'From the .prj file' })
+          });
+        }
+      })
+      .catch(() => show({ state: 'missing', text: 'Could not be read from the file' }));
+  }
+
   private setFile(file: File | null): void {
     this.submitError.set(null);
     if (!file) return;
@@ -252,6 +307,7 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
       return;
     }
     this.selectedFile.set(file);
+    this.detectSourceProjection(file);
 
     const current = this.f.layerName.value.trim();
     if (!current || current === this.suggestedName) {

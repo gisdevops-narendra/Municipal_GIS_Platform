@@ -69,6 +69,11 @@ export class CrsService {
     return this.byCode.get(key)!;
   }
 
+  /** The closest EPSG CRS to a .prj's WKT, and the name the WKT gives. */
+  identify(wkt: string): Observable<{ name: string | null; crs: CrsInfo | null }> {
+    return this.http.post<{ name: string | null; crs: CrsInfo | null }>(`${this.baseUrl}/crs/identify`, { wkt });
+  }
+
   layerCrs(layerId: string): Observable<LayerCrs> {
     return this.http.get<LayerCrs>(`${this.baseUrl}/layers/${layerId}/crs`);
   }

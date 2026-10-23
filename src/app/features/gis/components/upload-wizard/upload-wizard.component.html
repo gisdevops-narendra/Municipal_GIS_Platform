@@ -37,6 +37,12 @@
             <button pButton type="button" icon="pi pi-times" class="p-button-text p-button-sm p-button-rounded p-button-secondary"
               aria-label="Remove file" [disabled]="uploading()" (click)="clearFile(fileInput)"></button>
           </div>
+          @if (sourceProjection(); as proj) {
+            <div class="upload-wizard__projection" [class.upload-wizard__projection--warn]="proj.state === 'missing'">
+              <i class="pi" [class.pi-globe]="proj.state !== 'missing'" [class.pi-exclamation-triangle]="proj.state === 'missing'" aria-hidden="true"></i>
+              <span><strong>Source projection:</strong> {{ proj.text }}</span>
+            </div>
+          }
         } @else {
           <button
             type="button"
@@ -205,8 +211,17 @@
         @if (u.validation.summary; as summary) {
           <dl class="upload-wizard__summary">
             <div class="upload-wizard__summary-row">
-              <dt>CRS</dt>
-              <dd>{{ summary.sourceCrs || '—' }} → {{ summary.targetCrs }}</dd>
+              <dt>Source projection</dt>
+              <dd>{{ describeCrs(summary.sourceCrs) }}</dd>
+            </div>
+            <div class="upload-wizard__summary-row">
+              <dt>Stored in</dt>
+              <dd>
+                {{ describeCrs(summary.targetCrs) }}
+                @if (summary.sourceCrs && summary.sourceCrs !== summary.targetCrs) {
+                  <span class="upload-wizard__optional">(reprojected on import)</span>
+                }
+              </dd>
             </div>
             <div class="upload-wizard__summary-row">
               <dt>Geometry</dt>
