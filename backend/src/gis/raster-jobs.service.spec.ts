@@ -24,6 +24,7 @@ describe('RasterJobsService', () => {
       rasterJobHistory: {
         create: jest.fn().mockResolvedValue({}),
         update: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({}),
         upsert: jest.fn().mockResolvedValue({}),
         delete: jest.fn().mockResolvedValue({}),
       },

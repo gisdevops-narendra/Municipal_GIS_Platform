@@ -159,15 +159,61 @@ export function rasterInsights(tool: string, stats: RasterStatistics): RasterIns
     }
 
     case 'ndvi':
-    case 'greencover': {
+    case 'greencover':
+    case 'savi': {
+      const name = tool === 'savi' ? 'SAVI' : 'NDVI';
       const bands: Band[] = [['Water / built-up (< 0)', -Infinity, 0, '#4575b4'], ['Bare soil (0–0.2)', 0, 0.2, '#d8b365'], ['Sparse vegetation (0.2–0.4)', 0.2, 0.4, '#d9ef8b'], ['Moderate vegetation (0.4–0.6)', 0.4, 0.6, '#66bd63'], ['Dense vegetation (> 0.6)', 0.6, Infinity, '#006837']];
       const green = shareInRange(stats, 0.2, Infinity);
       return {
         heading: 'Vegetation cover',
         facts: [
-          { label: 'Mean NDVI', value: num(stats.mean, 3) },
-          { label: 'Vegetated (NDVI > 0.2)', value: `${pct(green)} · ${area((stats.areaM2 * green) / 100)}` },
+          { label: `Mean ${name}`, value: num(stats.mean, 3) },
+          { label: `Vegetated (${name} > 0.2)`, value: `${pct(green)} · ${area((stats.areaM2 * green) / 100)}` },
           { label: 'Dense vegetation (> 0.6)', value: pct(shareInRange(stats, 0.6, Infinity)) },
+          { label: 'Area analysed', value: area(stats.areaM2) },
+        ],
+        classes: classify(stats, bands),
+      };
+    }
+
+    case 'evi': {
+      // EVI runs lower than NDVI: ~0.2 sparse, > 0.5 dense canopy.
+      const bands: Band[] = [['Water / built-up (< 0)', -Infinity, 0, '#4575b4'], ['Bare soil (0–0.1)', 0, 0.1, '#d8b365'], ['Sparse vegetation (0.1–0.3)', 0.1, 0.3, '#d9ef8b'], ['Moderate vegetation (0.3–0.5)', 0.3, 0.5, '#66bd63'], ['Dense vegetation (> 0.5)', 0.5, Infinity, '#006837']];
+      const green = shareInRange(stats, 0.2, Infinity);
+      return {
+        heading: 'Vegetation cover (EVI)',
+        facts: [
+          { label: 'Mean EVI', value: num(stats.mean, 3) },
+          { label: 'Vegetated (EVI > 0.2)', value: `${pct(green)} · ${area((stats.areaM2 * green) / 100)}` },
+          { label: 'Dense canopy (> 0.5)', value: pct(shareInRange(stats, 0.5, Infinity)) },
+          { label: 'Area analysed', value: area(stats.areaM2) },
+        ],
+        classes: classify(stats, bands),
+      };
+    }
+
+    case 'ndwi': {
+      const bands: Band[] = [['Dry land / vegetation (< −0.3)', -Infinity, -0.3, '#a6611a'], ['Moist soil (−0.3–0)', -0.3, 0, '#dfc27d'], ['Shallow / turbid water (0–0.3)', 0, 0.3, '#80cdc1'], ['Open water (> 0.3)', 0.3, Infinity, '#018571']];
+      const water = shareInRange(stats, 0, Infinity);
+      return {
+        heading: 'Surface water',
+        facts: [
+          { label: 'Mean NDWI', value: num(stats.mean, 3) },
+          { label: 'Water (NDWI > 0)', value: `${pct(water)} · ${area((stats.areaM2 * water) / 100)}` },
+          { label: 'Area analysed', value: area(stats.areaM2) },
+        ],
+        classes: classify(stats, bands),
+      };
+    }
+
+    case 'ndbi': {
+      const bands: Band[] = [['Water / vegetation (< −0.1)', -Infinity, -0.1, '#1a9641'], ['Mixed (−0.1–0)', -0.1, 0, '#ffffbf'], ['Built-up / bare (0–0.2)', 0, 0.2, '#fdae61'], ['Dense built-up (> 0.2)', 0.2, Infinity, '#d7191c']];
+      const built = shareInRange(stats, 0, Infinity);
+      return {
+        heading: 'Built-up land',
+        facts: [
+          { label: 'Mean NDBI', value: num(stats.mean, 3) },
+          { label: 'Built-up / bare (NDBI > 0)', value: `${pct(built)} · ${area((stats.areaM2 * built) / 100)}` },
           { label: 'Area analysed', value: area(stats.areaM2) },
         ],
         classes: classify(stats, bands),

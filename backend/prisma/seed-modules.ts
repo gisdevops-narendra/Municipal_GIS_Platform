@@ -108,7 +108,7 @@ const MODULES: ModuleSeed[] = [
   { module_id: 951, module_name: 'Swipe / Compare', isactive: true, module_parent_id: 950, node_path: '69.950.951', sub_module: null, default_module: false, display_priority: 1, type: 'mainleft' },
   { module_id: 952, module_name: 'NDVI / Vegetation Index', isactive: true, module_parent_id: 950, node_path: '69.950.952', sub_module: null, default_module: false, display_priority: 2, type: 'mainleft' },
   { module_id: 953, module_name: 'Change Detection', isactive: true, module_parent_id: 950, node_path: '69.950.953', sub_module: null, default_module: false, display_priority: 3, type: 'mainleft' },
-  { module_id: 954, module_name: 'Spectral Indices (NDWI / NDBI / SAVI)', isactive: true, module_parent_id: 950, node_path: '69.950.954', sub_module: null, default_module: false, display_priority: 4, type: 'mainleft' },
+  { module_id: 954, module_name: 'Spectral Indices (NDVI / NDWI / NDBI / SAVI / EVI)', isactive: true, module_parent_id: 950, node_path: '69.950.954', sub_module: null, default_module: false, display_priority: 4, type: 'mainleft' },
   { module_id: 955, module_name: 'Unsupervised Classification', isactive: true, module_parent_id: 950, node_path: '69.950.955', sub_module: null, default_module: false, display_priority: 5, type: 'mainleft' },
   { module_id: 956, module_name: 'Index Time Series', isactive: true, module_parent_id: 950, node_path: '69.950.956', sub_module: null, default_module: false, display_priority: 6, type: 'mainleft' },
   { module_id: 957, module_name: 'Urban Heat Island (LST)', isactive: true, module_parent_id: 950, node_path: '69.950.957', sub_module: null, default_module: false, display_priority: 7, type: 'mainleft' },

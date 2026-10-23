@@ -161,8 +161,13 @@ export interface RasterJob<T = unknown> {
   cancellable: boolean;
   queuePosition: number | null;
   elapsedMs: number;
+  /** Estimated percentage (0–100). */
+  progress?: number;
   result: T | null;
   error: string | null;
+  /** Panel tool that started it; jobs/pending also returns its body. */
+  clientTool?: string | null;
+  body?: Record<string, unknown>;
 }
 
 export interface TerrainMeshData {
@@ -319,8 +324,9 @@ export class RasterService {
 
   /** Background job for a layer-producing tool (same body as `run`). */
   /** `departmentId`: the owner's choice of department for the output. */
-  startJob<T = LayerResult>(tool: string, body: Record<string, unknown>, departmentId?: string | null): Observable<RasterJob<T>> {
-    const params: Record<string, string> = departmentId ? { departmentId } : {};
+  /** `ui`: the panel tool starting it, so a reloaded panel can reattach. */
+  startJob<T = LayerResult>(tool: string, body: Record<string, unknown>, departmentId?: string | null, ui?: string): Observable<RasterJob<T>> {
+    const params: Record<string, string> = { ...(departmentId ? { departmentId } : {}), ...(ui ? { ui } : {}) };
     return this.http.post<RasterJob<T>>(`${this.baseUrl}/jobs/${tool}`, body, { params });
   }
 
@@ -394,6 +400,15 @@ export class RasterService {
 
   job<T = LayerResult>(id: string): Observable<RasterJob<T>> {
     return this.http.get<RasterJob<T>>(`${this.baseUrl}/jobs/${id}`);
+  }
+
+  /** The user's running jobs and unseen finished results (newest first). */
+  pendingJobs(): Observable<RasterJob[]> {
+    return this.http.get<RasterJob[]>(`${this.baseUrl}/jobs/pending`);
+  }
+
+  markJobSeen(id: string): Observable<{ ok: boolean }> {
+    return this.http.post<{ ok: boolean }>(`${this.baseUrl}/jobs/${id}/seen`, {});
   }
 
   cancelJob(id: string): Observable<RasterJob> {

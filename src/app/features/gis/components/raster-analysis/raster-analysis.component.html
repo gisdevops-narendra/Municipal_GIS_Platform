@@ -570,17 +570,7 @@
     }
 
     @case ('ndvi') {
-      <div class="bo__row">
-        <label class="bo__field bo__field--grow">
-          <span class="bo__label">Red band</span>
-          <input type="number" class="bo__input" min="1" [(ngModel)]="redBand" />
-        </label>
-        <label class="bo__field bo__field--grow">
-          <span class="bo__label">Near-infrared band</span>
-          <input type="number" class="bo__input" min="1" [(ngModel)]="nirBand" />
-        </label>
-      </div>
-      <p class="bo__hint">NDVI = (NIR − Red) / (NIR + Red). Sentinel-2: Red = 4, NIR = 8 · Landsat 8/9: Red = 4, NIR = 5.</p>
+      <ng-container *ngTemplateOutlet="indexForm"></ng-container>
     }
 
     @case ('online') {
@@ -1464,34 +1454,7 @@
     }
 
     @case ('indices') {
-      <div class="bo__modes" role="tablist">
-        <button type="button" class="bo__mode" [class.bo__mode--active]="indexKind === 'ndwi'" (click)="setIndexKind('ndwi')">NDWI</button>
-        <button type="button" class="bo__mode" [class.bo__mode--active]="indexKind === 'ndbi'" (click)="setIndexKind('ndbi')">NDBI</button>
-        <button type="button" class="bo__mode" [class.bo__mode--active]="indexKind === 'savi'" (click)="setIndexKind('savi')">SAVI</button>
-      </div>
-      <div class="bo__row">
-        <label class="bo__field bo__field--grow">
-          <span class="bo__label">{{ indexKind === 'ndwi' ? 'Green' : indexKind === 'ndbi' ? 'SWIR' : 'Red' }} band</span>
-          <input type="number" class="bo__input" min="1" [(ngModel)]="indexA" />
-        </label>
-        <label class="bo__field bo__field--grow">
-          <span class="bo__label">Near-infrared band</span>
-          <input type="number" class="bo__input" min="1" [(ngModel)]="indexB" />
-        </label>
-      </div>
-      @if (indexKind === 'savi') {
-        <label class="bo__field">
-          <span class="bo__label">Soil factor L ({{ soilFactor }})</span>
-          <input type="range" min="0" max="1" step="0.05" [(ngModel)]="soilFactor" />
-        </label>
-      }
-      <p class="bo__hint">
-        @switch (indexKind) {
-          @case ('ndwi') { NDWI = (Green − NIR) / (Green + NIR) — water bodies are &gt; 0. Sentinel-2: Green = 3, NIR = 8. }
-          @case ('ndbi') { NDBI = (SWIR − NIR) / (SWIR + NIR) — built-up areas are &gt; 0. Sentinel-2: SWIR = 11, NIR = 8. }
-          @case ('savi') { SAVI = (1 + L)(NIR − Red) / (NIR + Red + L) — NDVI corrected for bare soil; needs reflectance (0–1). }
-        }
-      </p>
+      <ng-container *ngTemplateOutlet="indexForm"></ng-container>
     }
 
     @case ('classify') {
@@ -1571,8 +1534,12 @@
   }
   @if (job(); as j) {
     <div class="ra__job">
-      <div class="ra__progress">
-        <div class="ra__progress-bar is-indeterminate"></div>
+      <div class="ra__progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="j.progress ?? null">
+        @if (j.status === 'running' && j.progress != null) {
+          <div class="ra__progress-bar" [style.width.%]="j.progress"></div>
+        } @else {
+          <div class="ra__progress-bar is-indeterminate"></div>
+        }
       </div>
       <div class="ra__job-row">
         <span class="ra__job-stage">
@@ -1582,6 +1549,9 @@
             {{ j.stage }}…
           }
         </span>
+        @if (j.status === 'running' && j.progress != null) {
+          <span class="ra__job-time">{{ j.progress }} %</span>
+        }
         <span class="ra__job-time">{{ elapsed(j.elapsedMs) }}</span>
       </div>
       @if (j.cancellable) {
@@ -1815,6 +1785,55 @@
 @if (mesh(); as m) {
   <app-terrain-3d [mesh]="m" [drapeUrl]="drapeUrl()" [title]="meshTitle()" (closed)="mesh.set(null)" />
 }
+
+<!-- Indices: NDVI tool (NDVI only) and Spectral Indices (all five). Bands
+     are prefilled from band names / the sensor's band stack. -->
+<ng-template #indexForm>
+  @if (tool() === 'indices') {
+    <div class="bo__modes" role="tablist" aria-label="Index">
+      @for (index of spectralIndices; track index.id) {
+        <button type="button" class="bo__mode" role="tab" [attr.aria-selected]="indexKind === index.id" [class.bo__mode--active]="indexKind === index.id" (click)="setIndexKind(index.id)">{{ index.label }}</button>
+      }
+    </div>
+  }
+  <span class="bo__label">Imagery</span>
+  <div class="bo__modes" role="tablist" aria-label="Imagery">
+    @for (sensor of indexSensors; track sensor.id) {
+      <button type="button" class="bo__mode" role="tab" [attr.aria-selected]="indexSensor === sensor.id" [class.bo__mode--active]="indexSensor === sensor.id" (click)="setIndexSensor(sensor.id)">{{ sensor.label }}</button>
+    }
+  </div>
+  <div class="bo__row">
+    @for (band of activeIndex().bands; track band) {
+      <label class="bo__field bo__field--grow">
+        <span class="bo__label">{{ indexBandLabel(band) }}</span>
+        <p-select class="bo__select" [options]="bandOptions()" optionLabel="label" optionValue="value" [(ngModel)]="indexBands[band]" appendTo="body" />
+      </label>
+    }
+  </div>
+  <label class="bo__field">
+    <span class="bo__label">Pixel values</span>
+    <select class="bo__input" [(ngModel)]="indexValues">
+      <option value="auto">Detect (reflectance or digital numbers)</option>
+      <option value="reflectance">Surface reflectance (0–1)</option>
+      <option value="dn">Digital numbers — convert with the sensor's scale</option>
+    </select>
+  </label>
+  @if (activeIndex().id === 'savi') {
+    <label class="bo__field">
+      <span class="bo__label">Soil factor L ({{ soilFactor }})</span>
+      <input type="range" min="0" max="1" step="0.05" [(ngModel)]="soilFactor" />
+    </label>
+  }
+  <p class="bo__hint">
+    {{ activeIndex().formula }} — {{ activeIndex().reading }}
+    @switch (indexSensor) {
+      @case ('sentinel2') { Sentinel-2 L2A digital numbers become reflectance as DN / 10 000 − 0.1. }
+      @case ('landsat89') { Landsat Collection 2 Level-2: DN × 0.0000275 − 0.2. }
+      @case ('landsat457') { Landsat Collection 2 Level-2: DN × 0.0000275 − 0.2. }
+      @default { Digital numbers are divided by 10 000. }
+    }
+  </p>
+</ng-template>
 
 <ng-template #polygonInput>
   <div class="bo__section">

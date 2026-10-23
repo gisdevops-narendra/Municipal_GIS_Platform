@@ -212,14 +212,31 @@ export class RasterController {
     @Param('tool') tool: string,
     @Body() body: Record<string, unknown>,
     @Query('departmentId', new ParseUUIDPipe({ optional: true })) departmentId?: string,
+    /** The panel tool that started it, for reattaching after a reload. */
+    @Query('ui') clientTool?: string,
   ) {
-    return this.jobs.start(appUser, tool, body, departmentId);
+    const ui = clientTool && /^[a-z0-9-]{1,40}$/.test(clientTool) ? clientTool : 'panel';
+    return this.jobs.start(appUser, tool, body, departmentId, undefined, undefined, ui);
   }
 
   @RequireRasterModule(ANY_RASTER_MODULE)
   @Get('jobs')
   listJobs(@CurrentAppUser() appUser: AppUser) {
     return this.jobs.list(appUser);
+  }
+
+  /** A reloaded panel reattaches to these (running, or finished unseen). */
+  @RequireRasterModule(ANY_RASTER_MODULE)
+  @Get('jobs/pending')
+  pendingJobs(@CurrentAppUser() appUser: AppUser) {
+    return this.jobs.pending(appUser);
+  }
+
+  @RequireRasterModule(ANY_RASTER_MODULE)
+  @Post('jobs/:id/seen')
+  @HttpCode(200)
+  markJobSeen(@CurrentAppUser() appUser: AppUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.jobs.markSeen(appUser, id);
   }
 
   @RequireRasterModule(ANY_RASTER_MODULE)

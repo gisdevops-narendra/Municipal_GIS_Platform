@@ -97,6 +97,7 @@ export class RasterWorkspaceService {
       for (const [i, step] of steps.entries()) {
         const job = rasterJobContext.getStore();
         job?.setStage(`Step ${i + 1} / ${steps.length}: ${step.tool}`);
+        job?.setProgress((i / steps.length) * 95, ((i + 1) / steps.length) * 95);
         const body = substitute(step.body, { [INPUT]: inputLayerId, [PREV]: prev });
         const def = RASTER_JOB_TOOLS[step.tool];
         const dto = plainToInstance(def.dto, body);

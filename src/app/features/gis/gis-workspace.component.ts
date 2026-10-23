@@ -1,5 +1,6 @@
 import { AnalysisReportComponent } from './components/analysis-report/analysis-report.component';
 import { NotificationService } from '../../core/services/notification.service';
+import { RasterService } from './services/raster.service';
 import { SettingsService } from '../../core/services/settings.service';
 import { Component, WritableSignal, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -185,6 +186,7 @@ export class GisWorkspaceComponent {
   private readonly gisWorkspaceService = inject(GisWorkspaceService);
   private readonly gisLayersService = inject(GisLayersService);
   private readonly notify = inject(NotificationService);
+  private readonly rasterService = inject(RasterService);
   private readonly settingsService = inject(SettingsService);
   private readonly currentUserService = inject(CurrentUserService);
   private readonly moduleAccessService = inject(ModuleAccessService);
@@ -388,6 +390,18 @@ export class GisWorkspaceComponent {
         this.municipalityName.set(user.municipality.name);
         this.isOwner.set(user.systemRole === 'MUNICIPALITY_OWNER');
       }
+    });
+
+    // A raster job running (or finished unseen) from before a page reload:
+    // open Raster Analysis, which reattaches to it.
+    this.rasterService.pendingJobs().subscribe({
+      next: (jobs) => {
+        if (!jobs.length || (typeof window !== 'undefined' && window.innerWidth < 900)) return;
+        this.leftTool.set('raster');
+        this.rememberOpened(this.openedLeftTools, 'raster');
+        this.refreshMapSize();
+      },
+      error: () => undefined
     });
 
     this.moduleAccessService.getMyModuleIds().subscribe({

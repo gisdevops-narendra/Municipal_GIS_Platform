@@ -126,6 +126,17 @@ class RasterOpsTest(unittest.TestCase):
         self.assertAlmostEqual(ndvi["vegetationPct"], 50, delta=1)
         ndwi = self.ok({"op": "index", "kind": "ndwi", "path": self.image, "bandA": 2, "bandB": 4, "output": self.out("ndwi.tif")})
         self.assertAlmostEqual(ndwi["openWaterPct"], 50, delta=1)
+        bands = {"blue": 1, "green": 2, "red": 3, "nir": 4}
+        for kind in ("ndvi", "ndwi", "savi", "evi"):
+            with self.subTest(kind=kind):
+                r = self.ok({"op": "index", "kind": kind, "path": self.image, "bands": bands, "sensor": "sentinel2",
+                             "output": self.out(f"{kind}.tif")})
+                self.assertEqual(r["values"], "dn")
+                self.assertLessEqual(r["stats"]["max"], 1)
+        evi = self.ok({"op": "index", "kind": "evi", "path": self.image, "bands": bands, "output": self.out("evi2.tif")})
+        self.assertAlmostEqual(evi["vegetationPct"], 50, delta=1)
+        code, body = run({"op": "index", "kind": "ndbi", "path": self.image, "bands": bands, "output": self.out("x.tif")})
+        self.assertEqual(code, 1, body)
 
     def test_classify_separates_two_covers(self):
         r = self.ok({"op": "classify", "path": self.image, "classes": 2, "output": self.out("cls.tif")})

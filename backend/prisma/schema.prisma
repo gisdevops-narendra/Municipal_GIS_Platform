@@ -648,6 +648,17 @@ model RasterJobHistory {
   createdAt      DateTime  @map("created_at")
   /// Null while the job is queued / running.
   finishedAt     DateTime? @map("finished_at")
+  startedAt      DateTime? @map("started_at")
+  /// Live stage text and estimated percentage (0–100), kept while it runs.
+  stage          String?
+  progress       Int       @default(0)
+  /// The finished job's result (as GET jobs/:id returns it).
+  result         Json?
+  /// Raster Analysis panel tool that started it — lets a reloaded panel
+  /// reattach. Null for monitor runs.
+  clientTool     String?   @map("client_tool")
+  /// When the panel showed the finished result to the user.
+  seenAt         DateTime? @map("seen_at")
   /// Results-screen report saved by the client (statistics, classes, AI
   /// insights) so it can be reopened later from the layer.
   report         Json?

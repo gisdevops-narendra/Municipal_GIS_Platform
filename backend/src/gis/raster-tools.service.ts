@@ -52,6 +52,7 @@ import type {
   ViewshedDto,
   WatershedDto,
 } from './dto/raster.dto';
+import { INDEX_BANDS } from './dto/raster.dto';
 
 /** Functions a Raster Calculator expression may call (raster_ops.py). */
 const CALC_FUNCTIONS = new Set([
@@ -411,13 +412,7 @@ export class RasterToolsService {
   // ----- Imagery Analysis -----
 
   async ndvi(appUser: AppUser, dto: NdviDto) {
-    const { file } = await this.rasters.resolveRaster(appUser, dto.layerId);
-    return this.toRasterLayer(appUser, dto.outputName, async (output) => {
-      const { stats, ...result } = await this.rasters.runOp<Record<string, number> & { stats: RasterStats }>({
-        op: 'ndvi', path: file, redBand: dto.redBand, nirBand: dto.nirBand, output,
-      });
-      return { style: { mode: 'ramp', ramp: 'ndvi', min: -0.2, max: 0.9 }, result: { ...result, stats } };
-    });
+    return this.spectralIndex(appUser, { ...dto, kind: 'ndvi' });
   }
 
   async changeDetection(appUser: AppUser, dto: ChangeDetectionDto) {
@@ -437,11 +432,20 @@ export class RasterToolsService {
     });
   }
 
+  /** NDVI / NDWI / NDBI / SAVI / EVI. Digital numbers are converted to
+   *  reflectance with the sensor's scale and offset first (raster_ops). */
   async spectralIndex(appUser: AppUser, dto: SpectralIndexDto) {
     const { file } = await this.rasters.resolveRaster(appUser, dto.layerId);
+    const given = { blue: dto.blueBand, green: dto.greenBand, red: dto.redBand, nir: dto.nirBand, swir: dto.swirBand };
+    const bands = Object.fromEntries(INDEX_BANDS[dto.kind].map((name) => [name, given[name]]).filter(([, n]) => n));
+    if (dto.bandA === undefined && Object.keys(bands).length < INDEX_BANDS[dto.kind].length) {
+      throw new BadRequestException(`${dto.kind.toUpperCase()} needs the ${INDEX_BANDS[dto.kind].join(', ')} bands.`);
+    }
     return this.toRasterLayer(appUser, dto.outputName, async (output) => {
-      const { stats, ...result } = await this.rasters.runOp<Record<string, number> & { stats: RasterStats }>({
-        op: 'index', path: file, kind: dto.kind, bandA: dto.bandA, bandB: dto.bandB,
+      const { stats, ...result } = await this.rasters.runOp<Record<string, unknown> & { stats: RasterStats }>({
+        op: 'index', path: file, kind: dto.kind, bands,
+        ...(dto.bandA !== undefined ? { bandA: dto.bandA, bandB: dto.bandB } : {}),
+        sensor: dto.sensor ?? 'other', values: dto.values ?? 'auto',
         soilFactor: dto.soilFactor ?? 0.5, output,
       });
       const style: RasterStyleSpec =
@@ -449,7 +453,7 @@ export class RasterToolsService {
           ? { mode: 'ramp', ramp: 'water', min: -0.3, max: 0.6 }
           : dto.kind === 'ndbi'
             ? { mode: 'ramp', ramp: 'heat', min: -0.3, max: 0.4 }
-            : { mode: 'ramp', ramp: 'ndvi', min: -0.2, max: 0.9 };
+            : { mode: 'ramp', ramp: 'ndvi', min: -0.2, max: dto.kind === 'evi' ? 0.8 : 0.9 };
       return { style, result: { ...result, stats } };
     });
   }

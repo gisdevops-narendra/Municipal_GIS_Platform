@@ -704,21 +704,8 @@ def op_polygonize(req):
 
 
 def op_ndvi(req):
-    ds = gdal.Open(req["path"])
-    red = read_band(ds, req["redBand"])
-    nir = read_band(ds, req["nirBand"])
-    with np.errstate(all="ignore"):
-        ndvi = (nir - red) / (nir + red)
-    ndvi[~np.isfinite(ndvi)] = np.nan
-    write_array(ds, ndvi, req["output"])
-    valid = ndvi[np.isfinite(ndvi)]
-    total = valid.size or 1
-    return {
-        "stats": stats_of(ndvi),
-        "vegetationPct": float((valid > 0.3).sum() * 100 / total),
-        "sparsePct": float(((valid > 0.1) & (valid <= 0.3)).sum() * 100 / total),
-        "waterPct": float((valid < 0).sum() * 100 / total),
-    }
+    """NDVI from a red and a near-infrared band (the NDVI tool)."""
+    return op_index({**req, "kind": "ndvi", "bands": {"red": req["redBand"], "nir": req["nirBand"]}})
 
 
 def op_change(req):
@@ -1132,32 +1119,82 @@ def op_proximity(req):
 
 # -------------------------------------------------------- imagery tools
 
+# Spectral indices on surface reflectance (0–1). Each lists the bands it
+# needs; SAVI's L is the soil brightness factor.
 INDEX_FORMULAS = {
-    # (A, B) bands per index: NDWI = Green, NIR; NDBI = SWIR, NIR; SAVI = Red, NIR
-    "ndwi": lambda a, b, L: (a - b) / (a + b),
-    "ndbi": lambda a, b, L: (a - b) / (a + b),
-    "savi": lambda a, b, L: (1 + L) * (b - a) / (b + a + L),
+    "ndvi": (("red", "nir"), lambda b, L: (b["nir"] - b["red"]) / (b["nir"] + b["red"])),
+    "ndwi": (("green", "nir"), lambda b, L: (b["green"] - b["nir"]) / (b["green"] + b["nir"])),
+    "ndbi": (("swir", "nir"), lambda b, L: (b["swir"] - b["nir"]) / (b["swir"] + b["nir"])),
+    "savi": (("red", "nir"), lambda b, L: (1 + L) * (b["nir"] - b["red"]) / (b["nir"] + b["red"] + L)),
+    "evi": (("blue", "red", "nir"),
+            lambda b, L: 2.5 * (b["nir"] - b["red"]) / (b["nir"] + 6 * b["red"] - 7.5 * b["blue"] + 1)),
 }
+
+# Digital numbers → surface reflectance: (scale, offset) per sensor.
+# Sentinel-2 L2A: DN / 10000 − 0.1 (processing baseline ≥ 04.00, the whole
+# current archive); Landsat Collection 2 Level-2: DN × 0.0000275 − 0.2.
+REFLECTANCE_SCALE = {
+    "sentinel2": (0.0001, -0.1),
+    "landsat89": (0.0000275, -0.2),
+    "landsat457": (0.0000275, -0.2),
+    "other": (0.0001, 0.0),
+}
+
+# Legacy bodies: bandA / bandB (B = NIR) per index.
+LEGACY_BAND_A = {"ndvi": "red", "ndwi": "green", "ndbi": "swir", "savi": "red"}
 
 
 def op_index(req):
     ds = gdal.Open(req["path"])
     kind = req["kind"]
-    a = read_band(ds, req["bandA"])
-    b = read_band(ds, req["bandB"])
+    if kind not in INDEX_FORMULAS:
+        raise OpError(f"Unknown index {kind}.")
+    needed, formula = INDEX_FORMULAS[kind]
+    numbers = dict(req.get("bands") or {})
+    if "bandA" in req and kind in LEGACY_BAND_A:
+        numbers.setdefault(LEGACY_BAND_A[kind], req["bandA"])
+        numbers.setdefault("nir", req.get("bandB"))
+    missing = [name for name in needed if not numbers.get(name)]
+    if missing:
+        raise OpError(f"{kind.upper()} needs the {', '.join(missing)} band.")
+    for name in needed:
+        if not 1 <= int(numbers[name]) <= ds.RasterCount:
+            raise OpError(f"The {name} band ({numbers[name]}) is not in this raster ({ds.RasterCount} bands).")
+    bands = {name: read_band(ds, int(numbers[name])) for name in needed}
+
+    # Reflectance: "auto" treats values above 1.5 as digital numbers.
+    mode = req.get("values", "auto")
+    if mode == "auto":
+        sample = bands["nir"][np.isfinite(bands["nir"])]
+        mode = "dn" if sample.size and float(np.percentile(sample, 99)) > 1.5 else "reflectance"
+    if mode == "dn":
+        scale, offset = REFLECTANCE_SCALE.get(req.get("sensor") or "other", REFLECTANCE_SCALE["other"])
+        bands = {name: arr * scale + offset for name, arr in bands.items()}
+    # Negative reflectance (dark pixels after the offset) is not physical
+    # and would push the normalised indices past ±1.
+    bands = {name: np.maximum(arr, 0) for name, arr in bands.items()}
+
     with np.errstate(all="ignore"):
-        idx = INDEX_FORMULAS[kind](a, b, float(req.get("soilFactor", 0.5)))
+        idx = formula(bands, float(req.get("soilFactor", 0.5)))
     idx[~np.isfinite(idx)] = np.nan
+    # EVI explodes where its denominator nears 0 (clouds, shadows, water).
+    if kind == "evi":
+        idx[(idx < -1) | (idx > 1)] = np.nan
     write_array(ds, idx, req["output"])
     valid = idx[np.isfinite(idx)]
     total = valid.size or 1
-    result = {"stats": stats_of(idx)}
+    share = lambda mask: float(mask.sum() * 100 / total)
+    result = {"stats": stats_of(idx), "kind": kind, "values": mode}
     if kind == "ndwi":
-        result["openWaterPct"] = float((valid > 0).sum() * 100 / total)
+        result["openWaterPct"] = share(valid > 0)
     elif kind == "ndbi":
-        result["builtUpPct"] = float((valid > 0).sum() * 100 / total)
+        result["builtUpPct"] = share(valid > 0)
+    elif kind == "ndvi":
+        result.update(vegetationPct=share(valid > 0.3), sparsePct=share((valid > 0.1) & (valid <= 0.3)), waterPct=share(valid < 0))
+    elif kind == "evi":
+        result.update(vegetationPct=share(valid > 0.2), densePct=share(valid > 0.5))
     else:
-        result["vegetationPct"] = float((valid > 0.3).sum() * 100 / total)
+        result["vegetationPct"] = share(valid > 0.3)
     return result
 
 

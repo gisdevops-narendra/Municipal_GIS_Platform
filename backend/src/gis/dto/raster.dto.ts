@@ -367,6 +367,12 @@ export class ClipDto extends RasterOutputDto {
 
 export class PolygonizeDto extends RasterOutputDto {}
 
+/** Imagery source — sets the DN → reflectance scale / offset. */
+export const INDEX_SENSORS = ['sentinel2', 'landsat89', 'landsat457', 'other'] as const;
+export type IndexSensor = (typeof INDEX_SENSORS)[number];
+/** Pixel values: reflectance (0–1), digital numbers, or detect. */
+export const INDEX_VALUE_MODES = ['auto', 'reflectance', 'dn'] as const;
+
 export class NdviDto extends RasterOutputDto {
   @IsInt()
   @Min(1)
@@ -375,6 +381,14 @@ export class NdviDto extends RasterOutputDto {
   @IsInt()
   @Min(1)
   nirBand!: number;
+
+  @IsOptional()
+  @IsIn(INDEX_SENSORS)
+  sensor?: IndexSensor;
+
+  @IsOptional()
+  @IsIn(INDEX_VALUE_MODES)
+  values?: (typeof INDEX_VALUE_MODES)[number];
 }
 
 export class ChangeDetectionDto {
@@ -546,19 +560,46 @@ export class ProximityDto extends VectorGridDto {
 
 // ----- Imagery -----
 
+export const SPECTRAL_INDICES = ['ndvi', 'ndwi', 'ndbi', 'savi', 'evi'] as const;
+export type SpectralIndexKind = (typeof SPECTRAL_INDICES)[number];
+
+/** Bands each index needs (1-based numbers in the raster). */
+export const INDEX_BANDS: Record<SpectralIndexKind, ('blue' | 'green' | 'red' | 'nir' | 'swir')[]> = {
+  ndvi: ['red', 'nir'],
+  ndwi: ['green', 'nir'],
+  ndbi: ['swir', 'nir'],
+  savi: ['red', 'nir'],
+  evi: ['blue', 'red', 'nir'],
+};
+
 export class SpectralIndexDto extends RasterOutputDto {
-  @IsIn(['ndwi', 'ndbi', 'savi'])
-  kind!: 'ndwi' | 'ndbi' | 'savi';
+  @IsIn(SPECTRAL_INDICES)
+  kind!: SpectralIndexKind;
 
-  /** NDWI: green · NDBI: SWIR · SAVI: red. */
+  @IsOptional() @IsInt() @Min(1) blueBand?: number;
+  @IsOptional() @IsInt() @Min(1) greenBand?: number;
+  @IsOptional() @IsInt() @Min(1) redBand?: number;
+  @IsOptional() @IsInt() @Min(1) nirBand?: number;
+  @IsOptional() @IsInt() @Min(1) swirBand?: number;
+
+  /** Older runs: NDWI green · NDBI SWIR · SAVI red (bandB = NIR). */
+  @IsOptional()
   @IsInt()
   @Min(1)
-  bandA!: number;
+  bandA?: number;
 
-  /** Near-infrared for all three. */
+  @IsOptional()
   @IsInt()
   @Min(1)
-  bandB!: number;
+  bandB?: number;
+
+  @IsOptional()
+  @IsIn(INDEX_SENSORS)
+  sensor?: IndexSensor;
+
+  @IsOptional()
+  @IsIn(INDEX_VALUE_MODES)
+  values?: (typeof INDEX_VALUE_MODES)[number];
 
   /** SAVI soil brightness factor L. */
   @IsOptional()
