@@ -577,7 +577,7 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
   readonly hoverReadout = signal<string | null>(null);
   readonly drapeLayers = computed(() => this.layersSignal().map((l) => ({ label: l.name, value: l.id })));
   drapeLayerId: string | null = null;
-  meshSize = 140;
+  meshSize = 260;
   readonly mesh = signal<TerrainMesh | null>(null);
   readonly drapeUrl = signal<string | null>(null);
   readonly meshTitle = signal('3D terrain');
@@ -1724,11 +1724,15 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
     this.execute(this.api.mesh(layerId, this.band, this.meshSize), (m) => {
       const drape = this.layersSignal().find((l) => l.id === this.drapeLayerId);
       const [minX, minY, maxX, maxY] = m.bbox;
+      // The drape is a texture: fetch it sharp (≤ 2048 px on the long side).
+      const longest = Math.max(m.width * m.cellX, m.height * m.cellY) || 1;
+      const imgW = Math.max(64, Math.round((2048 * m.width * m.cellX) / longest));
+      const imgH = Math.max(64, Math.round((2048 * m.height * m.cellY) / longest));
       this.drapeUrl.set(
         drape
           ? `${environment.geoserverUrl}/${drape.geoserverWorkspace}/wms?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap` +
               `&LAYERS=${encodeURIComponent(`${drape.geoserverWorkspace}:${drape.geoserverLayer}`)}&STYLES=&SRS=EPSG:4326` +
-              `&BBOX=${minX},${minY},${maxX},${maxY}&WIDTH=${m.width * 3}&HEIGHT=${m.height * 3}&FORMAT=image/png&TRANSPARENT=true`
+              `&BBOX=${minX},${minY},${maxX},${maxY}&WIDTH=${imgW}&HEIGHT=${imgH}&FORMAT=image/png&TRANSPARENT=true`
           : null
       );
       this.meshTitle.set(`${layer?.name ?? 'DEM'}${drape ? ' · ' + drape.name : ''}`);

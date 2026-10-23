@@ -433,7 +433,7 @@ export class RasterService {
     return this.http.post<RasterMonitor>(`${this.baseUrl}/monitors/${id}/acknowledge`, {});
   }
 
-  mesh(layerId: string, band: number, size = 140): Observable<TerrainMeshData> {
+  mesh(layerId: string, band: number, size = 260): Observable<TerrainMeshData> {
     return this.http.get<TerrainMeshData>(`${this.baseUrl}/${layerId}/mesh`, { params: { band, size } });
   }
 

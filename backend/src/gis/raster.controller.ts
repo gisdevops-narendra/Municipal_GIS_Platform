@@ -296,7 +296,7 @@ export class RasterController {
     @Query('size') size?: string,
   ) {
     const b = Math.max(1, Math.trunc(Number(band) || 1));
-    const n = Math.min(Math.max(Math.trunc(Number(size) || 140), 20), 200);
+    const n = Math.min(Math.max(Math.trunc(Number(size) || 260), 20), 400);
     return this.rasters.mesh(appUser, layerId, b, n);
   }
 

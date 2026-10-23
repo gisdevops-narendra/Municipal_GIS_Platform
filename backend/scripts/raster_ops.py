@@ -2424,7 +2424,7 @@ def op_viewshed_multi(req):
 def op_mesh(req):
     """Downsampled elevation grid (row-major, north first) for the 3D view."""
     src = gdal.Open(req["path"])
-    size = int(req.get("size", 140))
+    size = int(req.get("size", 260))
     f = min(1.0, size / max(src.RasterXSize, src.RasterYSize))
     w, h = max(int(src.RasterXSize * f), 2), max(int(src.RasterYSize * f), 2)
     ds = gdal.Warp("", src, format="MEM", width=w, height=h, resampleAlg="average",
