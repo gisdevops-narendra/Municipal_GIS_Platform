@@ -19,6 +19,9 @@ import { MapService } from '../../services/map.service';
 import { MunicipalMapComponent } from '../municipal-map/municipal-map.component';
 import { StyleEditorComponent } from '../style-editor/style-editor.component';
 import { UploadColumnsComponent } from '../upload-columns/upload-columns.component';
+import { UploadDatabaseComponent } from '../upload-database/upload-database.component';
+import { ExternalDbService } from '../../../../core/services/external-db.service';
+import { ExternalDbSelection } from '../../../../core/models/external-db.model';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { StyleGeometry } from '../../../../core/models/layer-style.model';
 import { GisWorkspaceService } from '../../../../core/services/gis-workspace.service';
@@ -64,7 +67,8 @@ const ACCEPTED_EXTENSIONS = ['zip', 'geojson', 'json', 'csv'];
     MunicipalMapComponent,
     CrsPickerComponent,
     StyleEditorComponent,
-    UploadColumnsComponent
+    UploadColumnsComponent,
+    UploadDatabaseComponent
   ],
   providers: [MapService],
   templateUrl: './upload-wizard.component.html',
@@ -88,6 +92,7 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
 
   private readonly fb = inject(FormBuilder);
   private readonly uploadsService = inject(GisUploadsService);
+  private readonly externalDb = inject(ExternalDbService);
   private readonly departmentService = inject(DepartmentService);
   private readonly mapService = inject(MapService);
   private readonly workspaceService = inject(GisWorkspaceService);
@@ -121,6 +126,10 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
   readonly step = signal<WizardStep>('FILE_INFO');
   readonly departments = signal<Department[]>([]);
   readonly selectedFile = signal<File | null>(null);
+  /** Step 1 source: an uploaded file, or a table from the user's database. */
+  readonly source = signal<'FILE' | 'DATABASE'>('FILE');
+  /** The database table to import (null until fully chosen). */
+  readonly dbSelection = signal<ExternalDbSelection | null>(null);
   readonly uploading = signal(false);
   readonly uploadPercent = signal(0);
   readonly submitError = signal<string | null>(null);
@@ -136,7 +145,25 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
 
   /** CSV gives points; routing needs line data. */
   get canRoute(): boolean {
-    return !this.isCsv;
+    return this.source() === 'DATABASE' ? !this.dbSelection()?.points : !this.isCsv;
+  }
+
+  get canSubmit(): boolean {
+    return this.source() === 'DATABASE' ? !!this.dbSelection() : !!this.selectedFile();
+  }
+
+  setSource(source: 'FILE' | 'DATABASE'): void {
+    this.source.set(source);
+    this.submitError.set(null);
+  }
+
+  /** A layer name from the chosen table — unless the user typed their own. */
+  onDbSuggestName(name: string): void {
+    const current = this.f.layerName.value.trim();
+    if (!current || current === this.suggestedName) {
+      this.suggestedName = name;
+      this.form.patchValue({ layerName: name });
+    }
   }
 
   readonly ownershipOptions = [
@@ -221,7 +248,7 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
   }
 
   get isCsv(): boolean {
-    return (this.selectedFile()?.name ?? '').toLowerCase().endsWith('.csv');
+    return this.source() === 'FILE' && (this.selectedFile()?.name ?? '').toLowerCase().endsWith('.csv');
   }
 
   onFileInput(event: Event): void {
@@ -334,6 +361,10 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
   }
 
   submitUpload(): void {
+    if (this.source() === 'DATABASE') {
+      this.importFromDatabase();
+      return;
+    }
     const file = this.selectedFile();
     if (!file) {
       this.submitError.set('Select a file to upload.');
@@ -381,6 +412,49 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
             this.upload.set(event.upload);
             this.step.set('VALIDATION');
           }
+        },
+        error: (error: HttpErrorResponse) => {
+          this.uploading.set(false);
+          this.submitError.set(this.resolveErrorMessage(error));
+        }
+      });
+  }
+
+  /** Step 1 from a database: the server extracts the table and validates
+   *  it like an uploaded file, so the next steps are the same. */
+  private importFromDatabase(): void {
+    const selection = this.dbSelection();
+    if (!selection) {
+      this.submitError.set('Connect to a database and choose a table to import.');
+      return;
+    }
+    if (this.form.invalid) {
+      this.form.markAllAsTouched();
+      return;
+    }
+    const value = this.form.getRawValue();
+    if (value.ownershipType === 'DEPARTMENT' && !value.departmentId) {
+      this.submitError.set('Select a department.');
+      return;
+    }
+    const { points, ...dataset } = selection;
+    this.uploading.set(true);
+    this.submitError.set(null);
+    this.uploadSub = this.externalDb
+      .import({
+        ...dataset,
+        layerName: value.layerName,
+        description: value.description || undefined,
+        ownershipType: value.ownershipType,
+        routingEnabled: !points && value.routingEnabled,
+        departmentId: value.ownershipType === 'DEPARTMENT' ? value.departmentId : undefined,
+        targetCrs: value.targetCrs && value.targetCrs !== this.workspaceCrs() ? value.targetCrs : undefined
+      })
+      .subscribe({
+        next: (upload) => {
+          this.uploading.set(false);
+          this.upload.set(upload);
+          this.step.set('VALIDATION');
         },
         error: (error: HttpErrorResponse) => {
           this.uploading.set(false);

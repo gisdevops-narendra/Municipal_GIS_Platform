@@ -1,4 +1,4 @@
-<div class="upload-wizard" [class.upload-wizard--wide]="step() === 'COLUMNS'">
+<div class="upload-wizard" [class.upload-wizard--wide]="step() === 'COLUMNS' || (step() === 'FILE_INFO' && source() === 'DATABASE')">
   <ol class="upload-wizard__steps">
     @for (label of stepLabels; track label; let i = $index) {
       <li
@@ -16,6 +16,22 @@
 
   @if (step() === 'FILE_INFO') {
     <form [formGroup]="form" (ngSubmit)="submitUpload()" class="upload-wizard__form">
+      <div class="upload-wizard__source" role="tablist" aria-label="Data source">
+        <button type="button" role="tab" class="upload-wizard__source-tab" [class.upload-wizard__source-tab--active]="source() === 'FILE'"
+          [attr.aria-selected]="source() === 'FILE'" [disabled]="uploading()" (click)="setSource('FILE')">
+          <i class="pi pi-file" aria-hidden="true"></i> Upload a file
+        </button>
+        <button type="button" role="tab" class="upload-wizard__source-tab" [class.upload-wizard__source-tab--active]="source() === 'DATABASE'"
+          [attr.aria-selected]="source() === 'DATABASE'" [disabled]="uploading()" (click)="setSource('DATABASE')">
+          <i class="pi pi-database" aria-hidden="true"></i> From a database
+        </button>
+      </div>
+
+      <!-- Kept alive while switching tabs, so a connection isn't lost. -->
+      <app-upload-database [hidden]="source() !== 'DATABASE'"
+        (selectionChange)="dbSelection.set($event)" (suggestName)="onDbSuggestName($event)" />
+
+      @if (source() === 'FILE') {
       <div class="upload-wizard__field">
         <label class="field-label">File <span class="upload-wizard__req">*</span></label>
         <input
@@ -65,6 +81,7 @@
           </button>
         }
       </div>
+      }
 
       <div class="upload-wizard__field">
         <label class="field-label" for="wiz-layer-name">Layer Name <span class="upload-wizard__req">*</span></label>
@@ -138,7 +155,7 @@
         <label class="field-label" for="wiz-target-crs">Store layer in <span class="upload-wizard__optional">(optional)</span></label>
         <app-crs-picker inputId="wiz-target-crs" formControlName="targetCrs" />
         <div class="field-hint">
-          The file's own projection is detected automatically and the data is reprojected into this CRS{{ workspaceCrs() ? ' — workspace default ' + workspaceCrs() : '' }}.
+          The data's own projection is detected automatically and the data is reprojected into this CRS{{ workspaceCrs() ? ' — workspace default ' + workspaceCrs() : '' }}.
           Change it only if this layer should be stored in another CRS.
         </div>
       </div>
@@ -180,9 +197,11 @@
 
       @if (uploading()) {
         <div class="upload-wizard__field">
-          <p-progressBar [value]="uploadPercent()" [showValue]="true"></p-progressBar>
+          <p-progressBar [value]="uploadPercent()" [showValue]="source() !== 'DATABASE'"
+            [mode]="source() === 'DATABASE' ? 'indeterminate' : 'determinate'"></p-progressBar>
           <p class="upload-wizard__hint">
-            {{ uploadPercent() < 100 ? 'Uploading…' : 'Upload complete — importing and validating the data…' }}
+            @if (source() === 'DATABASE') { Reading the table from the database, then importing and validating it… }
+            @else { {{ uploadPercent() < 100 ? 'Uploading…' : 'Upload complete — importing and validating the data…' }} }
           </p>
         </div>
       }
@@ -193,8 +212,9 @@
 
       <div class="upload-wizard__actions">
         <button pButton type="button" label="Cancel" class="p-button-text" (click)="close()"></button>
-        <button pButton type="submit" icon="pi pi-upload" label="Upload &amp; Validate" [loading]="uploading()"
-          [disabled]="!selectedFile()"></button>
+        <button pButton type="submit" [icon]="source() === 'DATABASE' ? 'pi pi-database' : 'pi pi-upload'"
+          [label]="source() === 'DATABASE' ? 'Import & Validate' : 'Upload & Validate'" [loading]="uploading()"
+          [disabled]="!canSubmit"></button>
       </div>
     </form>
   }

@@ -38,6 +38,8 @@ import { CrsController } from './crs.controller';
 import { CrsService } from './crs.service';
 import { UploadReviewService } from './upload-review.service';
 import { UploadSchemaService } from './upload-schema.service';
+import { ExternalDbController } from './external-db.controller';
+import { ExternalDbService } from './external-db.service';
 
 @Module({
   imports: [AuthModule, ModuleAccessModule, AiClientModule],
@@ -52,6 +54,7 @@ import { UploadSchemaService } from './upload-schema.service';
     VectorToolsController,
     DataToolsController,
     CrsController,
+    ExternalDbController,
   ],
   providers: [
     GisWorkspaceService,
@@ -78,6 +81,7 @@ import { UploadSchemaService } from './upload-schema.service';
     VectorToolsService,
     DataToolsService,
     CrsService,
+    ExternalDbService,
     UploadReviewService,
     UploadSchemaService,
   ],

@@ -1,0 +1,242 @@
+<!-- 1. Connection -->
+<fieldset class="udb__section" [disabled]="isConnected">
+  <div class="udb__row">
+    <div class="udb__field udb__field--grow">
+      <label class="field-label" for="udb-type">Database <span class="udb__req">*</span></label>
+      <p-select inputId="udb-type" [options]="dbTypes" optionLabel="label" optionValue="value" styleClass="w-full"
+        [(ngModel)]="conn.type" (ngModelChange)="onTypeChange($event)" [disabled]="isConnected" />
+    </div>
+  </div>
+  <div class="udb__row">
+    <div class="udb__field udb__field--grow">
+      <label class="field-label" for="udb-host">Host / server address <span class="udb__req">*</span></label>
+      <input pInputText id="udb-host" class="w-full" [(ngModel)]="conn.host" (ngModelChange)="onConnectionEdited()"
+        [placeholder]="isMongo && conn.srv ? 'cluster0.abcde.mongodb.net' : 'db.example.org or 10.0.0.5'" autocomplete="off" />
+    </div>
+    @if (!(isMongo && conn.srv)) {
+      <div class="udb__field udb__field--port">
+        <label class="field-label" for="udb-port">Port <span class="udb__req">*</span></label>
+        <p-inputNumber inputId="udb-port" [(ngModel)]="conn.port" (ngModelChange)="onConnectionEdited()"
+          [useGrouping]="false" [min]="1" [max]="65535" styleClass="w-full" inputStyleClass="w-full" [disabled]="isConnected" />
+      </div>
+    }
+  </div>
+  <div class="udb__field">
+    <label class="field-label" for="udb-db">Database name <span class="udb__req">*</span></label>
+    <input pInputText id="udb-db" class="w-full" [(ngModel)]="conn.database" (ngModelChange)="onConnectionEdited()" autocomplete="off" />
+  </div>
+  <div class="udb__row">
+    <div class="udb__field udb__field--grow">
+      <label class="field-label" for="udb-user">Username</label>
+      <input pInputText id="udb-user" class="w-full" [(ngModel)]="conn.username" (ngModelChange)="onConnectionEdited()" autocomplete="off" />
+    </div>
+    <div class="udb__field udb__field--grow">
+      <label class="field-label" for="udb-pass">Password</label>
+      <p-password inputId="udb-pass" [(ngModel)]="conn.password" (ngModelChange)="onConnectionEdited()" [feedback]="false"
+        [toggleMask]="true" styleClass="w-full" inputStyleClass="w-full" autocomplete="new-password" [disabled]="isConnected" />
+    </div>
+  </div>
+
+  @if (isPostgres) {
+    <div class="udb__row">
+      <div class="udb__field udb__field--grow">
+        <label class="field-label" for="udb-ssl">SSL mode</label>
+        <p-select inputId="udb-ssl" [options]="sslModes" optionLabel="label" optionValue="value" styleClass="w-full"
+          [(ngModel)]="conn.sslMode" (ngModelChange)="onConnectionEdited()" [disabled]="isConnected" />
+      </div>
+      <div class="udb__field udb__field--grow">
+        <label class="field-label" for="udb-schemas">Schemas <span class="udb__optional">(optional)</span></label>
+        <input pInputText id="udb-schemas" class="w-full" [(ngModel)]="conn.schemas" (ngModelChange)="onConnectionEdited()"
+          placeholder="All — or e.g. public, gis" />
+      </div>
+    </div>
+  }
+  @if (isMongo) {
+    <div class="udb__row udb__row--center">
+      <div class="udb__field udb__field--grow">
+        <label class="field-label" for="udb-auth">Authentication database <span class="udb__optional">(optional)</span></label>
+        <input pInputText id="udb-auth" class="w-full" [(ngModel)]="conn.authSource" (ngModelChange)="onConnectionEdited()" placeholder="admin" />
+      </div>
+      <label class="udb__check">
+        <p-checkbox [binary]="true" [(ngModel)]="conn.tls" (ngModelChange)="onConnectionEdited()" [disabled]="isConnected" /> TLS
+      </label>
+      <label class="udb__check">
+        <p-checkbox [binary]="true" [(ngModel)]="conn.srv" (ngModelChange)="onConnectionEdited()" [disabled]="isConnected" /> SRV (Atlas)
+      </label>
+    </div>
+  }
+</fieldset>
+
+<div class="udb__actions">
+  <span class="udb__note"><i class="pi pi-lock" aria-hidden="true"></i> Credentials are used for this import only and never stored.</span>
+  @if (isConnected) {
+    <button pButton type="button" label="Change connection" icon="pi pi-pencil" class="p-button-text p-button-sm" (click)="disconnect()"></button>
+  } @else {
+    <button pButton type="button" label="Test connection" icon="pi pi-bolt" class="p-button-outlined p-button-sm"
+      [loading]="busy() === 'test'" [disabled]="!!busy()" (click)="testConnection()"></button>
+    <button pButton type="button" label="Connect" icon="pi pi-sign-in" class="p-button-sm"
+      [loading]="busy() === 'connect'" [disabled]="!!busy()" (click)="connect()"></button>
+  }
+</div>
+
+@if (status(); as s) {
+  <p-message [severity]="s.severity" [text]="s.text" styleClass="w-full" />
+}
+
+<!-- 2. Tables / collections -->
+@if (datasets(); as all) {
+  @if (all.length) {
+    <div class="udb__section">
+      <div class="udb__list-head">
+        <span class="field-label">{{ isMongo ? 'Collections' : 'Tables' }} <span class="udb__req">*</span></span>
+        <input pInputText class="udb__search" placeholder="Search…" [ngModel]="filter()" (ngModelChange)="filter.set($event)" />
+        <label class="udb__check">
+          <p-checkbox [binary]="true" [ngModel]="spatialOnly()" (ngModelChange)="spatialOnly.set($event)" /> With geometry only
+        </label>
+      </div>
+      <div class="udb__list" role="listbox" [attr.aria-label]="isMongo ? 'Collections' : 'Tables'">
+        <div class="udb__list-row udb__list-row--head">
+          <span>{{ isMongo ? 'Collection' : 'Table' }}</span><span>Geometry</span><span>CRS</span><span class="udb__num">Records</span>
+        </div>
+        @for (d of visibleDatasets(); track d.name) {
+          <button type="button" role="option" class="udb__list-row" [class.udb__list-row--active]="selected()?.name === d.name"
+            [attr.aria-selected]="selected()?.name === d.name" (click)="select(d)">
+            <span class="udb__name" [title]="d.name">
+              @if (d.schema && d.schema !== 'public') { <span class="udb__schema">{{ d.schema }}.</span> }{{ d.table }}
+            </span>
+            <span>
+              @if (d.geometryType) { <p-tag [value]="d.geometryType" severity="info" /> }
+              @else { <span class="udb__muted">None</span> }
+            </span>
+            <span class="udb__muted">{{ d.crs ?? (d.geometryField ? 'Unknown' : '—') }}</span>
+            <span class="udb__num">{{ count(d.featureCount) }}</span>
+          </button>
+        } @empty {
+          <p class="udb__muted udb__empty">Nothing matches.</p>
+        }
+      </div>
+    </div>
+  }
+}
+
+<!-- 3. Preview + import settings -->
+@if (selected(); as d) {
+  <div class="udb__section">
+    <div class="udb__list-head">
+      <span class="field-label">Preview · {{ d.name }}</span>
+      @if (busy() === 'preview') { <i class="pi pi-spin pi-spinner udb__muted" aria-label="Loading"></i> }
+    </div>
+    @if (previewError(); as err) {
+      <p-message severity="error" [text]="err" styleClass="w-full" />
+    }
+    @if (preview(); as p) {
+      <dl class="udb__facts">
+        <div><dt>Geometry</dt><dd>{{ d.geometryField ? (d.geometryField + ' · ' + (d.geometryType ?? 'Unknown')) : 'None' }}</dd></div>
+        <div><dt>CRS</dt><dd>{{ d.crs ?? (d.geometryField ? 'No EPSG code' : '—') }}</dd></div>
+        <div><dt>Records</dt><dd>{{ count(d.featureCount) }}</dd></div>
+        <div><dt>Fields</dt><dd>{{ d.fields.length }}</dd></div>
+      </dl>
+      @if (p.rows.length) {
+        <div class="udb__table">
+          <table>
+            <thead>
+              <tr>@for (c of previewColumns(); track c) { <th>{{ c === '__geometry' ? '⌖ geometry' : c }}</th> }</tr>
+            </thead>
+            <tbody>
+              @for (row of p.rows; track $index) {
+                <tr>@for (c of previewColumns(); track c) { <td [title]="cell(row[c])">{{ cell(row[c]) }}</td> }</tr>
+              }
+            </tbody>
+          </table>
+        </div>
+        <p class="udb__muted">First {{ p.rows.length }} records.</p>
+      } @else {
+        <p class="udb__muted">The table is empty.</p>
+      }
+
+      <!-- Geometry source -->
+      <div class="udb__field">
+        <span class="field-label">Location from</span>
+        <div class="udb__segmented" role="radiogroup" aria-label="Location from">
+          @if (d.geometryField) {
+            <button type="button" role="radio" [class.active]="coordMode() === 'GEOMETRY'" [attr.aria-checked]="coordMode() === 'GEOMETRY'"
+              (click)="setCoordMode('GEOMETRY')">Geometry field ({{ d.geometryField }})</button>
+          }
+          <button type="button" role="radio" [class.active]="coordMode() === 'LATLON'" [attr.aria-checked]="coordMode() === 'LATLON'"
+            (click)="setCoordMode('LATLON')">Latitude / longitude</button>
+          <button type="button" role="radio" [class.active]="coordMode() === 'XY'" [attr.aria-checked]="coordMode() === 'XY'"
+            (click)="setCoordMode('XY')">X / Y</button>
+        </div>
+      </div>
+
+      @if (coordMode() === 'LATLON') {
+        <div class="udb__row">
+          <div class="udb__field udb__field--grow">
+            <label class="field-label" for="udb-lat">Latitude column <span class="udb__req">*</span></label>
+            <p-select inputId="udb-lat" [options]="fieldOptions()" optionLabel="label" optionValue="value" styleClass="w-full"
+              [filter]="fieldOptions().length > 8" [ngModel]="latField()" (ngModelChange)="latField.set($event); emit()" placeholder="Choose" />
+          </div>
+          <div class="udb__field udb__field--grow">
+            <label class="field-label" for="udb-lon">Longitude column <span class="udb__req">*</span></label>
+            <p-select inputId="udb-lon" [options]="fieldOptions()" optionLabel="label" optionValue="value" styleClass="w-full"
+              [filter]="fieldOptions().length > 8" [ngModel]="lonField()" (ngModelChange)="lonField.set($event); emit()" placeholder="Choose" />
+          </div>
+        </div>
+        <p class="udb__muted">Latitude / longitude are WGS 84 (EPSG:4326) degrees.</p>
+      }
+      @if (coordMode() === 'XY') {
+        <div class="udb__row">
+          <div class="udb__field udb__field--grow">
+            <label class="field-label" for="udb-x">X column <span class="udb__req">*</span></label>
+            <p-select inputId="udb-x" [options]="fieldOptions()" optionLabel="label" optionValue="value" styleClass="w-full"
+              [filter]="fieldOptions().length > 8" [ngModel]="xField()" (ngModelChange)="xField.set($event); emit()" placeholder="Choose" />
+          </div>
+          <div class="udb__field udb__field--grow">
+            <label class="field-label" for="udb-y">Y column <span class="udb__req">*</span></label>
+            <p-select inputId="udb-y" [options]="fieldOptions()" optionLabel="label" optionValue="value" styleClass="w-full"
+              [filter]="fieldOptions().length > 8" [ngModel]="yField()" (ngModelChange)="yField.set($event); emit()" placeholder="Choose" />
+          </div>
+        </div>
+      }
+      @if (coordMode() === 'XY' || (coordMode() === 'GEOMETRY' && !d.crs)) {
+        <div class="udb__field">
+          <label class="field-label" for="udb-crs">{{ coordMode() === 'XY' ? 'CRS of the X / Y columns' : 'Source CRS' }} <span class="udb__req">*</span></label>
+          <app-crs-picker inputId="udb-crs" [ngModel]="sourceCrs()" (ngModelChange)="sourceCrs.set($event ?? ''); emit()" />
+          <div class="field-hint">
+            {{ coordMode() === 'XY' ? 'X / Y values are never assumed to be WGS 84.' : "The table's projection has no EPSG code — choose the matching CRS." }}
+          </div>
+        </div>
+      }
+
+      <!-- Attribute fields -->
+      @if (d.fields.length) {
+        <div class="udb__field">
+          <div class="udb__list-head">
+            <span class="field-label">Attribute fields to import ({{ selectedFieldCount() }} of {{ d.fields.length }})</span>
+            <button pButton type="button" label="All" class="p-button-text p-button-sm" (click)="setAllFields(true)"></button>
+            <button pButton type="button" label="None" class="p-button-text p-button-sm" (click)="setAllFields(false)"></button>
+          </div>
+          <div class="udb__fields">
+            @for (f of d.fields; track f.name) {
+              <label class="udb__field-chip">
+                <p-checkbox [binary]="true" [ngModel]="fieldChoice()[f.name]" (ngModelChange)="toggleField(f.name, $event)" />
+                <span class="udb__field-name" [title]="f.name">{{ f.name }}</span>
+                <span class="udb__muted">{{ f.type }}</span>
+              </label>
+            }
+          </div>
+        </div>
+      }
+
+      <div class="udb__field udb__field--port">
+        <label class="field-label" for="udb-limit">Record limit <span class="udb__optional">(optional)</span></label>
+        <p-inputNumber inputId="udb-limit" [ngModel]="limit()" (ngModelChange)="limit.set($event); emit()" [min]="1"
+          placeholder="All records" styleClass="w-full" inputStyleClass="w-full" />
+      </div>
+
+      @if (problem(); as why) {
+        <p-message severity="warn" [text]="why" styleClass="w-full" />
+      }
+    }
+  </div>
+}
