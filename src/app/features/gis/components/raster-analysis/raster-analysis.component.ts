@@ -47,7 +47,7 @@ export type RasterToolId =
   | 'suitability' | 'encroach' | 'greencover' | 'monitor' | 'floodrisk' | 'exposure' | 'report'
   | 'extract' | 'leastcost' | 'hotspot' | 'airquality' | 'water' | 'curvature' | 'fillnodata' | 'heights'
   | 'workflows' | 'history' | 'timeslider' | 'storage'
-  | 'streams' | 'view3d' | 'swipe' | 'change' | 'changematrix' | 'series' | 'ndvi' | 'indices' | 'heat' | 'classify' | 'supervised';
+  | 'streams' | 'view3d' | 'swipe' | 'change' | 'changematrix' | 'series' | 'ndvi' | 'indices' | 'heat' | 'lst' | 'classify' | 'supervised';
 
 interface ToolDef {
   id: RasterToolId;
@@ -121,6 +121,7 @@ export const RASTER_TOOLS: ToolDef[] = [
   { id: 'ndvi', label: 'NDVI / Vegetation Index', group: 'Imagery Analysis', section: 'Indices', moduleId: 952, icon: 'pi pi-sparkles', description: 'Vegetation health from red and near-infrared bands — Sentinel-2 or Landsat.' },
   { id: 'indices', label: 'Spectral Indices', group: 'Imagery Analysis', section: 'Indices', moduleId: 954, icon: 'pi pi-palette', description: 'NDVI, NDWI (water), NDBI (built-up), SAVI or EVI from Sentinel-2 or Landsat imagery.' },
   { id: 'heat', label: 'Urban Heat Island', group: 'Imagery Analysis', section: 'Environment', moduleId: 957, icon: 'pi pi-sun', description: 'Land surface temperature (°C) from Landsat 8/9 — find hotspots.' },
+  { id: 'lst', label: 'LST from Landsat Bands', group: 'Imagery Analysis', section: 'Environment', moduleId: 957, icon: 'pi pi-sun', description: 'Land surface temperature (°C) from a downloaded Landsat image: Red, NIR and thermal bands (NDVI emissivity method).' },
   { id: 'classify', label: 'Unsupervised Classification', group: 'Imagery Analysis', section: 'Classification', moduleId: 955, icon: 'pi pi-clone', description: 'K-means land-cover classes from multi-band imagery.' },
   { id: 'supervised', label: 'Supervised Classification', group: 'Imagery Analysis', section: 'Classification', moduleId: 958, icon: 'pi pi-pencil', description: 'Draw examples of each class and classify the image, with accuracy.' }
 ];
@@ -130,7 +131,7 @@ export const RASTER_TOOL_MODULE_IDS = RASTER_TOOLS.map((t) => t.moduleId);
 const OUTPUT_TOOLS: RasterToolId[] = [
   'slope', 'aspect', 'hillshade', 'contour', 'rugged', 'fillsinks', 'watershed', 'flood', 'viewshed',
   'calc', 'reclass', 'clip', 'polygonize', 'ndvi', 'change', 'mosaic', 'resample', 'rasterize',
-  'idw', 'heatmap', 'proximity', 'indices', 'classify', 'online', 'streams', 'heat', 'supervised', 'changematrix', 'suitability', 'floodrisk', 'extract', 'leastcost', 'hotspot', 'airquality', 'curvature', 'fillnodata', 'heights'
+  'idw', 'heatmap', 'proximity', 'indices', 'classify', 'online', 'streams', 'heat', 'lst', 'supervised', 'changematrix', 'suitability', 'floodrisk', 'extract', 'leastcost', 'hotspot', 'airquality', 'curvature', 'fillnodata', 'heights'
 ];
 
 /** Tools that may also publish their result (a checkbox). */
@@ -559,6 +560,14 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
   indexSensor: IndexSensor = 'sentinel2';
   indexValues: 'auto' | 'reflectance' | 'dn' = 'auto';
   indexBands: Record<IndexBand, number> = { blue: 1, green: 2, red: 3, nir: 4, swir: 5 };
+  // LST from bands: thermal band, radiance = DN × gain + offset, Band 10 K1 / K2
+  lstThermalBand: number | null = null;
+  // atmospheric correction bands (Landsat L2 ATRAN / URAD / DRAD), when present
+  lstAtmos: { atran: number | null; urad: number | null; drad: number | null } = { atran: null, urad: null, drad: null };
+  lstGain = 0.001;
+  lstOffset = 0;
+  lstK1 = 774.8853;
+  lstK2 = 1321.0789;
   soilFactor = 0.5;
   classCount = 6;
 
@@ -792,6 +801,14 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
       next[band] = named(words[band]) ?? coded(sensor.codes?.[band]) ?? Math.min(stack[band], count);
     }
     this.indexBands = next;
+    // Thermal: "Thermal radiance (B10)" of a downloaded Landsat image; otherwise
+    // the user must choose it (guessing would read e.g. SWIR as heat).
+    this.lstThermalBand = named(/thermal|\blwir|(^|[^A-Z0-9])(ST_|TRAD_)?B10($|[^0-9])/i) ?? null;
+    this.lstAtmos = {
+      atran: named(/transmittance|\batran\b/i) ?? null,
+      urad: named(/upwelling|\burad\b/i) ?? null,
+      drad: named(/downwelling|\bdrad\b/i) ?? null
+    };
   }
 
   /** Sentinel-2 / Landsat from band names (downloaded Sentinel-2 bands are
@@ -1891,6 +1908,29 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
         return this.runLayerTool('clip', { layerId, polygon: this.polygon(), outputName: base.outputName });
       case 'polygonize':
         return this.runLayerTool('polygonize', base);
+      case 'lst': {
+        const count = this.info()?.bandCount ?? 0;
+        if (count < 3) return this.error.set(`LST needs Red, NIR and thermal bands — this raster has ${count}. Download a new Landsat image (band 6 is thermal).`);
+        if (!this.lstThermalBand) return this.error.set('This raster has no band named thermal. Choose the thermal band — or download the Landsat image again (band 6 is thermal; older downloads have none).');
+        if (this.lstThermalBand === this.indexBands.red || this.lstThermalBand === this.indexBands.nir) return this.error.set('The thermal band must differ from the Red and NIR bands.');
+        const atmos = Object.values(this.lstAtmos).filter((b) => b).length;
+        if (atmos > 0 && atmos < 3) return this.error.set('Atmospheric correction needs all three bands (transmittance, upwelling, downwelling) — or clear them all.');
+        return this.runLayerTool('lst-bands', {
+          layerId,
+          redBand: this.indexBands.red,
+          nirBand: this.indexBands.nir,
+          thermalBand: this.lstThermalBand,
+          atranBand: this.lstAtmos.atran ?? undefined,
+          uradBand: this.lstAtmos.urad ?? undefined,
+          dradBand: this.lstAtmos.drad ?? undefined,
+          sensor: this.indexSensor,
+          gain: this.lstGain,
+          offset: this.lstOffset,
+          k1: this.lstK1,
+          k2: this.lstK2,
+          outputName: base.outputName
+        });
+      }
       case 'ndvi': {
         const bad = this.indexBandError();
         if (bad) return this.error.set(bad);

@@ -768,6 +768,30 @@ export class LandSurfaceTempDto extends AoiDto {
   outputName!: string;
 }
 
+/** LST from a raster's Red, NIR and thermal bands (NDVI emissivity method). */
+export class LstFromBandsDto extends RasterOutputDto {
+  @IsInt() @Min(1) redBand!: number;
+  @IsInt() @Min(1) nirBand!: number;
+  @IsInt() @Min(1) thermalBand!: number;
+
+  /** Optional atmospheric correction (Landsat L2 ATRAN / URAD / DRAD bands). */
+  @IsOptional() @IsInt() @Min(1) atranBand?: number;
+  @IsOptional() @IsInt() @Min(1) uradBand?: number;
+  @IsOptional() @IsInt() @Min(1) dradBand?: number;
+
+  @IsOptional()
+  @IsIn(INDEX_SENSORS)
+  sensor?: IndexSensor;
+
+  /** Thermal DN → radiance: radiance = DN × gain + offset. */
+  @IsOptional() @IsNumber() gain?: number;
+  @IsOptional() @IsNumber() offset?: number;
+
+  /** Thermal constants (Landsat 8/9 Band 10 by default). */
+  @IsOptional() @IsNumber() @Min(0.001) k1?: number;
+  @IsOptional() @IsNumber() @Min(0.001) k2?: number;
+}
+
 class TrainingClassDto {
   @IsString()
   @Length(1, 60)

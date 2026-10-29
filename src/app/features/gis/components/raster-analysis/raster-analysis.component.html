@@ -156,7 +156,7 @@
         <button type="button" class="ra__export-btn" (click)="shareLayer(layerId(), 'image')" title="Copy a PNG image URL of the layer"><i class="pi pi-image"></i> Image URL</button>
       </div>
     }
-    @if (bandOptions().length > 1 && !['ndvi', 'clip', 'indices', 'classify', 'supervised', 'changematrix', 'download', 'resample'].includes(tool()) && !(tool() === 'style' && styleMode === 'rgb')) {
+    @if (bandOptions().length > 1 && !['ndvi', 'lst', 'clip', 'indices', 'classify', 'supervised', 'changematrix', 'download', 'resample'].includes(tool()) && !(tool() === 'style' && styleMode === 'rgb')) {
       <label class="bo__field">
         <span class="bo__label">Band</span>
         <p-select class="bo__select" [options]="bandOptions()" optionLabel="label" optionValue="value" [(ngModel)]="band" appendTo="body" />
@@ -689,7 +689,7 @@
           <p class="bo__hint">Community drone and aerial imagery (mostly CC BY 4.0) — property-level detail where someone has flown. Click an image to preview it on the map; the download keeps its native resolution (coarsened only for very large areas). Max 100 km².</p>
           <button pButton type="button" [label]="coverageLoading() ? 'Finding imagery…' : 'Show available imagery'" icon="pi pi-map" class="p-button-sm p-button-outlined" [disabled]="coverageLoading()" (click)="showCoverage()"></button>
         } @else if (onlineSource === 'landsat') {
-          <p class="bo__hint">Landsat 8/9 Collection 2 surface reflectance (USGS, via Microsoft Planetary Computer), a new scene every ~8 days. Click a scene to preview it on the map. Bands saved: 1 Blue · 2 Green · 3 Red · 4 NIR · 5 SWIR — ready for NDVI, NDWI, NDBI, SAVI and classification. Max 10 000 km².</p>
+          <p class="bo__hint">Landsat 8/9 Collection 2 surface reflectance (USGS, via Microsoft Planetary Computer), a new scene every ~8 days. Click a scene to preview it on the map. Bands saved: 1 Blue · 2 Green · 3 Red · 4 NIR · 5 SWIR · 6 Thermal radiance (B10) · 7–9 atmosphere (B10) — ready for NDVI, NDWI, NDBI, SAVI, classification and LST. Scenes of the same pass are stitched when the area spans them. Max 10 000 km².</p>
         } @else {
           <p class="bo__hint">Click a scene to preview it on the map. Bands saved: 1 Blue · 2 Green · 3 Red · 4 NIR · 5 SWIR — ready for NDVI, NDWI, NDBI, SAVI and classification. Max 2 500 km².</p>
         }
@@ -756,6 +756,59 @@
         <input type="range" min="0" max="80" step="5" [(ngModel)]="heatCloud" />
       </label>
       <p class="bo__hint">Median land surface temperature (°C) of the 5 clearest Landsat 8/9 scenes, 30 m. Pick summer months (e.g. March – May) to see heat islands. Max 2 500 km².</p>
+    }
+
+    @case ('lst') {
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Red</span>
+          <p-select class="bo__select" [options]="bandOptions()" optionLabel="label" optionValue="value" [(ngModel)]="indexBands.red" appendTo="body" />
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">NIR</span>
+          <p-select class="bo__select" [options]="bandOptions()" optionLabel="label" optionValue="value" [(ngModel)]="indexBands.nir" appendTo="body" />
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Thermal</span>
+          <p-select class="bo__select" [options]="bandOptions()" optionLabel="label" optionValue="value" [(ngModel)]="lstThermalBand" placeholder="Choose" appendTo="body" />
+        </label>
+      </div>
+      <span class="bo__label">Atmospheric correction (optional)</span>
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Transmittance</span>
+          <p-select class="bo__select" [options]="bandOptions()" optionLabel="label" optionValue="value" [(ngModel)]="lstAtmos.atran" placeholder="None" [showClear]="true" appendTo="body" />
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Upwelling</span>
+          <p-select class="bo__select" [options]="bandOptions()" optionLabel="label" optionValue="value" [(ngModel)]="lstAtmos.urad" placeholder="None" [showClear]="true" appendTo="body" />
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Downwelling</span>
+          <p-select class="bo__select" [options]="bandOptions()" optionLabel="label" optionValue="value" [(ngModel)]="lstAtmos.drad" placeholder="None" [showClear]="true" appendTo="body" />
+        </label>
+      </div>
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Thermal gain</span>
+          <input type="number" class="bo__input" step="any" [(ngModel)]="lstGain" />
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">Offset</span>
+          <input type="number" class="bo__input" step="any" [(ngModel)]="lstOffset" />
+        </label>
+      </div>
+      <div class="bo__row">
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">K1</span>
+          <input type="number" class="bo__input" step="any" [(ngModel)]="lstK1" />
+        </label>
+        <label class="bo__field bo__field--grow">
+          <span class="bo__label">K2</span>
+          <input type="number" class="bo__input" step="any" [(ngModel)]="lstK2" />
+        </label>
+      </div>
+      <p class="bo__hint">Radiance L = DN × gain + offset; emissivity ε from NDVI (Sobrino). With the atmospheric bands: B(T) = ((L − Lu) / τ − (1 − ε) Ld) / ε, T = K2 / ln(K1 / B + 1) — the Landsat Level-2 method, accurate to ~1–2 °C. Without them: LST = BT / (1 + (λ·BT / ρ) ln ε), a few °C low. Defaults fit a Landsat 8/9 image downloaded here (band 6 thermal, 7–9 atmosphere). For a Level-1 Band 10 use the MTL's RADIANCE_MULT / ADD_BAND_10 (e.g. 0.0003342 / 0.1). Images downloaded before this tool have no thermal band — download again.</p>
     }
 
     @case ('supervised') {

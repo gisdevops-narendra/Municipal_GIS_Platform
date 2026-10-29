@@ -26,6 +26,7 @@ import type {
   HeatmapDto,
   IndexSeriesDto,
   LandSurfaceTempDto,
+  LstFromBandsDto,
   IdwDto,
   MosaicDto,
   OnlineRasterDto,
@@ -621,6 +622,28 @@ export class RasterToolsService {
       const { stats, ...result } = await this.rasters.runOp<Record<string, unknown> & { stats: RasterStats }>({
         op: 'lst', bbox: dto.bbox, polygon: dto.polygon, from: dto.from, to: dto.to,
         maxCloud: dto.maxCloud ?? 30, output,
+      });
+      const [min, max] = span(stats, [20, 50]);
+      return { style: { mode: 'ramp', ramp: 'thermal', min, max, opacity: 0.8 }, result: { ...result, stats } };
+    });
+  }
+
+  /** LST (°C) from a raster's Red, NIR and thermal bands — e.g. a downloaded
+   *  Landsat 8/9 image (band 6 = Band 10 thermal radiance). */
+  async lstFromBands(appUser: AppUser, dto: LstFromBandsDto) {
+    const { file } = await this.rasters.resolveRaster(appUser, dto.layerId);
+    return this.toRasterLayer(appUser, dto.outputName, async (output) => {
+      const { stats, ...result } = await this.rasters.runOp<Record<string, unknown> & { stats: RasterStats }>({
+        op: 'lst_bands', path: file, output,
+        bands: {
+          red: dto.redBand, nir: dto.nirBand, thermal: dto.thermalBand,
+          atran: dto.atranBand, urad: dto.uradBand, drad: dto.dradBand,
+        },
+        sensor: dto.sensor ?? 'landsat89',
+        ...(dto.gain !== undefined ? { gain: dto.gain } : {}),
+        ...(dto.offset !== undefined ? { offset: dto.offset } : {}),
+        ...(dto.k1 !== undefined ? { k1: dto.k1 } : {}),
+        ...(dto.k2 !== undefined ? { k2: dto.k2 } : {}),
       });
       const [min, max] = span(stats, [20, 50]);
       return { style: { mode: 'ramp', ramp: 'thermal', min, max, opacity: 0.8 }, result: { ...result, stats } };

@@ -1198,6 +1198,86 @@ def op_index(req):
     return result
 
 
+# Landsat 8/9 TIRS Band 10: K1, K2 (MTL thermal constants) and centre
+# wavelength (µm). ρ = h·c / σ = 14 388 µm·K.
+LST_B10 = {"k1": 774.8853, "k2": 1321.0789, "wavelength": 10.895}
+
+
+def op_lst_bands(req):
+    """Land surface temperature (°C) with emissivity from NDVI (Sobrino 2004).
+    With the atmospheric bands (transmittance τ, upwelling Lu, downwelling Ld)
+    the thermal radiance is corrected as in the Landsat Level-2 product:
+    B(T) = ((L − Lu) / τ − (1 − ε) Ld) / ε, T = K2 / ln(K1 / B + 1).
+    Without them: brightness temperature BT = K2 / ln(K1 / L + 1),
+    LST = BT / (1 + (λ·BT / ρ) · ln ε)."""
+    ds = gdal.Open(req["path"])
+    numbers = req["bands"]
+    for name in ("red", "nir", "thermal"):
+        if not 1 <= int(numbers.get(name) or 0) <= ds.RasterCount:
+            raise OpError(f"Choose the {name} band (this raster has {ds.RasterCount} bands).")
+    red, nir, thermal = (read_band(ds, int(numbers[n])) for n in ("red", "nir", "thermal"))
+    thermal[thermal <= 0] = np.nan
+    atmos = [numbers.get(n) for n in ("atran", "urad", "drad")]
+    corrected = all(atmos)
+    if any(atmos) and not corrected:
+        raise OpError("Atmospheric correction needs all three bands: transmittance, upwelling and downwelling radiance.")
+    for n in atmos if corrected else []:
+        if not 1 <= int(n) <= ds.RasterCount:
+            raise OpError(f"Band {n} is not in this raster ({ds.RasterCount} bands).")
+
+    # Reflectance: values above 1.5 are digital numbers.
+    sample = nir[np.isfinite(nir)]
+    if sample.size and float(np.percentile(sample, 99)) > 1.5:
+        scale, offset = REFLECTANCE_SCALE.get(req.get("sensor") or "landsat89", REFLECTANCE_SCALE["other"])
+        red, nir = red * scale + offset, nir * scale + offset
+    red, nir = np.maximum(red, 0), np.maximum(nir, 0)
+
+    k1, k2 = float(req.get("k1", LST_B10["k1"])), float(req.get("k2", LST_B10["k2"]))
+    wavelength = float(req.get("wavelength", LST_B10["wavelength"]))
+    with np.errstate(all="ignore"):
+        radiance = thermal * float(req.get("gain", 0.001)) + float(req.get("offset", 0.0))
+        ndvi = (nir - red) / (nir + red)
+        pv = np.clip((ndvi - 0.2) / (0.5 - 0.2), 0, 1) ** 2
+        emissivity = np.where(ndvi < 0, 0.991,
+                              np.where(ndvi < 0.2, 0.966, np.where(ndvi > 0.5, 0.99, 0.004 * pv + 0.986)))
+        if corrected:
+            tau = read_band(ds, int(numbers["atran"])) * float(req.get("atranScale", 0.0001))
+            up = read_band(ds, int(numbers["urad"])) * float(req.get("radScale", 0.001))
+            down = read_band(ds, int(numbers["drad"])) * float(req.get("radScale", 0.001))
+            surface = ((radiance - up) / tau - (1 - emissivity) * down) / emissivity
+            lst = k2 / np.log(k1 / surface + 1) - 273.15
+        else:
+            bt = k2 / np.log(k1 / radiance + 1)
+            lst = bt / (1 + (wavelength * bt / 14388) * np.log(emissivity)) - 273.15
+    lst[~np.isfinite(lst) | ~np.isfinite(ndvi)] = np.nan
+    if not np.isfinite(lst).any():
+        raise OpError("No valid pixels — check the thermal band and its gain / offset.")
+    # The hottest land surface ever measured is ~71 °C (Lut desert); a median
+    # outside −40…60 °C or many pixels above 72 °C mean the wrong band (e.g.
+    # SWIR read as thermal) or wrong gain / offset.
+    finite = lst[np.isfinite(lst)]
+    median = float(np.median(finite))
+    too_hot = float((finite > 72).mean() * 100)
+    if not -40 <= median <= 60 or too_hot > 1:
+        raise OpError(f"Implausible result (median {median:.0f} °C, {too_hot:.0f} % above 72 °C) — "
+                      "the thermal band or its gain / offset is wrong.")
+    lst[(lst < -60) | (lst > 90)] = np.nan
+    write_array(ds, lst, req["output"])
+    valid = lst[np.isfinite(lst)]
+    mean = float(valid.mean())
+    hot = valid > mean + 2
+    gt = ds.GetGeoTransform()
+    pixel_m2 = abs(gt[1] * gt[5]) if not ds.GetSpatialRef() or ds.GetSpatialRef().IsProjected() else 900.0
+    return {
+        "source": "NDVI emissivity, atmospherically corrected (Landsat Band 10)" if corrected
+                  else "NDVI emissivity method, no atmospheric correction (Landsat Band 10)",
+        "atmosphericCorrection": corrected,
+        "meanC": mean, "maxC": float(valid.max()), "minC": float(valid.min()),
+        "hotspotM2": float(hot.sum() * pixel_m2), "hotspotPct": float(hot.sum() * 100 / valid.size),
+        "stats": stats_of(lst),
+    }
+
+
 def op_classify(req):
     ds = gdal.Open(req["path"])
     bands = req.get("bands") or list(range(1, ds.RasterCount + 1))
@@ -1512,19 +1592,42 @@ def op_stac_fetch(req):
 
 LANDSAT_COLLECTION = "landsat-c2-l2"
 LANDSAT_BANDS = [("blue", "Blue (B2)"), ("green", "Green (B3)"), ("red", "Red (B4)"),
-                 ("nir08", "NIR (B5)"), ("swir16", "SWIR (B6)")]
+                 ("nir08", "NIR (B5)"), ("swir16", "SWIR (B6)"), ("trad", "Thermal radiance (B10)"),
+                 ("atran", "Atmospheric transmittance (B10)"), ("urad", "Upwelling radiance (B10)"),
+                 ("drad", "Downwelling radiance (B10)")]
+# Nodata of each asset. Band 10 radiances (TRAD / URAD / DRAD) are Int16
+# × 0.001 W/(m²·sr·µm); ATRAN is Int16 × 0.0001.
+LANDSAT_NODATA = {"trad": -9999, "atran": -9999, "urad": -9999, "drad": -9999}
 # QA_PIXEL bits: 1 dilated cloud, 2 cirrus, 3 cloud, 4 cloud shadow.
 LANDSAT_QA_CLOUDY = 0b11110
 
 
+def landsat_sign(items):
+    """Signs the items' asset hrefs for anonymous access."""
+    token = http_json(PC_TOKEN_URL.format(collection=LANDSAT_COLLECTION))["token"]
+    for item in items:
+        for asset in item.get("assets", {}).values():
+            if "blob.core.windows.net" in asset.get("href", ""):
+                asset["href"] = pc_sign(asset["href"], token)
+    return items
+
+
 def landsat_item(scene_id):
     """The scene with its asset hrefs signed for anonymous access."""
-    item = http_json(f"{PC_STAC_URL}/collections/{LANDSAT_COLLECTION}/items/{scene_id}")
-    token = http_json(PC_TOKEN_URL.format(collection=LANDSAT_COLLECTION))["token"]
-    for asset in item.get("assets", {}).values():
-        if "blob.core.windows.net" in asset.get("href", ""):
-            asset["href"] = pc_sign(asset["href"], token)
-    return item
+    return landsat_sign([http_json(f"{PC_STAC_URL}/collections/{LANDSAT_COLLECTION}/items/{scene_id}")])[0]
+
+
+def landsat_same_pass(item, bbox):
+    """Other scenes of the same satellite pass (same day and WRS path) over the
+    area — adjacent rows, which mosaic seamlessly with the picked scene."""
+    props = item.get("properties", {})
+    date = props.get("datetime", "")[:10]
+    extra = {"platform": {"eq": props.get("platform")}}
+    if props.get("landsat:wrs_path") is not None:
+        extra["landsat:wrs_path"] = {"eq": props["landsat:wrs_path"]}
+    others = [i for i in stac_items(PC_STAC_URL, LANDSAT_COLLECTION, bbox, date, date, 100, 20, extra)
+              if i["id"] != item["id"] and all(k in i.get("assets", {}) for k, _ in LANDSAT_BANDS)]
+    return landsat_sign(others)
 
 
 def landsat_preview(req, width, height):
@@ -1558,20 +1661,22 @@ def landsat_fetch(req):
     missing = [key for key, _ in LANDSAT_BANDS if key not in assets]
     if missing:
         raise OpError(f"The scene is missing bands: {', '.join(missing)}.")
+    # The picked scene goes last so it wins where scenes overlap.
+    scenes = landsat_same_pass(item, req["bbox"]) + [item]
     folder = tempfile.mkdtemp()
     try:
         srs = gdal.Open("/vsicurl/" + assets["red"]["href"]).GetProjection()
         parts = []
         for key, _ in LANDSAT_BANDS:
             part = os.path.join(folder, f"{key}.tif")
-            warp_to_aoi(["/vsicurl/" + assets[key]["href"]], part, req, dstSRS=srs, xRes=30, yRes=30,
-                        targetAlignedPixels=True, resampleAlg="near", srcNodata=0, dstNodata=0,
+            warp_to_aoi(["/vsicurl/" + s["assets"][key]["href"] for s in scenes], part, req, dstSRS=srs, xRes=30, yRes=30,
+                        targetAlignedPixels=True, resampleAlg="near", srcNodata=LANDSAT_NODATA.get(key, 0), dstNodata=0,
                         outputType=gdal.GDT_UInt16)
             parts.append(part)
         masked_pct = None
-        if req.get("maskClouds") and "qa_pixel" in assets:
+        if req.get("maskClouds") and all("qa_pixel" in s["assets"] for s in scenes):
             qa_path = os.path.join(folder, "qa.tif")
-            warp_to_aoi(["/vsicurl/" + assets["qa_pixel"]["href"]], qa_path, req, dstSRS=srs, xRes=30, yRes=30,
+            warp_to_aoi(["/vsicurl/" + s["assets"]["qa_pixel"]["href"] for s in scenes], qa_path, req, dstSRS=srs, xRes=30, yRes=30,
                         targetAlignedPixels=True, resampleAlg="near", srcNodata=1, dstNodata=1)
             qa_ds = gdal.Open(qa_path)
             qa = qa_ds.GetRasterBand(1).ReadAsArray().astype(np.uint16)
@@ -1601,7 +1706,8 @@ def landsat_fetch(req):
         shutil.rmtree(folder, ignore_errors=True)
     props = item.get("properties", {})
     platform = (props.get("platform") or "landsat").replace("landsat-", "Landsat ")
-    return {"source": f"{platform} Collection 2 Level-2", "sceneId": item["id"], "date": props.get("datetime"),
+    return {"source": f"{platform} Collection 2 Level-2", "sceneId": item["id"],
+            "scenes": [s["id"] for s in scenes], "date": props.get("datetime"),
             "cloud": props.get("eo:cloud_cover"), "bands": [label for _, label in LANDSAT_BANDS],
             "maskedPct": masked_pct, "width": width, "height": height}
 
@@ -3227,7 +3333,7 @@ OPS = {
     "online_earthview": op_online_earthview,
     "imagery_coverage": op_imagery_coverage,
     "stac_search": op_stac_search, "stac_fetch": op_stac_fetch, "stac_preview": op_stac_preview,
-    "s2_composite": op_s2_composite, "index_series": op_index_series, "lst": op_lst,
+    "s2_composite": op_s2_composite, "index_series": op_index_series, "lst": op_lst, "lst_bands": op_lst_bands,
     "supervised": op_supervised, "change_matrix": op_change_matrix, "streams": op_streams,
     "online_population": op_online_population, "online_water": op_online_water,
     "viewshed_multi": op_viewshed_multi, "find_raster": op_find_raster,

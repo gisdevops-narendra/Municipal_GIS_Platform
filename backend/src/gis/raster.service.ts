@@ -68,6 +68,7 @@ const OP_STAGES: Record<string, string> = {
   s2_composite: 'Downloading scenes and building the median composite',
   index_series: 'Reading every clear Sentinel-2 date',
   lst: 'Downloading Landsat thermal bands',
+  lst_bands: 'Calculating land surface temperature',
   supervised: 'Training and classifying',
   change_matrix: 'Cross-tabulating classes',
   streams: 'Tracing the stream network',

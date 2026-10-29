@@ -194,6 +194,49 @@ async function main() {
   }, true);
   await check('Imagery', 'Urban heat island', async () =>
     published(await job('heat-island', { bbox: BBOX, from: '2026-03-01', to: '2026-05-31', outputName: out('lst') })), true);
+  await check('Imagery', 'Online: Landsat (with thermal + atmosphere)', async () => {
+    const { scenes } = (await tools.sentinelSearch({ collection: 'landsat', bbox: BBOX, from: '2026-03-01', to: '2026-05-31', maxCloud: 10 })) as { scenes: { id: string }[] };
+    if (!scenes.length) throw new Error('no clear Landsat scene');
+    const r = await job('online', { source: 'landsat', bbox: BBOX, sceneId: scenes[0].id, maskClouds: true, outputName: out('landsat') }, 'landsat');
+    const bands = (r.result as { bands?: string[] } | undefined)?.bands ?? [];
+    if (bands.length !== 9 || !/thermal/i.test(bands[5])) throw new Error(`bands: ${bands.join(', ')}`);
+    return `${published(r)} ${scenes[0].id}, ${bands.length} bands`;
+  }, true);
+  if (ids.landsat) {
+    const lst = async (body: Record<string, unknown>, name: string) => {
+      const r = await job('lst-bands', { layerId: ids.landsat, redBand: 3, nirBand: 4, thermalBand: 6, ...body, outputName: out(name) });
+      const res = r.result as { meanC: number; minC: number; maxC: number; atmosphericCorrection: boolean };
+      if (!(res.meanC > 15 && res.meanC < 60 && res.minC > -10 && res.maxC < 75)) throw new Error(`implausible: ${res.minC.toFixed(1)}–${res.maxC.toFixed(1)} °C`);
+      return { r, res };
+    };
+    await check('Imagery', 'Landsat LST (atmos. corrected)', async () => {
+      const { r, res } = await lst({ atranBand: 7, uradBand: 8, dradBand: 9 }, 'lst-bands');
+      if (!res.atmosphericCorrection) throw new Error('correction not applied');
+      return `${published(r)} mean ${res.meanC.toFixed(1)} °C (${res.minC.toFixed(1)}–${res.maxC.toFixed(1)})`;
+    });
+    await check('Imagery', 'Landsat LST (uncorrected)', async () => {
+      const { r, res } = await lst({}, 'lst-bands-raw');
+      return `${published(r)} mean ${res.meanC.toFixed(1)} °C`;
+    });
+    await check('Imagery', 'Landsat LST rejects SWIR as thermal', async () => {
+      try {
+        await job('lst-bands', { layerId: ids.landsat, redBand: 3, nirBand: 4, thermalBand: 5, outputName: out('lst-bad') });
+      } catch (e) {
+        if (/implausible/i.test((e as Error).message)) return 'refused: implausible result';
+        throw e;
+      }
+      throw new Error('published a result from the SWIR band');
+    });
+    await check('Imagery', 'Landsat LST rejects partial atmosphere bands', async () => {
+      try {
+        await job('lst-bands', { layerId: ids.landsat, redBand: 3, nirBand: 4, thermalBand: 6, atranBand: 7, outputName: out('lst-partial') });
+      } catch (e) {
+        if (/all three bands/i.test((e as Error).message)) return 'refused';
+        throw e;
+      }
+      throw new Error('ran with one atmospheric band');
+    });
+  }
   await check('Imagery', 'Air quality (NO₂, 2 orbits)', async () =>
     published(await job('air-quality', { bbox: BBOX, from: '2026-10-01', to: '2026-10-05', maxOrbits: 2, outputName: out('no2') })), true);
 
