@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GISLayer, GISWorkspace, GisPermission, Prisma } from '@prisma/client';
+import { UploadSchemaService } from './upload-schema.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiClientService } from '../gis-ai/ai-client.service';
 import { GeoServerService } from './geoserver.service';
@@ -139,6 +140,7 @@ export class GisLayersService {
     /** Optional so unit tests need not stub it. */
     @Optional() private readonly ai?: AiClientService,
     @Optional() private readonly crs?: CrsService,
+    @Optional() private readonly uploadSchema?: UploadSchemaService,
   ) {}
 
   /**
@@ -531,6 +533,34 @@ export class GisLayersService {
     });
     this.refreshAiIndex(appUser.municipalityId);
     return { id: layer.id, name };
+  }
+
+  /** "Fix column types" for a layer uploaded before types were fixed at
+   *  import: the same safe conversion (every value must convert; codes
+   *  with leading zeros stay text), then GeoServer re-reads the fields. */
+  async fixColumnTypes(appUser: AppUser, layerId: string) {
+    if (appUser.systemRole !== 'MUNICIPALITY_OWNER') {
+      throw new ForbiddenException('Only the municipality owner may change column types.');
+    }
+    const layer = await this.findLayerInMunicipality(appUser.municipalityId, layerId);
+    if (!layer.postgisTable || !this.uploadSchema) {
+      throw new BadRequestException('This layer has no editable data table.');
+    }
+    let converted: { column: string; type: string }[];
+    try {
+      converted = await this.uploadSchema.autoTypeColumns(layer.postgisTable);
+    } catch (error) {
+      throw new BadRequestException(`Column types could not be changed: ${(error as Error).message}`);
+    }
+    if (converted.length) {
+      await this.geoServer.refreshFeatureType(
+        layer.geoserverWorkspace,
+        `${layer.geoserverWorkspace}_postgis`,
+        layer.geoserverLayer,
+      );
+      this.refreshAiIndex(appUser.municipalityId);
+    }
+    return { converted };
   }
 
   async deleteLayer(appUser: AppUser, layerId: string): Promise<void> {

@@ -577,6 +577,28 @@ export class GisWorkspaceComponent {
     });
   }
 
+  /** Layers uploaded before types were fixed at import: numbers / dates
+   *  stored as text become real types (only when every value converts). */
+  fixColumnTypes(layer: GisLayer): void {
+    this.notify.info(`Checking the columns of "${layer.name}"… large layers can take a minute.`);
+    this.gisLayersService.fixColumnTypes(layer.id).subscribe({
+      next: ({ converted }) => {
+        if (!converted.length) {
+          this.notify.info(`"${layer.name}": no text column holds only numbers, dates or yes/no values.`);
+          return;
+        }
+        const names = converted.slice(0, 6).map((c) => c.column).join(', ');
+        this.notify.success(
+          `${converted.length} column${converted.length === 1 ? '' : 's'} converted: ${names}${converted.length > 6 ? '…' : ''}`,
+          layer.name
+        );
+        this.mapService.refreshLayerStyle(layer.id);
+        this.loadLayers();
+      },
+      error: (err: HttpErrorResponse) => this.notify.error(this.apiError(err, 'Column types could not be changed.'))
+    });
+  }
+
   private apiError(err: HttpErrorResponse, fallback: string): string {
     const message = err.error?.message;
     return Array.isArray(message) ? message.join('. ') : (message ?? fallback);

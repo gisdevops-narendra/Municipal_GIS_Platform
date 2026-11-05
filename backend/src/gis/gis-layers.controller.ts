@@ -174,6 +174,13 @@ export class GisLayersController {
     return this.gisLayersService.renameLayer(appUser, id, dto.name);
   }
 
+  /** Gives text columns holding numbers / dates / yes-no their real type. Owner-only. */
+  @RequireMunicipalityOwner()
+  @Post('layers/:id/fix-column-types')
+  fixColumnTypes(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
+    return this.gisLayersService.fixColumnTypes(appUser, id);
+  }
+
   /** Hard-deletes a layer — unpublishes it from GeoServer and drops its
    *  data. Owner-only (also re-checked in the service); the guard here is
    *  defense-in-depth, matching DELETE /api/departments/:id. */

@@ -64,6 +64,8 @@ export class LayerPanelComponent {
   @Input() canManage = false;
   @Output() renameLayer = new EventEmitter<{ layer: GisLayer; name: string }>();
   @Output() deleteLayer = new EventEmitter<GisLayer>();
+  /** Owner: give text columns holding numbers / dates their real type. */
+  @Output() fixColumnTypes = new EventEmitter<GisLayer>();
   /** Raster Analysis outputs: reopen the saved results report. */
   @Output() openReport = new EventEmitter<GisLayer>();
 
@@ -122,6 +124,9 @@ export class LayerPanelComponent {
       ...(this.canManage
         ? [
             { label: 'Rename', icon: 'pi pi-pencil', command: () => this.beginRename(layer) },
+            ...(layer.layerType === 'VECTOR'
+              ? [{ label: 'Fix column types', icon: 'pi pi-sort-numeric-up', command: () => this.fixColumnTypes.emit(layer) }]
+              : []),
             { separator: true },
             { label: 'Delete layer', icon: 'pi pi-trash', styleClass: 'layer-panel__menu-danger', command: () => this.deleteLayer.emit(layer) }
           ]

@@ -108,6 +108,7 @@
               [canManage]="isOwner()"
               (renameLayer)="renameLayer($event.layer, $event.name)"
               (deleteLayer)="deleteLayer($event)"
+              (fixColumnTypes)="fixColumnTypes($event)"
               (openReport)="reportLayer.set($event)"
             />
           } @else if (leftTool() === 'layers') {

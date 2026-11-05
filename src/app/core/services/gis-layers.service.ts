@@ -106,6 +106,11 @@ export class GisLayersService {
     return this.http.patch<{ id: string; name: string }>(`${this.baseUrl}/${id}`, { name });
   }
 
+  /** Text columns holding numbers / dates / yes-no get their real type. */
+  fixColumnTypes(id: string): Observable<{ converted: { column: string; type: string }[] }> {
+    return this.http.post<{ converted: { column: string; type: string }[] }>(`${this.baseUrl}/${id}/fix-column-types`, {});
+  }
+
   delete(id: string): Observable<{ success: true }> {
     return this.http.delete<{ success: true }>(`${this.baseUrl}/${id}`);
   }
