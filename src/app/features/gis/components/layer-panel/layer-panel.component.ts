@@ -10,6 +10,9 @@ import { TooltipModule } from 'primeng/tooltip';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { MapService } from '../../services/map.service';
 import { RasterInfo, RasterService } from '../../services/raster.service';
+import { LegendModel, parseLegend } from '../layer-legend/legend-model';
+import { LegendSwatchComponent } from '../layer-legend/legend-swatch.component';
+import { LayerLegendComponent } from '../layer-legend/layer-legend.component';
 
 export interface LayerPanelDepartmentGroup {
   departmentId: string;
@@ -39,7 +42,7 @@ export interface LayerPanelDepartmentGroup {
 @Component({
   selector: 'app-layer-panel',
   standalone: true,
-  imports: [NgTemplateOutlet, FormsModule, ButtonModule, CheckboxModule, MenuModule, SelectModule, TooltipModule],
+  imports: [NgTemplateOutlet, LegendSwatchComponent, LayerLegendComponent, FormsModule, ButtonModule, CheckboxModule, MenuModule, SelectModule, TooltipModule],
   templateUrl: './layer-panel.component.html',
   styleUrl: './layer-panel.component.scss'
 })
@@ -187,8 +190,6 @@ export class LayerPanelComponent {
 
   /** Layers whose full legend is expanded under the row. */
   readonly openLegends = signal<ReadonlySet<string>>(new Set());
-  /** Layers GeoServer returned no legend image for. */
-  readonly legendFailed = new Set<string>();
 
   isLegendOpen(layerId: string): boolean {
     return this.openLegends().has(layerId);
@@ -251,8 +252,38 @@ export class LayerPanelComponent {
     this.mapService.setLayerVisibility(layerId, !!event.checked);
   }
 
-  legendUrl(layer: GisLayer): string {
-    return this.mapService.legendGraphicUrl(layer);
+  /** Parsed JSON legends by layer id: undefined = not loaded, null = none. */
+  readonly legends = signal<ReadonlyMap<string, LegendModel | null>>(new Map());
+  private readonly legendLoading = new Set<string>();
+
+  /** A restyle refetches every legend (the swatches beside names too). */
+  private readonly resetLegendsOnRestyle = effect(() => {
+    if (this.mapService.styleChanged() === 0) return;
+    untracked(() => {
+      this.legendLoading.clear();
+      this.legends.set(new Map());
+    });
+  });
+
+  legend(layer: GisLayer): LegendModel | null | undefined {
+    const map = this.legends();
+    if (!map.has(layer.id) && !this.legendLoading.has(layer.id)) {
+      this.legendLoading.add(layer.id);
+      const version = this.mapService.styleChanged();
+      void this.mapService.legendJson(layer, version || undefined).then((json) => {
+        if (version !== this.mapService.styleChanged()) return; // superseded by a restyle
+        this.legendLoading.delete(layer.id);
+        this.legends.update((m) => new Map(m).set(layer.id, parseLegend(json)));
+      });
+    }
+    return map.get(layer.id);
+  }
+
+  /** Mini colour ramp for the swatch beside a raster layer's name. */
+  rampGradient(model: LegendModel): string | null {
+    const stops = model.ramp?.stops;
+    if (!stops?.length) return null;
+    return stops.length === 1 ? stops[0].color : `linear-gradient(135deg, ${stops.map((s) => s.color).join(', ')})`;
   }
 
   onStyle(layer: GisLayer, event: Event): void {

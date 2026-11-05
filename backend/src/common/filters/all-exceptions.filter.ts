@@ -31,6 +31,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
         exception instanceof Error ? exception.stack : exception,
       );
     }
+    else if (status !== HttpStatus.UNAUTHORIZED) {
+      // Rejected requests (400 / 403 / 413 …) — logged so a "nothing
+      // happened" report can be traced to its reason.
+      const req = ctx.getRequest<{ method?: string; originalUrl?: string }>();
+      this.logger.warn(`${status} ${req.method ?? ''} ${req.originalUrl ?? ''}: ${message}`);
+    }
 
     response.status(status).json({
       statusCode: status,

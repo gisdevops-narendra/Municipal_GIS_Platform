@@ -46,6 +46,7 @@ import { LayerStyleService } from '../../../../core/services/layer-style.service
 import { GisAiService } from '../../services/gis-ai.service';
 import { IconLibraryService, pageOf } from '../../services/icon-library.service';
 import { NotificationService } from '../../../../core/services/notification.service';
+import { SldEditorComponent } from '../sld-editor/sld-editor.component';
 
 /** Online icons shown per page (more come from the same search). */
 const ICON_PAGE = 12;
@@ -179,6 +180,7 @@ const ZOOM_TO_DENOM = (z: number): number => 559082264.028 / Math.pow(2, z);
     DecimalPipe,
     FormsModule,
     ButtonModule,
+    SldEditorComponent,
     SelectModule,
     CheckboxModule,
     InputNumberModule,
@@ -206,6 +208,8 @@ export class StyleEditorComponent implements OnInit, OnDestroy {
   @Output() applied = new EventEmitter<{ styleName?: string }>();
   @Output() removed = new EventEmitter<void>();
   @Output() closed = new EventEmitter<void>();
+  /** SLD tab map preview: a draft style name, or null to end it. */
+  @Output() stylePreview = new EventEmitter<string | null>();
 
   readonly markShapes = MARK_SHAPES;
   readonly fonts = FONT_FAMILIES;
@@ -219,6 +223,12 @@ export class StyleEditorComponent implements OnInit, OnDestroy {
   readonly errorMsg = signal<string | null>(null);
   readonly classifying = signal(false);
   readonly hasSavedStyle = signal(false);
+  /** An uploaded SLD is the layer's active style. */
+  readonly sldActive = signal(false);
+  /** Visual editor or SLD (XML) editor; the SLD one is created on first open
+   *  and then kept alive so unsaved XML survives switching tabs. */
+  readonly tab = signal<'visual' | 'sld'>('visual');
+  readonly sldOpened = signal(false);
   readonly rampId = signal('viridis');
 
   /** ExternalGraphic icon picker (point geometry only). */
@@ -346,6 +356,12 @@ export class StyleEditorComponent implements OnInit, OnDestroy {
   private loadExistingStyle(): void {
     this.styleService.getStyle(this.target).subscribe({
       next: (stored) => {
+        this.sldActive.set(!!stored.sld);
+        if (stored.sld) {
+          this.hasSavedStyle.set(true);
+          // SLD-styled layers open on the SLD tab.
+          this.setTab('sld');
+        }
         if (stored.spec) {
           this.spec.set(stored.spec);
           this.hasSavedStyle.set(true);
@@ -914,6 +930,7 @@ export class StyleEditorComponent implements OnInit, OnDestroy {
       next: (result) => {
         this.state.set('idle');
         this.hasSavedStyle.set(true);
+        this.sldActive.set(false);
         this.applied.emit({ styleName: result.styleName });
         if (!auto) this.notify.success('Style applied.');
         this.flushPendingLiveApply();
@@ -925,6 +942,18 @@ export class StyleEditorComponent implements OnInit, OnDestroy {
         this.flushPendingLiveApply();
       },
     });
+  }
+
+  setTab(tab: 'visual' | 'sld'): void {
+    if (tab === 'sld') this.sldOpened.set(true);
+    this.tab.set(tab);
+  }
+
+  /** The SLD tab saved the layer's style. */
+  onSldSaved(result: { styleName: string }): void {
+    this.hasSavedStyle.set(true);
+    this.sldActive.set(true);
+    this.applied.emit({ styleName: result.styleName });
   }
 
   reset(): void {
@@ -950,6 +979,7 @@ export class StyleEditorComponent implements OnInit, OnDestroy {
           next: () => {
             this.state.set('idle');
             this.hasSavedStyle.set(false);
+            this.sldActive.set(false);
             this.setCustomIconPreview(null);
             this.spec.set(defaultSpec(this.geometry));
             this.notify.success('Style removed.');

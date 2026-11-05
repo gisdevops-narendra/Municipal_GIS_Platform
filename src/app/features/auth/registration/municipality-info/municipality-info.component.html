@@ -81,6 +81,9 @@
               class="w-full"
               placeholder="e.g. Gir Somnath"
             />
+            @if (isAllIndia) {
+              <small class="field-hint">Not applicable for All India scope.</small>
+            }
             @if (f.district.invalid && f.district.touched) {
               <div class="field-error"><span>District is required.</span></div>
             }
@@ -97,6 +100,9 @@
             class="w-full"
             placeholder="e.g. Veraval"
           />
+          @if (isAllIndia) {
+            <small class="field-hint">Not applicable for All India scope.</small>
+          }
           @if (f.cityOrTown.invalid && f.cityOrTown.touched) {
             <div class="field-error"><span>City / town is required.</span></div>
           }

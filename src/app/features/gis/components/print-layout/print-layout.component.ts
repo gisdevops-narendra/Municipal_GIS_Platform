@@ -15,6 +15,8 @@ import {
   PrintReportRequest
 } from '../../../../core/models/print.model';
 import { MapService } from '../../services/map.service';
+import { parseLegend } from '../layer-legend/legend-model';
+import { buildPrintLegend } from '../layer-legend/print-legend';
 import { PrintService } from '../../../../core/services/print.service';
 
 type PanelState = 'idle' | 'generating' | 'done' | 'error';
@@ -160,7 +162,7 @@ export class PrintLayoutComponent implements OnDestroy {
     );
   }
 
-  generate(): void {
+  async generate(): Promise<void> {
     const context = this.mapService.getPrintContext();
     if (!context) {
       this.fail('The map is still loading — try again in a moment.');
@@ -175,6 +177,15 @@ export class PrintLayoutComponent implements OnDestroy {
     this.state.set('generating');
     this.errorMsg.set(null);
     this.refreshScale();
+
+    // The app's own legend symbols (PNG icons), not GeoServer's legend image.
+    const legends = this.includeLegend
+      ? await Promise.all(
+          context.layers.map(async (l) =>
+            buildPrintLegend(l.name, parseLegend(await this.mapService.legendJsonById(l.layerId)))
+          )
+        )
+      : [];
 
     const request: PrintReportRequest = {
       pageSize: this.pageSize(),
@@ -194,10 +205,11 @@ export class PrintLayoutComponent implements OnDestroy {
         rotation: context.rotation,
         projection: context.projection
       },
-      layers: context.layers.map((layer) => ({
+      layers: context.layers.map((layer, i) => ({
         layerId: layer.layerId,
         opacity: layer.opacity,
-        cqlFilter: layer.cqlFilter ?? undefined
+        cqlFilter: layer.cqlFilter ?? undefined,
+        legend: legends[i]
       }))
     };
 

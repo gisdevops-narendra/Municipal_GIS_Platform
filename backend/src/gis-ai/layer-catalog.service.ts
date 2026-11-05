@@ -83,6 +83,13 @@ const TEXTISH = new Set([
 const INTERNAL_COLUMNS = new Set(['ogc_fid', 'fid', 'gis_workspace_id']);
 const MATCHES_PER_COLUMN = 15;
 const DISTINCT_PER_COLUMN = 5000;
+/** Above this many rows a full DISTINCT per text column is too slow (a
+ *  653k-row table took ~60 s); look up only the question's words instead. */
+const LARGE_TABLE_ROWS = 50_000;
+/** Text fields nobody names a value by (ids, codes, flags, measures). */
+const NON_VALUE_COLUMN =
+  /(^|_)(id|fid|gid|uid|code|cd|status|sta|year|area|length|leng|shape|summer|month)(_|$)|^objectid|code$|_\d+$/i;
+const LARGE_TABLE_COLUMNS = 12;
 const DISTINCT_CACHE_MS = 10 * 60 * 1000;
 
 /** Words common to every request — they would match half of any column. */
@@ -295,7 +302,9 @@ export class LayerCatalogService {
           (c) => c.kind === 'text' && !INTERNAL_COLUMNS.has(c.name),
         );
         if (textCols.length === 0) return;
-        const distinct = await this.distinctValues(entry, textCols);
+        const distinct = (await this.isLargeTable(entry))
+          ? await this.questionValues(entry, textCols, words)
+          : await this.distinctValues(entry, textCols);
         for (const col of textCols) {
           const hits = (distinct.get(col.name) ?? [])
             .map((v) => ({ v, n: matchScore(v, words) }))
@@ -309,6 +318,69 @@ export class LayerCatalogService {
         }
       }),
     );
+  }
+
+  private readonly rowCountCache = new Map<string, { at: number; rows: number }>();
+
+  private async isLargeTable(entry: LayerCatalogEntry): Promise<boolean> {
+    if (entry.isDemo) return false;
+    const hit = this.rowCountCache.get(entry.table);
+    if (hit && Date.now() - hit.at < DISTINCT_CACHE_MS) return hit.rows >= LARGE_TABLE_ROWS;
+    const [row] = await this.prisma
+      .$queryRawUnsafe<{ rows: number }[]>(
+        `SELECT GREATEST(reltuples, 0)::float8 AS rows FROM pg_class WHERE relname = $1 AND relkind = 'r'`,
+        entry.table,
+      )
+      .catch(() => [] as { rows: number }[]);
+    const rows = Number(row?.rows ?? 0);
+    this.rowCountCache.set(entry.table, { at: Date.now(), rows });
+    return rows >= LARGE_TABLE_ROWS;
+  }
+
+  /**
+   * Large tables: only values that contain one of the question's words (or
+   * a close spelling, via pg_trgm), in the table's value-bearing text
+   * columns — indexed by the search service's trigram indexes. Per
+   * question, not cached; bounded by a statement timeout.
+   */
+  private async questionValues(
+    entry: LayerCatalogEntry,
+    textCols: CatalogColumn[],
+    words: string[],
+  ): Promise<Map<string, string[]>> {
+    const useful = textCols.filter((c) => !NON_VALUE_COLUMN.test(c.name));
+    const cols = (useful.length ? useful : textCols)
+      .sort((a, b) => Number(!/name/i.test(a.name)) - Number(!/name/i.test(b.name)))
+      .slice(0, LARGE_TABLE_COLUMNS);
+    const values = new Map<string, string[]>();
+    if (!cols.length || !words.length) return values;
+    const patterns = words.map((w) => `%${w.replace(/[\\%_]/g, '')}%`);
+    const union = cols
+      .map((c) => {
+        const col = `"${c.name.replace(/"/g, '""')}"`;
+        const match = words.map((_, i) => `$${i + 2} <% ${col}`).join(' OR ');
+        return (
+          `(SELECT '${c.name.replace(/'/g, "''")}' AS c, v FROM (SELECT DISTINCT ${col}::text AS v ` +
+          `FROM "${entry.table}" WHERE ${col} ILIKE ANY($1) OR ${match} LIMIT ${MATCHES_PER_COLUMN * 2}) d)`
+        );
+      })
+      .join(' UNION ALL ');
+    try {
+      const rows = await this.prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = 4000`);
+        await tx.$executeRawUnsafe(`SET LOCAL pg_trgm.word_similarity_threshold = 0.5`);
+        return tx.$queryRawUnsafe<{ c: string; v: string }[]>(union, patterns, ...words);
+      });
+      for (const r of rows) {
+        if (!r.v) continue;
+        const list = values.get(r.c) ?? [];
+        list.push(r.v);
+        values.set(r.c, list);
+      }
+    } catch {
+      // best effort — the plan still works without the hint
+    }
+    return values;
   }
 
   private async distinctValues(

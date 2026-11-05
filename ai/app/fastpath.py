@@ -48,6 +48,7 @@ from .repair import (
     _mentioned_layers,
     _numbered_field,
     _numbered_filters,
+    _similar,
     _tokens,
     _value_phrase_filters,
     abbreviation_words,
@@ -55,6 +56,7 @@ from .repair import (
     matching_values,
     value_filter,
 )
+from .metadata import alias_phrases, role_of
 from .schema import AttributeFilter, GisOperation, LayerInfo, PlanResult, SpatialFilter
 
 # Words that carry no condition of their own.
@@ -654,3 +656,93 @@ def _describe(op: GisOperation, target: LayerInfo) -> str:
     else:
         order = ""
     return what + (" where " + " and ".join(conditions) if conditions else "") + order + "."
+
+
+# ---------------------------------------------------------------------------
+# "what is the <field> of this/these <thing>" right after a result: the value
+# of a field for the features just shown, read from the data (never guessed
+# by the model). Generic: the field is found among the target layer's own
+# field names / aliases, whatever the uploaded data calls it.
+
+_ASK_FIELD = re.compile(
+    r"^\s*(?:and\s+|so\s+)?(?:what(?:'s|\s+is|\s+are|\s+was|\s+were)?|which|"
+    r"tell\s+me|give\s+me|show(?:\s+me)?|how\s+much)\s+(?P<rest>.+)$",
+    re.I,
+)
+_REFERS_BACK = re.compile(r"\b(this|that|these|those|it|its|their|them|same)\b", re.I)
+_STAT_AVG = re.compile(r"\b(average|avg|mean)\b", re.I)
+# Plain English question words — never a field name.
+_QUESTION_WORDS = set(_tokens(
+    "a an the of for in on at is are was were what whats which this that these those it its "
+    "their them same value values me tell give show how much please total sum overall "
+    "combined average avg mean number"
+))
+_NUMERIC_TEXT = re.compile(r"^\s*-?\d[\d,]*(\.\d+)?\s*$")
+
+
+def _numeric_like(field) -> bool:
+    """Numbers, or text whose sampled values are all numbers ("2052")."""
+    if field.type in ("integer", "number"):
+        return True
+    samples = [v for v in (field.sample_values or []) if str(v).strip()]
+    return field.type == "text" and bool(samples) and all(_NUMERIC_TEXT.match(str(v)) for v in samples)
+
+
+def field_follow_up(message: str, layers: List[LayerInfo], previous: Optional[GisOperation]) -> Optional[PlanResult]:
+    if previous is None or previous.kind != "select":
+        return None
+    text = message.strip().rstrip("?.! ")
+    m = _ASK_FIELD.match(text)
+    if not m or not _REFERS_BACK.search(text):
+        return None
+    target = _find_layer(layers, previous.target_layer)
+    if target is None:
+        return None
+    # Naming another layer usually means a new question — unless the words
+    # are also a field of this result ("the district of this village").
+    others = [found for found, *_ in _mentioned_layers(text, layers) if found.code != target.code]
+    layer_words = set(_tokens(f"{target.name} {target.code}"))
+    words = [w for w in _tokens(m.group("rest")) if w not in _QUESTION_WORDS and w not in layer_words]
+    if not words:
+        return None
+
+    def covers(word: str, parts: List[str]) -> bool:
+        return any(word == p or _similar(word, p) or (len(word) > 3 and p.startswith(word)) for p in parts)
+
+    best = None
+    for f in target.fields:
+        if role_of(f) in ("id", "hidden"):
+            continue
+        name_parts = [p for p in _tokens(f.name) if p]
+        alias_parts = [p for a in alias_phrases(f) for p in _tokens(a)]
+        parts = name_parts + alias_parts
+        if not all(covers(w, parts) for w in words):
+            continue
+        # Fewest unexplained name parts wins: "population" ->
+        # total_population_<layer> over total_male_population_<layer>.
+        extra = len([p for p in name_parts if p not in layer_words and not any(covers(w, [p]) for w in words)])
+        key = (extra, len(f.name))
+        if best is None or key < best[0]:
+            best = (key, f)
+    if best is None:
+        return None
+    field = best[1]
+    if others and not any(
+        covers(w, [p for p in _tokens(field.name)]) for o in others for w in _tokens(f"{o.name} {o.code}")
+    ):
+        return None
+
+    op = previous.model_copy(deep=True)
+    op.kind = "aggregate"
+    op.order_by, op.order_desc, op.limit = None, None, None
+    op.group_by_layer = op.group_by_layer_field = None
+    if _numeric_like(field):
+        op.metric = "avg" if _STAT_AVG.search(text) else "sum"
+        op.metric_field = field.name
+        op.group_by = None
+    else:
+        # A text field: its value(s) among these features, with counts.
+        op.metric, op.metric_field = "count", None
+        op.group_by = field.name
+    return PlanResult(answer_kind="gis_operation", explanation=_describe(op, target),
+                      operation=op, planner="fast")

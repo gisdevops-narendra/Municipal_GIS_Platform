@@ -537,7 +537,14 @@ export class GisWorkspaceComponent {
     return 'polygon';
   }
 
+  /** SLD editor preview: render the layer with a draft style (null ends it). */
+  onStylePreview(layer: GisLayer, style: string | null): void {
+    if (style) this.mapService.setLayerVisibility(layer.id, true);
+    this.mapService.previewLayerStyle(layer.id, style);
+  }
+
   onStyleApplied(layer: GisLayer): void {
+    this.mapService.previewLayerStyle(layer.id, null);
     this.mapService.setLayerVisibility(layer.id, true);
     this.mapService.refreshLayerStyle(layer.id);
   }
@@ -714,25 +721,28 @@ export class GisWorkspaceComponent {
     this.highlightLayerId.set(match.id);
   }
 
+  /** Search × — drop the found feature's highlight and the layer emphasis. */
+  onSearchCleared(): void {
+    this.mapService.clearSelectionHighlight();
+    this.highlightLayerId.set(null);
+    this.featureInfoResults.set([]);
+  }
+
   onSearchFeatureSelected(match: GisSearchFeatureMatch): void {
     const layer = this.layers().find((candidate) => candidate.id === match.layerId);
     if (match.bbox) {
       this.mapService.zoomToBbox4326(match.bbox);
     }
+    // Outline the found feature itself, not just the area around it.
+    this.mapService.setSelectionHighlight(match.geometry ? [match.geometry] : []);
     if (layer) {
       this.mapService.setLayerVisibility(layer.id, true);
       this.highlightLayerId.set(layer.id);
       const results: FeatureInfoResult[] = [{ layer, features: [{ attributes: match.attributes }] }];
+      // Search only zooms to and highlights the feature — no Identify
+      // popup; clicking the feature still opens its info as usual.
       this.featureInfoResults.set(results);
-      // Show the searched feature's attributes in the on-map Identify popup,
-      // anchored at the centre of its bounding box.
-      if (match.bbox) {
-        const centre: [number, number] = [
-          (match.bbox[0] + match.bbox[2]) / 2,
-          (match.bbox[1] + match.bbox[3]) / 2
-        ];
-        this.mapService.openFeatureInfoPopupAt4326(centre, { loading: false, error: null, results });
-      }
+      this.mapService.closeFeatureInfoPopup();
     }
   }
 

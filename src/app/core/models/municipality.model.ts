@@ -2,6 +2,7 @@
  *  list rather than a hard-coded enum with special-cased logic, since the
  *  platform must support ULB types beyond Municipal Corporations. */
 export type MunicipalityTypeCode =
+  | 'national'
   | 'municipal_corporation'
   | 'municipality'
   | 'municipal_council'

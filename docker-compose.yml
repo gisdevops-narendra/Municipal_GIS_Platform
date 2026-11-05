@@ -268,6 +268,11 @@ services:
       MAPFISH_PRINT_URL: ${MAPFISH_PRINT_URL:-http://mapfish-print:8080/print}
       MAPFISH_PRINT_APP: ${MAPFISH_PRINT_APP:-municipal-gis}
       MAPFISH_GEOSERVER_URL: ${MAPFISH_GEOSERVER_URL:-http://geoserver:8080/geoserver}
+      # External-DB import: "localhost" entered by the user means the host
+      # machine, not this container.
+      EXTERNAL_DB_LOCALHOST_ALIAS: host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${BACKEND_PORT:-3000}:3000"
     volumes:

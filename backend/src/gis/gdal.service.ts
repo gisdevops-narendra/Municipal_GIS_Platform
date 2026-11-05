@@ -82,7 +82,8 @@ export class GdalService {
     }
     args.push(filePath);
 
-    const stdout = await this.run('ogrinfo', args);
+    // A multi-GB GeoJSON is scanned end to end to count its features.
+    const stdout = await this.run('ogrinfo', args, 15 * 60_000);
 
     let parsed: unknown;
     try {
@@ -192,6 +193,9 @@ export class GdalService {
       '-t_srs',
       params.targetCrs,
       '-overwrite',
+      // Large transactions: far faster for hundreds of thousands of features.
+      '-gt',
+      '65536',
     ];
     if (params.sourceCrsOverride && /^EPSG:\d+$/i.test(params.sourceCrsOverride)) {
       args.push('-s_srs', params.sourceCrsOverride);
@@ -200,7 +204,9 @@ export class GdalService {
       args.push('-oo', oo);
     }
 
-    await this.run('ogr2ogr', args, 120_000);
+    // National datasets (e.g. every village in India) take many minutes.
+    const minutes = Number(process.env.GIS_IMPORT_TIMEOUT_MINUTES) || 120;
+    await this.run('ogr2ogr', args, minutes * 60_000);
   }
 
   private async run(

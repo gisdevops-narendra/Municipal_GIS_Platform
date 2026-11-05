@@ -32,6 +32,9 @@ export class StorageService {
   private readonly logger = new Logger(StorageService.name);
   private readonly rootDir: string;
   readonly maxUploadBytes: number;
+  /** Data pulled from a user's database is written server-side straight to
+   *  disk (never through the browser), so it gets its own, larger limit. */
+  readonly maxExternalImportBytes: number;
   readonly maxExtractedZipBytes: number;
   readonly maxZipFileCount: number;
 
@@ -43,6 +46,8 @@ export class StorageService {
       Number(this.config.get<string>('GIS_UPLOAD_MAX_FILE_SIZE_MB', '500')) *
       1024 *
       1024;
+    this.maxExternalImportBytes =
+      Number(this.config.get<string>('EXTERNAL_DB_MAX_FILE_SIZE_MB', '30720')) * 1024 * 1024;
     this.maxExtractedZipBytes =
       Number(
         this.config.get<string>('GIS_UPLOAD_MAX_EXTRACTED_ZIP_SIZE_MB', '2000'),
@@ -88,6 +93,35 @@ export class StorageService {
     await fsp.mkdir(dir, { recursive: true });
     const absolutePath = path.join(dir, storedFilename);
     await fsp.writeFile(absolutePath, buffer);
+    return { storedFilename, absolutePath };
+  }
+
+  /** Like saveRawFile, but moves an already-written server-side file
+   *  (an external-database extract) into raw/ instead of buffering it. */
+  async saveRawFileFromPath(
+    municipalityId: string,
+    uploadId: string,
+    originalFilename: string,
+    sourcePath: string,
+  ): Promise<{ storedFilename: string; absolutePath: string }> {
+    const { size } = await fsp.stat(sourcePath);
+    if (size > this.maxExternalImportBytes) {
+      throw new UploadTooLargeError(
+        `The data exceeds the ${Math.round(this.maxExternalImportBytes / 1024 / 1024)} MB import limit.`,
+      );
+    }
+    const ext = this.safeExtension(originalFilename);
+    const storedFilename = `${randomUUID()}${ext}`;
+    const dir = this.rawDir(municipalityId, uploadId);
+    await fsp.mkdir(dir, { recursive: true });
+    const absolutePath = path.join(dir, storedFilename);
+    try {
+      await fsp.rename(sourcePath, absolutePath);
+    } catch {
+      // Different filesystem (tmp → storage volume): copy, then drop the source.
+      await fsp.copyFile(sourcePath, absolutePath);
+      await fsp.rm(sourcePath, { force: true });
+    }
     return { storedFilename, absolutePath };
   }
 

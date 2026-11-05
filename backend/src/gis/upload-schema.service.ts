@@ -3,6 +3,7 @@ import type { GISLayerUpload } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiClientService } from '../gis-ai/ai-client.service';
 import { isSafeGeneratedTableName } from './layer-naming.util';
+import { ensureOgcFid, normalizeColumnNames } from './ensure-ogc-fid.util';
 import type { ApplyUploadSchemaDto, UploadColumnChangeDto } from './dto/upload-schema.dto';
 
 /** Column types an uploader can choose. */
@@ -35,6 +36,8 @@ const COLUMN_NAME = /^[a-z][a-z0-9_]{0,62}$/;
 const DMY = '^(\\d{1,2})[/.-](\\d{1,2})[/.-](\\d{4})$';
 const BOOLEAN_WORDS = ['yes', 'no', 'y', 'n', 'true', 'false', 't', 'f', '1', '0'];
 const PREVIEW_ROWS = 10;
+/** The Columns step previews only this many rows (see describe). */
+const PREVIEW_SAMPLE_ROWS = 10;
 const SAMPLE_VALUES = 6;
 
 export interface ColumnConversion {
@@ -87,12 +90,19 @@ export class UploadSchemaService {
 
   async describe(upload: GISLayerUpload, srid: number) {
     const table = this.table(upload);
+    // Repairs tables imported before every import guaranteed an ogc_fid.
+    await ensureOgcFid(this.prisma, table);
+    await normalizeColumnNames(this.prisma, table);
     const columns = await this.columns(table);
     const rows = await this.prisma.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM "${table}"`);
     const total = rows[0]?.n ?? 0;
 
+    // Stats, samples and conversion previews come from the first few rows
+    // only — instant even for national layers. apply() still checks every row.
+    const sampled = total > PREVIEW_SAMPLE_ROWS;
+    const source = sampled ? `(SELECT * FROM "${table}" LIMIT ${PREVIEW_SAMPLE_ROWS}) AS sampled` : `"${table}"`;
     const described: UploadSchemaColumn[] = [];
-    for (const c of columns) described.push(await this.describeColumn(table, c.name, c.dataType, total));
+    for (const c of columns) described.push(await this.describeColumn(source, c.name, c.dataType, total));
 
     // Column meanings are not asked for at upload: the AI assistant works
     // them out after publishing (ai_field_metadata, source 'auto').
@@ -114,7 +124,7 @@ export class UploadSchemaService {
       : [];
 
     return {
-      table: { rows: total },
+      table: { rows: total, sampled },
       columns: described,
       records,
       proposalsAvailable: proposals != null,
@@ -166,7 +176,7 @@ export class UploadSchemaService {
       if (!change.type) continue;
       const from = kindOf(byName.get(change.name)!.dataType);
       if (from === change.type) continue;
-      const check = await this.conversion(table, change.name, from, change.type, total);
+      const check = await this.conversion(`"${table}"`, change.name, from, change.type, total);
       if (!check) throw new BadRequestException(`"${change.name}" cannot be changed from ${from} to ${change.type}.`);
       if (check.failing > 0) {
         throw new BadRequestException(
@@ -236,7 +246,8 @@ export class UploadSchemaService {
       .map((r) => ({ name: r.column_name, dataType: r.data_type }));
   }
 
-  private async describeColumn(table: string, name: string, dataType: string, total: number): Promise<UploadSchemaColumn> {
+  /** `source` is a FROM expression: the quoted table, or a sample of it. */
+  private async describeColumn(source: string, name: string, dataType: string, total: number): Promise<UploadSchemaColumn> {
     const col = `"${name}"`;
     const kind = kindOf(dataType);
     const ordered = kind === 'integer' || kind === 'number' || kind === 'date';
@@ -245,17 +256,17 @@ export class UploadSchemaService {
     >(
       `SELECT count(NULLIF(trim(${col}::text), ''))::int AS filled, count(DISTINCT ${col})::int AS distinct,
               ${ordered ? `min(${col})::text` : 'NULL'} AS min, ${ordered ? `max(${col})::text` : 'NULL'} AS max
-         FROM "${table}"`,
+         FROM ${source}`,
     );
     const samples = await this.prisma.$queryRawUnsafe<{ value: string; count: number }[]>(
-      `SELECT ${col}::text AS value, count(*)::int AS count FROM "${table}"
+      `SELECT ${col}::text AS value, count(*)::int AS count FROM ${source}
         WHERE NULLIF(trim(${col}::text), '') IS NOT NULL
         GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT ${SAMPLE_VALUES}`,
     );
     const conversions: UploadSchemaColumn['conversions'] = {};
     for (const to of COLUMN_KINDS) {
       if (to === kind) continue;
-      const check = await this.conversion(table, name, kind, to, total);
+      const check = await this.conversion(source, name, kind, to, total);
       if (check) conversions[to] = check;
     }
     return {
@@ -273,7 +284,8 @@ export class UploadSchemaService {
   /** How many non-empty values of `column` would not survive becoming
    *  `to` (null: that conversion is not offered at all). */
   private async conversion(
-    table: string,
+    /** Quoted table name, or a FROM expression (a sample). */
+    source: string,
     column: string,
     from: ColumnKind | 'other',
     to: ColumnKind,
@@ -308,8 +320,8 @@ export class UploadSchemaService {
     const where = `NULLIF(${v}, '') IS NOT NULL AND (${bad})`;
     const [row] = await this.prisma.$queryRawUnsafe<{ failing: number; examples: string[] | null }[]>(
       `SELECT count(*)::int AS failing,
-              (SELECT array_agg(x) FROM (SELECT DISTINCT ${col}::text AS x FROM "${table}" WHERE ${where} LIMIT 3) e) AS examples
-         FROM "${table}" WHERE ${where}`,
+              (SELECT array_agg(x) FROM (SELECT DISTINCT ${col}::text AS x FROM ${source} WHERE ${where} LIMIT 3) e) AS examples
+         FROM ${source} WHERE ${where}`,
     );
     return { failing: row?.failing ?? 0, examples: row?.examples ?? [] };
   }

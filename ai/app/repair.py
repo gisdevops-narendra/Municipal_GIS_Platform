@@ -65,6 +65,9 @@ _AREA = re.compile(r"\b(area|sq\.? ?m|square met|hectare|acre)\b", re.I)
 _SELECT = re.compile(r"\b(show|display|list|find|get|locate|highlight|which|where|all)\b", re.I)
 # "now only those in ward 5", "of them", "same" — a request that builds on
 # the previous one, so its conditions may legitimately carry over.
+_REFERS_BACK = re.compile(r"\b(this|that|it|its)\b", re.I)
+
+
 _FOLLOW_UP = re.compile(r"\b(those|these|them|they|same|previous|of them|now only|only those|among)\b", re.I)
 # Values that stand for "has it / doesn't" rather than a named category.
 _FLAG_VALUES = {"yes", "no", "y", "n", "true", "false", "1", "0"}
@@ -111,7 +114,14 @@ def is_follow_up(message: str, layers: List[LayerInfo], previous: Optional[GisOp
         if not (area_words & set(_tokens(f"{m[0].name} {m[0].code}")))
     ]
     if named:
-        return False
+        # "what is the <field> of this <layer>" names the previous layer only
+        # to refer back to it.
+        before = _find_layer(layers, previous.target_layer)
+        return (
+            before is not None
+            and bool(_REFERS_BACK.search(message))
+            and all(l.code == before.code for l in named)
+        )
     # "show me all temples in ward 3" after a signals answer: the value
     # points at another layer, so this is a new question.
     implied = {l.code for l in implied_layers(message, layers)}

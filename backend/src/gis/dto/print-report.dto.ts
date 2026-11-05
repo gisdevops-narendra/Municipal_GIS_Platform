@@ -12,8 +12,21 @@ import {
   MaxLength,
   Min,
   Max,
+  Matches,
   ValidateNested,
 } from 'class-validator';
+
+/** The app's native legend for a layer: each legend line (symbol +
+ *  label) drawn by the browser as a PNG. Only inline PNG data URIs are
+ *  accepted — never a URL the print server would fetch. */
+export class PrintLayerLegendDto {
+  @IsArray()
+  @ArrayMaxSize(60)
+  @IsString({ each: true })
+  @MaxLength(300_000, { each: true })
+  @Matches(/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/, { each: true })
+  rows!: string[];
+}
 
 /** One visible map layer to print, referenced by its GISLayer id only —
  *  the backend resolves the GeoServer workspace/layer name and builds the
@@ -36,6 +49,12 @@ export class PrintLayerDto {
   @IsString()
   @MaxLength(4000)
   cqlFilter?: string;
+
+  /** Native legend for this layer; GeoServer's PNG legend when omitted. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PrintLayerLegendDto)
+  legend?: PrintLayerLegendDto;
 }
 
 /** The live OpenLayers view, in the map projection (always EPSG:3857 for

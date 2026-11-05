@@ -12,10 +12,18 @@ export type PrintFormat = 'pdf' | 'png';
  *  here (see PrintLayoutComponent.toPrintBasemapId for the fallback). */
 export type PrintBasemapId = 'osm' | 'carto-voyager' | 'carto-dark' | 'topo' | 'none';
 
+/** The app's native legend for a printed layer: each legend line
+ *  (symbol + label) as a PNG data URI, drawn in the browser
+ *  (see layer-legend/print-legend.ts). */
+export interface PrintLayerLegend {
+  rows: string[];
+}
+
 export interface PrintLayerRequest {
   layerId: string;
   opacity?: number;
   cqlFilter?: string;
+  legend?: PrintLayerLegend;
 }
 
 export interface PrintReportRequest {

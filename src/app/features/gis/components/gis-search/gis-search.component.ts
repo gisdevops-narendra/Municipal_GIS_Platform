@@ -31,6 +31,8 @@ export class GisSearchComponent {
 
   @Output() layerSelected = new EventEmitter<GisSearchLayerMatch>();
   @Output() featureSelected = new EventEmitter<GisSearchFeatureMatch>();
+  /** × pressed — the parent removes what the search put on the map. */
+  @Output() cleared = new EventEmitter<void>();
 
   readonly query = signal('');
   readonly loading = signal(false);
@@ -92,6 +94,7 @@ export class GisSearchComponent {
     // Keep the stream in step: otherwise typing the same text again after
     // Clear is swallowed by distinctUntilChanged and nothing is searched.
     this.query$.next('');
+    this.cleared.emit();
   }
 
   selectLayer(match: GisSearchLayerMatch): void {
@@ -109,8 +112,18 @@ export class GisSearchComponent {
     return r.layers.length > 0 || r.features.length > 0;
   }
 
+  /** The value that matched the query (e.g. the village name), else the
+   *  first name-like / text value — never a bare id. */
   featureLabel(match: GisSearchFeatureMatch): string {
-    const values = Object.values(match.attributes).find((v) => typeof v === 'string' && v.trim().length > 0);
-    return typeof values === 'string' ? values : match.layerName;
+    if (match.label) return match.label;
+    const q = this.query().trim().toLowerCase();
+    const entries = Object.entries(match.attributes).filter(
+      (e): e is [string, string] => typeof e[1] === 'string' && e[1].trim().length > 0
+    );
+    const hit =
+      entries.find(([, v]) => v.toLowerCase().includes(q)) ??
+      entries.find(([k]) => /name/i.test(k)) ??
+      entries.find(([k]) => !/(^|_)(id|fid|gid|code)$|^objectid/i.test(k));
+    return hit?.[1] ?? match.layerName;
   }
 }

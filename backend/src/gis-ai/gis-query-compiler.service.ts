@@ -906,7 +906,12 @@ export class GisQueryCompilerService {
     if (filter.op === 'in' || filter.op === 'not_in') {
       const list = this.valueList(filter);
       if (list.length === 0) return null;
-      const inList = `${name} IN (${list.map((v) => this.cqlValue(col, v)).join(', ')})`;
+      const inList =
+        col.kind === 'text'
+          ? `strToLowerCase(strTrim(${name})) IN (${list
+              .map((v) => this.cqlValue(col, String(v).trim().toLowerCase()))
+              .join(', ')})`
+          : `${name} IN (${list.map((v) => this.cqlValue(col, v)).join(', ')})`;
       // SQL's NOT IN never matches NULL; GeoServer's would — keep them equal.
       return filter.op === 'in' ? inList : `NOT (${inList}) AND ${name} IS NOT NULL`;
     }
@@ -922,6 +927,11 @@ export class GisQueryCompilerService {
     }
     const op = COMPARISON[filter.op];
     if (!op || filter.value == null) return null;
+    if (col.kind === 'text' && (op === '=' || op === '<>')) {
+      const lowered = `strToLowerCase(strTrim(${name}))`;
+      const v = this.cqlValue(col, String(filter.value).trim().toLowerCase());
+      return op === '=' ? `${lowered} = ${v}` : `${lowered} <> ${v} AND ${name} IS NOT NULL`;
+    }
     // SQL's <> never matches NULL; GeoServer's would (3,120 vs 3,119).
     if (op === '<>') return `${name} <> ${this.cqlValue(col, filter.value)} AND ${name} IS NOT NULL`;
     return `${name} ${op} ${this.cqlValue(col, filter.value)}`;
@@ -1128,6 +1138,15 @@ export class GisQueryCompilerService {
         (c) => c.name.toLowerCase().replace(/_/g, '') === needle.replace(/_/g, ''),
       );
     if (col) {
+      // Uploads often store numbers as text ("2052", "1,250"): measure
+      // those values; anything non-numeric counts as empty.
+      if (col.kind === 'text') {
+        const v = `btrim(${t}."${col.name}")`;
+        return {
+          expr: `(CASE WHEN ${v} ~ '^-?[0-9][0-9,]*(\\.[0-9]+)?$' THEN replace(${v}, ',', '')::numeric END)`,
+          label: col.name,
+        };
+      }
       if (col.kind !== 'integer' && col.kind !== 'number') {
         throw new PlanValidationError(
           `"${col.name}" is not numeric. Numeric fields of "${layer.name}": ${this.numericNames(layer)}.`,
@@ -1290,10 +1309,16 @@ export class GisQueryCompilerService {
       if (list.length === 0) {
         throw new PlanValidationError(`"${col.name}" needs at least one value.`);
       }
+      // Text matches ignore case and stray spaces ("ukadiya" = "Ukadiya").
+      const text = col.kind === 'text';
       const placeholders = list
-        .map((v) => bind(this.coerce(col, v, col.name)))
+        .map((v) => {
+          const p = bind(this.coerce(col, v, col.name));
+          return text ? `lower(btrim(${p}))` : p;
+        })
         .join(', ');
-      return `${ref} ${filter.op === 'in' ? 'IN' : 'NOT IN'} (${placeholders})`;
+      const lhs = text ? `lower(btrim(${ref}))` : ref;
+      return `${lhs} ${filter.op === 'in' ? 'IN' : 'NOT IN'} (${placeholders})`;
     }
 
     if (filter.op === 'between') {
@@ -1322,7 +1347,11 @@ export class GisQueryCompilerService {
     if (filter.value == null) {
       throw new PlanValidationError(`"${col.name}" ${filter.op} needs a value.`);
     }
-    return `${ref} ${sqlOp} ${bind(this.coerce(col, filter.value, col.name))}`;
+    const value = bind(this.coerce(col, filter.value, col.name));
+    if (col.kind === 'text' && (sqlOp === '=' || sqlOp === '<>')) {
+      return `lower(btrim(${ref})) ${sqlOp} lower(btrim(${value}))`;
+    }
+    return `${ref} ${sqlOp} ${value}`;
   }
 
   private valueList(filter: AiAttributeFilter): (string | number | boolean)[] {

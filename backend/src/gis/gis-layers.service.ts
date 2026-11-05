@@ -775,6 +775,8 @@ export class GisLayersService {
       styleName: layer.styleName,
       spec: (layer.styleSpec as unknown as LayerStyleSpecDto | null) ?? null,
       geometry: this.geometryKey(layer),
+      /** True when the active style is an uploaded SLD (no editor spec). */
+      sld: !!layer.styleName && layer.styleName === this.styleService.sldStyleNameFor(layer.geoserverLayer),
     };
   }
 
@@ -1011,6 +1013,9 @@ export class GisLayersService {
       },
       spec,
     );
+    if (layer.styleName && layer.styleName !== styleName) {
+      await this.styleService.dropStyle(layer.geoserverWorkspace, layer.styleName);
+    }
     await this.prisma.gISLayer.update({
       where: { id: layer.id },
       data: {
@@ -1020,6 +1025,57 @@ export class GisLayersService {
       },
     });
     return { styleName, spec };
+  }
+
+  /** Replaces the layer's style with an uploaded SLD file. */
+  async uploadLayerSld(appUser: AppUser, layerId: string, file: { buffer?: Buffer; originalname?: string }) {
+    const layer = await this.findManageableLayer(appUser, layerId);
+    const { styleName } = await this.styleService.applySld(
+      { workspace: layer.geoserverWorkspace, geoserverLayer: layer.geoserverLayer },
+      file,
+    );
+    if (layer.styleName && layer.styleName !== styleName) {
+      await this.styleService.dropStyle(layer.geoserverWorkspace, layer.styleName);
+    }
+    await this.prisma.gISLayer.update({
+      where: { id: layer.id },
+      data: { styleName, styleSpec: Prisma.DbNull, updatedById: appUser.id },
+    });
+    return { styleName };
+  }
+
+  /** Validate SLD for a layer and stage it as a draft for map preview. */
+  async checkLayerSld(appUser: AppUser, layerId: string, sld: string) {
+    const layer = await this.findManageableLayer(appUser, layerId);
+    // Rasters have no attribute table — the attribute check is skipped.
+    const attributes = await this.layerStyleAttributes(appUser, layerId)
+      .then((r) => r.attributes.map((a: { name: string }) => a.name))
+      .catch(() => null);
+    return this.styleService.checkSld(
+      { workspace: layer.geoserverWorkspace, geoserverLayer: layer.geoserverLayer },
+      sld,
+      attributes,
+    );
+  }
+
+  /** Remove the layer's SLD draft (editor closed without saving). */
+  async discardLayerSldDraft(appUser: AppUser, layerId: string) {
+    const layer = await this.findManageableLayer(appUser, layerId);
+    await this.styleService.dropStyle(
+      layer.geoserverWorkspace,
+      this.styleService.sldDraftStyleNameFor(layer.geoserverLayer),
+    );
+  }
+
+  /** The layer's current style as SLD, for download (null: default style). */
+  async layerSld(appUser: AppUser, layerId: string): Promise<string | null> {
+    const layer = await this.findManageableLayer(appUser, layerId);
+    // No custom style: GeoServer's encoding of the built-in default.
+    return this.styleService.sldBody(
+      layer.geoserverWorkspace,
+      layer.styleName ?? this.styleService.sldStyleNameFor(layer.geoserverLayer),
+      layer.geoserverLayer,
+    );
   }
 
   async removeLayerStyle(appUser: AppUser, layerId: string) {

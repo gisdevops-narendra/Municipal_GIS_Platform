@@ -33,7 +33,7 @@ import { LayerReportService } from './layer-report.service';
 import { LayerReportDto } from './dto/layer-report.dto';
 import { ExportSelectionDto } from './dto/selection.dto';
 import { SetLayerPermissionDto } from './dto/set-layer-permission.dto';
-import { LayerStyleSpecDto } from './dto/layer-style.dto';
+import { LayerStyleSpecDto, PasteSldDto } from './dto/layer-style.dto';
 import type { ClassificationMethod } from './dto/layer-style.dto';
 import type { GroupMeasure } from './field-stats.service';
 
@@ -370,6 +370,66 @@ export class GisLayersController {
     res.setHeader('Content-Type', icon.contentType);
     res.setHeader('Cache-Control', 'public, max-age=86400');
     res.send(icon.body);
+  }
+
+  /** Upload an SLD (1.0 / 1.1) file as the layer's style. */
+  @RequireMunicipalityMember()
+  @Post('layers/:id/style/sld')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
+  uploadSld(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('An SLD file is required.');
+    return this.gisLayersService.uploadLayerSld(appUser, id, file);
+  }
+
+  /** Apply SLD text pasted in the editor (same checks as an upload). */
+  @RequireMunicipalityMember()
+  @Put('layers/:id/style/sld')
+  pasteSld(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @Body() body: PasteSldDto,
+  ) {
+    return this.gisLayersService.uploadLayerSld(appUser, id, {
+      buffer: Buffer.from(body.sld, 'utf8'),
+    });
+  }
+
+  /** Validate SLD (platform + GeoServer + attribute checks) and stage it
+   *  as a draft style the map can preview. Does not change the layer. */
+  @RequireMunicipalityMember()
+  @Post('layers/:id/style/sld/check')
+  checkSld(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @Body() body: PasteSldDto,
+  ) {
+    return this.gisLayersService.checkLayerSld(appUser, id, body.sld);
+  }
+
+  @RequireMunicipalityMember()
+  @Delete('layers/:id/style/sld/draft')
+  async discardSldDraft(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
+    await this.gisLayersService.discardLayerSldDraft(appUser, id);
+    return { success: true };
+  }
+
+  /** Download the layer's current style as SLD. */
+  @RequireMunicipalityMember()
+  @Get('layers/:id/style/sld')
+  async downloadSld(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    const sld = await this.gisLayersService.layerSld(appUser, id);
+    if (sld == null) throw new BadRequestException('This layer uses the default style — there is no SLD to download.');
+    res.setHeader('Content-Type', 'application/vnd.ogc.sld+xml; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="layer-style.sld"`);
+    res.send(sld);
   }
 
   @RequireMunicipalityMember()

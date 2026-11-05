@@ -14,6 +14,7 @@ import { StorageService } from './storage.service';
 import { GisAuthorizationService } from './gis-authorization.service';
 import { GisDashboardController } from './gis-dashboard.controller';
 import { GisDashboardService } from './gis-dashboard.service';
+import { FuzzySearchService } from './fuzzy-search.service';
 import { PrintController } from './print.controller';
 import { PrintService } from './print.service';
 import { StyleService } from './style.service';
@@ -65,6 +66,7 @@ import { ExternalDbService } from './external-db.service';
     StorageService,
     GisAuthorizationService,
     GisDashboardService,
+    FuzzySearchService,
     PrintService,
     StyleService,
     FieldStatsService,

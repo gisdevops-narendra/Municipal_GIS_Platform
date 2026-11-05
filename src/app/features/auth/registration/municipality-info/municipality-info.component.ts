@@ -10,7 +10,7 @@ import { RegistrationProgressComponent } from '../../../../shared/components/reg
 import { CustomValidators } from '../../../../shared/validators/custom-validators';
 import { RegistrationStateService } from '../../../../core/services/registration-state.service';
 import { MUNICIPALITY_TYPES } from '../../../../core/data/municipality-types.data';
-import { INDIAN_STATES } from '../../../../core/data/indian-states.data';
+import { ALL_INDIA, INDIAN_STATES } from '../../../../core/data/indian-states.data';
 import { REGISTRATION_STEPS } from '../registration-steps';
 
 @Component({
@@ -52,6 +52,28 @@ export class MunicipalityInfoComponent {
     const existing = this.state.municipality();
     if (existing.name) {
       this.form.patchValue(existing as any);
+    }
+    this.applyScope(this.form.controls.state.value);
+    this.form.controls.state.valueChanges.subscribe((v) => this.applyScope(v));
+  }
+
+  get isAllIndia(): boolean {
+    return this.form.controls.state.value === ALL_INDIA;
+  }
+
+  /** National scope: district / city aren't applicable — fill and lock them. */
+  private applyScope(stateValue: string | null): void {
+    const { district, cityOrTown } = this.form.controls;
+    if (stateValue === ALL_INDIA) {
+      district.setValue('All districts');
+      cityOrTown.setValue('All cities');
+      district.disable({ emitEvent: false });
+      cityOrTown.disable({ emitEvent: false });
+    } else if (district.disabled) {
+      district.enable({ emitEvent: false });
+      cityOrTown.enable({ emitEvent: false });
+      district.setValue('');
+      cityOrTown.setValue('');
     }
   }
 

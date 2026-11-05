@@ -1,0 +1,89 @@
+<div class="sld">
+  <!-- toolbar -->
+  <div class="sld__toolbar" role="toolbar" aria-label="SLD tools">
+    <input #fileInput type="file" accept=".sld,.xml,application/xml,text/xml" hidden (change)="onFile($event)" />
+    <button pButton type="button" icon="pi pi-folder-open" class="p-button-sm p-button-text"
+      pTooltip="Open an .sld file into the editor" tooltipPosition="bottom"
+      [disabled]="busy()" (click)="fileInput.click()" aria-label="Open file"></button>
+    <button pButton type="button" icon="pi pi-replay" class="p-button-sm p-button-text"
+      pTooltip="Reload the layer's saved style" tooltipPosition="bottom"
+      [disabled]="busy()" (click)="loadCurrent()" aria-label="Reload saved style"></button>
+    <button pButton type="button" icon="pi pi-clone" class="p-button-sm p-button-text"
+      pTooltip="Insert a template" tooltipPosition="bottom"
+      [disabled]="busy()" (click)="templates.toggle($event)" aria-label="Templates"></button>
+    <p-menu #templates [model]="templateItems" [popup]="true" appendTo="body" />
+    <button pButton type="button" icon="pi pi-align-left" class="p-button-sm p-button-text"
+      pTooltip="Format XML (Shift+Alt+F)" tooltipPosition="bottom"
+      [disabled]="busy()" (click)="format()" aria-label="Format XML"></button>
+    <span class="sld__sep" aria-hidden="true"></span>
+    <button pButton type="button" icon="pi pi-copy" class="p-button-sm p-button-text"
+      pTooltip="Copy SLD" tooltipPosition="bottom" (click)="copy()" aria-label="Copy SLD"></button>
+    <button pButton type="button" icon="pi pi-download" class="p-button-sm p-button-text"
+      pTooltip="Download .sld" tooltipPosition="bottom" (click)="download()" aria-label="Download SLD"></button>
+
+    <span class="sld__status" [attr.data-status]="status()">
+      <i class="sld__dot" aria-hidden="true"></i>{{ statusLabel() }}
+    </span>
+  </div>
+
+  <!-- code editor -->
+  <div class="sld__editor" #host></div>
+  <div class="sld__footer-bar">
+    <span>SLD · XML</span>
+    <span>{{ cursor() }}</span>
+  </div>
+
+  @if (previewing() !== 'off') {
+    <div class="sld__banner" [class.is-stale]="previewing() === 'stale'">
+      <i class="pi pi-eye" aria-hidden="true"></i>
+      @if (previewing() === 'live') {
+        <span>Previewing on the map — the layer itself is unchanged until you save.</span>
+      } @else {
+        <span>Edited since the preview — refresh it to see your changes.</span>
+        <button type="button" class="sld__link" (click)="togglePreview()">Refresh preview</button>
+      }
+      <button type="button" class="sld__link" (click)="endPreview()">End preview</button>
+    </div>
+  }
+
+  <!-- validation results -->
+  @if (findings().length) {
+    <div class="sld__findings" role="status" aria-live="polite">
+      <div class="sld__findings-head">
+        Validation
+        @if (errorCount()) { <span class="sld__count is-error">{{ errorCount() }} error{{ errorCount() === 1 ? '' : 's' }}</span> }
+        @if (warningCount()) { <span class="sld__count is-warning">{{ warningCount() }} warning{{ warningCount() === 1 ? '' : 's' }}</span> }
+      </div>
+      <ul>
+        @for (f of findings(); track $index) {
+          <li [class]="'is-' + f.severity">
+            <i [class]="f.severity === 'error' ? 'pi pi-times-circle' : 'pi pi-exclamation-triangle'" aria-hidden="true"></i>
+            <span>{{ f.message }}</span>
+            @if (f.line) {
+              <button type="button" class="sld__link" (click)="jumpTo(f)">Line {{ f.line }}</button>
+            }
+          </li>
+        }
+      </ul>
+    </div>
+  } @else if (status() === 'valid' || (status() === 'saved' && previewing() === 'live')) {
+    <div class="sld__ok"><i class="pi pi-check-circle" aria-hidden="true"></i> No problems found.</div>
+  }
+
+  <!-- actions -->
+  <div class="sld__actions">
+    <button pButton type="button" label="Validate" icon="pi pi-check-square" class="p-button-sm p-button-outlined"
+      [loading]="status() === 'checking'" [disabled]="busy()" (click)="validate()"></button>
+    <button pButton type="button" [label]="previewing() === 'live' ? 'End preview' : 'Preview on map'"
+      [icon]="previewing() === 'live' ? 'pi pi-eye-slash' : 'pi pi-eye'" class="p-button-sm p-button-outlined"
+      [disabled]="busy()" (click)="togglePreview()"></button>
+    <span class="sld__grow"></span>
+    @if (status() !== 'saved' && status() !== 'loading') {
+      <button pButton type="button" label="Revert" class="p-button-sm p-button-text"
+        [disabled]="busy()" (click)="revert()"></button>
+    }
+    <button pButton type="button" label="Save style" icon="pi pi-save" class="p-button-sm"
+      pTooltip="Validate and save as the layer's style (Ctrl+S)" tooltipPosition="top"
+      [loading]="status() === 'saving'" [disabled]="busy() || status() === 'saved'" (click)="save()"></button>
+  </div>
+</div>

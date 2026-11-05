@@ -52,7 +52,7 @@
             @for (match of result().features; track $index) {
               <button type="button" class="gis-search__result" (click)="selectFeature(match)">
                 <span class="gis-search__result-title">{{ featureLabel(match) }}</span>
-                <span class="gis-search__result-meta">{{ match.layerName }}</span>
+                <span class="gis-search__result-meta">{{ match.layerName }}@if (match.matchedField) { · {{ match.matchedField }}}</span>
               </button>
             }
           </div>

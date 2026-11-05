@@ -1,7 +1,12 @@
 /** States and Union Territories of India, for the Municipality Registration
  *  state selector. Plain string list — district is captured as free text in
  *  this task rather than a dependent dataset, noted as a follow-up. */
+/** Pseudo-state for national-scope workspaces (e.g. all-India GIS data).
+ *  Selecting it makes district and city/town not applicable. */
+export const ALL_INDIA = 'All India';
+
 export const INDIAN_STATES: string[] = [
+  ALL_INDIA,
   'Andhra Pradesh',
   'Arunachal Pradesh',
   'Assam',

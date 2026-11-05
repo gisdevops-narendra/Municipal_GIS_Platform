@@ -44,6 +44,9 @@ export interface StyleTarget {
   styleName?: string;
 }
 
+/** User-uploaded SLD files (XML text — large rule sets stay well under). */
+const MAX_SLD_BYTES = 5 * 1024 * 1024;
+
 /**
  * Style primitives — no tenant/permission logic (the callers,
  * `GisLayersService` / `GisUploadsService`, resolve and authorise the
@@ -98,6 +101,113 @@ export class StyleService {
       target.workspace,
     );
     return { styleName, ysld };
+  }
+
+  sldStyleNameFor(geoserverLayer: string): string {
+    return `${geoserverLayer}_sld`;
+  }
+
+  /**
+   * Saves a user-uploaded SLD as the layer's style and makes it the
+   * default. The file is checked first: well-formed-looking SLD, no
+   * DOCTYPE / entities (XXE) and no local-file or internal references
+   * GeoServer would otherwise resolve server-side.
+   */
+  sldDraftStyleNameFor(geoserverLayer: string): string {
+    return `${geoserverLayer}_sld_draft`;
+  }
+
+  /** Platform-side checks on SLD text; throws BadRequestException. */
+  private assertSafeSld(sld: string): void {
+    if (!sld.trim()) throw new BadRequestException('The SLD is empty.');
+    if (Buffer.byteLength(sld, 'utf8') > MAX_SLD_BYTES) {
+      throw new PayloadTooLargeException(`The SLD must be ${MAX_SLD_BYTES / 1024 / 1024} MB or smaller.`);
+    }
+    if (!/<(\w+:)?StyledLayerDescriptor[\s>]/.test(sld)) {
+      throw new BadRequestException('This is not an SLD (no <StyledLayerDescriptor> element).');
+    }
+    if (/<!DOCTYPE|<!ENTITY/i.test(sld)) {
+      throw new BadRequestException('DOCTYPE / ENTITY declarations are not allowed in an SLD.');
+    }
+    const refs = [...sld.matchAll(/(?:xlink:href|href)\s*=\s*["']([^"']*)["']/gi)].map((m) => m[1].trim());
+    const bad = refs.find(
+      (r) =>
+        /^(file|jar|ftp|gopher|netdoc):/i.test(r) ||
+        /^https?:\/\/(localhost|127\.|0\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|\[?::1|postgres|geoserver|keycloak|backend|gis-ai|ollama|mapfish)/i.test(r) ||
+        r.startsWith('/') || r.includes('..'),
+    );
+    if (bad) {
+      throw new BadRequestException(`The SLD references "${bad}", which is not allowed. Use public http(s) URLs for icons.`);
+    }
+  }
+
+  private sldText(file: { buffer?: Buffer }): string {
+    if (!file?.buffer?.length) throw new BadRequestException('The SLD is empty.');
+    return file.buffer.toString('utf8').replace(/^\uFEFF/, '');
+  }
+
+  /**
+   * Validates SLD without touching the layer: platform checks, then
+   * GeoServer's own parser (by saving it as the layer's draft style, which
+   * the map can also render as a preview), then a check that every
+   * <PropertyName> is an attribute of the layer.
+   */
+  async checkSld(
+    target: StyleTarget,
+    sld: string,
+    attributes: string[] | null,
+  ): Promise<{ valid: boolean; errors: string[]; warnings: string[]; previewStyle: string | null }> {
+    const draft = this.sldDraftStyleNameFor(target.geoserverLayer);
+    try {
+      this.assertSafeSld(sld);
+      await this.geoServer.putSldStyle(target.workspace, draft, sld);
+    } catch (error) {
+      if (error instanceof BadRequestException || error instanceof PayloadTooLargeException) {
+        return { valid: false, errors: [error.message], warnings: [], previewStyle: null };
+      }
+      throw error;
+    }
+    const known = new Set((attributes ?? []).map((a) => a.toLowerCase()));
+    const used = new Set(
+      [...sld.matchAll(/<(?:\w+:)?PropertyName>\s*([^<\s]+)\s*<\/(?:\w+:)?PropertyName>/g)].map((m) => m[1]),
+    );
+    const warnings = [...used]
+      .filter(() => attributes !== null)
+      .filter((name) => !known.has(name.toLowerCase()) && !known.has(name.split(':').pop()!.toLowerCase()))
+      .map((name) => `"${name}" is not an attribute of this layer — rules using it will not match.`);
+    if (!/<(\w+:)?(Polygon|Line|Point|Text|Raster)Symbolizer[\s>]/.test(sld)) {
+      warnings.push('The SLD has no symbolizer — nothing will be drawn.');
+    }
+    return { valid: true, errors: [], warnings, previewStyle: `${target.workspace}:${draft}` };
+  }
+
+  /**
+   * Saves SLD as the layer's style and makes it the default (same checks
+   * as checkSld). The draft style, if any, is removed.
+   */
+  async applySld(
+    target: StyleTarget,
+    file: { buffer?: Buffer; originalname?: string },
+  ): Promise<{ styleName: string }> {
+    const sld = this.sldText(file);
+    this.assertSafeSld(sld);
+    const styleName = this.sldStyleNameFor(target.geoserverLayer);
+    await this.geoServer.putSldStyle(target.workspace, styleName, sld);
+    await this.geoServer.setLayerDefaultStyle(target.workspace, target.geoserverLayer, styleName, target.workspace);
+    await this.dropStyle(target.workspace, this.sldDraftStyleNameFor(target.geoserverLayer));
+    return { styleName };
+  }
+
+  /** Deletes a style that is no longer the layer's (best-effort). */
+  async dropStyle(workspace: string, styleName: string): Promise<void> {
+    await this.geoServer
+      .deleteStyle(workspace, styleName)
+      .catch((error: Error) => this.logger.warn(`Failed to delete old style "${styleName}": ${error.message}`));
+  }
+
+  /** The SLD of a layer's style, for download. */
+  sldBody(workspace: string, styleName: string, layer?: string): Promise<string | null> {
+    return this.geoServer.getSldBody(workspace, styleName, layer);
   }
 
   /**

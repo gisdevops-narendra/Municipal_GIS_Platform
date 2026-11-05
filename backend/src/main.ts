@@ -1,11 +1,21 @@
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
+// BigInt columns (e.g. multi-GB upload file sizes) must survive JSON
+// responses; JSON.stringify throws on BigInt by default.
+(BigInt.prototype as unknown as { toJSON: () => number }).toJSON = function (this: bigint) {
+  return Number(this);
+};
+
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // Default is 100 KB; pasted SLD styles (PUT layers/:id/style/sld) can be
+  // a few MB.
+  app.useBodyParser('json', { limit: '6mb' });
   const config = app.get(ConfigService);
 
   app.setGlobalPrefix('api');

@@ -19,8 +19,15 @@
         [ngModel]="isVisible(layer.id)"
         (onChange)="onToggle(layer.id, $event)"
       ></p-checkbox>
+      @let lg = legend(layer);
       <span class="layer-panel__symbol" aria-hidden="true">
-        <img [src]="legendUrl(layer)" alt="" (error)="$any($event.target).style.visibility = 'hidden'" />
+        @if (lg?.entries?.length) {
+          <app-legend-swatch [symbols]="lg!.entries[0].symbols" [w]="18" [h]="18" />
+        } @else if (lg?.ramp) {
+          <span class="layer-panel__ramp-chip" [style.background]="rampGradient(lg!)"></span>
+        } @else if (layer.layerType === 'RASTER') {
+          <i class="pi pi-image" aria-hidden="true"></i>
+        }
       </span>
       @if (renamingId() === layer.id) {
         <input
@@ -85,13 +92,12 @@
               }
             </ul>
           } @else {
-            <img
-              [src]="legendUrl(layer)"
-              [alt]="layer.name + ' legend'"
-              (error)="$any($event.target).hidden = true; legendFailed.add(layer.id)"
-            />
-            @if (legendFailed.has(layer.id) && !info) {
+            @if (lg) {
+              <app-layer-legend [model]="lg" />
+            } @else if (lg === null && !info) {
               <span class="layer-panel__legend-empty">No legend available for this layer.</span>
+            } @else if (lg === undefined) {
+              <span class="layer-panel__legend-empty">Loading legend…</span>
             }
           }
           @if (info && canStyle) {

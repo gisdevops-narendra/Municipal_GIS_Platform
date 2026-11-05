@@ -102,19 +102,25 @@ export class ExternalDbService {
     if (byCoordinates && !((upload.latitudeField && upload.longitudeField) || (upload.xField && upload.yField))) {
       throw new BadRequestException('Choose both coordinate columns (latitude + longitude, or X + Y).');
     }
-    const extracted =
+    const extracted: { buffer?: Buffer; path?: string; dir?: string; format: 'geojson' | 'csv' } =
       conn.type === 'MONGODB'
         ? await this.mongoExtract(conn, dataset, { geometryField, fields, limit, byCoordinates, upload })
         : await this.gdalExtract(conn, dataset, { fields, limit, byCoordinates, upload });
 
     const base = `${conn.type.toLowerCase()}_${conn.database}_${dataset}`.replace(/[^\w.-]+/g, '_').slice(0, 120);
-    const file = {
-      originalname: `${base}.${extracted.format}`,
-      buffer: extracted.buffer,
-      size: extracted.buffer.length,
-      mimetype: extracted.format === 'csv' ? 'text/csv' : 'application/geo+json',
-    } as Express.Multer.File;
-    return this.uploads.create(appUser, upload, file);
+    try {
+      const size = extracted.path ? (await fs.stat(extracted.path)).size : extracted.buffer!.length;
+      const file = {
+        originalname: `${base}.${extracted.format}`,
+        buffer: extracted.buffer,
+        path: extracted.path,
+        size,
+        mimetype: extracted.format === 'csv' ? 'text/csv' : 'application/geo+json',
+      } as Express.Multer.File;
+      return await this.uploads.create(appUser, upload, file);
+    } finally {
+      if (extracted.dir) await fs.rm(extracted.dir, { recursive: true, force: true });
+    }
   }
 
   // ---------------------------------------------------------------- GDAL
@@ -159,7 +165,7 @@ export class ExternalDbService {
     conn: ExternalDbConnectionDto,
     dataset: string,
     opts: { fields?: string[]; limit?: number; byCoordinates: boolean; upload: Partial<ExternalDbImportDto> },
-  ): Promise<{ buffer: Buffer; format: 'geojson' | 'csv' }> {
+  ): Promise<{ buffer?: Buffer; path?: string; dir?: string; format: 'geojson' | 'csv' }> {
     const info = await this.gdalLayer(conn, dataset);
     const asCsv = !info.geometryField || opts.byCoordinates;
     if (asCsv && !opts.byCoordinates) {
@@ -188,10 +194,24 @@ export class ExternalDbService {
       if (fields) args.push('-select', fields.join(','));
       args.push('-limit', String(opts.limit ?? this.maxFeatures));
       if (asCsv) args.push('-lco', 'GEOMETRY=NONE');
-      await this.gdal('ogr2ogr', args, conn, 600_000);
-      return { buffer: await this.readCapped(out), format: asCsv ? 'csv' : 'geojson' };
-    } finally {
+      // Don't carry the source primary key over as the GeoJSON feature id:
+      // the PostGIS load would then name its FID column after it (e.g. "id")
+      // instead of the "ogc_fid" the rest of the platform relies on.
+      else args.push('-unsetFid', '-lco', 'COORDINATE_PRECISION=7');
+      // Streamed to disk and handed over as a file (see import()): national
+      // datasets run to many GB, far beyond what fits in memory.
+      const minutes = Number(process.env.GIS_IMPORT_TIMEOUT_MINUTES) || 120;
+      await this.gdal('ogr2ogr', args, conn, minutes * 60_000);
+      const { size } = await fs.stat(out);
+      if (size > this.storage.maxExternalImportBytes) {
+        throw new BadRequestException(
+          `The data exceeds the ${Math.round(this.storage.maxExternalImportBytes / 1024 / 1024)} MB import limit — set a record limit or import fewer fields.`,
+        );
+      }
+      return { path: out, dir, format: asCsv ? 'csv' : 'geojson' };
+    } catch (error) {
       await fs.rm(dir, { recursive: true, force: true });
+      throw error;
     }
   }
 
@@ -221,13 +241,22 @@ export class ExternalDbService {
 
   /** The GDAL data source name. PostgreSQL takes everything from the libpq
    *  environment (see gdalEnv); MySQL needs it inline. */
+  /** "localhost" typed in the browser means the user's machine, but this
+   *  process may run in a container where it means the container itself.
+   *  EXTERNAL_DB_LOCALHOST_ALIAS (e.g. host.docker.internal) redirects it. */
+  private host(conn: ExternalDbConnectionDto): string {
+    const alias = process.env.EXTERNAL_DB_LOCALHOST_ALIAS?.trim();
+    const h = conn.host.trim().toLowerCase();
+    return alias && (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]') ? alias : conn.host;
+  }
+
   private dsn(conn: ExternalDbConnectionDto): string {
     if (conn.type === 'POSTGRESQL') return 'PG:';
     const parts = [conn.database, conn.host, String(conn.port), conn.username ?? '', conn.password ?? ''];
     if (parts.some((p) => /[,=]/.test(p))) {
       throw new BadRequestException('For MySQL, the database name, user name and password cannot contain "," or "=".');
     }
-    return `MYSQL:${conn.database},host=${conn.host},port=${conn.port}` +
+    return `MYSQL:${conn.database},host=${this.host(conn)},port=${conn.port}` +
       (conn.username ? `,user=${conn.username}` : '') + (conn.password ? `,password=${conn.password}` : '');
   }
 
@@ -237,7 +266,7 @@ export class ExternalDbService {
     for (const key of Object.keys(env)) if (key.startsWith('PG')) delete env[key];
     if (conn.type === 'POSTGRESQL') {
       Object.assign(env, {
-        PGHOST: conn.host,
+        PGHOST: this.host(conn),
         PGPORT: String(conn.port),
         PGDATABASE: conn.database,
         PGUSER: conn.username ?? '',
@@ -276,7 +305,7 @@ export class ExternalDbService {
     const auth = conn.username
       ? `${encodeURIComponent(conn.username)}:${encodeURIComponent(conn.password ?? '')}@`
       : '';
-    const uri = conn.srv ? `mongodb+srv://${auth}${conn.host}/` : `mongodb://${auth}${conn.host}:${conn.port}/`;
+    const uri = conn.srv ? `mongodb+srv://${auth}${conn.host}/` : `mongodb://${auth}${this.host(conn)}:${conn.port}/`;
     const client = new MongoClient(uri, {
       serverSelectionTimeoutMS: 10_000,
       connectTimeoutMS: 10_000,
@@ -459,16 +488,6 @@ export class ExternalDbService {
         `This table has ${count.toLocaleString()} records — more than the ${this.maxFeatures.toLocaleString()} that can be imported at once. Set a record limit.`,
       );
     }
-  }
-
-  private async readCapped(file: string): Promise<Buffer> {
-    const { size } = await fs.stat(file);
-    if (size > this.storage.maxUploadBytes) {
-      throw new BadRequestException(
-        `The data exceeds the ${Math.round(this.storage.maxUploadBytes / 1024 / 1024)} MB import limit — set a record limit or import fewer fields.`,
-      );
-    }
-    return fs.readFile(file);
   }
 
   /** Refuses any database of this platform (its own, or another

@@ -22,6 +22,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import type { AppUser } from '../auth/types/app-user.type';
 import { GdalError, GdalService } from './gdal.service';
+import { ensureOgcFid, normalizeColumnNames } from './ensure-ogc-fid.util';
 import {
   StorageService,
   UnsafeArchiveError,
@@ -164,7 +165,7 @@ export class GisUploadsService {
         uploadedById: appUser.id,
         originalFilename: file.originalname,
         storedFilename: '',
-        fileSize: file.size,
+        fileSize: BigInt(file.size),
         fileFormat,
         status: 'UPLOAD_PENDING',
         layerName: dto.layerName.trim(),
@@ -179,12 +180,19 @@ export class GisUploadsService {
       },
     });
 
-    const { storedFilename } = await this.storage.saveRawFile(
-      appUser.municipalityId,
-      upload.id,
-      file.originalname,
-      file.buffer,
-    );
+    const { storedFilename } = file.path
+      ? await this.storage.saveRawFileFromPath(
+          appUser.municipalityId,
+          upload.id,
+          file.originalname,
+          file.path,
+        )
+      : await this.storage.saveRawFile(
+          appUser.municipalityId,
+          upload.id,
+          file.originalname,
+          file.buffer,
+        );
     await this.prisma.gISLayerUpload.update({
       where: { id: upload.id },
       data: { storedFilename },
@@ -861,6 +869,8 @@ export class GisUploadsService {
         connection,
       });
 
+      await ensureOgcFid(this.prisma, tableName);
+      await normalizeColumnNames(this.prisma, tableName);
       await this.ensureSpatialIndex(tableName);
       const { invalidCount, emptyCount } =
         await this.checkGeometryValidity(tableName);
@@ -1332,7 +1342,7 @@ export class GisUploadsService {
       id: upload.id,
       filename: upload.originalFilename,
       fileFormat: upload.fileFormat,
-      fileSize: upload.fileSize,
+      fileSize: Number(upload.fileSize),
       status: upload.status,
       layer: {
         name: upload.layerName,

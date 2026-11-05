@@ -130,6 +130,7 @@ export interface BasemapOption {
  *  the live opacity and any CQL filter currently applied. */
 export interface PrintLayerContext {
   layerId: string;
+  name: string;
   opacity: number;
   cqlFilter: string | null;
 }
@@ -572,6 +573,14 @@ export class MapService {
    *  Works for a managed GIS layer id or the wizard's `preview` layer. */
   /** Bumped on every restyle — legends that show style details re-read. */
   readonly styleChanged = signal(0);
+
+  /** Renders a layer with a named (draft) style instead of its default —
+   *  the SLD editor's map preview. `null` returns to the default style. */
+  previewLayerStyle(layerId: string, style: string | null): void {
+    const source = this.managedLayers.get(layerId)?.olLayer.getSource() as
+      { updateParams?: (p: Record<string, unknown>) => void } | null | undefined;
+    source?.updateParams?.({ STYLES: style ?? '', _style: Date.now() });
+  }
 
   refreshLayerStyle(layerId: string): void {
     this.demCache.delete(layerId); // a new ramp can make it (not) a DEM
@@ -2375,6 +2384,7 @@ export class MapService {
         const cql = params['CQL_FILTER'];
         return {
           layerId: entry.layer.id,
+          name: entry.layer.name,
           opacity: entry.olLayer.getOpacity(),
           cqlFilter: typeof cql === 'string' && cql.trim().length > 0 ? cql : null
         };
@@ -2453,6 +2463,24 @@ export class MapService {
     });
     if (cacheBust) params.set('_ts', String(cacheBust));
     return `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wms?${params.toString()}`;
+  }
+
+  /** The layer's legend as GeoServer JSON (rules + symbolizers), drawn
+   *  natively by the app instead of GeoServer's PNG. Null on failure. */
+  async legendJson(layer: GisLayer, cacheBust?: number): Promise<unknown | null> {
+    const url = this.legendGraphicUrl(layer, cacheBust).replace('format=image%2Fpng', 'format=application%2Fjson');
+    try {
+      const res = await fetch(url);
+      return res.ok ? await res.json() : null;
+    } catch {
+      return null; // GeoServer down or an exception report (XML), not JSON
+    }
+  }
+
+  /** `legendJson` for a layer on the map, by id (print legends). */
+  legendJsonById(layerId: string): Promise<unknown | null> {
+    const layer = this.managedLayers.get(layerId)?.layer;
+    return layer ? this.legendJson(layer, this.styleChanged() || undefined) : Promise.resolve(null);
   }
 
   /**

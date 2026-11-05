@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- Legend rows. The app sends each legend line (symbol + label, already
+     drawn) as one 272x18 pt PNG, so a row is just that image. The name
+     band only serves GeoServer's legend image fallback (name, then icon). -->
 <jasperReport xmlns="http://jasperreports.sourceforge.net/jasperreports"
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:schemaLocation="http://jasperreports.sourceforge.net/jasperreports http://jasperreports.sourceforge.net/xsd/jasperreport.xsd"
@@ -16,10 +19,10 @@
         <textFieldExpression><![CDATA[$F{name}]]></textFieldExpression>
       </textField>
     </band>
-    <band height="20" splitType="Prevent">
+    <band height="18" splitType="Prevent">
       <printWhenExpression><![CDATA[$F{icon} != null]]></printWhenExpression>
-      <image scaleImage="RealHeight" hAlign="Left" vAlign="Middle" isUsingCache="true">
-        <reportElement x="6" y="1" width="260" height="16"/>
+      <image scaleImage="RetainShape" hAlign="Left" vAlign="Middle" isUsingCache="false">
+        <reportElement x="0" y="0" width="272" height="18"/>
         <imageExpression><![CDATA[$F{icon}]]></imageExpression>
       </image>
     </band>

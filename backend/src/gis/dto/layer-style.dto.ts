@@ -319,3 +319,10 @@ export class LayerStyleSpecDto {
   @Type(() => RasterSpecDto)
   raster?: RasterSpecDto;
 }
+
+/** SLD XML pasted into the style editor. */
+export class PasteSldDto {
+  @IsString()
+  @MaxLength(5 * 1024 * 1024)
+  sld!: string;
+}

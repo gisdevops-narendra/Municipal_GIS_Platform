@@ -67,6 +67,7 @@
             [layerName]="l.name"
             [live]="true"
             (applied)="onStyleApplied(l)"
+            (stylePreview)="onStylePreview(l, $event)"
             (removed)="onStyleRemoved(l)"
             (closed)="closeStyleEditor()"
           />
@@ -343,6 +344,7 @@
           class="gis-ws__search"
           (layerSelected)="onSearchLayerSelected($event)"
           (featureSelected)="onSearchFeatureSelected($event)"
+          (cleared)="onSearchCleared()"
         />
       }
 

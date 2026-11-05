@@ -9,5 +9,6 @@ export const MUNICIPALITY_TYPES: MunicipalityTypeOption[] = [
   { code: 'municipal_council', label: 'Municipal Council' },
   { code: 'nagar_palika', label: 'Nagar Palika' },
   { code: 'nagar_panchayat', label: 'Nagar Panchayat' },
+  { code: 'national', label: 'National / All India' },
   { code: 'other', label: 'Other' }
 ];

@@ -126,6 +126,32 @@ export class GeoServerService {
     return response.text();
   }
 
+  /** Text (string) attribute names of a layer, via WFS DescribeFeatureType
+   *  — what a free-text search can match with ILIKE. */
+  async stringAttributes(
+    workspace: string,
+    layer: string,
+    timeoutMs = 5000,
+  ): Promise<string[]> {
+    const params = new URLSearchParams({
+      service: 'WFS',
+      version: '2.0.0',
+      request: 'DescribeFeatureType',
+      typeNames: `${workspace}:${layer}`,
+      outputFormat: 'application/json',
+    });
+    const response = await this.wfsRequest(workspace, params, timeoutMs);
+    if (!response.ok) {
+      throw await this.toError('describing layer attributes', response);
+    }
+    const body = (await response.json()) as {
+      featureTypes?: { properties?: { name: string; localType?: string }[] }[];
+    };
+    return (body.featureTypes?.[0]?.properties ?? [])
+      .filter((p) => p.localType === 'string')
+      .map((p) => p.name);
+  }
+
   /** Report Generation: features of one layer as parsed GeoJSON — only
    *  `propertyNames` (no geometry), optionally narrowed by an already
    *  vetted `cqlFilter` (see assertSafeCql) or by `featureIds`, capped at
@@ -549,6 +575,70 @@ export class GeoServerService {
     if (!response.ok) {
       throw await this.toError('saving style', response);
     }
+  }
+
+  /**
+   * Creates or replaces a workspace style holding a user-supplied SLD
+   * (1.0 or 1.1 / SE). GeoServer validates it; a 400 comes back as a
+   * BadRequestException with its parser message.
+   */
+  async putSldStyle(workspace: string, name: string, sld: string): Promise<void> {
+    const v11 = /version\s*=\s*["']1\.1/.test(sld.slice(0, 2000));
+    const contentType = v11 ? 'application/vnd.ogc.se+xml' : 'application/vnd.ogc.sld+xml';
+    if (!(await this.styleExists(workspace, name))) {
+      const created = await this.request(
+        `/rest/workspaces/${encodeURIComponent(workspace)}/styles`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            style: {
+              name,
+              format: 'sld',
+              languageVersion: { version: v11 ? '1.1.0' : '1.0.0' },
+              filename: `${name}.sld`,
+            },
+          }),
+        },
+      );
+      if (!created.ok && created.status !== 409) {
+        throw await this.toError('creating style', created);
+      }
+    }
+    const response = await this.request(
+      `/rest/workspaces/${encodeURIComponent(workspace)}/styles/${encodeURIComponent(name)}`,
+      { method: 'PUT', headers: { 'Content-Type': contentType }, body: sld },
+      30000,
+    );
+    if (response.status === 400) {
+      const detail = await response.text().catch(() => '');
+      throw new BadRequestException(
+        `The SLD is not valid: ${this.firstLine(detail) || 'GeoServer rejected it.'}`,
+      );
+    }
+    if (!response.ok) {
+      throw await this.toError('saving style', response);
+    }
+  }
+
+  /** A layer's style as SLD: the stored file for SLD-format styles (keeps
+   *  the author's formatting), otherwise GeoServer's SLD encoding of it
+   *  (WMS GetStyles) — so editor-made YSLD styles can be edited as SLD. */
+  async getSldBody(workspace: string, name: string, layer?: string): Promise<string | null> {
+    const raw = await this.request(
+      `/rest/workspaces/${encodeURIComponent(workspace)}/styles/${encodeURIComponent(name)}.sld`,
+      { method: 'GET', headers: { Accept: 'application/vnd.ogc.sld+xml' } },
+    );
+    if (raw.ok) return raw.text();
+    if (raw.status !== 404) throw await this.toError('reading style', raw);
+    if (!layer) return null;
+    const encoded = await this.request(
+      `/${encodeURIComponent(workspace)}/wms?service=WMS&version=1.1.1&request=GetStyles&layers=${encodeURIComponent(`${workspace}:${layer}`)}`,
+      { method: 'GET' },
+    );
+    if (!encoded.ok) return null;
+    const text = await encoded.text();
+    return /StyledLayerDescriptor/.test(text) ? text : null;
   }
 
   async getStyleBody(workspace: string, name: string): Promise<string | null> {

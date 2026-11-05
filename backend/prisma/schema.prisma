@@ -344,7 +344,7 @@ model GISLayerUpload {
   /// storage/uploads/<municipalityId>/... — never the user's original
   /// filename (see StorageService).
   storedFilename   String              @map("stored_filename")
-  fileSize         Int                 @map("file_size")
+  fileSize         BigInt                @map("file_size")
   fileFormat       GisUploadFileFormat @map("file_format")
   status           GisUploadStatus     @default(UPLOAD_PENDING)
 

@@ -27,6 +27,33 @@ const DB_TYPES: { value: ExternalDbType; label: string; port: number }[] = [
   { value: 'MONGODB', label: 'MongoDB', port: 27017 }
 ];
 
+/** The last connection that listed successfully. Kept for the whole app
+ *  session (password included, memory only) so the next upload doesn't need
+ *  it re-entered; everything but the password also survives a page reload
+ *  via localStorage. */
+const SAVED_KEY = 'gis.externalDb.lastConnection';
+let sessionConnection: ExternalDbConnection | null = null;
+
+function loadSavedConnection(): ExternalDbConnection | null {
+  if (sessionConnection) return { ...sessionConnection };
+  try {
+    const raw = localStorage.getItem(SAVED_KEY);
+    return raw ? { ...(JSON.parse(raw) as ExternalDbConnection), password: '' } : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveConnection(conn: ExternalDbConnection): void {
+  sessionConnection = { ...conn };
+  try {
+    const { password: _omit, ...rest } = conn;
+    localStorage.setItem(SAVED_KEY, JSON.stringify(rest));
+  } catch {
+    /* storage unavailable — the in-memory copy still applies */
+  }
+}
+
 /**
  * Upload wizard, step 1 "From database": connect to the user's own
  * database, pick a table / collection, preview it and choose what to
@@ -86,6 +113,14 @@ export class UploadDatabaseComponent {
   /** The connection the dataset list belongs to — editing the form after
    *  connecting must not silently import from somewhere else. */
   private connected: ExternalDbConnection | null = null;
+
+  constructor() {
+    const saved = loadSavedConnection();
+    if (!saved) return;
+    this.conn = { ...this.conn, ...saved, password: saved.password ?? '' };
+    // Same session, full credentials known: reconnect straight away.
+    if (sessionConnection) queueMicrotask(() => this.connect());
+  }
 
   readonly visibleDatasets = computed(() => {
     const q = this.filter().trim().toLowerCase();
@@ -194,6 +229,7 @@ export class UploadDatabaseComponent {
       next: (list) => {
         this.busy.set(null);
         this.connected = connection;
+        saveConnection(this.conn);
         this.datasets.set(list);
         const spatial = list.filter((d) => d.geometryField).length;
         this.spatialOnly.set(spatial > 0 && spatial < list.length);

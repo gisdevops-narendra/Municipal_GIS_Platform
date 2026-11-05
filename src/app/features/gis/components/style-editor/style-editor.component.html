@@ -1,9 +1,32 @@
 <div class="se">
+  @if (target.kind === 'layer') {
+    <div class="se__tabs" role="tablist" aria-label="Style editor">
+      <button type="button" role="tab" class="se__tab" [class.is-active]="tab() === 'visual'"
+        [attr.aria-selected]="tab() === 'visual'" (click)="setTab('visual')">
+        <i class="pi pi-palette" aria-hidden="true"></i> Visual
+      </button>
+      <button type="button" role="tab" class="se__tab" [class.is-active]="tab() === 'sld'"
+        [attr.aria-selected]="tab() === 'sld'" (click)="setTab('sld')">
+        <i class="pi pi-code" aria-hidden="true"></i> SLD
+        @if (sldActive()) { <span class="se__tab-badge">active</span> }
+      </button>
+    </div>
+    @if (sldOpened()) {
+      <app-sld-editor [hidden]="tab() !== 'sld'" [target]="target" [geometry]="geometry" [layerName]="layerName"
+        (saved)="onSldSaved($event)" (preview)="stylePreview.emit($event)" />
+    }
+  }
+  <div class="se__visual" [hidden]="tab() !== 'visual'">
   @if (state() === 'loading') {
     <p class="se__hint"><i class="pi pi-spin pi-spinner" aria-hidden="true"></i> Reading layer attributes…</p>
   } @else if (state() === 'error' && !attributes().length) {
     <p-message severity="error" [text]="errorMsg() ?? 'Could not load the layer.'" styleClass="w-full" />
   } @else {
+
+    @if (sldActive()) {
+      <p-message severity="info" styleClass="w-full se__sld-note"
+        text="This layer is styled by SLD — edit it in the SLD tab. Applying a style here replaces it." />
+    }
 
     <!-- ============ symbology mode ============ -->
     @if (geometry !== 'raster') {
@@ -491,4 +514,5 @@
       }
     </div>
   }
+  </div>
 </div>

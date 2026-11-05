@@ -8,7 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { GisLayersService } from './gis-layers.service';
 import type { AppUser } from '../auth/types/app-user.type';
-import type { PrintReportDto } from './dto/print-report.dto';
+import type { PrintLayerLegendDto, PrintReportDto } from './dto/print-report.dto';
 
 /** A resolved, authorised layer ready to go into the MapFish spec. */
 interface ResolvedPrintLayer {
@@ -17,6 +17,12 @@ interface ResolvedPrintLayer {
   geoserverLayer: string;
   opacity: number;
   cqlFilter?: string;
+  legend?: PrintLayerLegendDto;
+}
+
+interface MapFishLegendClass {
+  name: string;
+  icons: string[];
 }
 
 interface BasemapDefinition {
@@ -46,7 +52,7 @@ export interface MapFishPrintSpec {
     showLegend: boolean;
     showScalebar: boolean;
     showNorthArrow: boolean;
-    legend: { name: string; classes: { name: string; icons: string[] }[] };
+    legend: { name: string; classes: MapFishLegendClass[] };
     scalebar: Record<string, never>;
     northArrow: Record<string, never>;
     map: {
@@ -217,6 +223,7 @@ export class PrintService {
         geoserverLayer: layer.geoserverLayer,
         opacity: requested.opacity ?? 1,
         cqlFilter: requested.cqlFilter?.trim() || undefined,
+        legend: requested.legend,
       };
     });
   }
@@ -260,10 +267,7 @@ export class PrintService {
       .join('  ·  ');
 
     const legendClasses = dto.includeLegend
-      ? layers.map((layer) => ({
-          name: layer.name,
-          icons: [this.legendGraphicUrl(layer)],
-        }))
+      ? layers.map((layer) => this.legendClass(layer))
       : [];
 
     return {
@@ -292,6 +296,16 @@ export class PrintService {
         },
       },
     };
+  }
+
+  /** The app's native legend rows (symbol + label already drawn into
+   *  each PNG, so no MapFish name rows); GeoServer's legend image as a
+   *  fallback when the client sent none. */
+  private legendClass(layer: ResolvedPrintLayer): MapFishLegendClass {
+    if (layer.legend?.rows.length) {
+      return { name: '', icons: layer.legend.rows };
+    }
+    return { name: layer.name, icons: [this.legendGraphicUrl(layer)] };
   }
 
   private legendGraphicUrl(layer: ResolvedPrintLayer): string {

@@ -18,10 +18,20 @@ export interface StyleAttributesResponse {
   attributes: StyleAttribute[];
 }
 
+export interface SldCheckResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  /** Workspace-qualified draft style the map can render as a preview. */
+  previewStyle: string | null;
+}
+
 export interface StoredStyle {
   styleName: string | null;
   spec: LayerStyleSpec | null;
   geometry?: StyleGeometry | null;
+  /** The active style is an uploaded SLD (no editor spec). */
+  sld?: boolean;
 }
 
 /**
@@ -80,6 +90,39 @@ export class LayerStyleService {
   /** Layer target only — revert to GeoServer's built-in default style. */
   remove(target: StyleTargetRef): Observable<{ success: true }> {
     return this.http.delete<{ success: true }>(this.base(target));
+  }
+
+  /** Layer target only — upload an SLD file as the layer's style. */
+  uploadSld(target: StyleTargetRef, file: File): Observable<{ styleName: string }> {
+    const form = new FormData();
+    form.append('file', file);
+    return this.http.post<{ styleName: string }>(`${this.base(target)}/sld`, form);
+  }
+
+  /** Layer target only — apply pasted SLD text as the layer's style. */
+  pasteSld(target: StyleTargetRef, sld: string): Observable<{ styleName: string }> {
+    return this.http.put<{ styleName: string }>(`${this.base(target)}/sld`, { sld });
+  }
+
+  /** Layer target only — validate SLD (platform, GeoServer and attribute
+   *  checks) and stage it as a draft style the map can preview. */
+  checkSld(target: StyleTargetRef, sld: string): Observable<SldCheckResult> {
+    return this.http.post<SldCheckResult>(`${this.base(target)}/sld/check`, { sld });
+  }
+
+  /** Layer target only — drop the staged SLD draft. */
+  discardSldDraft(target: StyleTargetRef): Observable<{ success: true }> {
+    return this.http.delete<{ success: true }>(`${this.base(target)}/sld/draft`);
+  }
+
+  /** Layer target only — the current style as SLD text. */
+  currentSld(target: StyleTargetRef): Observable<string> {
+    return this.http.get(`${this.base(target)}/sld`, { responseType: 'text' });
+  }
+
+  /** Layer target only — the current style as an SLD file. */
+  downloadSld(target: StyleTargetRef): Observable<Blob> {
+    return this.http.get(`${this.base(target)}/sld`, { responseType: 'blob' });
   }
 
   // ---- point icons (ExternalGraphic) ------------------------------

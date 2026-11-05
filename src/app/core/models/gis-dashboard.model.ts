@@ -34,6 +34,12 @@ export interface GisSearchFeatureMatch {
   layerCode: string;
   attributes: Record<string, unknown>;
   bbox: [number, number, number, number] | null;
+  /** The feature's shape (GeoJSON, EPSG:4326) and a point inside it. */
+  geometry?: Record<string, unknown> | null;
+  anchor?: [number, number] | null;
+  /** Fuzzy search: the field / value that matched — the result's title. */
+  matchedField?: string;
+  label?: string;
 }
 
 /** Shape of GET /api/gis/dashboard/search?q= — layer name/code matches

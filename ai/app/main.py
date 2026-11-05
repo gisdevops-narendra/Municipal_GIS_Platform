@@ -20,6 +20,7 @@ Endpoints (called only by the Node.js backend, never the browser):
 from __future__ import annotations
 
 import asyncio
+import re
 import logging
 from contextlib import asynccontextmanager
 
@@ -30,7 +31,7 @@ from fastapi import FastAPI, HTTPException, Request
 from . import config, db, embeddings, llm, rag
 from .metadata import propose, use_layers
 from .indexer import reindex_municipality
-from .fastpath import fast_plan
+from .fastpath import fast_plan, field_follow_up
 from .guide import annotate, apply_instructions, converse, field_confidence, parse_instruction, is_small_talk, preflight, remember_near, suggestions
 from .repair import carry_over, is_follow_up, repair_plan
 from .schema import (
@@ -135,6 +136,14 @@ async def plan(body: PlanRequest, request: Request) -> PlanResult:
         watcher.cancel()
 
 
+def _invented_numbers(answer: str, message: str, history) -> bool:
+    """Numbers in a model answer that appear nowhere in what it was told."""
+    told = " ".join([message, *(h.content for h in history or [])])
+    known = set(re.findall(r"\d+(?:\.\d+)?", told.replace(",", "")))
+    said = set(re.findall(r"\d+(?:\.\d+)?", (answer or "").replace(",", "")))
+    return bool(said - known)
+
+
 async def _plan(body: PlanRequest, cancel: threading.Event) -> PlanResult:
     # Field roles / aliases learned at upload (metadata.py) for this request.
     use_layers(body.layers)
@@ -165,6 +174,13 @@ async def _plan(body: PlanRequest, cancel: threading.Event) -> PlanResult:
                 "options": [*result.options, *remembered_options],
             })
         return result
+
+    # "what is the <field> of this <feature>" after a result: read the value
+    # from the data for those features — never let the model guess it.
+    asked_field = field_follow_up(message, body.layers, body.previous_operation)
+    if asked_field is not None:
+        log.info("field follow-up (%s): %s", message[:80], asked_field.explanation)
+        return apply_instructions(asked_field, body.instructions)
 
     # Conversation that is not a map query: greetings, help, questions about
     # the layers / fields / values, GIS terms — answered from the catalog.
@@ -234,6 +250,18 @@ async def _plan(body: PlanRequest, cancel: threading.Event) -> PlanResult:
         # The small model often drops the newer operation fields; the
         # question's own words fill them (see repair.py).
         repaired = repair_plan(message, result, body.layers, follow_up=follow)
+        # The model has no data access: a direct "answer" quoting numbers it
+        # was never given is invented. Say so instead of showing it.
+        if repaired.answer_kind == "answer" and _invented_numbers(repaired.explanation, message, body.history):
+            log.warning("dropped invented model answer: %s", repaired.explanation[:120])
+            return PlanResult(
+                answer_kind="unsupported",
+                explanation=(
+                    "I can't read that value from the data as asked. Show the features first, "
+                    "then ask for a field of them — e.g. \"what is the <field> of these\"."
+                ),
+                planner="model",
+            )
         if previous is not None:
             repaired = carry_over(previous, repaired, body.layers)
         return finish(repaired.model_copy(update={"planner": "model"}))
