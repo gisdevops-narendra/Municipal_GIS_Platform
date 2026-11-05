@@ -159,11 +159,27 @@ const fmtArea = (m2: number) => {
 };
 
 /** A step of a chat in progress, streamed to the panel. */
-export type ChatProgress = (stage: 'understanding' | 'planned' | 'running', detail?: string) => void;
+export type ChatStage =
+  | 'catalog' // reading the user's layers
+  | 'values' // finding the names / values the question mentions
+  | 'understanding' // planning (instant rules or the local AI model)
+  | 'understood' // detail: which planner answered
+  | 'planned' // detail: the plan in plain words
+  | 'checked' // detail: values corrected / ignored against the data
+  | 'running'; // detail: the layer queried
+export type ChatProgress = (stage: ChatStage, detail?: string) => void;
 
 const MULTI_TYPE: Record<string, string> = { POINT: 'MultiPoint', LINE: 'MultiLineString', POLYGON: 'MultiPolygon' };
 /** Export / save-as-layer take every match up to this many features. */
 const EXPORT_MAX_ROWS = 5000;
+/** "total" + "total_population_village" -> "total population village"
+ *  (field names read as words, the statistic word not repeated). */
+function metricPhrase(word: string, label: string | null | undefined): string {
+  const nice = String(label ?? '').replace(/_+/g, ' ').trim().toLowerCase();
+  if (!nice) return word;
+  return nice.startsWith(`${word} `) ? nice : `${word} ${nice}`;
+}
+
 const METRIC_WORD: Record<AggregateMetric, string> = {
   count: 'number',
   sum: 'total',
@@ -262,7 +278,6 @@ export class GisAiService {
     progress?: ChatProgress,
   ): Promise<GisChatResponse> {
     const started = Date.now();
-    progress?.('understanding');
     // Server-side memory: the chat's own turns give the history and the
     // previous plan, so follow-ups work after a reload too. With history
     // off ("Save chat history" setting) nothing is kept: the panel's own
@@ -502,6 +517,7 @@ export class GisAiService {
       select: { id: true },
     });
 
+    progress?.('catalog');
     let catalogEntries = await this.catalog.buildForUser(appUser);
     // "Layers the assistant may use" (setting): never widen past what the
     // user can see anyway — buildForUser already applied permissions.
@@ -533,11 +549,14 @@ export class GisAiService {
         workspace.id,
         'Your choice.',
         [],
+        progress,
       );
       return { ...chosen, planner: 'choice', followUps: this.followUps(chosen, catalogEntries, dto.message) };
     }
 
+    progress?.('values', `${catalogEntries.length} layer${catalogEntries.length === 1 ? '' : 's'}`);
     await this.catalog.addMatchingValues(catalogEntries, dto.message);
+    progress?.('understanding');
 
     const plan = await this.ai.plan({
       message: dto.message,
@@ -556,7 +575,8 @@ export class GisAiService {
           : instructions,
       instant_only: dto.instantOnly ?? false,
     }, signal);
-    progress?.('planned', plan.operation ? layerName(plan.operation.target_layer) : undefined);
+    progress?.('understood', plan.planner === 'model' ? 'AI model' : 'instant');
+    if (plan.answer_kind === 'gis_operation' && plan.explanation) progress?.('planned', plan.explanation);
 
     const usedContext = plan.used_context ?? [];
 
@@ -595,6 +615,7 @@ export class GisAiService {
       workspace.id,
       plan.explanation,
       usedContext,
+      progress,
     );
     return {
       ...response,
@@ -602,7 +623,7 @@ export class GisAiService {
       planner,
       // Options from validation (field / distance choice) win over hints.
       options: response.options?.length ? response.options : guidance.options,
-      notes: guidance.notes,
+      notes: [...(response.notes ?? []), ...guidance.notes],
     };
   }
 
@@ -887,6 +908,81 @@ export class GisAiService {
     workspaceId: string,
     explanation: string,
     usedContext: string[],
+    progress?: ChatProgress,
+  ): Promise<GisChatResponse> {
+    // Values the plan invented ("India" as a state) or misspelt: corrected
+    // to the closest stored value, or dropped with a note — never 0 rows.
+    const checked = await this.checkFilterValues(operation, catalogEntries);
+    operation = checked.operation;
+    if (checked.notes.length) progress?.('checked', checked.notes.join(' '));
+    const response = await this.runChecked(appUser, operation, catalogEntries, workspaceId, explanation, usedContext);
+    return checked.notes.length ? { ...response, notes: [...checked.notes, ...(response.notes ?? [])] } : response;
+  }
+
+  /**
+   * Each text condition on the target layer is checked against the stored
+   * values. Missing -> the closest spelling (pg_trgm) when one is close,
+   * else the condition is dropped. Generic: any layer, any text column.
+   */
+  private async checkFilterValues(
+    operation: AiGisOperation,
+    catalogEntries: Catalog,
+  ): Promise<{ operation: AiGisOperation; notes: string[] }> {
+    const ref = String(operation.target_layer ?? '').toLowerCase();
+    const target = catalogEntries.find((e) => e.code.toLowerCase() === ref || e.name.toLowerCase() === ref);
+    const filters = operation.attribute_filters ?? [];
+    if (!target || target.isDemo || !filters.length) return { operation, notes: [] };
+    const notes: string[] = [];
+    const kept: typeof filters = [];
+    for (const f of filters) {
+      const col = target.columns.find((c) => c.name.toLowerCase() === String(f.field ?? '').toLowerCase());
+      const raw = typeof f.value === 'string' ? f.value.replace(/^%+|%+$/g, '').trim() : null;
+      if (!col || col.kind !== 'text' || !raw || !['=', 'ilike', 'like'].includes(String(f.op))) {
+        kept.push(f);
+        continue;
+      }
+      const q = `"${col.name.replace(/"/g, '""')}"`;
+      const table = `"${target.table}"`;
+      try {
+        const found = await this.prisma.$transaction(async (tx) => {
+          await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = 4000`);
+          const [hit] = await tx.$queryRawUnsafe<{ ok: boolean }[]>(
+            f.op === '='
+              ? `SELECT EXISTS (SELECT 1 FROM ${table} WHERE lower(btrim(${q})) = lower(btrim($1))) AS ok`
+              : `SELECT EXISTS (SELECT 1 FROM ${table} WHERE ${q} ILIKE $1) AS ok`,
+            f.op === '=' ? raw : `%${raw.replace(/[\\%_]/g, '')}%`,
+          );
+          if (hit?.ok) return { exists: true, closest: null as string | null };
+          await tx.$executeRawUnsafe(`SET LOCAL pg_trgm.similarity_threshold = 0.45`);
+          const [near] = await tx.$queryRawUnsafe<{ v: string }[]>(
+            `SELECT ${q}::text AS v FROM ${table} WHERE ${q} % $1
+              ORDER BY similarity(${q}, $1) DESC LIMIT 1`,
+            raw,
+          );
+          return { exists: false, closest: near?.v ?? null };
+        });
+        if (found.exists) {
+          kept.push(f);
+        } else if (found.closest) {
+          kept.push({ ...f, op: '=', value: found.closest });
+          notes.push(`Used "${found.closest}" for "${raw}" (closest ${col.name} in ${target.name}).`);
+        } else {
+          notes.push(`Ignored ${col.name} = "${raw}": no ${target.name} has that value.`);
+        }
+      } catch {
+        kept.push(f); // check failed (timeout): run the plan as given
+      }
+    }
+    return { operation: { ...operation, attribute_filters: kept }, notes };
+  }
+
+  private async runChecked(
+    appUser: AppUser,
+    operation: AiGisOperation,
+    catalogEntries: Catalog,
+    workspaceId: string,
+    explanation: string,
+    usedContext: string[],
   ): Promise<GisChatResponse> {
     const base = { answerKind: 'gis_operation' as const, explanation, operation, usedContext };
     try {
@@ -1031,7 +1127,7 @@ export class GisAiService {
     const what =
       metric === 'count'
         ? `${layer} features`
-        : `${METRIC_WORD[metric]} ${compiled.metricLabel} of ${layer}`;
+        : `${metricPhrase(METRIC_WORD[metric], compiled.metricLabel)} of ${layer}`;
 
     let answer: string;
     const facts: Record<string, unknown> = {

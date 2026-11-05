@@ -32,8 +32,31 @@ import {
   AiInstruction,
   AiQueryLogEntry,
   ChatMessage,
+  ChatStage,
+  ChatStep,
   GisChatResponse,
 } from '../../models/gis-ai.model';
+
+/** What the assistant is doing, in the present tense (live line) and the
+ *  past tense (the "Worked for…" timeline). */
+const STEP_LIVE: Record<ChatStage, string> = {
+  catalog: 'Reading your layers',
+  values: 'Finding the names you mentioned',
+  understanding: 'Thinking about your question',
+  understood: 'Thinking about your question',
+  planned: 'Planning the query',
+  checked: 'Checking values against the data',
+  running: 'Querying',
+};
+const STEP_DONE: Record<ChatStage, string> = {
+  catalog: 'Read your layers',
+  values: 'Looked up the names you mentioned',
+  understanding: 'Thought about your question',
+  understood: 'Understood the question',
+  planned: 'Planned',
+  checked: 'Checked values against the data',
+  running: 'Queried',
+};
 
 /** Shown only until the real-layer suggestions arrive. */
 const EXAMPLES: string[] = [];
@@ -329,17 +352,37 @@ export class AiChatComponent {
       .reverse()
       .find((m) => m.response?.answerKind === 'gis_operation' && m.response.operation)?.response?.operation;
 
+    const startedAt = Date.now();
     this.messages.update((list) => [
       ...list,
       { role: 'user', content: text },
-      { role: 'assistant', content: '', pending: true },
+      { role: 'assistant', content: '', pending: true, steps: [], startedAt },
     ]);
     this.sending.set(true);
+    this.startTicker();
+
+    const fail = (message: string) => {
+      this.sending.set(false);
+      this.serviceError.set(message);
+      this.applyAssistant({ role: 'assistant', content: message, error: true, steps: this.pendingSteps(), workedMs: Date.now() - startedAt });
+    };
 
     this.chatSub = this.aiService
-      .chat(text, priorHistory, this.activeLayerId, previousOperation, resolvedOperation, this.conversationId(), this.chatOptions())
+      .chatStream(text, priorHistory, this.activeLayerId, previousOperation, resolvedOperation, this.conversationId(), this.chatOptions())
       .subscribe({
-      next: (response) => {
+      next: (event) => {
+        if (event.type === 'step') {
+          this.messages.update((list) =>
+            list.map((m) => (m.pending ? { ...m, steps: [...(m.steps ?? []), { stage: event.stage, detail: event.detail, ms: event.ms }] } : m)),
+          );
+          return;
+        }
+        if (event.type === 'error') {
+          fail(Array.isArray(event.message) ? event.message.join('. ') : event.message || 'The assistant is unavailable right now.');
+          return;
+        }
+        const response = event.response;
+        const steps = this.pendingSteps();
         this.sending.set(false);
         if (response.conversationId) this.conversationId.set(response.conversationId);
         if (response.instructions) this.instructions.set(response.instructions);
@@ -349,26 +392,97 @@ export class AiChatComponent {
           content: response.explanation,
           response,
           narrating: wantsWording,
+          steps,
+          workedMs: event.ms,
         });
         this.applyResultToMap(response);
         if (wantsWording) this.narrate(index, text, response.facts!);
       },
       error: (err: HttpErrorResponse) => {
-        this.sending.set(false);
-        const raw = err.error?.message;
-        const message =
+        let raw = err.error?.message;
+        if (raw === undefined && typeof err.error === 'string') {
+          try {
+            raw = JSON.parse(err.error).message;
+          } catch {
+            /* not JSON */
+          }
+        }
+        fail(
           (Array.isArray(raw) ? raw.join('. ') : raw) ??
-          (err.status === 0
-            ? 'Could not reach the assistant.'
-            : 'The assistant is unavailable right now.');
-        this.serviceError.set(message);
-        this.applyAssistant({
-          role: 'assistant',
-          content: message,
-          error: true,
-        });
+            (err.status === 0 ? 'Could not reach the assistant.' : 'The assistant is unavailable right now.'),
+        );
       },
     });
+  }
+
+  /** Ticks once a second while the assistant works (live timer). */
+  readonly now = signal(Date.now());
+  private ticker?: ReturnType<typeof setInterval>;
+  private readonly stopTicker = effect(() => {
+    if (!this.sending() && this.ticker) {
+      clearInterval(this.ticker);
+      this.ticker = undefined;
+    }
+  });
+
+  private startTicker(): void {
+    this.now.set(Date.now());
+    if (!this.ticker) this.ticker = setInterval(() => this.now.set(Date.now()), 500);
+  }
+
+  private pendingSteps(): ChatStep[] {
+    return this.messages().find((m) => m.pending)?.steps ?? [];
+  }
+
+  /** The live line: the latest step, worded as what is happening now. */
+  liveTitle(msg: ChatMessage): string {
+    const step = msg.steps?.at(-1);
+    if (!step) return 'Starting';
+    return step.stage === 'running' && step.detail ? `Querying ${step.detail}` : STEP_LIVE[step.stage];
+  }
+
+  /** A short line under the live title, only when it says something. */
+  liveDetail(msg: ChatMessage): string | null {
+    const steps = msg.steps ?? [];
+    const step = steps.at(-1);
+    if (!step) return null;
+    if (step.stage === 'understanding' && this.now() - (msg.startedAt ?? this.now()) - step.ms > 4000) {
+      return 'The local AI model is reading the question — this can take a little while.';
+    }
+    if (step.stage === 'running' || step.stage === 'checked' || step.stage === 'planned') {
+      const plan = [...steps].reverse().find((s) => s.stage === 'checked' || s.stage === 'planned');
+      return plan?.detail ?? null;
+    }
+    return null;
+  }
+
+  /** The finished timeline, without the bookkeeping steps. */
+  doneSteps(msg: ChatMessage): { title: string; detail: string | null }[] {
+    const steps = msg.steps ?? [];
+    const by = steps.find((s) => s.stage === 'understood')?.detail;
+    return steps
+      .filter((s) => s.stage !== 'understood' && s.stage !== 'understanding')
+      .map((s) => {
+        if (s.stage === 'values') {
+          return [
+            { title: STEP_DONE.values, detail: null },
+            { title: by === 'AI model' ? 'Understood the question with the local AI model' : 'Understood the question instantly', detail: null },
+          ];
+        }
+        if (s.stage === 'running') return [{ title: s.detail ? `Queried ${s.detail}` : STEP_DONE.running, detail: null }];
+        return [{ title: STEP_DONE[s.stage], detail: s.stage === 'catalog' ? null : s.detail }];
+      })
+      .flat();
+  }
+
+  elapsed(msg: ChatMessage): string {
+    const ms = msg.workedMs ?? this.now() - (msg.startedAt ?? this.now());
+    const s = Math.max(0, ms) / 1000;
+    return s < 1 ? '<1 s' : s < 60 ? `${Math.round(s)} s` : `${Math.floor(s / 60)} m ${Math.round(s % 60)} s`;
+  }
+
+  toggleSteps(index: number): void {
+    this.messages.update((list) => list.map((m, i) => (i === index ? { ...m, stepsOpen: !m.stepsOpen } : m)));
   }
 
   /** Returns the index the message landed at. */
@@ -593,7 +707,11 @@ export class AiChatComponent {
     const a = response.aggregate;
     if (!a) return '';
     const word = { count: 'Count', sum: 'Total', avg: 'Average', min: 'Minimum', max: 'Maximum' }[a.metric];
-    return a.metricLabel ? `${word} ${a.metricLabel}` : word;
+    if (!a.metricLabel) return word;
+    // "total_population_village" -> "Total population village"; no "Total total …".
+    const label = a.metricLabel.replace(/_+/g, ' ').trim();
+    const nice = label.charAt(0).toUpperCase() + label.slice(1);
+    return label.toLowerCase().startsWith(word.toLowerCase() + ' ') ? nice : `${word} ${label}`;
   }
 
   operationSummary(response: GisChatResponse): string[] {

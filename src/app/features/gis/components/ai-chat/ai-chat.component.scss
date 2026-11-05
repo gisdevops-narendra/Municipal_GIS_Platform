@@ -13,6 +13,8 @@
   flex: 1 1 auto;
   min-height: 0;
   background: var(--color-bg);
+  /* Layout follows the dock's width, not the screen's (see the end). */
+  container-type: inline-size;
 }
 
 /* ---------- toolbar ---------- */
@@ -176,6 +178,7 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -185,6 +188,7 @@
   /* Keep lines readable when the panel is widened. */
   > * {
     width: 100%;
+    min-width: 0;
     max-width: 720px;
     margin-inline: auto;
   }
@@ -1288,4 +1292,227 @@
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
+}
+
+
+/* ---------- narrow dock ----------
+   Nothing may push the thread wider than the dock; long field names wrap. */
+.aic__bar-title,
+.aic__bar-text {
+  min-width: 0;
+}
+
+.aic__bar-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aic__new {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.aic__card {
+  min-width: 0;
+}
+
+.aic__card-head > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+
+  &:last-child {
+    text-align: right;
+  }
+}
+
+.aic__result-count {
+  white-space: nowrap;
+}
+
+.aic__actions {
+  flex-wrap: wrap;
+}
+
+.aic__msg-text,
+.aic__followup {
+  overflow-wrap: anywhere;
+}
+
+@container (max-width: 360px) {
+  .aic__bar {
+    padding-inline: 10px 6px;
+  }
+
+  .aic__new {
+    padding: 5px 8px;
+    margin-left: 0;
+  }
+
+  .aic__new-label {
+    display: none;
+  }
+
+  .aic__thread {
+    padding: 14px 10px 16px;
+    gap: 12px;
+  }
+
+  .aic__bubble {
+    padding: 10px;
+  }
+
+  .aic__bubble--user {
+    max-width: 90%;
+  }
+
+  .aic__followups {
+    padding-left: 0;
+  }
+
+  .aic__result {
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .aic__agg-row {
+    grid-template-columns: minmax(0, 1fr) minmax(2rem, 0.8fr) auto;
+  }
+}
+
+
+/* ---------- what the assistant is doing ----------
+   Live: one calm line (current action, shimmering) + elapsed time.
+   Done: a quiet "Worked for N s" that opens a simple timeline. */
+.aic__live {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.aic__live-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.aic__live-dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--color-primary-500);
+  animation: aic-pulse 1.2s ease-in-out infinite;
+}
+
+.aic__live-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: transparent;
+  background: linear-gradient(
+    90deg,
+    var(--color-ink-500) 0%,
+    var(--color-ink-500) 40%,
+    var(--color-ink-900) 50%,
+    var(--color-ink-500) 60%,
+    var(--color-ink-500) 100%
+  );
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: aic-shimmer 2.2s linear infinite;
+}
+
+.aic__live-time {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--color-ink-500);
+  font-variant-numeric: tabular-nums;
+}
+
+.aic__live-detail {
+  margin: 0 0 0 15px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--color-ink-500);
+  overflow-wrap: anywhere;
+}
+
+@keyframes aic-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -150% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aic__live-title {
+    animation: none;
+    color: var(--color-ink-700);
+    background: none;
+  }
+}
+
+.aic__worked {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--color-ink-500);
+  cursor: pointer;
+
+  .pi {
+    font-size: 9px;
+  }
+
+  &:hover {
+    color: var(--color-ink-900);
+  }
+}
+
+.aic__timeline {
+  list-style: none;
+  margin: 0 0 10px 3px;
+  padding: 0 0 0 12px;
+  border-left: 1px solid var(--color-line);
+
+  li {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    padding: 3px 0;
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: var(--color-ink-700);
+
+    &::before {
+      content: '';
+      position: absolute;
+      left: -15.5px;
+      top: 9px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--color-surface);
+      border: 1px solid var(--color-ink-300);
+    }
+  }
+
+  small {
+    font-size: 11px;
+    color: var(--color-ink-500);
+    overflow-wrap: anywhere;
+  }
 }

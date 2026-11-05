@@ -27,8 +27,8 @@
       >
         <i class="pi pi-history" aria-hidden="true"></i>
       </button>
-      <button type="button" class="aic__new" [disabled]="messages().length === 0 || sending()" (click)="reset()">
-        <i class="pi pi-plus" aria-hidden="true"></i> New chat
+      <button type="button" class="aic__new" title="New chat" aria-label="New chat" [disabled]="messages().length === 0 || sending()" (click)="reset()">
+        <i class="pi pi-plus" aria-hidden="true"></i><span class="aic__new-label">New chat</span>
       </button>
     </div>
   </div>
@@ -74,12 +74,35 @@
             <i class="pi" [class.pi-sparkles]="!msg.error" [class.pi-exclamation-triangle]="msg.error"></i>
           </span>
           <div class="aic__bubble" [class.aic__bubble--error]="msg.error">
+            @let mi = $index;
             @if (msg.pending) {
-              <span class="aic__thinking">
-                <span class="aic__typing" aria-hidden="true"><span></span><span></span><span></span></span>
-                Thinking…
-              </span>
+              <div class="aic__live" role="status" aria-live="polite">
+                <div class="aic__live-line">
+                  <span class="aic__live-dot" aria-hidden="true"></span>
+                  <span class="aic__live-title">{{ liveTitle(msg) }}</span>
+                  <span class="aic__live-time">{{ elapsed(msg) }}</span>
+                </div>
+                @if (liveDetail(msg); as d) {
+                  <p class="aic__live-detail">{{ d }}</p>
+                }
+              </div>
             } @else {
+              @if (msg.steps?.length) {
+                <button type="button" class="aic__worked" [attr.aria-expanded]="!!msg.stepsOpen" (click)="toggleSteps(mi)">
+                  Worked for {{ elapsed(msg) }}
+                  <i class="pi" [class.pi-chevron-right]="!msg.stepsOpen" [class.pi-chevron-down]="msg.stepsOpen" aria-hidden="true"></i>
+                </button>
+                @if (msg.stepsOpen) {
+                  <ol class="aic__timeline">
+                    @for (step of doneSteps(msg); track $index) {
+                      <li>
+                        <span>{{ step.title }}</span>
+                        @if (step.detail) { <small>{{ step.detail }}</small> }
+                      </li>
+                    }
+                  </ol>
+                }
+              }
               <p class="aic__msg-text">{{ mainText(msg) }}</p>
               @if (msg.narrating) {
                 <span class="aic__wording"><i class="pi pi-spin pi-spinner"></i> Writing a summary…</span>

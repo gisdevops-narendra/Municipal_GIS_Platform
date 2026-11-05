@@ -330,6 +330,12 @@ _RANKED = re.compile(
     r"shortest|smallest|lowest|narrowest)\b",
     re.I,
 )
+# A count asked apart from the superlative: "top 5 … lowest", "first 10 …",
+# "show 3 villages with the highest …".
+_TOP_N = re.compile(
+    r"\b(?:top|first|bottom|last)\s+(\d{1,4})\b|^\s*(?:show|list|find|display|get|give)?\s*(?:me\s+)?(?:the\s+)?(\d{1,4})\s+[a-z]",
+    re.I,
+)
 SUP_DESC = {"tallest", "highest", "largest", "biggest", "longest", "widest", "deepest"}
 SUP_IMPLIES = {
     "tallest": "height", "highest": "height", "lowest": "height",
@@ -376,26 +382,70 @@ def ranked_request(text: str, target: Optional[LayerInfo]) -> Optional[Tuple[Opt
     if not m or target is None or _STATISTIC.search(text):
         return None
     sup = m.group("sup").lower()
-    return rank_measure(sup, target, _tokens(text)), sup in SUP_DESC, int(m.group("n") or 1)
+    n = m.group("n") or next((g for g in (_TOP_N.search(text) or re.match("", "")).groups() if g), None)
+    return rank_measure(sup, target, _tokens(text)), sup in SUP_DESC, int(n or 1)
+
+
+def named_numeric_field(target: LayerInfo, words: List[str]):
+    """The numeric field the question's own words name ("female population"
+    -> total_female_population_<…>): most words covered by its name parts /
+    aliases, then fewest unexplained name parts. Generic — any layer."""
+    layer_words = set(_tokens(f"{target.name} {target.code}"))
+    asked = [w for w in words if len(w) > 2 and w not in layer_words and w not in _FUNCTION_WORDS]
+
+    def covers(w: str, p: str) -> bool:
+        return w == p or _similar(w, p) or (len(w) > 3 and p.startswith(w))
+
+    best = None
+    for f in numeric_fields(target):
+        name_parts = [p for p in _tokens(f.name) if p and p not in layer_words]
+        parts = name_parts + [p for a in alias_words(f) for p in _tokens(a)]
+        hit = [w for w in asked if any(covers(w, p) for p in parts)]
+        if not hit:
+            continue
+        extra = len([p for p in name_parts if not any(covers(w, p) for w in hit)])
+        key = (-len(hit), extra)
+        if best is None or key < best[0]:
+            best = (key, f, False)
+        elif key == best[0]:
+            best = (key, best[1], True)  # as good as another: ambiguous
+    if best is None or best[2]:
+        return None
+    return best[1]
+
+
+def numeric_fields_by_words(target: LayerInfo, words: List[str]):
+    """Numeric fields, those sharing words with the question first (for
+    "which field?" choices)."""
+    layer_words = set(_tokens(f"{target.name} {target.code}"))
+    asked = set(w for w in words if len(w) > 2 and w not in layer_words and w not in _FUNCTION_WORDS)
+    def score(f) -> int:
+        parts = _tokens(f.name) + [p for a in alias_words(f) for p in _tokens(a)]
+        return -sum(1 for w in asked if any(w == p or _similar(w, p) for p in parts))
+    return sorted(numeric_fields(target), key=score)
 
 
 def rank_measure(sup: str, target: LayerInfo, words: List[str]) -> Optional[str]:
-    """The field a superlative ranks on: its implied measure, or — for one
-    implying none — a numeric field the question names."""
+    """The field a superlative ranks on: a numeric field the question names
+    ("highest female population"), else the superlative's implied measure
+    ("tallest" -> height, "largest" polygon -> area)."""
+    named = named_numeric_field(target, [w for w in words if w != sup])
+    if named is not None:
+        return named.name
     hints = rank_hints(sup, target)
     if not hints:
         return rank_field(target, words)
     return next((f for h in hints if (f := rank_field(target, [h]))), None)
 
 
-def rank_choice(plan: PlanResult, op: GisOperation, target: LayerInfo, desc: bool) -> PlanResult:
+def rank_choice(plan: PlanResult, op: GisOperation, target: LayerInfo, desc: bool, question: str = "") -> PlanResult:
     """No measure fits the superlative: ask which field, each chip running
     the ranking on that column. The plan stays attached, so a typed reply
     ("yes, use length") completes it."""
     from .schema import ClarifyOption  # local: schema imports nothing from here
 
     options = []
-    for f in numeric_fields(target)[:6]:
+    for f in numeric_fields_by_words(target, _tokens(question))[:6]:
         changed = op.model_copy(deep=True)
         changed.order_by = f.name
         options.append(ClarifyOption(label=f.name, operation=changed))
@@ -991,7 +1041,7 @@ def repair_plan(message: str, plan: PlanResult, layers: List[LayerInfo], follow_
             spatial_filters=op.spatial_filters, order_by=field, order_desc=desc, limit=n,
         )
         if field is None:
-            return rank_choice(plan, op, target, desc)
+            return rank_choice(plan, op, target, desc, message)
 
     if op.kind == "nearest" and not nearest and op.spatial_filter is not None:
         notes.append("kind nearest -> select (no nearest/closest in the request)")

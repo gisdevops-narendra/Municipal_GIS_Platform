@@ -179,9 +179,32 @@ export interface GisAiHealth {
   embedding_model?: string;
 }
 
+/** What the assistant did, streamed while it works (see chat/stream). */
+export type ChatStage = 'catalog' | 'values' | 'understanding' | 'understood' | 'planned' | 'checked' | 'running';
+
+export interface ChatStep {
+  stage: ChatStage;
+  detail: string | null;
+  /** ms since the question was sent */
+  ms: number;
+}
+
+export type ChatStreamEvent =
+  | ({ type: 'step' } & ChatStep)
+  | { type: 'result'; response: GisChatResponse; ms: number }
+  | { type: 'error'; status: number; message: string | string[] };
+
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  /** The steps the assistant took (live while pending, then collapsible). */
+  steps?: ChatStep[];
+  /** When the question was sent (for the live timer). */
+  startedAt?: number;
+  /** Total time once answered. */
+  workedMs?: number;
+  /** The step list is expanded under the answer. */
+  stepsOpen?: boolean;
   /** assistant-only rich payload */
   response?: GisChatResponse;
   /** The LLM's wording of `response.answer`, once it arrives. */

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, ParseUUIDPipe, Patch, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpException, Param, ParseIntPipe, ParseUUIDPipe, Patch, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import {
   RequireMunicipalityMember,
@@ -55,6 +55,48 @@ export class GisAiController {
       if (!res.writableFinished) cancel.abort();
     });
     return this.gisAi.chat(appUser, dto, cancel.signal);
+  }
+
+  /**
+   * Same as `chat`, streamed as NDJSON so the panel can show what the
+   * assistant is doing: `{"type":"step","stage":…,"detail":…,"ms":…}` per
+   * step, then `{"type":"result","response":…}` or `{"type":"error",…}`.
+   */
+  @RequireAiAssistant()
+  @Post('chat/stream')
+  async chatStream(
+    @CurrentAppUser() appUser: AppUser,
+    @Body() dto: GisChatDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const cancel = new AbortController();
+    res.on('close', () => {
+      if (!res.writableFinished) cancel.abort();
+    });
+    res.status(200);
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+    const started = Date.now();
+    const send = (event: Record<string, unknown>) => {
+      if (!res.writableEnded) res.write(JSON.stringify(event) + '\n');
+    };
+    try {
+      const response = await this.gisAi.chat(appUser, dto, cancel.signal, (stage, detail) =>
+        send({ type: 'step', stage, detail: detail ?? null, ms: Date.now() - started }),
+      );
+      send({ type: 'result', response, ms: Date.now() - started });
+    } catch (error) {
+      const status = error instanceof HttpException ? error.getStatus() : 500;
+      const body = error instanceof HttpException ? error.getResponse() : null;
+      const message =
+        (body && typeof body === 'object' && 'message' in body ? (body as { message: unknown }).message : null) ??
+        (error instanceof Error ? error.message : 'The assistant failed.');
+      send({ type: 'error', status, message });
+    } finally {
+      res.end();
+    }
   }
 
   /** The user's AI chats (history panel). */

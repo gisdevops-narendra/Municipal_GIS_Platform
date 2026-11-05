@@ -1,4 +1,5 @@
-import { HttpClient, HttpResponse } from '@angular/common/http';
+import type { ChatStreamEvent } from '../models/gis-ai.model';
+import { HttpClient, HttpDownloadProgressEvent, HttpEventType, HttpResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../environments/environment';
@@ -41,6 +42,59 @@ export class GisAiService {
       resolvedOperation,
       conversationId: conversationId ?? undefined,
       ...options,
+    });
+  }
+
+  /** `chat`, streamed: each step the assistant takes, then the result. */
+  chatStream(
+    message: string,
+    history: { role: 'user' | 'assistant'; content: string }[] = [],
+    activeLayerId?: string | null,
+    previousOperation?: AiGisOperation,
+    resolvedOperation?: AiGisOperation,
+    conversationId?: string | null,
+    options: AiChatOptions = {},
+  ): Observable<ChatStreamEvent> {
+    const body = {
+      message,
+      history,
+      activeLayerId: activeLayerId ?? undefined,
+      previousOperation,
+      resolvedOperation,
+      conversationId: conversationId ?? undefined,
+      ...options,
+    };
+    return new Observable<ChatStreamEvent>((subscriber) => {
+      let seen = 0;
+      let buffer = '';
+      const emitLines = (text: string, final: boolean) => {
+        buffer += text.slice(seen);
+        seen = text.length;
+        const lines = buffer.split('\n');
+        buffer = final ? '' : lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            subscriber.next(JSON.parse(line) as ChatStreamEvent);
+          } catch {
+            /* a partial line: completed by the next chunk */
+          }
+        }
+      };
+      const sub = this.http
+        .post(`${this.baseUrl}/chat/stream`, body, { observe: 'events', reportProgress: true, responseType: 'text' })
+        .subscribe({
+          next: (event) => {
+            if (event.type === HttpEventType.DownloadProgress) {
+              emitLines((event as HttpDownloadProgressEvent).partialText ?? '', false);
+            } else if (event.type === HttpEventType.Response) {
+              emitLines(event.body ?? '', true);
+              subscriber.complete();
+            }
+          },
+          error: (err) => subscriber.error(err),
+        });
+      return () => sub.unsubscribe();
     });
   }
 
