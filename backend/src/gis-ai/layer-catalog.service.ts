@@ -26,6 +26,9 @@ export interface CatalogColumn {
   name: string;
   dataType: string;
   kind: FieldKind;
+  /** A text column whose values are numbers ("2052", "1,250"): treated as
+   *  kind 'number' and read through a safe cast (see the query compiler). */
+  numericText?: boolean;
   sampleValues: string[];
   /** From ai_field_metadata (profiled at upload, Owner-editable). */
   role?: string;
@@ -91,6 +94,9 @@ const NON_VALUE_COLUMN =
   /(^|_)(id|fid|gid|uid|code|cd|status|sta|year|area|length|leng|shape|summer|month)(_|$)|^objectid|code$|_\d+$/i;
 const LARGE_TABLE_COLUMNS = 12;
 const DISTINCT_CACHE_MS = 10 * 60 * 1000;
+/** A number written as text: "2052", "-3.5", "1,250". */
+const NUMERIC_TEXT_SQL = '^-?[0-9][0-9,]*(\\.[0-9]+)?$';
+const NUMERIC_PROFILE_ROWS = 5000;
 
 /** Words common to every request — they would match half of any column. */
 const QUESTION_STOPWORDS = new Set(
@@ -448,7 +454,32 @@ export class LayerCatalogService {
     return Number.isFinite(n) ? n : null;
   }
 
+  /** describeTable results per table — sampling every text column of a
+   *  large table took 20–40 s, so it must not run on every question. */
+  private readonly describeCache = new Map<
+    string,
+    { at: number; result: Promise<Awaited<ReturnType<LayerCatalogService['describeTableUncached']>>> }
+  >();
+
   private async describeTable(
+    table: string,
+    isDemo: boolean,
+    workspaceId: string,
+    fallbackSrid: number,
+  ) {
+    const key = isDemo ? `${table}:${workspaceId}` : table;
+    let hit = this.describeCache.get(key);
+    if (!hit || Date.now() - hit.at >= DISTINCT_CACHE_MS) {
+      const result = this.describeTableUncached(table, isDemo, workspaceId, fallbackSrid);
+      result.catch(() => this.describeCache.delete(key));
+      hit = { at: Date.now(), result };
+      this.describeCache.set(key, hit);
+    }
+    const described = await hit.result;
+    return described ? structuredClone(described) : null;
+  }
+
+  private async describeTableUncached(
     table: string,
     isDemo: boolean,
     workspaceId: string,
@@ -505,7 +536,47 @@ export class LayerCatalogService {
       }
       columns.push(entry);
     }
+    await this.markNumericText(table, columns, isDemo, workspaceId);
     return { columns, geomColumn, srid };
+  }
+
+  /**
+   * Uploads often store numbers as text (shapefile/CSV): a text column is
+   * numeric when ≥ 95 % of its non-empty values (over the first rows) are
+   * numbers. One pass over all text columns; any data, no names assumed.
+   */
+  private async markNumericText(
+    table: string,
+    columns: CatalogColumn[],
+    isDemo: boolean,
+    workspaceId: string,
+  ): Promise<void> {
+    const text = columns.filter((c) => c.kind === 'text' && !INTERNAL_COLUMNS.has(c.name));
+    if (!text.length) return;
+    const scope = isDemo ? 'WHERE gis_workspace_id = $1' : '';
+    const parts = text.map((c, i) => {
+      const v = `btrim("${c.name.replace(/"/g, '')}"::text)`;
+      return (
+        `count(nullif(${v}, '')) AS n${i}, ` +
+        `count(*) FILTER (WHERE ${v} ~ '${NUMERIC_TEXT_SQL}') AS k${i}`
+      );
+    });
+    const sql = `SELECT ${parts.join(', ')} FROM (SELECT * FROM "${table}" ${scope} LIMIT ${NUMERIC_PROFILE_ROWS}) s`;
+    try {
+      const [row] = isDemo
+        ? await this.prisma.$queryRawUnsafe<Record<string, bigint>[]>(sql, workspaceId)
+        : await this.prisma.$queryRawUnsafe<Record<string, bigint>[]>(sql);
+      text.forEach((c, i) => {
+        const n = Number(row?.[`n${i}`] ?? 0);
+        const k = Number(row?.[`k${i}`] ?? 0);
+        if (n > 0 && k / n >= 0.95) {
+          c.kind = 'number';
+          c.numericText = true;
+        }
+      });
+    } catch {
+      // best effort — columns stay text
+    }
   }
 
   private async sampleDistinct(

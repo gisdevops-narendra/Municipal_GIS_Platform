@@ -199,7 +199,7 @@ export class GisQueryCompilerService {
         if (col.kind === 'geometry') {
           throw new PlanValidationError(`Cannot sort by the geometry column "${col.name}".`);
         }
-        orderExpr = `${t}."${col.name}"`;
+        orderExpr = this.valueRef(t, col);
         orderLabel = col.name;
         ranking = { field: col.name, unit: col.unit ?? null, desc: operation.order_desc !== false };
       } else {
@@ -900,6 +900,7 @@ export class GisQueryCompilerService {
 
   private attrCql(layer: LayerCatalogEntry, filter: AiAttributeFilter): string | null {
     const col = this.findColumn(layer, filter.field);
+    if (col.numericText) return null; // ECQL cannot cast safely; render from SQL ids
     const name = `"${col.name}"`;
     if (filter.op === 'is_null') return `${name} IS NULL`;
     if (filter.op === 'is_not_null') return `${name} IS NOT NULL`;
@@ -1152,7 +1153,7 @@ export class GisQueryCompilerService {
           `"${col.name}" is not numeric. Numeric fields of "${layer.name}": ${this.numericNames(layer)}.`,
         );
       }
-      return { expr: `${t}."${col.name}"`, label: col.name };
+      return { expr: this.valueRef(t, col), label: col.name };
     }
     const g = `${t}."${layer.geomColumn}"`;
     const metric = layer.srid !== 4326;
@@ -1271,6 +1272,15 @@ export class GisQueryCompilerService {
     return col;
   }
 
+  /** A column as a value: numbers stored as text (catalog numericText) are
+   *  read through a safe cast — non-numbers become NULL, never an error. */
+  private valueRef(alias: string, col: CatalogColumn): string {
+    const ref = `${alias}."${col.name}"`;
+    if (!col.numericText) return ref;
+    const v = `btrim(${ref}::text)`;
+    return `(CASE WHEN ${v} ~ '^-?[0-9][0-9,]*(\\.[0-9]+)?$' THEN replace(${v}, ',', '')::numeric END)`;
+  }
+
   private coerce(col: CatalogColumn, raw: unknown, label: string): unknown {
     if (col.kind === 'integer' || col.kind === 'id') {
       const n = Number(raw);
@@ -1299,7 +1309,7 @@ export class GisQueryCompilerService {
     bind: Bind,
   ): string {
     const col = this.findColumn(layer, filter.field);
-    const ref = `${alias}."${col.name}"`;
+    const ref = this.valueRef(alias, col);
 
     if (filter.op === 'is_null') return `${ref} IS NULL`;
     if (filter.op === 'is_not_null') return `${ref} IS NOT NULL`;

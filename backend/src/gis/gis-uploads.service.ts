@@ -871,6 +871,18 @@ export class GisUploadsService {
 
       await ensureOgcFid(this.prisma, tableName);
       await normalizeColumnNames(this.prisma, tableName);
+      // Numbers / dates / yes-no imported as text get their real type, so
+      // the whole platform (table, styling, filters, AI) sees real values.
+      const typed = await this.schema?.autoTypeColumns(tableName).catch(() => []);
+      if (typed?.length) {
+        warnings.push(
+          `${typed.length} column${typed.length === 1 ? '' : 's'} stored as text converted to ` +
+            `${[...new Set(typed.map((t) => t.type))].join(' / ')}: ` +
+            typed.slice(0, 8).map((t) => t.column).join(', ') +
+            (typed.length > 8 ? ` and ${typed.length - 8} more` : '') +
+            '. Change any type back in the Columns step.',
+        );
+      }
       await this.ensureSpatialIndex(tableName);
       const { invalidCount, emptyCount } =
         await this.checkGeometryValidity(tableName);

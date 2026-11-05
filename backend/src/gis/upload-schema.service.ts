@@ -39,6 +39,8 @@ const PREVIEW_ROWS = 10;
 /** The Columns step previews only this many rows (see describe). */
 const PREVIEW_SAMPLE_ROWS = 10;
 const SAMPLE_VALUES = 6;
+/** autoTypeColumns: rows read to find candidate columns before the full check. */
+const AUTO_TYPE_SAMPLE_ROWS = 5000;
 
 export interface ColumnConversion {
   /** Non-empty values that cannot become this type (0 = safe). */
@@ -279,6 +281,81 @@ export class UploadSchemaService {
       proposal: null,
       approved: null,
     };
+  }
+
+  /**
+   * Right after import: give every text column its real type when EVERY
+   * non-empty value converts cleanly — integer, then number, then date,
+   * then yes/no. Codes with leading zeros ("0123", pincodes) stay text so
+   * no zero is lost. Data-driven, no column names assumed; the Columns step
+   * still lets the uploader change any type back. Returns what changed.
+   */
+  async autoTypeColumns(table: string): Promise<{ column: string; type: ColumnKind }[]> {
+    if (!isSafeGeneratedTableName(table)) return [];
+    const text = (await this.columns(table)).filter((c) => kindOf(c.dataType) === 'text');
+    if (!text.length) return [];
+
+    // Numbers by pattern (cheap on millions of rows); dates by Postgres's
+    // own parser. Integers must fit bigint (≤ 18 digits).
+    const INT = `'^[+-]?[0-9]{1,18}$'`;
+    const NUM = `'^[+-]?([0-9]+[.]?[0-9]*|[.][0-9]+)([eE][+-]?[0-9]+)?$'`;
+    type Want = 'i' | 'n' | 'd' | 'b';
+    const checks = (c: { name: string; want: Want[] }, i: number) => {
+      const v = `NULLIF(trim("${c.name}"::text), '')`;
+      const bad: Record<Want, string> = {
+        i: `${v} !~ ${INT}`,
+        n: `${v} !~ ${NUM}`,
+        d: `NOT pg_input_is_valid(${dmyToIso(v)}, 'date')`,
+        b: `lower(${v}) NOT IN (${BOOLEAN_WORDS.map((w) => `'${w}'`).join(', ')})`,
+      };
+      return [
+        `count(${v}) AS f${i}`,
+        `count(*) FILTER (WHERE ${v} ~ '^[+-]?0[0-9]') AS z${i}`,
+        ...c.want.map((k) => `count(*) FILTER (WHERE ${v} IS NOT NULL AND ${bad[k]}) AS ${k}${i}`),
+      ].join(', ');
+    };
+    const pick = (row: Record<string, unknown>, i: number, want: Want[]): ColumnKind | null => {
+      const n = (k: string) => Number(row[`${k}${i}`] ?? 0);
+      if (n('f') === 0 || n('z') > 0) return null; // empty, or codes with leading zeros
+      const ok = (k: Want) => want.includes(k) && n(k) === 0;
+      if (ok('i')) return 'integer';
+      if (ok('n')) return 'number';
+      if (ok('d')) return 'date';
+      if (ok('b')) return 'boolean';
+      return null;
+    };
+    const profile = async (cols: { name: string; want: Want[] }[], from: string) => {
+      const [row] = await this.prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+        `SELECT ${cols.map(checks).join(', ')} FROM ${from}`,
+      );
+      return cols.map((c, i) => ({ name: c.name, type: row ? pick(row, i, c.want) : null }));
+    };
+    const ALL: Want[] = ['i', 'n', 'd', 'b'];
+    const WANT: Record<ColumnKind, Want[]> = { integer: ['i', 'n'], number: ['n'], date: ['d'], boolean: ['b'], text: [] };
+
+    // 1. a cheap pass over the first rows finds candidates and their type;
+    // 2. one full pass checks only that type against every value (a later
+    //    "NA" keeps the column text; a decimal turns integer into number).
+    const sample = await profile(
+      text.map((c) => ({ name: c.name, want: ALL })),
+      `(SELECT * FROM "${table}" LIMIT ${AUTO_TYPE_SAMPLE_ROWS}) s`,
+    );
+    const candidates = sample
+      .filter((c): c is { name: string; type: ColumnKind } => c.type !== null)
+      .map((c) => ({ name: c.name, want: WANT[c.type] }));
+    if (!candidates.length) return [];
+    const confirmed = (await profile(candidates, `"${table}"`)).filter(
+      (c): c is { name: string; type: ColumnKind } => c.type !== null,
+    );
+    if (!confirmed.length) return [];
+
+    await this.prisma.$executeRawUnsafe(
+      `ALTER TABLE "${table}" ` +
+        confirmed
+          .map((c) => `ALTER COLUMN "${c.name}" TYPE ${SQL_TYPE[c.type]} USING ${usingExpression(`"${c.name}"`, 'text', c.type)}`)
+          .join(', '),
+    );
+    return confirmed.map((c) => ({ column: c.name, type: c.type }));
   }
 
   /** How many non-empty values of `column` would not survive becoming
