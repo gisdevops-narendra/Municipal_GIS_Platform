@@ -205,4 +205,50 @@
     </div>
   }
   <p-menu #moreMenu [model]="moreItems" [popup]="true" appendTo="body" styleClass="layer-panel__menu" />
+
+  <p-dialog
+    [visible]="!!renderTarget()"
+    (visibleChange)="!$event ? renderTarget.set(null) : null"
+    [modal]="true"
+    [header]="'Rendering · ' + (renderTarget()?.name ?? '')"
+    [style]="{ width: '440px' }"
+    [breakpoints]="{ '520px': '95vw' }"
+    appendTo="body"
+  >
+    <p class="render-dlg__intro">Choose how the map draws this layer. Filters and style previews always draw live.</p>
+    <div class="render-dlg__options" role="radiogroup" aria-label="Rendering mode">
+      @for (m of renderModes; track m.mode) {
+        <button
+          type="button"
+          role="radio"
+          class="render-dlg__card"
+          [class.render-dlg__card--active]="renderChoice() === m.mode"
+          [attr.aria-checked]="renderChoice() === m.mode"
+          (click)="renderChoice.set(m.mode)"
+        >
+          <span class="render-dlg__icon"><i [class]="m.icon"></i></span>
+          <span class="render-dlg__text">
+            <span class="render-dlg__title">
+              {{ m.label }}
+              @if ((renderTarget()?.renderMode ?? 'WMS') === m.mode) {
+                <span class="render-dlg__current">Current</span>
+              }
+            </span>
+            <span class="render-dlg__hint">{{ m.hint }}</span>
+          </span>
+          <span class="render-dlg__radio" aria-hidden="true"></span>
+        </button>
+      }
+    </div>
+    <ng-template #footer>
+      <button pButton type="button" label="Cancel" class="p-button-text" (click)="renderTarget.set(null)"></button>
+      <button
+        pButton
+        type="button"
+        label="Apply"
+        [disabled]="renderChoice() === (renderTarget()?.renderMode ?? 'WMS')"
+        (click)="applyRendering()"
+      ></button>
+    </ng-template>
+  </p-dialog>
 </div>

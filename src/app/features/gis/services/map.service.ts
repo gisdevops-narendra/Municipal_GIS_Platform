@@ -41,7 +41,7 @@ import MousePosition from 'ol/control/MousePosition';
 import { createStringXY, toStringHDMS } from 'ol/coordinate';
 import type { Coordinate } from 'ol/coordinate';
 import { fromLonLat, get as getProjection, getPointResolution, toLonLat, transform, transformExtent } from 'ol/proj';
-import { createEmpty, extend as extendExtent, isEmpty as isEmptyExtent } from 'ol/extent';
+import { createEmpty, extend as extendExtent, intersects as extentsIntersect, isEmpty as isEmptyExtent } from 'ol/extent';
 import type Geometry from 'ol/geom/Geometry';
 import { firstValueFrom, forkJoin, map as rxMap, Observable, of } from 'rxjs';
 import type { EventsKey } from 'ol/events';
@@ -616,7 +616,8 @@ export class MapService {
       if (entry.rendered === 'WMS_TILED' && src instanceof TileWMS) src.updateParams({ _style: Date.now() });
       if (entry.rendered === 'MVT') {
         // New tiles (cache was emptied server-side) and the new style.
-        (src as VectorTileSource).setUrl(this.mvtUrl(entry));
+        const vts = src as VectorTileSource;
+        vts.setTileUrlFunction(this.mvtTileUrl(entry, vts), String(entry.tilesVersion));
         this.loadMvtStyle(entry, entry.olLayer as VectorTileLayer);
       }
       this.syncRenderer(entry);
@@ -2726,12 +2727,27 @@ export class MapService {
     return mode;
   }
 
-  private mvtUrl(entry: ManagedLayer): string {
-    const name = `${entry.layer.geoserverWorkspace}:${entry.layer.geoserverLayer}`;
-    return (
-      `${environment.geoserverUrl}/gwc/service/tms/1.0.0/${encodeURIComponent(name)}@EPSG%3A900913@pbf/{z}/{x}/{-y}.pbf` +
-      `?v=${entry.tilesVersion}`
-    );
+  /** Vector-tile source of the layer: GeoWebCache TMS, flipped y. */
+  private mvtSource(entry: ManagedLayer): VectorTileSource {
+    const source = new VectorTileSource({ format: new MVT() });
+    source.setTileUrlFunction(this.mvtTileUrl(entry, source));
+    return source;
+  }
+
+  /** Tile URLs for the layer — none for tiles outside its extent, which
+   *  GeoWebCache answers with 404 (console noise, wasted requests). */
+  private mvtTileUrl(entry: ManagedLayer, source: VectorTileSource): (c: number[]) => string | undefined {
+    const name = encodeURIComponent(`${entry.layer.geoserverWorkspace}:${entry.layer.geoserverLayer}`);
+    const base = `${environment.geoserverUrl}/gwc/service/tms/1.0.0/${name}@EPSG%3A900913@pbf`;
+    const b = entry.layer.bbox;
+    const extent = b
+      ? transformExtent([b.minX, Math.max(-85, b.minY), b.maxX, Math.min(85, b.maxY)], 'EPSG:4326', MAP_PROJECTION)
+      : null;
+    const version = entry.tilesVersion;
+    return ([z, x, y]) => {
+      if (extent && !extentsIntersect(source.getTileGrid()!.getTileCoordExtent([z, x, y]), extent)) return undefined;
+      return `${base}/${z}/${x}/${2 ** z - 1 - y}.pbf?v=${version}`;
+    };
   }
 
   private buildRenderer(entry: ManagedLayer, kind: RenderKind): ManagedLayer['olLayer'] {
@@ -2754,7 +2770,7 @@ export class MapService {
       declutter: true,
       // Nothing is drawn until the layer's own style is loaded.
       style: () => undefined,
-      source: new VectorTileSource({ format: new MVT(), url: this.mvtUrl(entry) }),
+      source: this.mvtSource(entry),
       properties
     });
     this.loadMvtStyle(entry, vt);

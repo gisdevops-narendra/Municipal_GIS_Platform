@@ -7,6 +7,7 @@ import { ButtonModule } from 'primeng/button';
 import { CheckboxModule, CheckboxChangeEvent } from 'primeng/checkbox';
 import { SelectModule } from 'primeng/select';
 import { TooltipModule } from 'primeng/tooltip';
+import { DialogModule } from 'primeng/dialog';
 import { GisLayer, GisRenderMode } from '../../../../core/models/gis-layer.model';
 import { MapService } from '../../services/map.service';
 import { RasterInfo, RasterService } from '../../services/raster.service';
@@ -15,10 +16,28 @@ import { LegendSwatchComponent } from '../layer-legend/legend-swatch.component';
 import { LayerLegendComponent } from '../layer-legend/layer-legend.component';
 
 /** The rendering choices offered for a vector layer. */
-const RENDER_MODES: { mode: GisRenderMode; label: string; hint: string }[] = [
-  { mode: 'WMS', label: 'WMS (live image)', hint: 'One image per view, always up to date. Best for small or often-edited layers.' },
-  { mode: 'WMS_TILED', label: 'Tiled WMS (GeoWebCache)', hint: 'Cached image tiles: fast panning for large, rarely edited layers.' },
-  { mode: 'MVT', label: 'Vector tiles (MVT)', hint: 'Drawn in the browser: crisp at every zoom, fast for very large layers.' }
+const RENDER_MODES: { mode: GisRenderMode; label: string; short: string; icon: string; hint: string }[] = [
+  {
+    mode: 'WMS',
+    label: 'WMS (live image)',
+    short: 'WMS',
+    icon: 'pi pi-image',
+    hint: 'One image per view, always up to date. Best for small or often-edited layers.'
+  },
+  {
+    mode: 'WMS_TILED',
+    label: 'Tiled WMS (GeoWebCache)',
+    short: 'Tiled WMS',
+    icon: 'pi pi-th-large',
+    hint: 'Cached image tiles for fast panning. Best for large, rarely edited layers.'
+  },
+  {
+    mode: 'MVT',
+    label: 'Vector tiles (MVT)',
+    short: 'Vector tiles',
+    icon: 'pi pi-objects-column',
+    hint: 'Drawn in the browser: crisp at every zoom, fast for very large layers.'
+  }
 ];
 
 export interface LayerPanelDepartmentGroup {
@@ -49,7 +68,7 @@ export interface LayerPanelDepartmentGroup {
 @Component({
   selector: 'app-layer-panel',
   standalone: true,
-  imports: [NgTemplateOutlet, LegendSwatchComponent, LayerLegendComponent, FormsModule, ButtonModule, CheckboxModule, MenuModule, SelectModule, TooltipModule],
+  imports: [NgTemplateOutlet, LegendSwatchComponent, LayerLegendComponent, FormsModule, ButtonModule, CheckboxModule, DialogModule, MenuModule, SelectModule, TooltipModule],
   templateUrl: './layer-panel.component.html',
   styleUrl: './layer-panel.component.scss'
 })
@@ -103,6 +122,23 @@ export class LayerPanelComponent {
   }
 
   @ViewChild('moreMenu') private moreMenu?: Menu;
+
+  /** Rendering dialog: the layer it is open for, and the selected mode. */
+  readonly renderModes = RENDER_MODES;
+  readonly renderTarget = signal<GisLayer | null>(null);
+  readonly renderChoice = signal<GisRenderMode>('WMS');
+
+  openRendering(layer: GisLayer): void {
+    this.renderChoice.set(layer.renderMode ?? 'WMS');
+    this.renderTarget.set(layer);
+  }
+
+  applyRendering(): void {
+    const layer = this.renderTarget();
+    const mode = this.renderChoice();
+    this.renderTarget.set(null);
+    if (layer && (layer.renderMode ?? 'WMS') !== mode) this.renderModeChange.emit({ layer, mode });
+  }
   /** Items of the shared More menu, built for the layer it was opened on. */
   moreItems: MenuItem[] = [];
 
@@ -130,18 +166,16 @@ export class LayerPanelComponent {
       ...(this.canStyle
         ? [
             { label: 'Style layer', icon: 'pi pi-palette', command: () => this.styleLayer.emit(layer) },
+            // Never a nested `items` group here: one group makes p-menu
+            // render every top-level item as an unclickable header.
             ...(layer.layerType === 'VECTOR'
               ? [
                   {
-                    label: 'Rendering',
-                    items: RENDER_MODES.map((m) => ({
-                      label: m.label,
-                      title: m.hint,
-                      icon: (layer.renderMode ?? 'WMS') === m.mode ? 'pi pi-check' : 'pi pi-fw',
-                      command: () => {
-                        if ((layer.renderMode ?? 'WMS') !== m.mode) this.renderModeChange.emit({ layer, mode: m.mode });
-                      }
-                    }))
+                    label: 'Rendering…',
+                    icon: 'pi pi-sliders-h',
+                    badge: RENDER_MODES.find((m) => m.mode === (layer.renderMode ?? 'WMS'))?.short,
+                    badgeStyleClass: 'layer-panel__menu-badge',
+                    command: () => this.openRendering(layer)
                   }
                 ]
               : [])
