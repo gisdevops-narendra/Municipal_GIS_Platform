@@ -12,12 +12,17 @@ export interface GisLayerBoundingBox {
 /** Shape of GET /api/gis/layers entries — the caller's own municipality's
  *  ACTIVE GIS layers. Always tenant-scoped server-side; never accepts a
  *  workspace/municipality id from the client. */
+/** How the Geoportal draws a layer (see MapService.renderKind). */
+export type GisRenderMode = 'WMS' | 'WMS_TILED' | 'MVT';
+
 export interface GisLayer {
   id: string;
   name: string;
   code: string;
   description: string | null;
   layerType: GisLayerType;
+  /** WMS (default), cached WMS tiles (GeoWebCache) or vector tiles (MVT). */
+  renderMode?: GisRenderMode;
   /** GeoServer workspace this layer is published in — combine with
    *  geoserverLayer for the qualified OGC layer name "{workspace}:{layer}". */
   geoserverWorkspace: string;

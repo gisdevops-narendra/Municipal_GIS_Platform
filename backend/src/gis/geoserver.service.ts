@@ -469,6 +469,77 @@ export class GeoServerService {
     if (!response.ok) {
       throw await this.toError('refreshing feature type', response);
     }
+    await this.truncateTileCache(workspace, name);
+  }
+
+  /**
+   * Makes sure GeoWebCache caches this layer as PNG tiles and Mapbox vector
+   * tiles in the web-mercator grid (EPSG:900913), with the STYLES parameter
+   * cached per style. GeoServer usually configures new layers itself; this
+   * creates or completes the configuration when it did not.
+   */
+  async ensureTileCache(workspace: string, layer: string): Promise<void> {
+    const name = `${workspace}:${layer}`;
+    const path = `/gwc/rest/layers/${encodeURIComponent(name)}`;
+    const wanted = ['image/png', 'application/vnd.mapbox-vector-tile'];
+    // XML, not JSON: GWC's JSON drops the parameter filters' types
+    // (styleParameterFilter…), so a JSON round-trip is rejected (HTTP 500).
+    const existing = await this.request(`${path}.xml`, { method: 'GET' });
+    if (existing.ok) {
+      let xml = await existing.text();
+      const missing = wanted.filter((m) => !xml.includes(`<string>${m}</string>`));
+      const hasGrid = xml.includes('<gridSetName>EPSG:900913</gridSetName>');
+      const disabled = xml.includes('<enabled>false</enabled>');
+      if (!missing.length && hasGrid && !disabled) return;
+      const add = missing.map((m) => `<string>${m}</string>`).join('');
+      if (add) {
+        xml = xml.includes('</mimeFormats>')
+          ? xml.replace('</mimeFormats>', `${add}</mimeFormats>`)
+          : xml.replace(/<mimeFormats\s*\/>/, `<mimeFormats>${add}</mimeFormats>`);
+      }
+      if (!hasGrid) {
+        const grid = '<gridSubset><gridSetName>EPSG:900913</gridSetName></gridSubset>';
+        xml = xml.includes('</gridSubsets>')
+          ? xml.replace('</gridSubsets>', `${grid}</gridSubsets>`)
+          : xml.replace('</GeoServerLayer>', `<gridSubsets>${grid}</gridSubsets></GeoServerLayer>`);
+      }
+      xml = xml.replace('<enabled>false</enabled>', '<enabled>true</enabled>');
+      const put = await this.request(`${path}.xml`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'text/xml' },
+        body: xml,
+      });
+      if (!put.ok) throw await this.toError('configuring the tile cache', put);
+      return;
+    }
+    const xml =
+      `<GeoServerLayer><name>${name}</name><enabled>true</enabled>` +
+      `<mimeFormats>${wanted.map((m) => `<string>${m}</string>`).join('')}</mimeFormats>` +
+      `<gridSubsets><gridSubset><gridSetName>EPSG:900913</gridSetName></gridSubset>` +
+      `<gridSubset><gridSetName>EPSG:4326</gridSetName></gridSubset></gridSubsets>` +
+      `<metaWidthHeight><int>4</int><int>4</int></metaWidthHeight>` +
+      `<parameterFilters><styleParameterFilter><key>STYLES</key><defaultValue></defaultValue></styleParameterFilter></parameterFilters>` +
+      `</GeoServerLayer>`;
+    const put = await this.request(`${path}.xml`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'text/xml' },
+      body: xml,
+    });
+    if (!put.ok) throw await this.toError('creating the tile cache', put);
+  }
+
+  /** Empties a layer's cached tiles (after a style or data change), so
+   *  tiled / vector-tile rendering never shows stale data. Best effort. */
+  async truncateTileCache(workspace: string, layer: string): Promise<void> {
+    try {
+      await this.request('/gwc/rest/masstruncate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/xml' },
+        body: `<truncateLayer><layerName>${workspace}:${layer}</layerName></truncateLayer>`,
+      });
+    } catch {
+      // the layer has no cache yet: nothing to empty
+    }
   }
 
   /** Re-declares a published feature type's CRS after its table was
@@ -775,6 +846,7 @@ export class GeoServerService {
     if (!response.ok) {
       throw await this.toError('setting layer default style', response);
     }
+    await this.truncateTileCache(workspace, layer);
   }
 
   // ---------------------------------------------------------------------

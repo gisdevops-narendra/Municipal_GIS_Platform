@@ -563,6 +563,53 @@ export class GisLayersService {
     return { converted };
   }
 
+  /**
+   * Per-layer rendering mode: plain WMS (default), cached WMS tiles
+   * (GeoWebCache) or Mapbox vector tiles. Tiled modes get their tile cache
+   * configured and emptied, so the first view renders the current style.
+   */
+  async setRenderMode(appUser: AppUser, layerId: string, mode: 'WMS' | 'WMS_TILED' | 'MVT') {
+    const layer = await this.findManageableLayer(appUser, layerId);
+    if (mode === 'MVT' && layer.layerType !== 'VECTOR') {
+      throw new BadRequestException('Vector tiles are only available for vector layers.');
+    }
+    if (mode !== 'WMS') {
+      try {
+        await this.geoServer.ensureTileCache(layer.geoserverWorkspace, layer.geoserverLayer);
+      } catch (error) {
+        throw new BadRequestException(`The tile cache could not be set up: ${(error as Error).message}`);
+      }
+    }
+    await this.geoServer.truncateTileCache(layer.geoserverWorkspace, layer.geoserverLayer);
+    await this.prisma.gISLayer.update({ where: { id: layer.id }, data: { renderMode: mode } });
+    return { id: layer.id, renderMode: mode };
+  }
+
+  private readonly tileRefresh = new Map<string, ReturnType<typeof setTimeout>>();
+
+  /** A feature of the layer changed: empty its tile cache shortly after
+   *  (after the edit's transaction commits; bursts of edits coalesce). */
+  scheduleTileRefresh(layerId: string): void {
+    clearTimeout(this.tileRefresh.get(layerId));
+    this.tileRefresh.set(
+      layerId,
+      setTimeout(() => {
+        this.tileRefresh.delete(layerId);
+        void this.prisma.gISLayer
+          .findUnique({
+            where: { id: layerId },
+            select: { geoserverWorkspace: true, geoserverLayer: true, renderMode: true },
+          })
+          .then((layer) =>
+            layer && layer.renderMode !== 'WMS'
+              ? this.geoServer.truncateTileCache(layer.geoserverWorkspace, layer.geoserverLayer)
+              : undefined,
+          )
+          .catch(() => undefined);
+      }, 1500),
+    );
+  }
+
   async deleteLayer(appUser: AppUser, layerId: string): Promise<void> {
     if (appUser.systemRole !== 'MUNICIPALITY_OWNER') {
       throw new ForbiddenException(
@@ -730,6 +777,7 @@ export class GisLayersService {
       hasCustomStyle: !!layer.styleName,
       rasterAnalysis: layer.rasterAnalysis,
       routingEnabled: layer.routingEnabled,
+      renderMode: layer.renderMode,
       drawnLayer: layer.drawnLayer,
       aiGenerated: layer.aiGenerated,
       bbox:

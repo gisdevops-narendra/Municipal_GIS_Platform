@@ -24,7 +24,7 @@ import { GisLayersService } from '../../core/services/gis-layers.service';
 import { CurrentUserService } from '../../core/services/current-user.service';
 import { ModuleAccessService } from '../../core/services/module-access.service';
 import { GisWorkspace } from '../../core/models/gis-workspace.model';
-import { GisLayer } from '../../core/models/gis-layer.model';
+import { GisLayer, GisRenderMode } from '../../core/models/gis-layer.model';
 import { GisSearchFeatureMatch, GisSearchLayerMatch } from '../../core/models/gis-dashboard.model';
 import { MapService, FeatureInfoResult, CoordFormat } from './services/map.service';
 import { MunicipalMapComponent } from './components/municipal-map/municipal-map.component';
@@ -574,6 +574,18 @@ export class GisWorkspaceComponent {
           },
           error: (err: HttpErrorResponse) => this.notify.error(this.apiError(err, 'Delete failed. Please try again.'))
         })
+    });
+  }
+
+  /** Rendering mode of a layer: saved, then the map switches renderer. */
+  setRenderMode(layer: GisLayer, mode: GisRenderMode): void {
+    const label = { WMS: 'WMS', WMS_TILED: 'tiled WMS (GeoWebCache)', MVT: 'vector tiles (MVT)' }[mode];
+    this.gisLayersService.setRenderMode(layer.id, mode).subscribe({
+      next: () => {
+        this.notify.success(`"${layer.name}" now renders as ${label}.`);
+        this.loadLayers();
+      },
+      error: (err: HttpErrorResponse) => this.notify.error(this.apiError(err, 'The rendering mode could not be changed.'))
     });
   }
 

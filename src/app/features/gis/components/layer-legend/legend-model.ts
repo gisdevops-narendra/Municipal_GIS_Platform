@@ -35,10 +35,15 @@ export interface PointSymbol {
   image: string | null;
 }
 
-export type LegendSymbol = FillSymbol | LineSymbol | PointSymbol;
+/** `rule`: index of the style rule it came from (vector tiles look up
+ *  that rule's scale range). */
+export type LegendSymbol = (FillSymbol | LineSymbol | PointSymbol) & { rule?: number };
 
 export interface LegendEntry {
   label: string;
+  /** The rule's filter as GeoServer reports it ("[type = 'Temple']"),
+   *  'ELSE' for an else-rule, null for none (vector tiles evaluate it). */
+  filter?: string | null;
   /** Drawn on top of each other, in rule order (e.g. halo band + dashed line). */
   symbols: LegendSymbol[];
 }
@@ -50,6 +55,8 @@ export interface LegendLabels {
   fontFamily: string;
   bold: boolean;
   italic: boolean;
+  /** Index of the style rule holding the labels. */
+  rule?: number;
 }
 
 export interface RampStop {
@@ -196,27 +203,30 @@ export function parseLegend(json: unknown): LegendModel | null {
   let raster = false;
   const ruleSymbols: { rule: Json; symbols: LegendSymbol[] }[] = [];
 
-  for (const rule of rules) {
+  rules.forEach((rule, index) => {
     const symbols: LegendSymbol[] = [];
     for (const s of (rule['symbolizers'] ?? []) as Json[]) {
-      if (s['Text']) labels ??= parseLabels(s['Text']);
+      if (s['Text']) labels ??= { ...parseLabels(s['Text']), rule: index };
       else if (s['Raster']) {
         raster = true;
         ramp ??= parseRamp(s['Raster'].colormap);
       } else {
         const sym = parseSymbolizer(s);
-        if (sym) symbols.push(sym);
+        if (sym) symbols.push({ ...sym, rule: index });
       }
     }
     if (symbols.length) ruleSymbols.push({ rule, symbols });
-  }
+  });
 
   // Filtered rules are categories; unfiltered rules are layers of one symbol.
-  const categorised = ruleSymbols.some(({ rule }) => rule['filter'] || rule['else']);
+  // GeoServer's JSON legend marks an else-rule as "ElseFilter": "true".
+  const isElse = (rule: Json) => !!rule['else'] || String(rule['ElseFilter'] ?? '') === 'true';
+  const categorised = ruleSymbols.some(({ rule }) => rule['filter'] || isElse(rule));
   let entries: LegendEntry[];
   if (categorised) {
     entries = ruleSymbols.map(({ rule, symbols }) => ({
-      label: String(rule['title'] ?? rule['name'] ?? (rule['else'] ? 'Other' : '')),
+      label: String(rule['title'] ?? rule['name'] ?? (isElse(rule) ? 'Other' : '')),
+      filter: isElse(rule) ? 'ELSE' : typeof rule['filter'] === 'string' ? rule['filter'] : null,
       symbols
     }));
   } else if (ruleSymbols.length) {

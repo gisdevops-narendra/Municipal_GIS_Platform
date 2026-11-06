@@ -109,6 +109,7 @@
               (renameLayer)="renameLayer($event.layer, $event.name)"
               (deleteLayer)="deleteLayer($event)"
               (fixColumnTypes)="fixColumnTypes($event)"
+              (renderModeChange)="setRenderMode($event.layer, $event.mode)"
               (openReport)="reportLayer.set($event)"
             />
           } @else if (leftTool() === 'layers') {

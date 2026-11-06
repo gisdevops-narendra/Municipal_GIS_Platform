@@ -4,6 +4,12 @@
   gap: 14px;
 }
 
+/* The wizard hides this (kept alive, so a connection survives switching to
+   "Upload a file") with [hidden]; display:flex above would override it. */
+:host([hidden]) {
+  display: none;
+}
+
 .udb__section {
   display: flex;
   flex-direction: column;

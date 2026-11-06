@@ -2,7 +2,7 @@ import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
-import { GisLayer } from '../models/gis-layer.model';
+import { GisLayer, GisRenderMode } from '../models/gis-layer.model';
 import { LayerExportFormat } from '../models/layer-export.model';
 import { AnalyticsField, DensityPoints, FieldSummary, GroupRequest, GroupResult, LayerProfile } from '../models/layer-analytics.model';
 import { GisLayerPermissionMatrix, GisPermission } from '../models/gis-layer-permission.model';
@@ -104,6 +104,11 @@ export class GisLayersService {
   /** Display name only (Owner). */
   rename(id: string, name: string): Observable<{ id: string; name: string }> {
     return this.http.patch<{ id: string; name: string }>(`${this.baseUrl}/${id}`, { name });
+  }
+
+  /** How the Geoportal draws the layer. */
+  setRenderMode(id: string, mode: GisRenderMode): Observable<{ id: string; renderMode: GisRenderMode }> {
+    return this.http.patch<{ id: string; renderMode: GisRenderMode }>(`${this.baseUrl}/${id}/render-mode`, { mode });
   }
 
   /** Text columns holding numbers / dates / yes-no get their real type. */

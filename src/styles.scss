@@ -467,3 +467,9 @@ a.p-button:hover {
 .layer-panel__menu-danger .p-menu-item-icon {
   color: var(--color-error-600);
 }
+
+/* `hidden` must always hide — component hosts / containers that set their
+   own display (flex, grid…) would otherwise stay visible. */
+[hidden] {
+  display: none !important;
+}

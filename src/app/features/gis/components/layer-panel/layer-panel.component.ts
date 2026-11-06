@@ -7,12 +7,19 @@ import { ButtonModule } from 'primeng/button';
 import { CheckboxModule, CheckboxChangeEvent } from 'primeng/checkbox';
 import { SelectModule } from 'primeng/select';
 import { TooltipModule } from 'primeng/tooltip';
-import { GisLayer } from '../../../../core/models/gis-layer.model';
+import { GisLayer, GisRenderMode } from '../../../../core/models/gis-layer.model';
 import { MapService } from '../../services/map.service';
 import { RasterInfo, RasterService } from '../../services/raster.service';
 import { LegendModel, parseLegend } from '../layer-legend/legend-model';
 import { LegendSwatchComponent } from '../layer-legend/legend-swatch.component';
 import { LayerLegendComponent } from '../layer-legend/layer-legend.component';
+
+/** The rendering choices offered for a vector layer. */
+const RENDER_MODES: { mode: GisRenderMode; label: string; hint: string }[] = [
+  { mode: 'WMS', label: 'WMS (live image)', hint: 'One image per view, always up to date. Best for small or often-edited layers.' },
+  { mode: 'WMS_TILED', label: 'Tiled WMS (GeoWebCache)', hint: 'Cached image tiles: fast panning for large, rarely edited layers.' },
+  { mode: 'MVT', label: 'Vector tiles (MVT)', hint: 'Drawn in the browser: crisp at every zoom, fast for very large layers.' }
+];
 
 export interface LayerPanelDepartmentGroup {
   departmentId: string;
@@ -64,6 +71,8 @@ export class LayerPanelComponent {
   @Input() canManage = false;
   @Output() renameLayer = new EventEmitter<{ layer: GisLayer; name: string }>();
   @Output() deleteLayer = new EventEmitter<GisLayer>();
+  /** How the Geoportal draws a layer (WMS / tiled WMS / vector tiles). */
+  @Output() renderModeChange = new EventEmitter<{ layer: GisLayer; mode: GisRenderMode }>();
   /** Owner: give text columns holding numbers / dates their real type. */
   @Output() fixColumnTypes = new EventEmitter<GisLayer>();
   /** Raster Analysis outputs: reopen the saved results report. */
@@ -119,7 +128,24 @@ export class LayerPanelComponent {
         : []),
       ...(this.canStyle || this.canManage ? [{ separator: true }] : []),
       ...(this.canStyle
-        ? [{ label: 'Style layer', icon: 'pi pi-palette', command: () => this.styleLayer.emit(layer) }]
+        ? [
+            { label: 'Style layer', icon: 'pi pi-palette', command: () => this.styleLayer.emit(layer) },
+            ...(layer.layerType === 'VECTOR'
+              ? [
+                  {
+                    label: 'Rendering',
+                    items: RENDER_MODES.map((m) => ({
+                      label: m.label,
+                      title: m.hint,
+                      icon: (layer.renderMode ?? 'WMS') === m.mode ? 'pi pi-check' : 'pi pi-fw',
+                      command: () => {
+                        if ((layer.renderMode ?? 'WMS') !== m.mode) this.renderModeChange.emit({ layer, mode: m.mode });
+                      }
+                    }))
+                  }
+                ]
+              : [])
+          ]
         : []),
       ...(this.canManage
         ? [

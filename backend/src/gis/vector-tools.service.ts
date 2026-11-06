@@ -1054,6 +1054,8 @@ export class VectorToolsService {
   ) {
     const data = (f: EditableFeature | null) =>
       f ? ({ properties: f.properties, geometry: f.geometry } as Prisma.InputJsonValue) : Prisma.DbNull;
+    // Every edit passes here: cached tiles of the layer are now stale.
+    this.gisLayers.scheduleTileRefresh(layerId);
     return tx.gISFeatureHistory.create({
       data: {
         layerId,

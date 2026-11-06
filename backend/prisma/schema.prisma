@@ -53,6 +53,15 @@ enum GisLayerType {
   RASTER
 }
 
+/// How the Geoportal draws a layer: one WMS image per view (default),
+/// cached WMS tiles (GeoWebCache), or Mapbox vector tiles styled in the
+/// browser.
+enum GisRenderMode {
+  WMS
+  WMS_TILED
+  MVT
+}
+
 enum GisGeometryType {
   POINT
   LINE
@@ -211,6 +220,7 @@ model GISLayer {
   visibleByDefault   Boolean          @default(true) @map("visible_by_default")
   status             GisLayerStatus   @default(ACTIVE)
   displayOrder       Int              @default(0) @map("display_order")
+  renderMode         GisRenderMode    @default(WMS) @map("render_mode")
   /// Layer's own extent in EPSG:4326 (lon/lat), captured from GeoServer at
   /// publish time — lets the frontend derive an initial map view per
   /// municipality without hardcoding any coordinates. Null until GeoServer

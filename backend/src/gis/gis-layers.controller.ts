@@ -16,6 +16,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { RenameLayerDto } from './dto/rename-layer.dto';
+import { SetRenderModeDto } from './dto/render-mode.dto';
 import type { Response } from 'express';
 import {
   RequireMunicipalityMember,
@@ -172,6 +173,18 @@ export class GisLayersController {
     @Body() dto: RenameLayerDto,
   ) {
     return this.gisLayersService.renameLayer(appUser, id, dto.name);
+  }
+
+  /** How the Geoportal draws the layer (WMS / tiled WMS / vector tiles).
+   *  Same permission as styling — re-checked in the service. */
+  @RequireMunicipalityMember()
+  @Patch('layers/:id/render-mode')
+  setRenderMode(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @Body() dto: SetRenderModeDto,
+  ) {
+    return this.gisLayersService.setRenderMode(appUser, id, dto.mode);
   }
 
   /** Gives text columns holding numbers / dates / yes-no their real type. Owner-only. */
