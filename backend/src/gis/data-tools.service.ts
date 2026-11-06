@@ -1240,6 +1240,7 @@ export class DataToolsService {
   }
 
   private async refreshLayer(source: Source) {
+    this.gisLayers.scheduleTileRefresh(source.layer.id);
     await this.geoServer
       .refreshFeatureType(
         source.layer.geoserverWorkspace,

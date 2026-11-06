@@ -53,13 +53,29 @@ enum GisLayerType {
   RASTER
 }
 
-/// How the Geoportal draws a layer: one WMS image per view (default),
-/// cached WMS tiles (GeoWebCache), or Mapbox vector tiles styled in the
-/// browser.
+/// How the Geoportal draws a layer. AUTO (new layers) = the fastest format
+/// the layer supports right now; the others are explicit admin choices.
+/// Unsupported choices fall back automatically in the browser.
 enum GisRenderMode {
-  WMS
-  WMS_TILED
+  AUTO
+  PMTILES
   MVT
+  WMTS
+  XYZ
+  COG
+  WMS_TILED
+  WMS
+  WFS
+  OGC_FEATURES
+}
+
+/// Pre-built PMTiles archive of a layer (served by the backend with HTTP
+/// range requests).
+enum GisTileArchiveStatus {
+  NONE
+  BUILDING
+  READY
+  FAILED
 }
 
 enum GisGeometryType {
@@ -220,7 +236,11 @@ model GISLayer {
   visibleByDefault   Boolean          @default(true) @map("visible_by_default")
   status             GisLayerStatus   @default(ACTIVE)
   displayOrder       Int              @default(0) @map("display_order")
-  renderMode         GisRenderMode    @default(WMS) @map("render_mode")
+  renderMode         GisRenderMode    @default(AUTO) @map("render_mode")
+  /// PMTiles archive state; pmtilesBuiltAt doubles as its cache version.
+  pmtilesStatus      GisTileArchiveStatus @default(NONE) @map("pmtiles_status")
+  pmtilesBuiltAt     DateTime?        @map("pmtiles_built_at")
+  pmtilesError       String?          @map("pmtiles_error")
   /// Layer's own extent in EPSG:4326 (lon/lat), captured from GeoServer at
   /// publish time — lets the frontend derive an initial map view per
   /// municipality without hardcoding any coordinates. Null until GeoServer

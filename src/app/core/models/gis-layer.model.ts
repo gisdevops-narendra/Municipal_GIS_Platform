@@ -13,7 +13,20 @@ export interface GisLayerBoundingBox {
  *  ACTIVE GIS layers. Always tenant-scoped server-side; never accepts a
  *  workspace/municipality id from the client. */
 /** How the Geoportal draws a layer (see MapService.renderKind). */
-export type GisRenderMode = 'WMS' | 'WMS_TILED' | 'MVT';
+export type GisRenderMode =
+  | 'AUTO'
+  | 'PMTILES'
+  | 'MVT'
+  | 'WMTS'
+  | 'XYZ'
+  | 'COG'
+  | 'WMS_TILED'
+  | 'WMS'
+  | 'WFS'
+  | 'OGC_FEATURES';
+
+/** State of a layer's pre-built PMTiles archive. */
+export type GisTileArchiveStatus = 'NONE' | 'BUILDING' | 'READY' | 'FAILED';
 
 export interface GisLayer {
   id: string;
@@ -21,8 +34,14 @@ export interface GisLayer {
   code: string;
   description: string | null;
   layerType: GisLayerType;
-  /** WMS (default), cached WMS tiles (GeoWebCache) or vector tiles (MVT). */
+  /** Chosen rendering format (AUTO: the fastest one available). */
   renderMode?: GisRenderMode;
+  pmtilesStatus?: GisTileArchiveStatus;
+  /** Build time of the PMTiles archive (ms) — its cache key. */
+  pmtilesVersion?: number | null;
+  pmtilesError?: string | null;
+  /** Raster COG path relative to the storage root (TiTiler reads it). */
+  cogPath?: string | null;
   /** GeoServer workspace this layer is published in — combine with
    *  geoserverLayer for the qualified OGC layer name "{workspace}:{layer}". */
   geoserverWorkspace: string;

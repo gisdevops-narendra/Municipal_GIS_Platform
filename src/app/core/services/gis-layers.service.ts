@@ -107,8 +107,13 @@ export class GisLayersService {
   }
 
   /** How the Geoportal draws the layer. */
-  setRenderMode(id: string, mode: GisRenderMode): Observable<{ id: string; renderMode: GisRenderMode }> {
-    return this.http.patch<{ id: string; renderMode: GisRenderMode }>(`${this.baseUrl}/${id}/render-mode`, { mode });
+  setRenderMode(id: string, mode: GisRenderMode): Observable<{ id: string; renderMode: GisRenderMode; pmtilesStatus: string }> {
+    return this.http.patch<{ id: string; renderMode: GisRenderMode; pmtilesStatus: string }>(`${this.baseUrl}/${id}/render-mode`, { mode });
+  }
+
+  /** Rebuilds the layer's PMTiles archive. */
+  rebuildTileArchive(id: string): Observable<{ id: string; pmtilesStatus: string }> {
+    return this.http.post<{ id: string; pmtilesStatus: string }>(`${this.baseUrl}/${id}/tile-archive`, {});
   }
 
   /** Text columns holding numbers / dates / yes-no get their real type. */

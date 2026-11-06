@@ -27,6 +27,8 @@ import type {
 } from './dto/layer-style.dto';
 import { ModuleAccessService } from '../module-access/module-access.service';
 import { CrsService } from './crs.service';
+import { TileArchiveService, type ArchiveSource } from './tile-archive.service';
+import { RENDER_MODES_BY_TYPE, type RenderMode } from './dto/render-mode.dto';
 
 type LayerWithDepartment = GISLayer & {
   department?: { id: string; name: string } | null;
@@ -141,7 +143,19 @@ export class GisLayersService {
     @Optional() private readonly ai?: AiClientService,
     @Optional() private readonly crs?: CrsService,
     @Optional() private readonly uploadSchema?: UploadSchemaService,
-  ) {}
+    @Optional() private readonly tileArchive?: TileArchiveService,
+  ) {
+    // A raster archive holds the styled rendering: restyle -> rebuild.
+    this.geoServer.onStyleChanged?.((workspace, geoserverLayer) => {
+      void this.prisma.gISLayer
+        .findFirst({
+          where: { geoserverWorkspace: workspace, geoserverLayer, layerType: 'RASTER', pmtilesStatus: { not: 'NONE' } },
+          select: { id: true },
+        })
+        .then((layer) => layer && this.scheduleTileRefresh(layer.id))
+        .catch(() => undefined);
+    });
+  }
 
   /**
    * Whether newly provisioned municipalities get the three sample demo
@@ -257,7 +271,7 @@ export class GisLayersService {
     });
 
     const viewable = await this.gisAuth.filterViewable(appUser, layers);
-    return viewable.map((layer) => this.toResponse(layer));
+    return viewable.map((layer) => this.toResponse(layer, appUser.municipalityId));
   }
 
   /** Tenant-scoped AND permission-checked single-layer lookup — used by
@@ -274,7 +288,7 @@ export class GisLayersService {
     if (!(await this.gisAuth.canView(appUser, layer))) {
       throw new NotFoundException('Layer not found.');
     }
-    return this.toResponse(layer);
+    return this.toResponse(layer, appUser.municipalityId);
   }
 
   /** Task 8 §3/§9: server-side export, gated by EXPORT permission — the
@@ -451,7 +465,7 @@ export class GisLayersService {
     }
 
     return {
-      layer: this.toResponse(layer),
+      layer: this.toResponse(layer, appUser.municipalityId),
       departments,
       grants: [...byDepartment.values()],
     };
@@ -564,31 +578,65 @@ export class GisLayersService {
   }
 
   /**
-   * Per-layer rendering mode: plain WMS (default), cached WMS tiles
-   * (GeoWebCache) or Mapbox vector tiles. Tiled modes get their tile cache
-   * configured and emptied, so the first view renders the current style.
+   * Per-layer rendering format (see GisRenderMode). Formats served through
+   * GeoWebCache get its tile cache configured and emptied; PMTiles queues
+   * an archive build (the map uses live tiles until it is ready).
    */
-  async setRenderMode(appUser: AppUser, layerId: string, mode: 'WMS' | 'WMS_TILED' | 'MVT') {
+  async setRenderMode(appUser: AppUser, layerId: string, mode: RenderMode) {
     const layer = await this.findManageableLayer(appUser, layerId);
-    if (mode === 'MVT' && layer.layerType !== 'VECTOR') {
-      throw new BadRequestException('Vector tiles are only available for vector layers.');
+    if (!RENDER_MODES_BY_TYPE[layer.layerType].includes(mode)) {
+      throw new BadRequestException(
+        `This format is not available for ${layer.layerType === 'RASTER' ? 'raster' : 'vector'} layers.`,
+      );
     }
-    if (mode !== 'WMS') {
+    if (['AUTO', 'MVT', 'WMTS', 'XYZ', 'WMS_TILED'].includes(mode)) {
       try {
         await this.geoServer.ensureTileCache(layer.geoserverWorkspace, layer.geoserverLayer);
       } catch (error) {
         throw new BadRequestException(`The tile cache could not be set up: ${(error as Error).message}`);
       }
+      await this.geoServer.truncateTileCache(layer.geoserverWorkspace, layer.geoserverLayer);
     }
-    await this.geoServer.truncateTileCache(layer.geoserverWorkspace, layer.geoserverLayer);
     await this.prisma.gISLayer.update({ where: { id: layer.id }, data: { renderMode: mode } });
-    return { id: layer.id, renderMode: mode };
+    if (mode === 'PMTILES' && this.tileArchive && layer.pmtilesStatus !== 'BUILDING') {
+      const source = await this.archiveSource(appUser, layer);
+      if (source) await this.tileArchive.request(layer.id, appUser.municipalityId, source);
+    }
+    const fresh = await this.prisma.gISLayer.findUniqueOrThrow({ where: { id: layer.id } });
+    return { id: layer.id, renderMode: mode, pmtilesStatus: fresh.pmtilesStatus, pmtilesError: fresh.pmtilesError };
+  }
+
+  /** Rebuilds the layer's PMTiles archive now (admin action). */
+  async rebuildTileArchive(appUser: AppUser, layerId: string) {
+    const layer = await this.findManageableLayer(appUser, layerId);
+    const source = await this.archiveSource(appUser, layer);
+    if (!source || !this.tileArchive) throw new BadRequestException('This layer cannot be pre-tiled.');
+    await this.tileArchive.request(layer.id, appUser.municipalityId, source);
+    return { id: layer.id, pmtilesStatus: 'BUILDING' as const };
+  }
+
+  /** The PMTiles file of a layer the caller may view (null: none yet). */
+  async tileArchiveFile(appUser: AppUser, layerId: string): Promise<string | null> {
+    const layer = await this.findLayerInMunicipality(appUser.municipalityId, layerId);
+    const permissions = await this.gisAuth.getPermissions(appUser, layer);
+    if (!permissions.has('VIEW')) {
+      throw new ForbiddenException('You do not have permission to view this layer.');
+    }
+    if (!this.tileArchive || layer.pmtilesStatus === 'NONE') return null;
+    return this.tileArchive.filePath(appUser.municipalityId, layer.id);
+  }
+
+  private async archiveSource(appUser: AppUser, layer: GISLayer): Promise<ArchiveSource | null> {
+    if (layer.layerType === 'RASTER') return { kind: 'raster', workspace: layer.geoserverWorkspace, layer: layer.geoserverLayer };
+    const { from } = await this.vectorSource(appUser, layer.id, 'view').catch(() => ({ from: null }));
+    return from ? { kind: 'vector', from, layerName: layer.geoserverLayer } : null;
   }
 
   private readonly tileRefresh = new Map<string, ReturnType<typeof setTimeout>>();
 
   /** A feature of the layer changed: empty its tile cache shortly after
-   *  (after the edit's transaction commits; bursts of edits coalesce). */
+   *  (after the edit's transaction commits; bursts of edits coalesce) and
+   *  rebuild its PMTiles archive, if it has one. */
   scheduleTileRefresh(layerId: string): void {
     clearTimeout(this.tileRefresh.get(layerId));
     this.tileRefresh.set(
@@ -596,15 +644,25 @@ export class GisLayersService {
       setTimeout(() => {
         this.tileRefresh.delete(layerId);
         void this.prisma.gISLayer
-          .findUnique({
-            where: { id: layerId },
-            select: { geoserverWorkspace: true, geoserverLayer: true, renderMode: true },
+          .findUnique({ where: { id: layerId }, include: { gisWorkspace: { select: { municipalityId: true } } } })
+          .then(async (layer) => {
+            if (!layer) return;
+            await this.geoServer.truncateTileCache(layer.geoserverWorkspace, layer.geoserverLayer);
+            if (layer.pmtilesStatus === 'NONE' || !this.tileArchive) return;
+            const municipalityId = layer.gisWorkspace.municipalityId;
+            const { table, workspaceId } = this.styleSource(layer);
+            this.tileArchive.scheduleRebuild(layerId, municipalityId, async () => {
+              if (layer.layerType === 'RASTER') {
+                return { kind: 'raster', workspace: layer.geoserverWorkspace, layer: layer.geoserverLayer };
+              }
+              if (!table) return null;
+              const from =
+                workspaceId && /^[0-9a-f-]{36}$/.test(workspaceId)
+                  ? `(SELECT * FROM "${table}" WHERE gis_workspace_id = '${workspaceId}')`
+                  : `"${table}"`;
+              return { kind: 'vector', from, layerName: layer.geoserverLayer };
+            });
           })
-          .then((layer) =>
-            layer && layer.renderMode !== 'WMS'
-              ? this.geoServer.truncateTileCache(layer.geoserverWorkspace, layer.geoserverLayer)
-              : undefined,
-          )
           .catch(() => undefined);
       }, 1500),
     );
@@ -708,6 +766,7 @@ export class GisLayersService {
       await rm(file, { force: true }).catch(() => undefined);
       await rm(`${file}.aux.xml`, { force: true }).catch(() => undefined);
     }
+    await this.tileArchive?.remove(appUser.municipalityId, layer.id);
     for (const upload of uploads) {
       await this.storage
         .deleteUploadFiles(upload.municipalityId, upload.id)
@@ -757,7 +816,7 @@ export class GisLayersService {
     return layer;
   }
 
-  private toResponse(layer: LayerWithDepartment) {
+  private toResponse(layer: LayerWithDepartment, municipalityId: string) {
     return {
       id: layer.id,
       name: layer.name,
@@ -778,6 +837,13 @@ export class GisLayersService {
       rasterAnalysis: layer.rasterAnalysis,
       routingEnabled: layer.routingEnabled,
       renderMode: layer.renderMode,
+      /** PMTiles archive: status, and its version (cache key) when built. */
+      pmtilesStatus: layer.pmtilesStatus,
+      pmtilesVersion: layer.pmtilesBuiltAt?.getTime() ?? null,
+      pmtilesError: layer.pmtilesError,
+      /** Raster COG, relative to the storage root (TiTiler reads it). */
+      cogPath:
+        layer.layerType === 'RASTER' ? `${municipalityId}/rasters/${layer.id}.tif` : null,
       drawnLayer: layer.drawnLayer,
       aiGenerated: layer.aiGenerated,
       bbox:

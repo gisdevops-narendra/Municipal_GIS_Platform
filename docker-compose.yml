@@ -305,6 +305,33 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  # COG + TiTiler: dynamic map tiles straight from the rasters' Cloud-
+  # Optimized GeoTIFFs (read-only), the fast path for raster layers set to
+  # "COG" rendering. Additive: GeoServer keeps serving WMS/WMTS for them.
+  # It sits on its own network so it cannot reach the other containers.
+  titiler:
+    image: ghcr.io/developmentseed/titiler:2.3.0
+    container_name: municipal-gis-titiler
+    command: ["uvicorn", "titiler.application.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    environment:
+      TITILER_API_CORS_ORIGINS: "*"
+      GDAL_CACHEMAX: "256"
+      GDAL_DISABLE_READDIR_ON_OPEN: EMPTY_DIR
+      VSI_CACHE: "TRUE"
+      VSI_CACHE_SIZE: "268435456"
+      CPL_VSIL_CURL_ALLOWED_EXTENSIONS: ".tif,.tiff"
+    volumes:
+      - backend-storage:/data:ro
+    ports:
+      - "${TITILER_PORT:-8700}:8000"
+    networks:
+      - titiler
+    mem_limit: 1g
+    restart: unless-stopped
+
+networks:
+  titiler: {}
+
 volumes:
   ollama-models:
   postgres-data:

@@ -14,31 +14,7 @@ import { RasterInfo, RasterService } from '../../services/raster.service';
 import { LegendModel, parseLegend } from '../layer-legend/legend-model';
 import { LegendSwatchComponent } from '../layer-legend/legend-swatch.component';
 import { LayerLegendComponent } from '../layer-legend/layer-legend.component';
-
-/** The rendering choices offered for a vector layer. */
-const RENDER_MODES: { mode: GisRenderMode; label: string; short: string; icon: string; hint: string }[] = [
-  {
-    mode: 'WMS',
-    label: 'WMS (live image)',
-    short: 'WMS',
-    icon: 'pi pi-image',
-    hint: 'One image per view, always up to date. Best for small or often-edited layers.'
-  },
-  {
-    mode: 'WMS_TILED',
-    label: 'Tiled WMS (GeoWebCache)',
-    short: 'Tiled WMS',
-    icon: 'pi pi-th-large',
-    hint: 'Cached image tiles for fast panning. Best for large, rarely edited layers.'
-  },
-  {
-    mode: 'MVT',
-    label: 'Vector tiles (MVT)',
-    short: 'Vector tiles',
-    icon: 'pi pi-objects-column',
-    hint: 'Drawn in the browser: crisp at every zoom, fast for very large layers.'
-  }
-];
+import { RenderFormatInfo, formatInfo, formatsFor, recommendedFormat } from '../../services/render-formats';
 
 export interface LayerPanelDepartmentGroup {
   departmentId: string;
@@ -124,12 +100,22 @@ export class LayerPanelComponent {
   @ViewChild('moreMenu') private moreMenu?: Menu;
 
   /** Rendering dialog: the layer it is open for, and the selected mode. */
-  readonly renderModes = RENDER_MODES;
   readonly renderTarget = signal<GisLayer | null>(null);
-  readonly renderChoice = signal<GisRenderMode>('WMS');
+  readonly renderChoice = signal<GisRenderMode>('AUTO');
+  /** Formats offered for the dialog's layer (by its data type), fastest first. */
+  renderFormats: RenderFormatInfo[] = [];
+  /** What "Automatic" draws the dialog's layer with right now. */
+  autoFormatLabel = '';
+  recommended: GisRenderMode = 'AUTO';
+  /** Rebuild the layer's PMTiles archive (owner / stylist). */
+  @Output() rebuildArchive = new EventEmitter<GisLayer>();
 
   openRendering(layer: GisLayer): void {
-    this.renderChoice.set(layer.renderMode ?? 'WMS');
+    this.renderFormats = formatsFor(layer);
+    const auto = recommendedFormat(layer);
+    this.autoFormatLabel = formatInfo(auto).label;
+    this.recommended = auto;
+    this.renderChoice.set(layer.renderMode ?? 'AUTO');
     this.renderTarget.set(layer);
   }
 
@@ -137,7 +123,19 @@ export class LayerPanelComponent {
     const layer = this.renderTarget();
     const mode = this.renderChoice();
     this.renderTarget.set(null);
-    if (layer && (layer.renderMode ?? 'WMS') !== mode) this.renderModeChange.emit({ layer, mode });
+    if (layer && (layer.renderMode ?? 'AUTO') !== mode) this.renderModeChange.emit({ layer, mode });
+  }
+
+  rebuildArchiveFor(layer: GisLayer): void {
+    this.renderTarget.set(null);
+    this.rebuildArchive.emit(layer);
+  }
+
+  /** "Rendering…" menu badge: the layer's chosen format, short. */
+  private renderBadge(layer: GisLayer): string {
+    const mode = layer.renderMode ?? 'AUTO';
+    if (mode === 'AUTO') return 'Auto';
+    return formatInfo(mode).label.replace(/\s*\(.*\)$/, '').replace(' + GeoWebCache', ' tiled');
   }
   /** Items of the shared More menu, built for the layer it was opened on. */
   moreItems: MenuItem[] = [];
@@ -168,17 +166,13 @@ export class LayerPanelComponent {
             { label: 'Style layer', icon: 'pi pi-palette', command: () => this.styleLayer.emit(layer) },
             // Never a nested `items` group here: one group makes p-menu
             // render every top-level item as an unclickable header.
-            ...(layer.layerType === 'VECTOR'
-              ? [
-                  {
-                    label: 'Rendering…',
-                    icon: 'pi pi-sliders-h',
-                    badge: RENDER_MODES.find((m) => m.mode === (layer.renderMode ?? 'WMS'))?.short,
-                    badgeStyleClass: 'layer-panel__menu-badge',
-                    command: () => this.openRendering(layer)
-                  }
-                ]
-              : [])
+            {
+              label: 'Rendering…',
+              icon: 'pi pi-sliders-h',
+              badge: this.renderBadge(layer),
+              badgeStyleClass: 'layer-panel__menu-badge',
+              command: () => this.openRendering(layer)
+            }
           ]
         : []),
       ...(this.canManage

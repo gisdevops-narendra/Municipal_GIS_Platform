@@ -60,6 +60,13 @@ export interface LonLatBoundingBox {
 export class GeoServerService {
   private readonly logger = new Logger(GeoServerService.name);
   private readonly baseUrl: string;
+  /** Called after a layer's default style changes (pre-rendered tiles of
+   *  that layer, e.g. a raster PMTiles archive, are now stale). */
+  private readonly styleListeners: ((workspace: string, layer: string) => void)[] = [];
+
+  onStyleChanged(listener: (workspace: string, layer: string) => void): void {
+    this.styleListeners.push(listener);
+  }
   private readonly authHeader: string;
 
   constructor(private readonly config: ConfigService) {
@@ -847,6 +854,7 @@ export class GeoServerService {
       throw await this.toError('setting layer default style', response);
     }
     await this.truncateTileCache(workspace, layer);
+    this.styleListeners.forEach((fn) => fn(workspace, layer));
   }
 
   // ---------------------------------------------------------------------

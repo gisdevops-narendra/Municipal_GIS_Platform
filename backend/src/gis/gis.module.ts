@@ -41,10 +41,13 @@ import { UploadReviewService } from './upload-review.service';
 import { UploadSchemaService } from './upload-schema.service';
 import { ExternalDbController } from './external-db.controller';
 import { ExternalDbService } from './external-db.service';
+import { TileArchiveService } from './tile-archive.service';
+import { OgcFeaturesController } from './ogc-features.controller';
 
 @Module({
   imports: [AuthModule, ModuleAccessModule, AiClientModule],
   controllers: [
+    OgcFeaturesController,
     GisWorkspaceController,
     GisLayersController,
     GisUploadsController,
@@ -86,6 +89,7 @@ import { ExternalDbService } from './external-db.service';
     ExternalDbService,
     UploadReviewService,
     UploadSchemaService,
+    TileArchiveService,
   ],
   exports: [
     GisWorkspaceService,

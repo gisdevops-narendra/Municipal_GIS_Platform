@@ -11,6 +11,13 @@ import ImageLayer from 'ol/layer/Image';
 import VectorTileLayer from 'ol/layer/VectorTile';
 import VectorTileSource from 'ol/source/VectorTile';
 import MVT from 'ol/format/MVT';
+import type TileSource from 'ol/source/Tile';
+import type TileGrid from 'ol/tilegrid/TileGrid';
+import type Layer from 'ol/layer/Layer';
+import { all as allStrategy } from 'ol/loadingstrategy';
+import { PMTilesRasterSource, PMTilesVectorSource } from 'ol-pmtiles';
+import { AuthFetchSource, titilerColormap } from './render-sources';
+import { RenderFormat, fallbackChain, isBrowserStyled } from './render-formats';
 import VectorLayer from 'ol/layer/Vector';
 import HeatmapLayer from 'ol/layer/Heatmap';
 import Cluster from 'ol/source/Cluster';
@@ -118,23 +125,19 @@ export interface FeatureInfoPopupState {
   results: FeatureInfoResult[];
 }
 
-/** How a layer is drawn right now (its configured mode, or WMS while a
- *  filter / style preview needs GeoServer to render it). */
-type RenderKind = 'WMS' | 'WMS_TILED' | 'MVT' | 'RASTER';
-
 interface ManagedLayer {
   layer: GisLayer;
-  /** What draws the layer: WMS image, cached WMS tiles or vector tiles. */
-  olLayer: ImageLayer<ImageWMS> | TileLayer<TileWMS> | VectorTileLayer;
-  /** The layer's WMS source: carries its params (CQL filter, preview
-   *  style) for identify / print / 3D, and renders in WMS mode. */
-  wms: ImageWMS | TileWMS;
-  rendered: RenderKind;
+  /** What draws the layer (see render-formats.ts). */
+  olLayer: Layer;
+  /** The layer's live WMS source: carries its params (CQL filter, preview
+   *  style) for identify / print / 3D, and draws it in WMS mode. */
+  wms: ImageWMS;
+  rendered: RenderFormat;
   /** SLD-editor preview style, while previewing. */
   previewStyle?: string | null;
-  /** The style cannot be drawn in the browser: render as WMS instead. */
-  mvtUnsupported?: boolean;
-  /** Bumped on restyle so browsers re-fetch vector tiles. */
+  /** Formats that failed for this layer (fallback skips them). */
+  unsupported: Set<RenderFormat>;
+  /** Bumped on restyle so browsers re-fetch tiles. */
   tilesVersion: number;
 }
 
@@ -610,21 +613,16 @@ export class MapService {
     const entry = this.managedLayers.get(layerId);
     if (entry) {
       entry.wms.updateParams({ _style: Date.now() });
+      // New tiles (caches were emptied server-side), new browser style, and
+      // every format gets another chance.
       entry.tilesVersion++;
-      entry.mvtUnsupported = false;
-      const src = entry.olLayer.getSource();
-      if (entry.rendered === 'WMS_TILED' && src instanceof TileWMS) src.updateParams({ _style: Date.now() });
-      if (entry.rendered === 'MVT') {
-        // New tiles (cache was emptied server-side) and the new style.
-        const vts = src as VectorTileSource;
-        vts.setTileUrlFunction(this.mvtTileUrl(entry, vts), String(entry.tilesVersion));
-        this.loadMvtStyle(entry, entry.olLayer as VectorTileLayer);
-      }
-      this.syncRenderer(entry);
+      entry.unsupported.clear();
+      this.syncRenderer(entry, true);
     }
     this.styleChanged.update((n) => n + 1);
     this.syncGlobe();
   }
+
 
   // ----- buffer / overlay analysis -----
 
@@ -2594,11 +2592,14 @@ export class MapService {
     for (const layer of [...layers].sort((a, b) => a.displayOrder - b.displayOrder)) {
       const existing = this.managedLayers.get(layer.id);
       if (existing) {
-        const modeChanged = existing.layer.renderMode !== layer.renderMode;
+        const renderingChanged =
+          existing.layer.renderMode !== layer.renderMode ||
+          existing.layer.pmtilesStatus !== layer.pmtilesStatus ||
+          existing.layer.pmtilesVersion !== layer.pmtilesVersion;
         existing.layer = layer;
-        if (modeChanged) {
-          existing.mvtUnsupported = false;
-          this.syncRenderer(existing);
+        if (renderingChanged) {
+          existing.unsupported.clear();
+          this.syncRenderer(existing, true);
         }
         continue;
       }
@@ -2684,25 +2685,18 @@ export class MapService {
   private addWmsLayer(layer: GisLayer, insertAt?: number): void {
     if (!this.map) return;
     const qualifiedLayer = `${layer.geoserverWorkspace}:${layer.geoserverLayer}`;
-    // Rasters are heavy to render, so they always come as 256 px tiles
-    // through GeoWebCache. Vector layers follow their configured rendering
-    // mode (WMS by default); their WMS source always exists for identify,
-    // print, 3D, CQL filters and style previews.
-    const wms =
-      layer.layerType === 'RASTER'
-        ? new TileWMS({
-            url: `${environment.geoserverUrl}/gwc/service/wms`,
-            params: { LAYERS: qualifiedLayer, TILED: true, FORMAT: 'image/png', VERSION: '1.1.1' },
-            projection: MAP_PROJECTION,
-            transition: 0
-          })
-        : new ImageWMS({
-            url: `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wms`,
-            params: { LAYERS: qualifiedLayer, TILED: false },
-            projection: MAP_PROJECTION,
-            ratio: 1
-          });
-    const entry = { layer, wms, tilesVersion: 0 } as ManagedLayer;
+    // Every layer keeps a live WMS source: it carries the CQL filter / style
+    // preview params, answers identify (GetFeatureInfo), feeds print and the
+    // 3D view, and draws the layer whenever GeoServer must (filter, preview,
+    // or as the last fallback). What normally draws the layer is chosen by
+    // its rendering format (render-formats.ts).
+    const wms = new ImageWMS({
+      url: `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wms`,
+      params: { LAYERS: qualifiedLayer, TILED: false },
+      projection: MAP_PROJECTION,
+      ratio: 1
+    });
+    const entry = { layer, wms, tilesVersion: 0, unsupported: new Set<RenderFormat>() } as ManagedLayer;
     entry.rendered = this.renderKind(entry);
     entry.olLayer = this.buildRenderer(entry, entry.rendered);
     entry.olLayer.setVisible(this.defaultVisible(layer));
@@ -2713,84 +2707,292 @@ export class MapService {
     this.managedLayers.set(layer.id, entry);
   }
 
-  /** The configured mode, unless GeoServer must draw the layer itself:
-   *  an active CQL filter or style preview (tiles are cached unfiltered,
-   *  default-style), or a style the browser cannot reproduce. */
-  private renderKind(entry: ManagedLayer): RenderKind {
-    if (entry.layer.layerType === 'RASTER') return 'RASTER';
-    const mode = entry.layer.renderMode ?? 'WMS';
-    if (mode === 'WMS') return 'WMS';
+  /** The format that draws the layer now: the first one of its fallback
+   *  chain that is available. GeoServer draws it live (WMS) while a CQL
+   *  filter or style preview is on — cached / pre-built tiles hold the
+   *  whole layer in its default style. */
+  private renderKind(entry: ManagedLayer): RenderFormat {
     const params = entry.wms.getParams();
     const filtered = typeof params['CQL_FILTER'] === 'string' && params['CQL_FILTER'].trim() !== '';
     if (filtered || entry.previewStyle) return 'WMS';
-    if (mode === 'MVT' && entry.mvtUnsupported) return 'WMS';
-    return mode;
+    for (const format of fallbackChain(entry.layer)) {
+      if (!entry.unsupported.has(format) && this.formatAvailable(entry, format)) return format;
+    }
+    return 'WMS';
   }
 
-  /** Vector-tile source of the layer: GeoWebCache TMS, flipped y. */
-  private mvtSource(entry: ManagedLayer): VectorTileSource {
-    const source = new VectorTileSource({ format: new MVT() });
-    source.setTileUrlFunction(this.mvtTileUrl(entry, source));
-    return source;
+  private formatAvailable(entry: ManagedLayer, format: RenderFormat): boolean {
+    switch (format) {
+      case 'PMTILES':
+        return entry.layer.pmtilesStatus === 'READY' && !!entry.layer.pmtilesVersion;
+      case 'COG':
+        return !!entry.layer.cogPath && this.titilerState !== 'down';
+      default:
+        return true;
+    }
   }
 
-  /** Tile URLs for the layer — none for tiles outside its extent, which
-   *  GeoWebCache answers with 404 (console noise, wasted requests). */
-  private mvtTileUrl(entry: ManagedLayer, source: VectorTileSource): (c: number[]) => string | undefined {
-    const name = encodeURIComponent(`${entry.layer.geoserverWorkspace}:${entry.layer.geoserverLayer}`);
-    const base = `${environment.geoserverUrl}/gwc/service/tms/1.0.0/${name}@EPSG%3A900913@pbf`;
+  /** Marks formats unusable for this layer and switches to the next one. */
+  private fallBack(entry: ManagedLayer, formats: RenderFormat[], reason: string): void {
+    formats.forEach((f) => entry.unsupported.add(f));
+    console.warn(`Layer "${entry.layer.name}": ${formats.join('/')} unavailable (${reason}); falling back.`);
+    this.syncRenderer(entry);
+  }
+
+  /** Formats drawn in the browser all need the layer's style reproduced. */
+  private browserStyledFormats(entry: ManagedLayer): RenderFormat[] {
+    return fallbackChain({ ...entry.layer, renderMode: 'AUTO' })
+      .concat(['WFS', 'OGC_FEATURES'])
+      .filter((f) => isBrowserStyled(f, entry.layer));
+  }
+
+  /** The layer's extent in map units (tiles outside it are never asked for:
+   *  GeoWebCache / TiTiler answer them with errors). */
+  private layerExtent(entry: ManagedLayer): number[] | null {
     const b = entry.layer.bbox;
-    const extent = b
-      ? transformExtent([b.minX, Math.max(-85, b.minY), b.maxX, Math.min(85, b.maxY)], 'EPSG:4326', MAP_PROJECTION)
-      : null;
-    const version = entry.tilesVersion;
-    return ([z, x, y]) => {
-      if (extent && !extentsIntersect(source.getTileGrid()!.getTileCoordExtent([z, x, y]), extent)) return undefined;
-      return `${base}/${z}/${x}/${2 ** z - 1 - y}.pbf?v=${version}`;
+    return b ? transformExtent([b.minX, Math.max(-85, b.minY), b.maxX, Math.min(85, b.maxY)], 'EPSG:4326', MAP_PROJECTION) : null;
+  }
+
+  /** z/x/y tile URLs, skipping tiles outside the layer's extent. */
+  private tileUrls(entry: ManagedLayer, source: { getTileGrid(): TileGrid | null }, url: (z: number, x: number, y: number) => string) {
+    const extent = this.layerExtent(entry);
+    return (coord: number[]): string | undefined => {
+      const grid = source.getTileGrid();
+      if (extent && grid && !extentsIntersect(grid.getTileCoordExtent(coord), extent)) return undefined;
+      return url(coord[0], coord[1], coord[2]);
     };
   }
 
-  private buildRenderer(entry: ManagedLayer, kind: RenderKind): ManagedLayer['olLayer'] {
+  /** Too many failed tiles and none loaded: the format does not work for
+   *  this layer (server lacks it, archive missing…) — fall back. */
+  private watchTileErrors(entry: ManagedLayer, source: TileSource, format: RenderFormat): void {
+    let failed = 0;
+    let loaded = 0;
+    source.on('tileloadend', () => loaded++);
+    source.on('tileloaderror', () => {
+      if (++failed >= 6 && loaded === 0 && entry.olLayer.getSource() === source) {
+        this.fallBack(entry, [format], 'tiles fail to load');
+      }
+    });
+  }
+
+  private buildRenderer(entry: ManagedLayer, kind: RenderFormat): ManagedLayer['olLayer'] {
     const properties = { gisLayerId: entry.layer.id };
-    if (kind === 'RASTER') return new TileLayer({ source: entry.wms as TileWMS, properties });
-    if (kind === 'WMS') return new ImageLayer({ source: entry.wms as ImageWMS, properties });
-    if (kind === 'WMS_TILED') {
-      const name = `${entry.layer.geoserverWorkspace}:${entry.layer.geoserverLayer}`;
-      return new TileLayer({
-        source: new TileWMS({
-          url: `${environment.geoserverUrl}/gwc/service/wms`,
-          params: { LAYERS: name, TILED: true, FORMAT: 'image/png', VERSION: '1.1.1' },
-          projection: MAP_PROJECTION,
-          transition: 0
-        }),
-        properties
-      });
+    const layer = entry.layer;
+    const name = `${layer.geoserverWorkspace}:${layer.geoserverLayer}`;
+    const gs = environment.geoserverUrl;
+    const v = entry.tilesVersion;
+    const raster = layer.layerType === 'RASTER';
+    switch (kind) {
+      case 'WMS':
+        return new ImageLayer({ source: entry.wms, properties });
+      case 'WMS_TILED':
+        return new TileLayer({
+          source: new TileWMS({
+            url: `${gs}/gwc/service/wms`,
+            params: { LAYERS: name, TILED: true, FORMAT: 'image/png', VERSION: '1.1.1' },
+            projection: MAP_PROJECTION,
+            transition: 0
+          }),
+          preload: 1,
+          properties
+        });
+      case 'WMTS':
+      case 'XYZ': {
+        const source: XYZ = new XYZ({ crossOrigin: 'anonymous', transition: 0 });
+        const n = encodeURIComponent(name);
+        source.setTileUrlFunction(
+          this.tileUrls(entry, source, (z, x, y) =>
+            kind === 'WMTS'
+              ? `${gs}/gwc/service/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${n}&STYLE=&FORMAT=image%2Fpng` +
+                `&TILEMATRIXSET=EPSG%3A900913&TILEMATRIX=EPSG%3A900913%3A${z}&TILEROW=${y}&TILECOL=${x}&_v=${v}`
+              : `${gs}/gwc/service/tms/1.0.0/${n}@EPSG%3A900913@png/${z}/${x}/${2 ** z - 1 - y}.png?v=${v}`
+          )
+        );
+        this.watchTileErrors(entry, source, kind);
+        return new TileLayer({ source, preload: 1, properties });
+      }
+      case 'COG': {
+        const source: XYZ = new XYZ({ crossOrigin: 'anonymous', transition: 0 });
+        this.watchTileErrors(entry, source, 'COG');
+        this.configureCog(entry, source);
+        return new TileLayer({ source, preload: 1, properties });
+      }
+      case 'PMTILES': {
+        const archive = new AuthFetchSource(
+          `${environment.apiUrl}/gis/layers/${layer.id}/tiles.pmtiles?v=${layer.pmtilesVersion}`,
+          () => this.auth.getToken()
+        );
+        if (raster) {
+          const source = new PMTilesRasterSource({ url: archive, attributions: [], transition: 0 } as never);
+          this.watchTileErrors(entry, source as unknown as TileSource, 'PMTILES');
+          return new TileLayer({ source, properties });
+        }
+        const source = new PMTilesVectorSource({ url: archive } as never);
+        this.watchTileErrors(entry, source as unknown as TileSource, 'PMTILES');
+        return this.styledVectorTiles(entry, source, properties);
+      }
+      case 'MVT': {
+        const source = new VectorTileSource({ format: new MVT() });
+        const n = encodeURIComponent(name);
+        source.setTileUrlFunction(
+          this.tileUrls(entry, source, (z, x, y) => `${gs}/gwc/service/tms/1.0.0/${n}@EPSG%3A900913@pbf/${z}/${x}/${2 ** z - 1 - y}.pbf?v=${v}`)
+        );
+        this.watchTileErrors(entry, source, 'MVT');
+        return this.styledVectorTiles(entry, source, properties);
+      }
+      case 'WFS':
+      case 'OGC_FEATURES': {
+        const vl: VectorLayer<VectorSource> = new VectorLayer({
+          source: new VectorSource({
+            format: new GeoJSON(),
+            strategy: allStrategy,
+            loader: (_extent, _resolution, projection, success, failure) => {
+              void this.loadFeatures(entry, kind, projection.getCode()).then(
+                (features) => {
+                  if (features) {
+                    vl.getSource()?.addFeatures(features);
+                    success?.(features);
+                  } else failure?.();
+                },
+                () => {
+                  failure?.();
+                  if (entry.olLayer === vl) this.fallBack(entry, [kind], 'features could not be loaded');
+                }
+              );
+            }
+          }),
+          declutter: true,
+          style: () => undefined,
+          properties
+        });
+        this.loadBrowserStyle(entry, vl);
+        return vl;
+      }
     }
+  }
+
+  /** Vector tiles (MVT or PMTiles) styled from the layer's GeoServer style. */
+  private styledVectorTiles(entry: ManagedLayer, source: VectorTileSource, properties: Record<string, unknown>): VectorTileLayer {
     const vt = new VectorTileLayer({
       declutter: true,
       // Nothing is drawn until the layer's own style is loaded.
       style: () => undefined,
-      source: this.mvtSource(entry),
+      source,
+      renderBuffer: 64,
       properties
     });
-    this.loadMvtStyle(entry, vt);
+    this.loadBrowserStyle(entry, vt);
     return vt;
   }
 
-  /** Vector tiles carry no style: build it from the layer's GeoServer
-   *  style (JSON legend). Unsupported style -> the layer renders as WMS. */
-  private loadMvtStyle(entry: ManagedLayer, vt: VectorTileLayer): void {
+  /** Largest layer drawn from raw features; bigger ones fall back to tiles. */
+  private static readonly MAX_RAW_FEATURES = 20_000;
+
+  /** WFS (GeoServer) or OGC API – Features (backend) as map features; null
+   *  when the layer is too big for raw features (then it falls back). */
+  private async loadFeatures(entry: ManagedLayer, kind: 'WFS' | 'OGC_FEATURES', projection: string): Promise<Feature[] | null> {
+    const max = MapService.MAX_RAW_FEATURES;
+    const layer = entry.layer;
+    const format = new GeoJSON();
+    let json: { features?: unknown[]; numberMatched?: number; totalFeatures?: number };
+    if (kind === 'WFS') {
+      const params = new URLSearchParams({
+        service: 'WFS',
+        version: '2.0.0',
+        request: 'GetFeature',
+        typeNames: `${layer.geoserverWorkspace}:${layer.geoserverLayer}`,
+        outputFormat: 'application/json',
+        srsName: 'EPSG:4326',
+        count: String(max + 1)
+      });
+      const res = await fetch(`${environment.geoserverUrl}/${layer.geoserverWorkspace}/ows?${params.toString()}`);
+      if (!res.ok) throw new Error(`WFS ${res.status}`);
+      json = await res.json();
+    } else {
+      const token = this.auth.getToken();
+      const res = await fetch(`${environment.apiUrl}/gis/ogc/collections/${layer.id}/items?limit=${max + 1}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (!res.ok) throw new Error(`OGC API ${res.status}`);
+      json = await res.json();
+    }
+    const total = json.numberMatched ?? json.totalFeatures ?? json.features?.length ?? 0;
+    if (total > max || (json.features?.length ?? 0) > max) {
+      if (entry.olLayer.get('gisLayerId') === layer.id) this.fallBack(entry, [kind], `${total} features — too many for raw features`);
+      return null;
+    }
+    return format.readFeatures(json, { dataProjection: 'EPSG:4326', featureProjection: projection }) as Feature[];
+  }
+
+  /** Browser-drawn formats carry no style: build it from the layer's
+   *  GeoServer style (JSON legend + SLD scale ranges). A style the browser
+   *  cannot reproduce -> every browser-styled format falls back. */
+  private loadBrowserStyle(entry: ManagedLayer, target: VectorTileLayer | VectorLayer<VectorSource>): void {
     const now = Date.now();
     void Promise.all([this.legendJson(entry.layer, now), this.styleSld(entry.layer, now)]).then(([json, sld]) => {
-      if (entry.olLayer !== vt) return; // replaced meanwhile
+      if (entry.olLayer !== target) return; // replaced meanwhile
       // The SLD gives each rule's scale range (the JSON legend does not).
       const style = legendToOlStyle(parseLegend(json), sld ? ruleScalesFromSld(sld) : []);
-      if (style) {
-        vt.setStyle(style);
-      } else {
-        entry.mvtUnsupported = true;
-        this.syncRenderer(entry);
+      if (style) target.setStyle(style);
+      else this.fallBack(entry, this.browserStyledFormats(entry), 'style cannot be drawn in the browser');
+    });
+  }
+
+  /** TiTiler reachable? Checked once; COG layers fall back when it is not. */
+  private titilerState: 'unknown' | 'up' | 'down' = 'unknown';
+  private titilerCheck: Promise<boolean> | null = null;
+
+  private titilerUp(): Promise<boolean> {
+    this.titilerCheck ??= fetch(`${environment.titilerUrl}/healthz`, { signal: AbortSignal.timeout(4000) })
+      .then((r) => r.ok)
+      .catch(() => false)
+      .then((ok) => {
+        this.titilerState = ok ? 'up' : 'down';
+        return ok;
+      });
+    return this.titilerCheck;
+  }
+
+  /** COG + TiTiler: tiles cut from the raster's COG, styled like its
+   *  GeoServer style (colour ramp / classes from the legend, RGB bands with
+   *  the band statistics). */
+  private configureCog(entry: ManagedLayer, source: XYZ): void {
+    const layer = entry.layer;
+    void Promise.all([
+      this.titilerUp(),
+      firstValueFrom(this.rasterApi.info(layer.id)).catch(() => null),
+      this.legendJson(layer, Date.now())
+    ]).then(([up, info, legend]) => {
+      if (entry.olLayer.getSource() !== source) return;
+      if (!up) {
+        this.fallBack(entry, ['COG'], 'TiTiler is not reachable');
+        return;
       }
+      const q = new URLSearchParams({ url: `/data/uploads/${layer.cogPath}` });
+      const ramp = parseLegend(legend)?.ramp ?? null;
+      const spec = info?.styleSpec ?? null;
+      const bands = info?.bands ?? [];
+      if (spec?.mode === 'rgb' || (!ramp && bands.length >= 3)) {
+        const rgb = spec?.bands ?? [1, 2, 3];
+        for (const b of rgb) {
+          q.append('bidx', String(b));
+          const band = bands.find((x) => x.band === b);
+          if (band?.min != null && band?.max != null) q.append('rescale', `${band.min},${band.max}`);
+        }
+      } else {
+        q.set('bidx', String(spec?.band ?? 1));
+        const cmap = ramp ? titilerColormap(ramp) : null;
+        if (cmap) q.set('colormap', JSON.stringify(cmap));
+        else {
+          const band = bands.find((x) => x.band === (spec?.band ?? 1));
+          if (band?.min != null && band?.max != null) q.set('rescale', `${band.min},${band.max}`);
+        }
+      }
+      const base = `${environment.titilerUrl}/cog/tiles/WebMercatorQuad`;
+      const query = `${q.toString()}&v=${entry.tilesVersion}`;
+      source.setTileUrlFunction(this.tileUrls(entry, source, (z, x, y) => `${base}/${z}/${x}/${y}.png?${query}`));
+      source.refresh();
     });
   }
 
@@ -2814,10 +3016,10 @@ export class MapService {
 
   /** Swaps the layer's renderer when its mode or state calls for another
    *  one — same place in the stack, visibility, opacity and order. */
-  private syncRenderer(entry: ManagedLayer): void {
+  private syncRenderer(entry: ManagedLayer, force = false): void {
     if (!this.map) return;
     const kind = this.renderKind(entry);
-    if (kind === entry.rendered) return;
+    if (kind === entry.rendered && !force) return;
     const old = entry.olLayer;
     const next = this.buildRenderer(entry, kind);
     next.setVisible(old.getVisible());

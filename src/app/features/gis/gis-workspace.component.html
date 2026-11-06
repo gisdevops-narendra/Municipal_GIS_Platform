@@ -110,6 +110,7 @@
               (deleteLayer)="deleteLayer($event)"
               (fixColumnTypes)="fixColumnTypes($event)"
               (renderModeChange)="setRenderMode($event.layer, $event.mode)"
+              (rebuildArchive)="rebuildTileArchive($event)"
               (openReport)="reportLayer.set($event)"
             />
           } @else if (leftTool() === 'layers') {

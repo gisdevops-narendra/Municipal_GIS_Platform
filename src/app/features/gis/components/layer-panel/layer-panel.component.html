@@ -211,42 +211,88 @@
     (visibleChange)="!$event ? renderTarget.set(null) : null"
     [modal]="true"
     [header]="'Rendering · ' + (renderTarget()?.name ?? '')"
-    [style]="{ width: '440px' }"
-    [breakpoints]="{ '520px': '95vw' }"
+    [style]="{ width: '520px' }"
+    [breakpoints]="{ '600px': '95vw' }"
     appendTo="body"
   >
-    <p class="render-dlg__intro">Choose how the map draws this layer. Filters and style previews always draw live.</p>
-    <div class="render-dlg__options" role="radiogroup" aria-label="Rendering mode">
-      @for (m of renderModes; track m.mode) {
+    @if (renderTarget(); as rl) {
+      <p class="render-dlg__intro">
+        How the map draws this {{ rl.layerType === 'RASTER' ? 'raster' : 'vector' }} layer, fastest first. If a format
+        cannot be used, the map falls back to the next one automatically; filters and style previews always draw live.
+      </p>
+      <div class="render-dlg__options" role="radiogroup" aria-label="Rendering format">
         <button
           type="button"
           role="radio"
           class="render-dlg__card"
-          [class.render-dlg__card--active]="renderChoice() === m.mode"
-          [attr.aria-checked]="renderChoice() === m.mode"
-          (click)="renderChoice.set(m.mode)"
+          [class.render-dlg__card--active]="renderChoice() === 'AUTO'"
+          [attr.aria-checked]="renderChoice() === 'AUTO'"
+          (click)="renderChoice.set('AUTO')"
         >
-          <span class="render-dlg__icon"><i [class]="m.icon"></i></span>
+          <span class="render-dlg__icon"><i class="pi pi-bolt"></i></span>
           <span class="render-dlg__text">
             <span class="render-dlg__title">
-              {{ m.label }}
-              @if ((renderTarget()?.renderMode ?? 'WMS') === m.mode) {
+              Automatic
+              @if ((rl.renderMode ?? 'AUTO') === 'AUTO') {
                 <span class="render-dlg__current">Current</span>
               }
             </span>
-            <span class="render-dlg__hint">{{ m.hint }}</span>
+            <span class="render-dlg__hint">Always the fastest format that works for this layer — now: {{ autoFormatLabel }}.</span>
           </span>
           <span class="render-dlg__radio" aria-hidden="true"></span>
         </button>
-      }
-    </div>
+        @for (f of renderFormats; track f.format) {
+          <button
+            type="button"
+            role="radio"
+            class="render-dlg__card"
+            [class.render-dlg__card--active]="renderChoice() === f.format"
+            [attr.aria-checked]="renderChoice() === f.format"
+            (click)="renderChoice.set(f.format)"
+          >
+            <span class="render-dlg__icon"><i [class]="f.icon"></i></span>
+            <span class="render-dlg__text">
+              <span class="render-dlg__title">
+                {{ f.label }}
+                @if (recommended === f.format) {
+                  <span class="render-dlg__tag render-dlg__tag--rec">Recommended</span>
+                }
+                @if (rl.renderMode === f.format) {
+                  <span class="render-dlg__current">Current</span>
+                }
+              </span>
+              <span class="render-dlg__hint">{{ f.hint }}</span>
+              @if (f.format === 'PMTILES') {
+                <span class="render-dlg__status" [attr.data-status]="rl.pmtilesStatus ?? 'NONE'">
+                  @switch (rl.pmtilesStatus ?? 'NONE') {
+                    @case ('READY') { <i class="pi pi-check-circle"></i> Archive ready }
+                    @case ('BUILDING') { <i class="pi pi-spin pi-spinner"></i> Archive building… }
+                    @case ('FAILED') { <i class="pi pi-exclamation-triangle"></i> Build failed{{ rl.pmtilesError ? ': ' + rl.pmtilesError : '' }} }
+                    @default { <i class="pi pi-info-circle"></i> Built when selected (a few seconds to minutes) }
+                  }
+                  @if (rl.pmtilesStatus === 'READY' || rl.pmtilesStatus === 'FAILED') {
+                    <a class="render-dlg__link" role="button" tabindex="0" (click)="$event.stopPropagation(); rebuildArchiveFor(rl)"
+                      (keydown.enter)="$event.stopPropagation(); rebuildArchiveFor(rl)">Rebuild</a>
+                  }
+                </span>
+              }
+            </span>
+            <span class="render-dlg__score" [title]="'Speed ' + f.score + ' / 10'">
+              <span class="render-dlg__score-bar"><span [style.width.%]="f.score * 10"></span></span>
+              {{ f.score }}
+            </span>
+            <span class="render-dlg__radio" aria-hidden="true"></span>
+          </button>
+        }
+      </div>
+    }
     <ng-template #footer>
       <button pButton type="button" label="Cancel" class="p-button-text" (click)="renderTarget.set(null)"></button>
       <button
         pButton
         type="button"
         label="Apply"
-        [disabled]="renderChoice() === (renderTarget()?.renderMode ?? 'WMS')"
+        [disabled]="renderChoice() === (renderTarget()?.renderMode ?? 'AUTO')"
         (click)="applyRendering()"
       ></button>
     </ng-template>

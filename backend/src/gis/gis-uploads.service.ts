@@ -34,6 +34,7 @@ import { StyleService, type UploadedIcon } from './style.service';
 import { FieldStatsService } from './field-stats.service';
 import { CreateUploadDto } from './dto/create-upload.dto';
 import { CrsService } from './crs.service';
+import { GisLayersService } from './gis-layers.service';
 import type {
   ClassificationMethod,
   LayerStyleSpecDto,
@@ -110,6 +111,7 @@ export class GisUploadsService {
     @Optional() private readonly schema?: UploadSchemaService,
     @Optional() private readonly network?: NetworkService,
     @Optional() private readonly crs?: CrsService,
+    @Optional() private readonly gisLayers?: GisLayersService,
   ) {}
 
   async create(
@@ -755,6 +757,8 @@ export class GisUploadsService {
       // A line layer may be routed on: build its road network now, in the
       // background, so the first route on it is already fast.
       if (routingEnabled) this.network?.warmLayer(savedLayer.id);
+      // Re-published data: cached tiles / PMTiles archive are stale.
+      if (existingLayer) this.gisLayers?.scheduleTileRefresh(savedLayer.id);
 
       // Best-effort cleanup, never allowed to fail the publish itself
       // (the layer is already live at this point).

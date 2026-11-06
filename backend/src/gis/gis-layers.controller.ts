@@ -187,6 +187,33 @@ export class GisLayersController {
     return this.gisLayersService.setRenderMode(appUser, id, dto.mode);
   }
 
+  /** Rebuilds the layer's PMTiles archive. Same permission as styling. */
+  @RequireMunicipalityMember()
+  @Post('layers/:id/tile-archive')
+  rebuildTileArchive(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
+    return this.gisLayersService.rebuildTileArchive(appUser, id);
+  }
+
+  /** The layer's PMTiles archive, served with HTTP range requests (the
+   *  browser reads only the tiles in view). Versioned URL -> long cache. */
+  @RequireMunicipalityMember()
+  @Get('layers/:id/tiles.pmtiles')
+  async tileArchive(@CurrentAppUser() appUser: AppUser, @Param('id') id: string, @Res() res: Response) {
+    const file = await this.gisLayersService.tileArchiveFile(appUser, id);
+    if (!file) {
+      res.status(404).json({ message: 'This layer has no PMTiles archive yet.' });
+      return;
+    }
+    res.sendFile(file, {
+      acceptRanges: true,
+      lastModified: true,
+      etag: true,
+      headers: { 'Cache-Control': 'private, max-age=86400', 'Content-Type': 'application/vnd.pmtiles' },
+    }, (err) => {
+      if (err && !res.headersSent) res.status(404).json({ message: 'This layer has no PMTiles archive yet.' });
+    });
+  }
+
   /** Gives text columns holding numbers / dates / yes-no their real type. Owner-only. */
   @RequireMunicipalityOwner()
   @Post('layers/:id/fix-column-types')

@@ -25,6 +25,7 @@ import { CurrentUserService } from '../../core/services/current-user.service';
 import { ModuleAccessService } from '../../core/services/module-access.service';
 import { GisWorkspace } from '../../core/models/gis-workspace.model';
 import { GisLayer, GisRenderMode } from '../../core/models/gis-layer.model';
+import { formatInfo } from './services/render-formats';
 import { GisSearchFeatureMatch, GisSearchLayerMatch } from '../../core/models/gis-dashboard.model';
 import { MapService, FeatureInfoResult, CoordFormat } from './services/map.service';
 import { MunicipalMapComponent } from './components/municipal-map/municipal-map.component';
@@ -579,14 +580,50 @@ export class GisWorkspaceComponent {
 
   /** Rendering mode of a layer: saved, then the map switches renderer. */
   setRenderMode(layer: GisLayer, mode: GisRenderMode): void {
-    const label = { WMS: 'WMS', WMS_TILED: 'tiled WMS (GeoWebCache)', MVT: 'vector tiles (MVT)' }[mode];
+    const label = mode === 'AUTO' ? 'the fastest available format' : formatInfo(mode).label;
     this.gisLayersService.setRenderMode(layer.id, mode).subscribe({
-      next: () => {
-        this.notify.success(`"${layer.name}" now renders as ${label}.`);
+      next: (res) => {
+        this.notify.success(
+          res.pmtilesStatus === 'BUILDING'
+            ? `"${layer.name}": building its PMTiles archive — live tiles are shown until it is ready.`
+            : `"${layer.name}" now renders as ${label}.`
+        );
         this.loadLayers();
+        if (res.pmtilesStatus === 'BUILDING') this.watchTileArchive(layer.id);
       },
       error: (err: HttpErrorResponse) => this.notify.error(this.apiError(err, 'The rendering mode could not be changed.'))
     });
+  }
+
+  /** Rebuilds a layer's PMTiles archive. */
+  rebuildTileArchive(layer: GisLayer): void {
+    this.gisLayersService.rebuildTileArchive(layer.id).subscribe({
+      next: () => {
+        this.notify.success(`"${layer.name}": rebuilding its PMTiles archive.`);
+        this.loadLayers();
+        this.watchTileArchive(layer.id);
+      },
+      error: (err: HttpErrorResponse) => this.notify.error(this.apiError(err, 'The archive could not be rebuilt.'))
+    });
+  }
+
+  /** Polls a building PMTiles archive; the map switches to it once READY. */
+  private watchTileArchive(layerId: string, tries = 0): void {
+    setTimeout(() => {
+      this.gisLayersService.getById(layerId).subscribe({
+        next: (layer) => {
+          if (layer.pmtilesStatus === 'BUILDING' && tries < 180) {
+            this.watchTileArchive(layerId, tries + 1);
+            return;
+          }
+          if (layer.pmtilesStatus === 'READY') this.notify.success(`"${layer.name}": PMTiles archive ready.`);
+          else if (layer.pmtilesStatus === 'FAILED') {
+            this.notify.error(`"${layer.name}": PMTiles archive failed — ${layer.pmtilesError ?? 'unknown error'}. Live tiles are used.`);
+          }
+          this.loadLayers();
+        }
+      });
+    }, 5000);
   }
 
   /** Layers uploaded before types were fixed at import: numbers / dates

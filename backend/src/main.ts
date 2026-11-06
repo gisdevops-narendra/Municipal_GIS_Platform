@@ -38,7 +38,7 @@ async function bootstrap() {
     credentials: true,
     // Content-Disposition: so the Print Layout panel can read the
     // suggested download filename off the streamed PDF/PNG response.
-    exposedHeaders: ['Content-Disposition'],
+    exposedHeaders: ['Content-Disposition', 'Content-Range', 'Accept-Ranges', 'Content-Length', 'ETag'],
   });
 
   const port = config.get<string>('BACKEND_PORT', '3000');
