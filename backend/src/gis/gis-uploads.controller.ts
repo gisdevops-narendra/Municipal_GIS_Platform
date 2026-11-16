@@ -33,7 +33,7 @@ import type { ClassificationMethod } from './dto/layer-style.dto';
 // own first line of defense so an oversized upload is rejected before
 // even being buffered in memory.
 const MAX_UPLOAD_BYTES =
-  Number(process.env.GIS_UPLOAD_MAX_FILE_SIZE_MB ?? '500') * 1024 * 1024;
+  Number(process.env.GIS_UPLOAD_MAX_FILE_SIZE_MB ?? '3072') * 1024 * 1024;
 
 @Controller('gis')
 export class GisUploadsController {

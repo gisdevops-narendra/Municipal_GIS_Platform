@@ -16,7 +16,7 @@ const UPLOAD_ID = '22222222-2222-2222-2222-222222222222';
 function configFor(rootDir: string, overrides: Record<string, string> = {}) {
   const values: Record<string, string> = {
     GIS_UPLOAD_STORAGE_DIR: rootDir,
-    GIS_UPLOAD_MAX_FILE_SIZE_MB: '500',
+    GIS_UPLOAD_MAX_FILE_SIZE_MB: '3072',
     GIS_UPLOAD_MAX_EXTRACTED_ZIP_SIZE_MB: '2000',
     GIS_UPLOAD_MAX_ZIP_FILE_COUNT: '100',
     ...overrides,

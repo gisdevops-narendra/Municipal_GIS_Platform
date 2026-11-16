@@ -43,7 +43,7 @@ export class StorageService {
       this.config.get<string>('GIS_UPLOAD_STORAGE_DIR', './storage/uploads'),
     );
     this.maxUploadBytes =
-      Number(this.config.get<string>('GIS_UPLOAD_MAX_FILE_SIZE_MB', '500')) *
+      Number(this.config.get<string>('GIS_UPLOAD_MAX_FILE_SIZE_MB', '3000')) *
       1024 *
       1024;
     this.maxExternalImportBytes =
