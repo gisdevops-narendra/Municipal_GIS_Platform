@@ -70,6 +70,9 @@ import { WeatherComponent } from './components/platform-extras/weather.component
 import { OsmImportComponent } from './components/platform-extras/osm-import.component';
 import { DataCatalogComponent } from './components/platform-extras/data-catalog.component';
 import { StorageUsageComponent } from './components/platform-extras/storage-usage.component';
+import { GroundwaterComponent } from './components/platform-extras/groundwater.component';
+import { OutbreakComponent } from './components/platform-extras/outbreak.component';
+import { EvChargingComponent } from './components/platform-extras/ev-charging.component';
 import { SketchComponent } from './components/sketch/sketch.component';
 import { LayerStatisticsComponent } from './components/layer-statistics/layer-statistics.component';
 import { DensityMapComponent } from './components/density-map/density-map.component';
@@ -154,6 +157,9 @@ const TOOLS: WsTool[] = [
   // Draw & Mark also hosts feature editing (Edit Panel module) — there is no separate Edit Features tool.
   { id: 'sketch', label: 'Draw & Mark', icon: 'pi pi-pencil', group: 'analysis', dock: 'left', available: true, anyModuleIds: [DRAW_MODULE_ID, MARKING_TOOL_MODULE_ID, EDIT_PANEL_MODULE_ID] },
   { id: 'advanced', label: 'Advanced Tools', icon: 'pi pi-directions', group: 'analysis', dock: 'left', available: true, anyModuleIds: [BASIC_ROUTING_MODULE_ID, NEAREST_FACILITY_MODULE_ID, NETWORK_TRACING_MODULE_ID, SERVICE_AREA_MODULE_ID] },
+  { id: 'groundwater', label: 'Groundwater', icon: 'pi pi-filter-fill', group: 'analysis', dock: 'left', available: true },
+  { id: 'outbreak', label: 'Disease Outbreaks', icon: 'pi pi-exclamation-circle', group: 'analysis', dock: 'left', available: true },
+  { id: 'ev-charging', label: 'EV Charging', icon: 'pi pi-bolt', group: 'analysis', dock: 'left', available: true },
   { id: 'network-planning', label: 'Network Planning', icon: 'pi pi-sitemap', group: 'analysis', dock: 'left', available: true, anyModuleIds: [BASIC_ROUTING_MODULE_ID, NEAREST_FACILITY_MODULE_ID, SERVICE_AREA_MODULE_ID] },
   { id: 'raster', label: 'Raster Analysis', icon: 'pi pi-images', group: 'analysis', dock: 'left', available: true, anyModuleIds: RASTER_TOOL_MODULE_IDS },
   { id: 'heatmap', label: 'Heatmap & Clusters', icon: 'pi pi-sun', group: 'analysis', dock: 'left', available: true, moduleId: HEATMAP_MODULE_ID },
@@ -210,6 +216,9 @@ const TOOLS: WsTool[] = [
     OsmImportComponent,
     DataCatalogComponent,
     StorageUsageComponent,
+    GroundwaterComponent,
+    OutbreakComponent,
+    EvChargingComponent,
     SketchComponent,
     LayerStatisticsComponent,
     DensityMapComponent,

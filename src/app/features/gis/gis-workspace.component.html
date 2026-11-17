@@ -296,6 +296,18 @@
           <app-storage-usage [class.gis-ws__panel--hidden]="leftTool() !== 'storage'" />
         }
 
+        @if (openedLeftTools().has('groundwater') && layersReady()) {
+          <app-groundwater [class.gis-ws__panel--hidden]="leftTool() !== 'groundwater'" [layers]="layers()" />
+        }
+
+        @if (openedLeftTools().has('outbreak') && layersReady()) {
+          <app-outbreak [class.gis-ws__panel--hidden]="leftTool() !== 'outbreak'" [layers]="layers()" (layerCreated)="onLayerCreated($event)" />
+        }
+
+        @if (openedLeftTools().has('ev-charging') && layersReady()) {
+          <app-ev-charging [class.gis-ws__panel--hidden]="leftTool() !== 'ev-charging'" [layers]="layers()" />
+        }
+
         @if (openedLeftTools().has('integrations')) {
           <app-integrations [class.gis-ws__panel--hidden]="leftTool() !== 'integrations'" />
         }

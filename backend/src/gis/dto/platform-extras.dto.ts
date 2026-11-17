@@ -213,3 +213,136 @@ export class OsmImportDto {
   @IsUUID()
   departmentId?: string;
 }
+
+// ----- Groundwater -----
+export class WellReadingDto {
+  /** YYYY-MM-DD */
+  @IsString()
+  @MaxLength(10)
+  date!: string;
+
+  /** Depth to water below ground, metres. */
+  @IsNumber()
+  @Min(-50)
+  @Max(2000)
+  depthM!: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string;
+}
+
+export class WellImportDto {
+  /** Well-layer field the file's well ids match ('ogc_fid' = feature id). */
+  @IsString()
+  @MaxLength(63)
+  keyField!: string;
+
+  @IsArray()
+  @ArrayMaxSize(20000)
+  @IsObject({ each: true })
+  rows!: { key: string; date: string; depthM: number }[];
+}
+
+// ----- Disease outbreak -----
+export class OutbreakDto {
+  @IsUUID()
+  layerId!: string;
+
+  @IsString()
+  @MaxLength(63)
+  dateField!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(63)
+  diseaseField?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
+  diseaseValues?: string[];
+
+  /** YYYY-MM-DD; default = 90 days up to the latest case. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  from?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  to?: string;
+
+  /** Cases within this distance join a cluster. */
+  @IsOptional()
+  @IsNumber()
+  @Min(20)
+  @Max(5000)
+  clusterDistanceM?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(2)
+  @Max(100)
+  minCases?: number;
+
+  /** Control (fogging / spraying) ring around each cluster. */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(5000)
+  zoneBufferM?: number;
+
+  @IsOptional()
+  @IsUUID()
+  areaLayerId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(63)
+  areaPopulationField?: string;
+
+  /** Set to also save the control zones as a new polygon layer. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  saveZonesAs?: string;
+}
+
+// ----- EV charging -----
+export class EvCoverageDto {
+  @IsUUID()
+  chargerLayerId!: string;
+
+  @IsOptional()
+  @IsUUID()
+  demandLayerId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(63)
+  demandWeightField?: string;
+
+  /** Grid cell size (km); India's guideline is one station per 3 × 3 km. */
+  @IsOptional()
+  @IsNumber()
+  @Min(0.5)
+  @Max(20)
+  cellKm?: number;
+
+  /** Straight-line distance a charger serves (km). */
+  @IsOptional()
+  @IsNumber()
+  @Min(0.2)
+  @Max(50)
+  serviceRadiusKm?: number;
+
+  /** [minLon, minLat, maxLon, maxLat] */
+  @IsArray()
+  @ArrayMaxSize(4)
+  @IsNumber({}, { each: true })
+  bbox!: number[];
+}

@@ -558,30 +558,77 @@ export class MapService {
     return coordinate ? (toLonLat(coordinate, this.map!.getView().getProjection()) as [number, number]) : null;
   }
 
-  // ----- Weather overlay -----
+  // ----- Weather & Environment overlays -----
 
-  private weatherLayer: TileLayer<XYZ> | null = null;
+  private readonly envOverlays = new Map<string, TileLayer<XYZ>>();
 
-  /** Rain radar tiles over the map (null removes them). `maxZoom` is the
-   *  deepest zoom the provider serves; OpenLayers enlarges beyond it. */
-  setWeatherRadar(url: string | null, opacity = 0.7, maxZoom = 7): void {
+  /** A tile overlay by key (null removes it). `maxZoom` is the deepest
+   *  zoom the provider serves; OpenLayers enlarges tiles beyond it. */
+  setOverlayTiles(
+    key: string,
+    url: string | null,
+    options: { opacity?: number; maxZoom?: number; attribution?: string; zIndex?: number } = {}
+  ): void {
     if (!this.map) return;
+    let layer = this.envOverlays.get(key);
     if (!url) {
-      if (this.weatherLayer) this.map.removeLayer(this.weatherLayer);
-      this.weatherLayer = null;
+      if (layer) this.map.removeLayer(layer);
+      this.envOverlays.delete(key);
       return;
     }
-    if (!this.weatherLayer) {
-      this.weatherLayer = new TileLayer({ zIndex: 450, opacity });
-      this.map.addLayer(this.weatherLayer);
+    if (!layer) {
+      layer = new TileLayer({ zIndex: options.zIndex ?? 450 });
+      this.envOverlays.set(key, layer);
+      this.map.addLayer(layer);
     }
-    const current = this.weatherLayer.getSource()?.getUrls()?.[0];
-    if (current !== url) {
-      this.weatherLayer.setSource(
-        new XYZ({ url, maxZoom, attributions: 'Radar © <a href="https://www.rainviewer.com" target="_blank">RainViewer</a>', crossOrigin: 'anonymous' })
+    if (layer.getSource()?.getUrls()?.[0] !== url) {
+      layer.setSource(new XYZ({ url, maxZoom: options.maxZoom ?? 18, attributions: options.attribution, crossOrigin: 'anonymous' }));
+    }
+    layer.setOpacity(options.opacity ?? 0.7);
+  }
+
+  /** Rain radar (RainViewer) — kept for callers of the first version. */
+  setWeatherRadar(url: string | null, opacity = 0.7, maxZoom = 7): void {
+    this.setOverlayTiles('radar', url, {
+      opacity,
+      maxZoom,
+      attribution: 'Radar © <a href="https://www.rainviewer.com" target="_blank">RainViewer</a>',
+      zIndex: 460
+    });
+  }
+
+  // ----- Filled areas (grids, zones, wells) -----
+
+  private filledLayer: VectorLayer<VectorSource> | null = null;
+
+  /** Thin-outlined, filled shapes and dots (EV grid, outbreak zones, well
+   *  status). Replaces what was there; null / [] clears. Colours are
+   *  #rrggbb; `fill` is the fill opacity 0–1. */
+  setFilledAreas(items: { geometry: Record<string, unknown>; color: string; fill?: number; stroke?: string; radius?: number }[] | null): void {
+    if (!this.map) return;
+    if (!this.filledLayer) {
+      this.filledLayer = new VectorLayer({ source: new VectorSource(), zIndex: 9970 });
+      this.map.addLayer(this.filledLayer);
+    }
+    const source = this.filledLayer.getSource()!;
+    source.clear();
+    const hex = (a: number) => Math.round(Math.min(1, Math.max(0, a)) * 255).toString(16).padStart(2, '0');
+    for (const item of items ?? []) {
+      const feature = this.toMapFeature(item.geometry);
+      if (!feature) continue;
+      feature.setStyle(
+        new Style({
+          fill: new Fill({ color: `${item.color}${hex(item.fill ?? 0.45)}` }),
+          stroke: new Stroke({ color: item.stroke ?? item.color, width: item.stroke ? 1.5 : 0.6 }),
+          image: new CircleStyle({
+            radius: item.radius ?? 5,
+            fill: new Fill({ color: item.color }),
+            stroke: new Stroke({ color: '#ffffff', width: 1.5 })
+          })
+        })
       );
+      source.addFeature(feature);
     }
-    this.weatherLayer.setOpacity(opacity);
   }
 
   // ----- Live Sensors -----
@@ -672,7 +719,8 @@ export class MapService {
   destroy(): void {
     this.externalOl.clear();
     this.sensorLayers.clear();
-    this.weatherLayer = null;
+    this.envOverlays.clear();
+    this.filledLayer = null;
     this.pinLayer = null;
     this.globe?.destroy();
     this.globe = null;

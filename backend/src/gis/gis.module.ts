@@ -54,6 +54,10 @@ import { DataPlatformController } from './data-platform.controller';
 import { CatalogService } from './catalog.service';
 import { StorageUsageService } from './storage-usage.service';
 import { OsmImportService } from './osm-import.service';
+import { PlanningToolsController } from './planning-tools.controller';
+import { GroundwaterService } from './groundwater.service';
+import { OutbreakService } from './outbreak.service';
+import { EvPlanningService } from './ev-planning.service';
 
 @Module({
   imports: [AuthModule, ModuleAccessModule, AiClientModule],
@@ -74,6 +78,7 @@ import { OsmImportService } from './osm-import.service';
     ShareLinksController,
     IntegrationsController,
     DataPlatformController,
+    PlanningToolsController,
   ],
   providers: [
     GisWorkspaceService,
@@ -112,6 +117,9 @@ import { OsmImportService } from './osm-import.service';
     CatalogService,
     StorageUsageService,
     OsmImportService,
+    GroundwaterService,
+    OutbreakService,
+    EvPlanningService,
   ],
   exports: [
     GisWorkspaceService,

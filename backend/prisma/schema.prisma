@@ -319,6 +319,7 @@ model GISLayer {
   @@unique([gisWorkspaceId, code])
   @@index([departmentId])
   @@map("gis_layers")
+  wellReadings GISWellReading[]
 }
 
 /// Task 8. Grants one (role, department) pair a permission on one layer.
@@ -922,4 +923,23 @@ model Webhook {
 
   @@index([municipalityId])
   @@map("webhooks")
+}
+
+/// Groundwater: one water-level reading of a borewell / well — a feature
+/// (ogc_fid) of any point layer used as the well layer.
+model GISWellReading {
+  id          String   @id @default(uuid())
+  layerId     String   @map("layer_id")
+  featureId   Int      @map("feature_id")
+  readingDate DateTime @map("reading_date") @db.Date
+  /// Depth to water below ground level, metres (bigger = lower water).
+  depthM      Float    @map("depth_m")
+  note        String?
+  createdById String?  @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  layer GISLayer @relation(fields: [layerId], references: [id], onDelete: Cascade)
+
+  @@index([layerId, featureId, readingDate])
+  @@map("gis_well_readings")
 }
