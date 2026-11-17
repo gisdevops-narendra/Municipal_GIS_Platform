@@ -25,7 +25,7 @@ const SHORT: Record<string, string> = {
   topo: 'Terrain'
 };
 
-/** Google-Maps-style basemap picker in the map's bottom-left corner: the
+/** Google-Maps-style basemap picker in the map's bottom-right corner: the
  *  current basemap as a thumbnail; click it to choose another. */
 @Component({
   selector: 'app-basemap-switcher',
@@ -53,12 +53,13 @@ const SHORT: Record<string, string> = {
   styles: `
     :host {
       position: absolute;
-      left: 8px;
-      bottom: 40px;
+      right: 12px;
+      bottom: 28px;
       z-index: 9;
     }
     .bms {
       display: flex;
+      flex-direction: row-reverse;
       align-items: flex-end;
       gap: 8px;
     }
@@ -136,7 +137,7 @@ const SHORT: Record<string, string> = {
     @keyframes bms-in {
       from {
         opacity: 0;
-        transform: translateX(-6px);
+        transform: translateX(6px);
       }
     }
   `
