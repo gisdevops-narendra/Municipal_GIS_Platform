@@ -1441,6 +1441,7 @@ export class GisWorkspaceComponent {
       this.mapService.zoomToBbox4326(match.bbox);
     }
     // Outline the found feature itself, not just the area around it.
+    this.mapService.setSelectionWms(null, []);
     this.mapService.setSelectionHighlight(match.geometry ? [match.geometry] : []);
     if (layer) {
       this.mapService.setLayerVisibility(layer.id, true);

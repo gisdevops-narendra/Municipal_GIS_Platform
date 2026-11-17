@@ -661,6 +661,8 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
       this.mapService.clearSelectionHighlight();
       return;
     }
+    // GeoServer draws the selected features in the layer's own style.
+    this.mapService.setSelectionWms(layerId, [...ids]);
     this.withGeometries([...ids], (geometries) => {
       // A newer selection may have been made while geometries loaded.
       if (token === this.selectionToken) this.mapService.setSelectionHighlight(geometries);

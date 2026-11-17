@@ -1,6 +1,6 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable, map, of } from 'rxjs';
+import { Observable, catchError, map, of, switchMap } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import { GisLayer } from '../../../core/models/gis-layer.model';
 import {
@@ -41,6 +41,11 @@ const ID_FIELD = /^(id|fid|gid|objectid|feature_id)$|_id$/i;
  * `providedIn: 'root'` — stateless apart from a per-layer field cache; the
  * OpenLayers map instance stays in the component-scoped `MapService`.
  */
+/** WFS DescribeFeatureType (JSON): the layer's properties and types. */
+interface WfsDescribe {
+  featureTypes?: { properties?: { name: string; type?: string }[] }[];
+}
+
 @Injectable({ providedIn: 'root' })
 export class AttributeTableService {
   private readonly http = inject(HttpClient);
@@ -71,20 +76,44 @@ export class AttributeTableService {
       return of({ fields: cachedFields, geometryField: this.getGeometryField(layer.id) });
     }
     const url = `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wfs`;
-    const params = new HttpParams()
+    const typeName = `${layer.geoserverWorkspace}:${layer.geoserverLayer}`;
+    const sample = (propertyNames: string[] | null) => {
+      let params = new HttpParams()
+        .set('service', 'WFS')
+        .set('version', '2.0.0')
+        .set('request', 'GetFeature')
+        .set('typeNames', typeName)
+        .set('outputFormat', 'application/json')
+        .set('srsName', 'EPSG:4326')
+        .set('count', '100');
+      // Attributes only: geometry is what makes this slow on big polygons.
+      if (propertyNames?.length) params = params.set('propertyName', propertyNames.join(','));
+      return this.http.get<WfsFeatureCollection>(url, { params }).pipe(
+        map((collection) => {
+          const fields = this.resolveFields(layer.id, collection.features ?? []);
+          return { fields, geometryField: this.getGeometryField(layer.id) };
+        })
+      );
+    };
+    const describe = new HttpParams()
       .set('service', 'WFS')
       .set('version', '2.0.0')
-      .set('request', 'GetFeature')
-      .set('typeNames', `${layer.geoserverWorkspace}:${layer.geoserverLayer}`)
-      .set('outputFormat', 'application/json')
-      .set('srsName', 'EPSG:4326')
-      .set('count', '100');
+      .set('request', 'DescribeFeatureType')
+      .set('typeNames', typeName)
+      .set('outputFormat', 'application/json');
 
-    return this.http.get<WfsFeatureCollection>(url, { params }).pipe(
-      map((collection) => {
-        const fields = this.resolveFields(layer.id, collection.features ?? []);
-        return { fields, geometryField: this.getGeometryField(layer.id) };
-      })
+    // The field list (tiny) names the geometry field; then 100 sample rows
+    // without geometry give the values the field types are inferred from.
+    return this.http.get<WfsDescribe>(url, { params: describe }).pipe(
+      switchMap((d) => {
+        const props = d?.featureTypes?.[0]?.properties ?? [];
+        const geometry = props.find((p) => String(p.type ?? '').startsWith('gml:'));
+        const attributes = props.filter((p) => !String(p.type ?? '').startsWith('gml:')).map((p) => p.name);
+        if (!geometry || !attributes.length) return sample(null);
+        this.geometryFieldCache.set(layer.id, geometry.name);
+        return sample(attributes);
+      }),
+      catchError(() => sample(null))
     );
   }
 

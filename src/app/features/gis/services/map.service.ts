@@ -127,6 +127,28 @@ export interface FeatureInfoPopupState {
   results: FeatureInfoResult[];
 }
 
+/** Classic GIS selection colour. */
+const SELECTION_COLOR = '#00e5ff';
+
+/** SLD for GeoServer to draw selected features (WMS FEATUREID) in the
+ *  selection colour, by the layer's geometry type. */
+function selectionSld(layerName: string, geometryType: string | null | undefined): string {
+  const g = (geometryType ?? '').toUpperCase();
+  const c = SELECTION_COLOR;
+  const css = (n: string, v: string | number) => `<CssParameter name="${n}">${v}</CssParameter>`;
+  const symbolizer = g.includes('POINT')
+    ? `<PointSymbolizer><Graphic><Mark><WellKnownName>circle</WellKnownName><Fill>${css('fill', c)}${css('fill-opacity', 0.35)}</Fill>` +
+      `<Stroke>${css('stroke', c)}${css('stroke-width', 2.5)}</Stroke></Mark><Size>15</Size></Graphic></PointSymbolizer>`
+    : g.includes('LINE')
+      ? `<LineSymbolizer><Stroke>${css('stroke', c)}${css('stroke-width', 4)}${css('stroke-linecap', 'round')}${css('stroke-linejoin', 'round')}</Stroke></LineSymbolizer>`
+      : `<PolygonSymbolizer><Fill>${css('fill', c)}${css('fill-opacity', 0.15)}</Fill><Stroke>${css('stroke', c)}${css('stroke-width', 2.5)}</Stroke></PolygonSymbolizer>`;
+  return (
+    '<StyledLayerDescriptor version="1.0.0" xmlns="http://www.opengis.net/sld" xmlns:ogc="http://www.opengis.net/ogc">' +
+    `<NamedLayer><Name>${layerName}</Name><UserStyle><FeatureTypeStyle><Rule>${symbolizer}</Rule></FeatureTypeStyle></UserStyle></NamedLayer>` +
+    '</StyledLayerDescriptor>'
+  );
+}
+
 interface ManagedLayer {
   layer: GisLayer;
   /** What draws the layer (see render-formats.ts). */
@@ -741,6 +763,8 @@ export class MapService {
     this.lastPointer = null;
     this.managedLayers.clear();
     this.selectionLayer = null;
+    this.selectionWms = null;
+    this.selectionWmsLayerId = null;
     this.queryLayer = null;
     this.analysisLayer = null;
     this.densityLayer = null;
@@ -791,6 +815,53 @@ export class MapService {
   clearSelectionHighlight(): void {
     this.selectionLayer?.getSource()?.clear();
     this.selectionGeometries.set([]);
+    this.setSelectionWms(null, []);
+  }
+
+  /** GeoServer draws the selected features of a layer in the layer's own
+   *  style (WMS FEATUREID) above everything else; the vector glow sits
+   *  underneath. Very large selections keep only the glow (URL length). */
+  private selectionWms: ImageLayer<ImageWMS> | null = null;
+  private selectionWmsLayerId: string | null = null;
+
+  setSelectionWms(layerId: string | null, featureIds: string[]): void {
+    if (!this.map) return;
+    const entry = layerId ? this.managedLayers.get(layerId) : undefined;
+    if (!entry || !featureIds.length || featureIds.length > 400) {
+      if (this.selectionWms) this.map.removeLayer(this.selectionWms);
+      this.selectionWms = null;
+      this.selectionWmsLayerId = null;
+      this.selectionLayer?.setVisible(true);
+      return;
+    }
+    // GeoServer draws the highlight; the browser copy only feeds tools.
+    this.selectionLayer?.setVisible(false);
+    const { layer } = entry;
+    const name = `${layer.geoserverWorkspace}:${layer.geoserverLayer}`;
+    const params = {
+      LAYERS: name,
+      TILED: false,
+      // Workspace-scoped endpoint: the SLD names the layer without its prefix.
+      SLD_BODY: selectionSld(layer.geoserverLayer, layer.geometryType),
+      FEATUREID: featureIds.join(',')
+    };
+    if (this.selectionWms && this.selectionWmsLayerId === layerId) {
+      this.selectionWms.getSource()?.setParams(params);
+      return;
+    }
+    if (this.selectionWms) this.map.removeLayer(this.selectionWms);
+    this.selectionWms = new ImageLayer({
+      source: new ImageWMS({
+        url: `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wms`,
+        params,
+        projection: MAP_PROJECTION,
+        ratio: 1
+      }),
+      zIndex: 9999,
+      properties: { selectionOverlay: true }
+    });
+    this.selectionWmsLayerId = layerId;
+    this.map.addLayer(this.selectionWms);
   }
 
   // ----- query builder: WMS filter, result highlight, draw -----
@@ -1919,20 +1990,21 @@ export class MapService {
 
   private ensureSelectionSource(): VectorSource {
     if (!this.selectionLayer) {
-      const accent = '#b5722a';
-      const stroke = new Stroke({ color: accent, width: 3 });
+      // Same cyan highlight GeoServer draws (selectionSld) — used when
+      // GeoServer can't draw it (search hit, very large selections).
       this.selectionLayer = new VectorLayer({
         source: new VectorSource(),
         style: new Style({
-          stroke,
-          fill: new Fill({ color: 'rgba(181, 114, 42, 0.16)' }),
+          stroke: new Stroke({ color: SELECTION_COLOR, width: 3 }),
+          fill: new Fill({ color: 'rgba(0, 229, 255, 0.15)' }),
           image: new CircleStyle({
             radius: 7,
-            stroke: new Stroke({ color: accent, width: 3 }),
-            fill: new Fill({ color: 'rgba(181, 114, 42, 0.35)' })
+            fill: new Fill({ color: 'rgba(0, 229, 255, 0.35)' }),
+            stroke: new Stroke({ color: SELECTION_COLOR, width: 2.5 })
           })
         }),
-        zIndex: 9999,
+        zIndex: 9998,
+        visible: !this.selectionWms,
         properties: { selectionOverlay: true }
       });
       this.map?.addLayer(this.selectionLayer);
