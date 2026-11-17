@@ -8,8 +8,8 @@
 .gis-ws {
   position: relative;
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
-  grid-template-rows: 100%;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   height: calc(100dvh - var(--app-header-h, 112px));
   overflow: hidden;
   background: var(--color-surface);
@@ -17,96 +17,338 @@
   color: var(--color-ink-900);
 }
 
-/* ---------- tool rail ---------- */
-.gis-ws__rail {
-  grid-column: 1;
+/* ---------- toolbar ----------
+   One slim bar above the map: Layers / Table, then a dropdown per tool
+   group (desktop-GIS menu bar) and a tool search on the right. */
+.gis-ws__bar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  position: relative;
+  z-index: 50;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  width: 52px;
-  background: var(--color-surface-alt);
-  border-right: 1px solid var(--color-line);
-  overflow: hidden;
+  gap: 4px;
+  height: 44px;
+  padding: 0 10px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-line);
 }
 
-/* The scrollable tool list — everything except the pinned Workspace
-   group below. Only this scrolls; the rail itself never does. */
-.gis-ws__rail-scroll {
+.gis-ws__bar-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+}
+
+.gis-ws__bar-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.gis-ws__bar-menus {
   flex: 1;
-  min-height: 0;
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 8px 0;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  /* With every tool granted the list outgrows short screens: fade the
-     bottom edge so a half-cut icon reads as "more below", and pad so the
-     last tool can scroll clear of the fade. */
-  padding-bottom: 24px;
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+  min-width: 0;
 }
 
-/* Always visible at the bottom of the rail, regardless of how tall the
-   scrollable tool list above grows. */
-.gis-ws__rail-pinned {
-  flex-shrink: 0;
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 0;
-  border-top: 1px solid var(--color-line);
+.gis-ws__bar-sep {
+  width: 1px;
+  height: 22px;
+  margin: 0 6px;
+  background: var(--color-line);
 }
 
-.gis-ws__rail-group {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  width: 100%;
-  padding-bottom: 8px;
+.gis-ws__bar-menu {
+  position: relative;
+
+  &.is-end {
+    margin-left: auto;
+  }
 }
 
-.gis-ws__rail-group + .gis-ws__rail-group {
-  border-top: 1px solid var(--color-line);
-  padding-top: 8px;
-}
-
-.gis-ws__rail-btn {
+.gis-ws__bar-btn {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  border: 1px solid transparent;
+  gap: 7px;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
   border-radius: var(--radius-md);
   background: transparent;
-  color: var(--color-ink-500);
+  color: var(--color-ink-700, var(--color-ink-900));
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  transition: background 0.12s ease, color 0.12s ease;
 
-  i {
-    font-size: 16px;
+  > i:first-child {
+    font-size: 14px;
+    color: var(--color-ink-500);
   }
 
-  &:hover:not(:disabled) {
-    background: var(--color-surface);
+  &:hover,
+  &.is-open {
+    background: var(--color-surface-alt);
     color: var(--color-ink-900);
   }
 
-  &.is-active {
-    background: var(--color-primary-600);
-    border-color: var(--color-primary-600);
-    color: #fff;
+  &:focus-visible {
+    outline: 2px solid var(--color-primary-600);
+    outline-offset: -2px;
   }
+
+  &.is-active,
+  &.has-active {
+    color: var(--color-primary-600);
+
+    > i:first-child {
+      color: var(--color-primary-600);
+    }
+  }
+
+  &.is-active {
+    background: color-mix(in srgb, var(--color-primary-600) 10%, var(--color-surface));
+  }
+}
+
+.gis-ws__bar-caret {
+  font-size: 9px;
+  opacity: 0.6;
+}
+
+.gis-ws__bar-search {
+  position: relative;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+.gis-ws__bar-search-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 230px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  color: var(--color-ink-500);
+
+  &:focus-within {
+    border-color: var(--color-primary-600);
+    background: var(--color-surface);
+  }
+
+  i {
+    font-size: 12px;
+  }
+
+  input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    font: inherit;
+    font-size: 12.5px;
+    color: var(--color-ink-900);
+  }
+}
+
+.gis-ws__dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  max-height: min(480px, calc(100dvh - 200px));
+  padding: 5px;
+  overflow-y: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14), 0 2px 6px rgba(15, 23, 42, 0.06);
+  animation: gis-ws-drop 0.1s ease-out;
+
+  &--end {
+    left: auto;
+    right: 0;
+  }
+}
+
+.gis-ws__bar-menu.is-end .gis-ws__dropdown {
+  left: auto;
+  right: 0;
+}
+
+@keyframes gis-ws-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.gis-ws__dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 44px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-ink-900);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+
+  > i:first-child {
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
+    background: var(--color-surface-alt);
+    font-size: 14px;
+    color: var(--color-ink-500);
+  }
+
+  &:hover > i:first-child,
+  &:focus-visible > i:first-child {
+    background: var(--color-surface);
+    color: var(--color-primary-600);
+  }
+
+  &:hover,
+  &:focus-visible {
+    outline: 0;
+    background: var(--color-surface-alt);
+  }
+
+  &.is-active {
+    .gis-ws__dropdown-label {
+      color: var(--color-primary-600);
+      font-weight: 600;
+    }
+
+    > i:first-child {
+      background: color-mix(in srgb, var(--color-primary-600) 12%, var(--color-surface));
+      color: var(--color-primary-600);
+    }
+  }
+}
+
+.gis-ws__dropdown-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.gis-ws__dropdown-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink-900);
+}
+
+.gis-ws__dropdown-hint {
+  overflow: hidden;
+  font-size: 11.5px;
+  color: var(--color-ink-500);
+  text-overflow: ellipsis;
+}
+
+.gis-ws__dropdown {
+  min-width: 290px;
+}
+
+.gis-ws__dropdown--wide {
+  width: max-content;
+  max-width: min(980px, calc(100vw - 40px));
+}
+
+.gis-ws__dropdown--search {
+  width: 300px;
+}
+
+.gis-ws__dropdown-head {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 2px 4px 6px;
+  padding: 6px 6px 8px;
+  border-bottom: 1px solid var(--color-line);
+
+  span:first-child {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-ink-900);
+  }
+
+  span:last-child {
+    font-size: 11.5px;
+    color: var(--color-ink-500);
+  }
+}
+
+.gis-ws__dropdown-cols {
+  display: grid;
+  gap: 4px 8px;
+
+  .gis-ws__dropdown-item {
+    width: 260px;
+  }
+}
+
+.gis-ws__dropdown-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.gis-ws__dropdown-section {
+  padding: 6px 10px 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-500);
+}
+
+.gis-ws__kbd {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  background: var(--color-surface);
+  font-family: inherit;
+  font-size: 10px;
+  color: var(--color-ink-500);
+}
+
+.gis-ws__dropdown-check {
+  font-size: 11px;
+}
+
+.gis-ws__dropdown-empty {
+  margin: 8px 10px;
+  font-size: 12.5px;
+  color: var(--color-ink-500);
+  white-space: nowrap;
 }
 
 /* ---------- left dock ---------- */
 .gis-ws__left {
-  grid-column: 2;
+  grid-column: 1;
+  grid-row: 2;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -119,9 +361,9 @@
    column that squeezes it. */
 .gis-ws__left.is-floating:not(.is-collapsed) {
   position: absolute;
-  top: 12px;
+  top: 56px;
   bottom: 12px;
-  left: 64px;
+  left: 12px;
   z-index: 30;
   border: 1px solid var(--color-line);
   border-radius: var(--radius-md);
@@ -239,7 +481,8 @@
 
 /* ---------- stage ---------- */
 .gis-ws__stage {
-  grid-column: 3;
+  grid-column: 2;
+  grid-row: 2;
   min-width: 0;
   display: grid;
   grid-template-columns: 100%;
@@ -720,20 +963,63 @@
 /* ---------- responsive ---------- */
 @media (max-width: 900px) {
   .gis-ws {
-    grid-template-columns: 52px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Menus scroll sideways; labels drop to save room. */
+  .gis-ws__bar {
+    padding: 0 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .gis-ws__bar-btn span,
+  .gis-ws__bar-caret {
+    display: none;
+  }
+
+  .gis-ws__bar-search-box {
+    width: 130px;
+  }
+
+  .gis-ws__kbd {
+    display: none;
+  }
+
+  .gis-ws__dropdown-cols {
+    grid-template-columns: minmax(0, 1fr) !important;
+
+    .gis-ws__dropdown-item {
+      width: 100%;
+    }
+  }
+
+  .gis-ws__dropdown,
+  .gis-ws__dropdown--wide,
+  .gis-ws__dropdown--search {
+    width: auto;
+    max-width: none;
+  }
+
+  .gis-ws__dropdown {
+    position: fixed;
+    top: auto;
+    left: 8px !important;
+    right: 8px !important;
+    margin-top: 6px;
   }
 
   .gis-ws__stage {
-    grid-column: 2;
+    grid-column: 1;
   }
 
   .gis-ws__left {
     position: absolute;
-    top: 0;
+    top: 44px;
     bottom: 0;
-    left: 52px;
+    left: 0;
     z-index: 30;
-    width: min(340px, calc(100% - 52px)) !important;
+    width: min(340px, 100%) !important;
     box-shadow: 8px 0 28px -10px rgba(16, 34, 31, 0.28);
   }
 

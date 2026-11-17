@@ -5,44 +5,113 @@
   [class.gis-ws--left-open]="activeLeftTool()"
   [class.gis-ws--bottom-open]="activeBottomTool()"
 >
-  <!-- ============ tool rail ============ -->
-  <nav class="gis-ws__rail" aria-label="GIS tools">
-    <div class="gis-ws__rail-scroll">
-      @for (group of toolsByGroup(); track group.id) {
-        <div class="gis-ws__rail-group" role="group" [attr.aria-label]="group.label">
-          @for (tool of group.tools; track tool.id) {
-            <button
-              type="button"
-              class="gis-ws__rail-btn"
-              [class.is-active]="isToolActive(tool)"
-              [pTooltip]="tool.label"
-              tooltipPosition="right"
-              [attr.aria-pressed]="isToolActive(tool)"
-              (click)="activateTool(tool)"
-            >
-              <i [class]="tool.icon" aria-hidden="true"></i>
-            </button>
+  <!-- ============ toolbar ============ -->
+  <nav class="gis-ws__bar" aria-label="GIS tools">
+    @if (openMenu()) { <div class="gis-ws__bar-backdrop" (click)="closeMenu()" aria-hidden="true"></div> }
+
+    <div class="gis-ws__bar-group">
+      @for (tool of primaryTools(); track tool.id) {
+        <button type="button" class="gis-ws__bar-btn" [class.is-active]="isToolActive(tool)" [attr.aria-pressed]="isToolActive(tool)"
+                (click)="closeMenu(); activateTool(tool)">
+          <i [class]="tool.icon" aria-hidden="true"></i>
+          <span>{{ tool.id === 'attributes' ? 'Table' : tool.label }}</span>
+        </button>
+      }
+    </div>
+
+    <span class="gis-ws__bar-sep" aria-hidden="true"></span>
+
+    <div class="gis-ws__bar-group gis-ws__bar-menus" role="menubar">
+      @for (group of menuGroups(); track group.id) {
+        <div class="gis-ws__bar-menu" [class.is-end]="group.id === 'admin'" (keydown)="onMenuKeydown($event)">
+          <button type="button" class="gis-ws__bar-btn" role="menuitem" aria-haspopup="menu"
+                  [class.is-open]="openMenu() === group.id" [class.has-active]="isGroupActive(group)"
+                  [attr.aria-expanded]="openMenu() === group.id" (click)="toggleMenu(group.id)" (mouseenter)="hoverMenu(group.id)">
+            <i [class]="group.icon" aria-hidden="true"></i>
+            <span>{{ group.label }}</span>
+            <i class="pi pi-chevron-down gis-ws__bar-caret" aria-hidden="true"></i>
+          </button>
+          @if (openMenu() === group.id) {
+            <div class="gis-ws__dropdown" [class.gis-ws__dropdown--wide]="group.sections" role="menu" [attr.aria-label]="group.label">
+              <div class="gis-ws__dropdown-head">
+                <span>{{ group.label }}</span>
+                <span>{{ group.hint }}</span>
+              </div>
+              @if (group.sections; as sections) {
+                <div class="gis-ws__dropdown-cols" [style.grid-template-columns]="'repeat(' + sections.length + ', minmax(0, 1fr))'">
+                  @for (sec of sections; track sec.name) {
+                    <div class="gis-ws__dropdown-col">
+                      <span class="gis-ws__dropdown-section">{{ sec.name }}</span>
+                      @for (tool of sec.tools; track tool.id) {
+                    <button type="button" role="menuitem" class="gis-ws__dropdown-item" [class.is-active]="isToolActive(tool)" (click)="pickTool(tool)">
+                      <i [class]="tool.icon" aria-hidden="true"></i>
+                      <span class="gis-ws__dropdown-text">
+                        <span class="gis-ws__dropdown-label">{{ tool.label }}</span>
+                        @if (toolHint(tool)) { <span class="gis-ws__dropdown-hint">{{ toolHint(tool) }}</span> }
+                      </span>
+                      @if (isToolActive(tool)) { <i class="pi pi-check gis-ws__dropdown-check" aria-hidden="true"></i> }
+                    </button>
+                      }
+                    </div>
+                  }
+                </div>
+              } @else {
+                @for (tool of group.tools; track tool.id) {
+                    <button type="button" role="menuitem" class="gis-ws__dropdown-item" [class.is-active]="isToolActive(tool)" (click)="pickTool(tool)">
+                      <i [class]="tool.icon" aria-hidden="true"></i>
+                      <span class="gis-ws__dropdown-text">
+                        <span class="gis-ws__dropdown-label">{{ tool.label }}</span>
+                        @if (toolHint(tool)) { <span class="gis-ws__dropdown-hint">{{ toolHint(tool) }}</span> }
+                      </span>
+                      @if (isToolActive(tool)) { <i class="pi pi-check gis-ws__dropdown-check" aria-hidden="true"></i> }
+                    </button>
+                }
+              }
+            </div>
           }
         </div>
       }
     </div>
 
-    <!-- Always visible, never scrolls away — workspace-level actions
-         (Workspace Details, and any future ones) are pinned to the
-         bottom of the rail regardless of how many tools are above. -->
-    <div class="gis-ws__rail-pinned" role="group" [attr.aria-label]="pinnedToolGroup().label">
-      @for (tool of pinnedToolGroup().tools; track tool.id) {
-        <button
-          type="button"
-          class="gis-ws__rail-btn"
-          [class.is-active]="isToolActive(tool)"
-          [pTooltip]="tool.label"
-          tooltipPosition="right"
-          [attr.aria-pressed]="isToolActive(tool)"
-          (click)="activateTool(tool)"
-        >
-          <i [class]="tool.icon" aria-hidden="true"></i>
-        </button>
+    <div class="gis-ws__bar-search" (keydown)="onMenuKeydown($event)">
+      <label class="gis-ws__bar-search-box">
+        <i class="pi pi-search" aria-hidden="true"></i>
+        <input #toolSearch type="search" placeholder="Find a tool…" aria-label="Find a tool" [value]="menuQuery()"
+               (input)="onToolSearch($any($event.target).value)" (focus)="onSearchFocus()"
+               (keydown.enter)="menuResults()[0] && pickTool(menuResults()[0])" />
+        <kbd class="gis-ws__kbd" aria-hidden="true">Ctrl K</kbd>
+      </label>
+      @if (openMenu() === 'search') {
+        <div class="gis-ws__dropdown gis-ws__dropdown--end gis-ws__dropdown--search" role="menu" aria-label="Tools">
+          @if (menuQuery().trim()) {
+            @for (tool of menuResults(); track tool.id) {
+                    <button type="button" role="menuitem" class="gis-ws__dropdown-item" [class.is-active]="isToolActive(tool)" (click)="pickTool(tool)">
+                      <i [class]="tool.icon" aria-hidden="true"></i>
+                      <span class="gis-ws__dropdown-text">
+                        <span class="gis-ws__dropdown-label">{{ tool.label }}</span>
+                        @if (toolHint(tool)) { <span class="gis-ws__dropdown-hint">{{ toolHint(tool) }}</span> }
+                      </span>
+                      @if (isToolActive(tool)) { <i class="pi pi-check gis-ws__dropdown-check" aria-hidden="true"></i> }
+                    </button>
+            } @empty {
+              <p class="gis-ws__dropdown-empty">No tool matches “{{ menuQuery() }}”.</p>
+            }
+          } @else if (recentTools().length) {
+            <span class="gis-ws__dropdown-section">Recent</span>
+            @for (tool of recentTools(); track tool.id) {
+                    <button type="button" role="menuitem" class="gis-ws__dropdown-item" [class.is-active]="isToolActive(tool)" (click)="pickTool(tool)">
+                      <i [class]="tool.icon" aria-hidden="true"></i>
+                      <span class="gis-ws__dropdown-text">
+                        <span class="gis-ws__dropdown-label">{{ tool.label }}</span>
+                        @if (toolHint(tool)) { <span class="gis-ws__dropdown-hint">{{ toolHint(tool) }}</span> }
+                      </span>
+                      @if (isToolActive(tool)) { <i class="pi pi-check gis-ws__dropdown-check" aria-hidden="true"></i> }
+                    </button>
+            }
+          } @else {
+            <p class="gis-ws__dropdown-empty">Type to search all tools.</p>
+          }
+        </div>
       }
     </div>
   </nav>

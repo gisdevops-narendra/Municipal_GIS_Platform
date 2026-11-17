@@ -5,7 +5,7 @@ import { RasterService } from './services/raster.service';
 /** Raster Analysis → Raster Styling (seed-modules.ts). */
 const RASTER_STYLE_MODULE_ID = 912;
 import { SettingsService } from '../../core/services/settings.service';
-import { Component, WritableSignal, computed, effect, inject, signal, viewChild } from '@angular/core';
+import { Component, ElementRef, HostListener, WritableSignal, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
@@ -131,6 +131,57 @@ const GROUP_ORDER: { id: WsToolGroup; label: string }[] = [
   { id: 'output', label: 'Output' },
   { id: 'admin', label: 'Workspace' }
 ];
+
+/** Rail icon + one-line hint for each tool group's menu. */
+const GROUP_META: Record<WsToolGroup, { icon: string; hint: string }> = {
+  data: { icon: 'pi pi-database', hint: 'Add, download and browse data' },
+  explore: { icon: 'pi pi-compass', hint: 'Look up places and live information' },
+  analysis: { icon: 'pi pi-chart-line', hint: 'Measure, query and analyse' },
+  output: { icon: 'pi pi-file-export', hint: 'Print, report, export and share' },
+  admin: { icon: 'pi pi-cog', hint: 'Workspace settings and limits' }
+};
+
+/** One-line description and (for big groups) a menu section per tool. */
+const TOOL_INFO: Record<string, { hint: string; section?: string }> = {
+  layers: { hint: 'Turn layers on, style and order them' },
+  attributes: { hint: 'Browse and edit feature records' },
+  'add-service': { hint: 'Add WMS, WMTS, XYZ, ArcGIS or WFS layers' },
+  'osm-import': { hint: 'Download OpenStreetMap features as a layer' },
+  catalog: { hint: 'Search all layers with their metadata' },
+  'whats-here': { hint: 'Address and areas at any point', section: 'Look up' },
+  bookmarks: { hint: 'Save and jump to map views', section: 'Look up' },
+  assistant: { hint: 'Ask questions about your data', section: 'Look up' },
+  weather: { hint: 'Forecast, radar, air and river levels', section: 'Live data' },
+  'air-stations': { hint: 'Live AQI, city ranking and trends', section: 'Live data' },
+  hazards: { hint: 'Earthquakes and disaster alerts', section: 'Live data' },
+  sensors: { hint: 'Live readings from sensor feeds', section: 'Live data' },
+  tourism: { hint: 'Attractions, trails and city guide', section: 'Places' },
+  'buildings-3d': { hint: 'Extruded buildings on the 3D globe', section: 'Places' },
+  query: { hint: 'Filter features by attributes', section: 'Measure & query' },
+  measure: { hint: 'Distance, area and coordinates', section: 'Measure & query' },
+  statistics: { hint: 'Summaries and charts of any field', section: 'Measure & query' },
+  heatmap: { hint: 'Density heatmaps and clusters', section: 'Measure & query' },
+  buffer: { hint: 'Buffers, intersect, union, clip', section: 'Geoprocessing' },
+  geoprocessing: { hint: 'Dissolve, merge and spatial joins', section: 'Geoprocessing' },
+  data: { hint: 'Fields, joins and data cleanup', section: 'Geoprocessing' },
+  sketch: { hint: 'Draw shapes and markers on the map', section: 'Geoprocessing' },
+  advanced: { hint: 'Routing, service areas and more', section: 'Geoprocessing' },
+  raster: { hint: 'Terrain, indices and raster maths', section: 'Geoprocessing' },
+  'network-planning': { hint: 'Fleet routes, OD matrix, site selection', section: 'Planning' },
+  'ev-charging': { hint: 'Charger coverage and gaps', section: 'Planning' },
+  groundwater: { hint: 'Well levels and trends', section: 'Planning' },
+  outbreak: { hint: 'Disease cases, clusters and zones', section: 'Planning' },
+  print: { hint: 'Map layout to PDF or image' },
+  reports: { hint: 'Ready-made reports from your data' },
+  export: { hint: 'Download layers in many formats' },
+  share: { hint: 'Public link to a map view' },
+  storage: { hint: 'Space used and limits' },
+  integrations: { hint: 'API keys and webhooks' },
+  workspace: { hint: 'Workspace name, members and settings' }
+};
+
+/** Shown directly on the rail — everything else lives in group menus. */
+const PRIMARY_TOOL_IDS = ['layers', 'attributes'];
 
 /** moduleId values are Module Access catalog ids (see
  *  backend/prisma/seed-modules.ts) — Layer Switcher=1, Query Module=2,
@@ -312,36 +363,129 @@ export class GisWorkspaceComponent {
 
   // ----- dock state -----
   readonly groups = GROUP_ORDER;
-  /** Every tool group except 'admin' — rendered in the rail's scrollable
-   *  area. 'admin' (Workspace Details, and any future workspace-level
-   *  action) is rendered separately, pinned to the bottom of the rail —
-   *  see pinnedToolGroup — so it's always reachable without scrolling
-   *  even as the tool list above it grows toward the 100+ tools this
-   *  rail is designed to scale to. Not-yet-shipped tools (`available:
-   *  false`) are left out of the rail entirely rather than shown
-   *  disabled — flip a tool to `available: true` in TOOLS to have it
-   *  appear. A tool the caller has no Module Access to is left out the
-   *  same way — see hasModuleAccess. */
-  readonly toolsByGroup = computed(() =>
-    GROUP_ORDER.filter((group) => group.id !== 'admin')
-      .map((group) => ({
-        ...group,
-        tools: TOOLS.filter(
-          (tool) => tool.group === group.id && tool.available && this.hasModuleAccess(tool)
-        )
-      }))
-      .filter((group) => group.tools.length > 0)
+  // Not-yet-shipped tools (`available: false`) and tools the caller has
+  // no Module Access to (see hasModuleAccess) never appear on the rail.
+
+  // ----- rail menus -----
+  private readonly visibleToolList = computed(() => TOOLS.filter((t) => t.available && this.hasModuleAccess(t)));
+  readonly primaryTools = computed(() =>
+    PRIMARY_TOOL_IDS.map((id) => this.visibleToolList().find((t) => t.id === id)).filter((t): t is WsTool => !!t)
+  );
+  readonly menuGroups = computed(() =>
+    GROUP_ORDER.map((g) => ({
+      ...g,
+      ...GROUP_META[g.id],
+      tools: this.visibleToolList().filter((t) => t.group === g.id && !PRIMARY_TOOL_IDS.includes(t.id))
+    }))
+      .filter((g) => g.tools.length > 0)
+      .map((g) => {
+        // Big groups become a wide menu with one column per section.
+        const names = [...new Set(g.tools.map((t) => TOOL_INFO[t.id]?.section ?? 'More'))];
+        const sections = names.map((name) => ({ name, tools: g.tools.filter((t) => (TOOL_INFO[t.id]?.section ?? 'More') === name) }));
+        return { ...g, sections: g.tools.length > 6 && sections.length > 1 ? sections : null };
+      })
   );
 
-  readonly pinnedToolGroup = computed(() => {
-    const group = GROUP_ORDER.find((g) => g.id === 'admin')!;
-    return {
-      ...group,
-      tools: TOOLS.filter(
-        (tool) => tool.group === 'admin' && tool.available && this.hasModuleAccess(tool)
-      )
-    };
+  toolHint = (tool: WsTool) => TOOL_INFO[tool.id]?.hint ?? '';
+
+  /** Last few tools opened, newest first — shown when the search box is focused. */
+  readonly recentToolIds = signal<string[]>(this.readRecent());
+  readonly recentTools = computed(() =>
+    this.recentToolIds()
+      .map((id) => this.visibleToolList().find((t) => t.id === id))
+      .filter((t): t is WsTool => !!t)
+      .slice(0, 5)
+  );
+
+  private readRecent(): string[] {
+    try {
+      const v = JSON.parse(localStorage.getItem('gis.recentTools') ?? '[]');
+      return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private rememberRecent(id: string): void {
+    const next = [id, ...this.recentToolIds().filter((x) => x !== id)].slice(0, 8);
+    this.recentToolIds.set(next);
+    try {
+      localStorage.setItem('gis.recentTools', JSON.stringify(next));
+    } catch {
+      /* private mode */
+    }
+  }
+
+  private readonly toolSearchInput = viewChild<ElementRef<HTMLInputElement>>('toolSearch');
+
+  /** Ctrl/Cmd + K jumps to the tool search. */
+  @HostListener('document:keydown', ['$event'])
+  onShortcut(event: KeyboardEvent): void {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+      event.preventDefault();
+      this.toolSearchInput()?.nativeElement.focus();
+    }
+  }
+
+  onSearchFocus(): void {
+    this.openMenu.set('search');
+  }
+
+  /** Arrow keys move between items of an open dropdown. */
+  onMenuKeydown(event: KeyboardEvent): void {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    const root = (event.currentTarget as HTMLElement).closest('.gis-ws__bar-menu, .gis-ws__bar-search');
+    const items = Array.from(root?.querySelectorAll<HTMLButtonElement>('.gis-ws__dropdown-item') ?? []);
+    if (!items.length) return;
+    event.preventDefault();
+    const i = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next = event.key === 'ArrowDown' ? (i + 1) % items.length : (i <= 0 ? items.length - 1 : i - 1);
+    items[next].focus();
+  }
+  /** Which toolbar dropdown is open ('search' = the tool-search results). */
+  readonly openMenu = signal<WsToolGroup | 'search' | null>(null);
+  readonly menuQuery = signal('');
+  readonly openMenuGroup = computed(() => this.menuGroups().find((g) => g.id === this.openMenu()) ?? null);
+  /** Searching looks through every tool. */
+  readonly menuResults = computed(() => {
+    const q = this.menuQuery().trim().toLowerCase();
+    if (!q) return [];
+    return this.visibleToolList().filter((t) => t.label.toLowerCase().includes(q));
   });
+
+  toggleMenu(id: WsToolGroup): void {
+    this.openMenu.update((cur) => (cur === id ? null : id));
+  }
+
+  /** Menu-bar behaviour: with one dropdown open, hovering another opens it. */
+  hoverMenu(id: WsToolGroup): void {
+    if (this.openMenu() && this.openMenu() !== 'search' && this.openMenu() !== id) this.openMenu.set(id);
+  }
+
+  onToolSearch(value: string): void {
+    this.menuQuery.set(value);
+    this.openMenu.set('search');
+  }
+
+  closeMenu(): void {
+    this.openMenu.set(null);
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscape(): void {
+    if (this.openMenu()) this.closeMenu();
+  }
+
+  pickTool(tool: WsTool): void {
+    if (!this.isToolActive(tool)) this.activateTool(tool);
+    this.closeMenu();
+    this.menuQuery.set('');
+    this.toolSearchInput()?.nativeElement.blur();
+  }
+
+  isGroupActive(group: { tools: WsTool[] }): boolean {
+    return group.tools.some((t) => this.isToolActive(t));
+  }
 
   readonly leftTool = signal<string | null>('layers');
   readonly bottomTool = signal<string | null>(null);
@@ -537,6 +681,7 @@ export class GisWorkspaceComponent {
 
   // ----- dock actions -----
   activateTool(tool: WsTool): void {
+    this.rememberRecent(tool.id);
     if (tool.dock === 'left') {
       this.leftTool.update((current) => (current === tool.id ? null : tool.id));
       if (this.leftTool() === tool.id) {
