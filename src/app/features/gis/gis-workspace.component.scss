@@ -704,6 +704,211 @@
   }
 }
 
+/* Quick-start card (no panel open). */
+.gis-ws__quick {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 8;
+  width: 236px;
+  max-width: calc(100% - 90px);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+  animation: gis-ws-drop 0.12s ease-out;
+}
+
+.gis-ws__quick-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--color-line);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-ink-900);
+}
+
+.gis-ws__quick-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 8px;
+}
+
+.gis-ws__quick-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-ink-900);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+
+  .pi {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: var(--color-surface-alt);
+    font-size: 14px;
+    color: var(--color-primary-600);
+  }
+
+  span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &:hover {
+    background: var(--color-surface-alt);
+
+    .pi {
+      background: var(--color-surface);
+    }
+  }
+}
+
+/* Centre crosshair + live coordinates. */
+.gis-ws__crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 7;
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--color-ink-900), var(--color-ink-900)) center / 1.5px 100% no-repeat,
+    linear-gradient(var(--color-ink-900), var(--color-ink-900)) center / 100% 1.5px no-repeat;
+  filter: drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 1px #fff);
+}
+
+.gis-ws__crosshair-label {
+  position: absolute;
+  top: calc(50% + 22px);
+  left: 50%;
+  z-index: 7;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  transform: translateX(-50%);
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-surface) 92%, transparent);
+  box-shadow: var(--shadow-panel);
+  color: var(--color-ink-900);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+
+  .pi {
+    font-size: 10px;
+    color: var(--color-ink-500);
+  }
+
+  &:hover .pi {
+    color: var(--color-primary-600);
+  }
+}
+
+.gis-ws__selbar {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: calc(100% - 24px);
+  padding: 4px;
+  transform: translateX(-50%);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16), 0 2px 6px rgba(15, 23, 42, 0.08);
+  overflow-x: auto;
+  scrollbar-width: none;
+  animation: gis-ws-selbar-in 0.14s ease-out;
+}
+
+@keyframes gis-ws-selbar-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+}
+
+.gis-ws__selbar-count {
+  padding: 0 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-primary-600);
+  white-space: nowrap;
+}
+
+.gis-ws__selbar-sep {
+  align-self: stretch;
+  width: 1px;
+  margin: 4px 2px;
+  background: var(--color-line);
+}
+
+.gis-ws__selbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-ink-900);
+  font: inherit;
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+
+  .pi {
+    font-size: 12px;
+    color: var(--color-ink-500);
+  }
+
+  &:hover {
+    background: var(--color-surface-alt);
+
+    .pi {
+      color: var(--color-primary-600);
+    }
+  }
+
+  &.is-icon {
+    width: 30px;
+    padding: 0;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 640px) {
+  .gis-ws__selbar-btn span {
+    display: none;
+  }
+}
+
 .gis-ws__map {
   position: relative;
   min-height: 0;

@@ -543,8 +543,35 @@ export class GisWorkspaceComponent {
   readonly bottomTool = signal<string | null>(null);
   readonly leftWidth = signal(300);
   /** Raster Analysis needs room for its category rail + tool list. */
+  /** Width each tool was last given (drag or double-click snap). */
+  readonly toolWidths = signal<Record<string, number>>(this.readToolWidths());
+
+  private readToolWidths(): Record<string, number> {
+    try {
+      const v = JSON.parse(localStorage.getItem('gis.toolWidths') ?? '{}');
+      if (!v || typeof v !== 'object') return {};
+      return Object.fromEntries(
+        Object.entries(v).filter((e): e is [string, number] => typeof e[1] === 'number' && e[1] >= 240 && e[1] <= 560)
+      );
+    } catch {
+      return {};
+    }
+  }
+
+  private setToolWidth(tool: string, width: number): void {
+    this.toolWidths.update((m) => ({ ...m, [tool]: width }));
+    try {
+      localStorage.setItem('gis.toolWidths', JSON.stringify(this.toolWidths()));
+    } catch {
+      /* private mode */
+    }
+  }
+
   readonly leftPanelWidth = computed(() => {
     const tool = this.leftTool();
+    if (tool === 'assistant' && this.assistantPanelMode() === 'floating') return 400;
+    const saved = tool ? this.toolWidths()[tool] : undefined;
+    if (saved) return saved;
     if (tool === 'raster') return Math.max(this.leftWidth(), 420);
     if (tool === 'catalog') return Math.max(this.leftWidth(), 380);
     if (tool === 'assistant' && this.assistantPanelMode() === 'wide') return Math.max(this.leftWidth(), 520);
@@ -706,6 +733,82 @@ export class GisWorkspaceComponent {
   // ----- status bar -----
   cycleCoordFormat(): void {
     this.coordFormat.update((format) => (format === 'dd' ? 'dms' : format === 'dms' ? 'crs' : 'dd'));
+  }
+
+  // ----- quick-start card (shown when no panel is open) -----
+  readonly quickStartHidden = signal(this.readQuickStartHidden());
+  readonly quickStartTools = computed(() =>
+    ['layers', 'add-service', 'measure', 'query', 'print']
+      .map((id) => this.visibleToolList().find((t) => t.id === id))
+      .filter((t): t is WsTool => !!t)
+  );
+  readonly showQuickStart = computed(
+    () =>
+      !this.quickStartHidden() &&
+      this.layersReady() &&
+      !this.focusMode() &&
+      !this.activeLeftTool() &&
+      !this.activeBottomTool() &&
+      !this.styleTargetLayer() &&
+      !(this.layersDock() === 'right' && this.rightOpen())
+  );
+
+  private readQuickStartHidden(): boolean {
+    try {
+      return localStorage.getItem('gis.quickStartHidden') === '1';
+    } catch {
+      return false;
+    }
+  }
+
+  setQuickStartHidden(hidden: boolean): void {
+    this.quickStartHidden.set(hidden);
+    try {
+      localStorage.setItem('gis.quickStartHidden', hidden ? '1' : '0');
+    } catch {
+      /* private mode */
+    }
+    this.closeMenu();
+  }
+
+  focusMapSearch(): void {
+    document.querySelector<HTMLInputElement>('.gis-ws__place-search input')?.focus();
+  }
+
+  // ----- centre crosshair -----
+  readonly crosshair = signal(this.readCrosshair());
+  readonly crosshairText = computed(() => {
+    this.mapService.centerRevision();
+    this.coordFormat();
+    this.workspace();
+    return this.mapService.centerText() ?? '';
+  });
+
+  private readCrosshair(): boolean {
+    try {
+      return localStorage.getItem('gis.crosshair') === '1';
+    } catch {
+      return false;
+    }
+  }
+
+  toggleCrosshair(): void {
+    this.crosshair.update((v) => !v);
+    try {
+      localStorage.setItem('gis.crosshair', this.crosshair() ? '1' : '0');
+    } catch {
+      /* private mode */
+    }
+    this.closeMenu();
+  }
+
+  copyCenterCoords(): void {
+    const text = this.mapService.centerText();
+    if (!text) return;
+    navigator.clipboard?.writeText(text).then(
+      () => this.notify.success(`Copied ${text}`, 'Map centre'),
+      () => this.notify.error('Could not copy to the clipboard.')
+    );
   }
 
   copyCursorCoords(): void {
@@ -898,6 +1001,12 @@ export class GisWorkspaceComponent {
     this.leftWidth.set(300);
     this.bottomHeight.set(240);
     this.rightWidth.set(300);
+    this.toolWidths.set({});
+    try {
+      localStorage.removeItem('gis.toolWidths');
+    } catch {
+      /* private mode */
+    }
     this.refreshMapSize();
   }
 
@@ -1171,9 +1280,30 @@ export class GisWorkspaceComponent {
   startLeftResize(event: PointerEvent): void {
     event.preventDefault();
     const startX = event.clientX;
-    const startW = this.leftPanelWidth();
-    const move = (e: PointerEvent) => this.leftWidth.set(Math.min(560, Math.max(240, startW + (e.clientX - startX))));
+    // The style editor uses the shared width; a tool panel its own.
+    const tool = this.styleTargetLayer() ? null : this.leftTool();
+    const startW = tool ? this.leftPanelWidth() : this.leftWidth();
+    const move = (e: PointerEvent) => {
+      const w = Math.min(560, Math.max(240, startW + (e.clientX - startX)));
+      if (tool) this.setToolWidth(tool, w);
+      else this.leftWidth.set(w);
+    };
     this.dragUntilRelease(move);
+  }
+
+  /** Double-click on the resize edge: compact (300) ⇄ wide (480). */
+  snapLeftWidth(): void {
+    const tool = this.styleTargetLayer() ? null : this.leftTool();
+    const current = tool ? this.leftPanelWidth() : this.leftWidth();
+    const next = current < 390 ? 480 : 300;
+    if (tool) this.setToolWidth(tool, next);
+    else this.leftWidth.set(next);
+    this.refreshMapSize();
+  }
+
+  snapRightWidth(): void {
+    this.rightWidth.set(this.rightWidth() < 390 ? 480 : 300);
+    this.refreshMapSize();
   }
 
   startBottomResize(event: PointerEvent): void {
@@ -1334,6 +1464,36 @@ export class GisWorkspaceComponent {
   private readonly attributeTable = viewChild(AttributeTableComponent);
   readonly selectingShape = computed(() => this.attributeTable()?.selectingShape() ?? null);
   readonly selectedCount = computed(() => this.attributeTable()?.selectedIds().size ?? 0);
+
+  // ----- floating selection bar -----
+  canUseTool = (id: string) => this.visibleToolList().some((t) => t.id === id);
+
+  selectionZoom(): void {
+    this.attributeTable()?.zoomToSelected();
+  }
+
+  /** Opens the attribute table showing only the selected records. */
+  selectionShowInTable(): void {
+    this.openPanel('attributes', 'bottom');
+    this.bottomMaximized.set(false);
+    const table = this.attributeTable();
+    if (table && !table.showSelectedOnly()) table.toggleShowSelected();
+    this.refreshMapSize();
+  }
+
+  /** Buffer & Overlay can take the current selection as its input. */
+  selectionBuffer(): void {
+    this.openPanel('buffer', 'left');
+    this.refreshMapSize();
+  }
+
+  /** The table's selection menu holds the export formats. */
+  selectionExport(): void {
+    this.openPanel('attributes', 'bottom');
+    // After this click finishes — the table closes its menu on outside clicks.
+    setTimeout(() => this.attributeTable()?.selectionMenuOpen.set(true));
+    this.refreshMapSize();
+  }
 
   onMapClearSelection(): void {
     const table = this.attributeTable();

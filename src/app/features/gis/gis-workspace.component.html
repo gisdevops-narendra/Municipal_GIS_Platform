@@ -152,6 +152,46 @@
               <span class="gis-ws__dropdown-hint">Move the Layers panel to the other side</span>
             </span>
           </button>
+          <button type="button" role="menuitemcheckbox" class="gis-ws__dropdown-item" [attr.aria-checked]="crosshair()" (click)="toggleCrosshair()">
+            <i class="pi pi-plus" aria-hidden="true"></i>
+            <span class="gis-ws__dropdown-text">
+              <span class="gis-ws__dropdown-label">Centre crosshair</span>
+              <span class="gis-ws__dropdown-hint">Coordinates of the map centre</span>
+            </span>
+            @if (showQuickStart() && (quickStartTools().length || canSearch())) {
+        <section class="gis-ws__quick" aria-label="Get started">
+          <header class="gis-ws__quick-head">
+            <span>Get started</span>
+            <button type="button" class="gis-ws__icon-btn" aria-label="Hide quick start" title="Hide (Layout menu brings it back)" (click)="setQuickStartHidden(true)">
+              <i class="pi pi-times" aria-hidden="true"></i>
+            </button>
+          </header>
+          <div class="gis-ws__quick-grid">
+            @if (canSearch()) {
+              <button type="button" class="gis-ws__quick-btn" (click)="focusMapSearch()">
+                <i class="pi pi-search" aria-hidden="true"></i><span>Search</span>
+              </button>
+            }
+            @for (tool of quickStartTools(); track tool.id) {
+              <button type="button" class="gis-ws__quick-btn" (click)="pickTool(tool)">
+                <i [class]="tool.icon" aria-hidden="true"></i><span>{{ tool.id === 'add-service' ? 'Add data' : tool.label }}</span>
+              </button>
+            }
+          </div>
+        </section>
+      }
+
+      @if (crosshair()) { <i class="pi pi-check gis-ws__dropdown-check" aria-hidden="true"></i> }
+          </button>
+          @if (quickStartHidden()) {
+            <button type="button" role="menuitem" class="gis-ws__dropdown-item" (click)="setQuickStartHidden(false)">
+              <i class="pi pi-bolt" aria-hidden="true"></i>
+              <span class="gis-ws__dropdown-text">
+                <span class="gis-ws__dropdown-label">Show quick start</span>
+                <span class="gis-ws__dropdown-hint">Shortcut card when no panel is open</span>
+              </span>
+            </button>
+          }
           <button type="button" role="menuitem" class="gis-ws__dropdown-item" (click)="resetPanelSizes()">
             <i class="pi pi-arrows-alt" aria-hidden="true"></i>
             <span class="gis-ws__dropdown-text">
@@ -201,7 +241,7 @@
           />
         }
       </div>
-      <div class="gis-ws__resize gis-ws__resize--x" (pointerdown)="startLeftResize($event)" title="Drag to resize"></div>
+      <div class="gis-ws__resize gis-ws__resize--x" (pointerdown)="startLeftResize($event)" (dblclick)="snapLeftWidth()" title="Drag to resize · double-click: compact / wide"></div>
     </aside>
   }
   <!-- The tool dock stays in the DOM even when closed or hidden behind the
@@ -582,7 +622,7 @@
         }
       </div>
 
-    <div class="gis-ws__resize gis-ws__resize--x" (pointerdown)="startLeftResize($event)" title="Drag to resize"></div>
+    <div class="gis-ws__resize gis-ws__resize--x" (pointerdown)="startLeftResize($event)" (dblclick)="snapLeftWidth()" title="Drag to resize · double-click: compact / wide"></div>
   </aside>
 
   <!-- ============ stage: map + bottom dock + status bar ============ -->
@@ -597,6 +637,39 @@
       />
       @if (canPickBasemap()) {
         <app-basemap-switcher />
+      }
+
+      @if (crosshair()) {
+        <div class="gis-ws__crosshair" aria-hidden="true"></div>
+        <button type="button" class="gis-ws__crosshair-label" title="Map centre — click to copy" (click)="copyCenterCoords()">
+          {{ crosshairText() }} <i class="pi pi-copy" aria-hidden="true"></i>
+        </button>
+      }
+
+      <!-- Floating actions for the current selection -->
+      @if (selectedCount() > 0 && !bottomMaximized()) {
+        <div class="gis-ws__selbar" role="toolbar" aria-label="Selection actions">
+          <span class="gis-ws__selbar-count">{{ selectedCount().toLocaleString() }} selected</span>
+          <span class="gis-ws__selbar-sep" aria-hidden="true"></span>
+          <button type="button" class="gis-ws__selbar-btn" (click)="selectionZoom()">
+            <i class="pi pi-search-plus" aria-hidden="true"></i><span>Zoom to</span>
+          </button>
+          <button type="button" class="gis-ws__selbar-btn" (click)="selectionShowInTable()">
+            <i class="pi pi-table" aria-hidden="true"></i><span>Table</span>
+          </button>
+          @if (canUseTool('buffer')) {
+            <button type="button" class="gis-ws__selbar-btn" (click)="selectionBuffer()">
+              <i class="pi pi-circle" aria-hidden="true"></i><span>Buffer</span>
+            </button>
+          }
+          <button type="button" class="gis-ws__selbar-btn" (click)="selectionExport()">
+            <i class="pi pi-download" aria-hidden="true"></i><span>Export</span>
+          </button>
+          <span class="gis-ws__selbar-sep" aria-hidden="true"></span>
+          <button type="button" class="gis-ws__selbar-btn is-icon" aria-label="Clear selection" title="Clear selection" (click)="onMapClearSelection()">
+            <i class="pi pi-times" aria-hidden="true"></i>
+          </button>
+        </div>
       }
       <app-map-controls
         [allowedModuleIds]="myModuleIds()"
@@ -737,7 +810,7 @@
   <!-- ============ right dock (Layers, when moved here) ============ -->
   @if (layersDock() === 'right' && rightOpen()) {
     <aside class="gis-ws__right" [style.width.px]="rightWidth()" aria-label="Layers">
-      <div class="gis-ws__resize gis-ws__resize--x-left" (pointerdown)="startRightResize($event)" title="Drag to resize"></div>
+      <div class="gis-ws__resize gis-ws__resize--x-left" (pointerdown)="startRightResize($event)" (dblclick)="snapRightWidth()" title="Drag to resize · double-click: compact / wide"></div>
       <header class="gis-ws__panel-head">
         <span class="gis-ws__panel-title">Layers</span>
         <span class="gis-ws__panel-actions">

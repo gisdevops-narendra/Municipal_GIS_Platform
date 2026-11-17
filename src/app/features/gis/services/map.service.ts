@@ -492,7 +492,12 @@ export class MapService {
 
     this.initialExtent3857 = this.computeInitialExtent(layers);
     this.resetNavHistory();
+    const initView = this.map.getView();
+    this.mapRotation.set(initView.getRotation());
+    initView.on('change:rotation', () => this.mapRotation.set(initView.getRotation()));
+    initView.on('change:center', () => this.centerRevision.update((n) => n + 1));
     this.map.on('moveend', () => {
+      this.mapRotation.set(this.map?.getView().getRotation() ?? 0);
       this.recordView();
       this.viewRevision.update((n) => n + 1);
       const zoom = this.map?.getView().getZoom();
@@ -722,9 +727,12 @@ export class MapService {
     this.envOverlays.clear();
     this.filledLayer = null;
     this.pinLayer = null;
+    this.infoPinLayer = null;
+    this.lastInfoCoordinate = null;
     this.globe?.destroy();
     this.globe = null;
     this.is3d.set(false);
+    this.mapRotation.set(0);
     this.cancelDraw();
     this.clearMeasure();
     this.map?.setTarget(undefined);
@@ -1965,7 +1973,7 @@ export class MapService {
 
   setIdentifyEnabled(enabled: boolean): void {
     this.identifyEnabled = enabled;
-    if (!enabled) this.featureInfoPopup.set(null);
+    if (!enabled) this.closeFeatureInfoPopup();
   }
 
   /** User's Identify toggle (map-controls button) — on by default; works
@@ -1974,7 +1982,7 @@ export class MapService {
 
   toggleIdentify(): void {
     this.identifyActive.update((on) => !on);
-    if (!this.identifyActive()) this.featureInfoPopup.set(null);
+    if (!this.identifyActive()) this.closeFeatureInfoPopup();
   }
 
   /** Pan module gate: turns map dragging (DragPan + keyboard pan) on/off. */
@@ -2026,9 +2034,66 @@ export class MapService {
     this.map.addOverlay(this.featurePopupOverlay);
   }
 
+  /** Feature info as a card docked on the map's right (true, default) or
+   *  the classic popup anchored at the clicked point. Remembered. */
+  readonly featureInfoDocked = signal(this.readInfoDocked());
+  private lastInfoCoordinate: number[] | null = null;
+  private infoPinLayer: VectorLayer<VectorSource> | null = null;
+
+  private readInfoDocked(): boolean {
+    try {
+      return localStorage.getItem('gis.infoDocked') !== '0';
+    } catch {
+      return true;
+    }
+  }
+
+  setFeatureInfoDocked(docked: boolean): void {
+    this.featureInfoDocked.set(docked);
+    try {
+      localStorage.setItem('gis.infoDocked', docked ? '1' : '0');
+    } catch {
+      /* private mode */
+    }
+    if (this.featureInfoPopup() && this.lastInfoCoordinate) this.placeFeatureInfo(this.lastInfoCoordinate);
+  }
+
+  /** Popup mode: anchor the overlay. Docked mode: a pin marks the point. */
+  private placeFeatureInfo(coordinate: number[]): void {
+    this.lastInfoCoordinate = coordinate;
+    if (this.featureInfoDocked()) {
+      this.featurePopupOverlay?.setPosition(undefined);
+      this.setInfoPin(coordinate);
+    } else {
+      this.setInfoPin(null);
+      this.featurePopupOverlay?.setPosition(coordinate);
+    }
+  }
+
+  private setInfoPin(coordinate: number[] | null): void {
+    if (!this.map) return;
+    if (!this.infoPinLayer) {
+      this.infoPinLayer = new VectorLayer({
+        source: new VectorSource(),
+        zIndex: 9996,
+        style: new Style({
+          image: new CircleStyle({
+            radius: 7,
+            fill: new Fill({ color: '#0f766e' }),
+            stroke: new Stroke({ color: '#ffffff', width: 2.5 })
+          })
+        })
+      });
+      this.map.addLayer(this.infoPinLayer);
+    }
+    const source = this.infoPinLayer.getSource()!;
+    source.clear();
+    if (coordinate) source.addFeature(new Feature(new Point(coordinate)));
+  }
+
   /** Opens (or moves) the Identify popup at a map coordinate (EPSG:3857). */
   openFeatureInfoPopup(coordinate: number[], state: FeatureInfoPopupState): void {
-    this.featurePopupOverlay?.setPosition(coordinate);
+    this.placeFeatureInfo(coordinate);
     this.featureInfoPopup.set(state);
   }
 
@@ -2044,6 +2109,8 @@ export class MapService {
 
   closeFeatureInfoPopup(): void {
     this.featurePopupOverlay?.setPosition(undefined);
+    this.setInfoPin(null);
+    this.lastInfoCoordinate = null;
     this.featureInfoPopup.set(null);
   }
 
@@ -2208,6 +2275,15 @@ export class MapService {
     this.coordFormat = { mode: effective, crs: effective === 'crs' ? crs : 'EPSG:4326' };
     this.mousePosition?.setProjection(this.coordFormat.crs);
     this.mousePosition?.setCoordinateFormat((c?: Coordinate) => (c ? this.formatCoord(c) : ''));
+  }
+
+  /** Bumped on every view-centre change (live while panning). */
+  readonly centerRevision = signal(0);
+
+  /** The map centre in the active status-bar format, or null. */
+  centerText(): string | null {
+    const center = this.map?.getView().getCenter();
+    return center ? this.formatCoord(transform(center, MAP_PROJECTION, this.coordFormat.crs)) : null;
   }
 
   /** The last cursor position in the active status-bar format, or null. */
@@ -2506,6 +2582,14 @@ export class MapService {
   // ----- 3D mode (Cesium globe in the map's own container) -----
 
   /** The map is showing the 3D globe. */
+  /** 2D map rotation in radians (0 = north up) — drives the compass. */
+  readonly mapRotation = signal(0);
+
+  /** Turns the 2D map back to north-up. */
+  resetNorth(): void {
+    this.map?.getView().animate({ rotation: 0, duration: 300 });
+  }
+
   readonly is3d = signal(false);
   readonly globeBusy = signal(false);
   /** Vertical exaggeration of the 3D relief (1 = true scale). */

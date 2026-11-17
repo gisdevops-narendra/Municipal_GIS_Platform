@@ -22,8 +22,11 @@
 
 <!-- Identify popup — an OpenLayers Overlay; OL moves this element into its
      own overlay container and positions it at the clicked coordinate. -->
-<div #featurePopup class="map-popup" [class.map-popup--hidden]="!popup()">
+<div #featurePopup class="map-popup" [class.map-popup--hidden]="!popup() || docked()">
   @if (popup(); as state) {
+    <button type="button" class="map-popup__dock" aria-label="Dock to the side" title="Dock to the side of the map" (click)="setDocked(true)">
+      <i class="pi pi-window-maximize" aria-hidden="true"></i>
+    </button>
     <button type="button" class="map-popup__close" aria-label="Close" (click)="closePopup()">
       <i class="pi pi-times" aria-hidden="true"></i>
     </button>
@@ -36,3 +39,23 @@
     </div>
   }
 </div>
+
+<!-- Docked Identify card: same contents, on the map's right edge. -->
+@if (docked() && popup(); as state) {
+  <section class="map-info" aria-label="Feature information">
+    <header class="map-info__head">
+      <span><i class="pi pi-info-circle" aria-hidden="true"></i> Feature info</span>
+      <span class="map-info__actions">
+        <button type="button" class="map-info__btn" aria-label="Show as popup at the point" title="Show as popup at the clicked point" (click)="setDocked(false)">
+          <i class="pi pi-comment" aria-hidden="true"></i>
+        </button>
+        <button type="button" class="map-info__btn" aria-label="Close" title="Close" (click)="closePopup()">
+          <i class="pi pi-times" aria-hidden="true"></i>
+        </button>
+      </span>
+    </header>
+    <div class="map-info__body">
+      <app-feature-info [loading]="state.loading" [error]="state.error" [results]="state.results" />
+    </div>
+  </section>
+}

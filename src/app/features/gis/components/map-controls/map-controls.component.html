@@ -1,4 +1,24 @@
 <div class="map-controls">
+  @if (showCompass()) {
+    <div class="map-controls__group">
+      <button
+        pButton
+        type="button"
+        class="p-button-text map-controls__btn map-controls__compass"
+        [attr.aria-label]="'Map rotated ' + rotationDeg() + ' degrees — reset to north'"
+        [pTooltip]="'Rotated ' + rotationDeg() + '° — click to reset north'"
+        tooltipPosition="left"
+        (click)="resetNorth()"
+      >
+        <svg class="map-controls__needle" viewBox="0 0 24 24" aria-hidden="true" [style.transform]="'rotate(' + rotationDeg() + 'deg)'">
+          <path d="M12 2.5 16 12h-8z" fill="#dc2626" />
+          <path d="M12 21.5 8 12h8z" fill="currentColor" opacity="0.55" />
+          <text x="12" y="9.6" text-anchor="middle" font-size="5" font-weight="700" fill="#fff">N</text>
+        </svg>
+      </button>
+    </div>
+  }
+
   @if (showNavGroup()) {
     <div class="map-controls__group">
       @if (showZoomIn()) {

@@ -46,6 +46,13 @@
   opacity: 0.4;
 }
 
+/* Compass: needle turns with the map; red tip = north. */
+.map-controls__needle {
+  width: 20px;
+  height: 20px;
+  transition: transform 0.15s ease-out;
+}
+
 /* Selection: one button, options slide out to its left in a row. */
 .map-controls__group--flyout {
   position: relative;

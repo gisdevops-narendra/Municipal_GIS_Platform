@@ -166,6 +166,17 @@ export class MapControlsComponent {
     this.resetRequest.emit();
   }
 
+  /** Compass: shown only while the 2D map is rotated. */
+  readonly rotationDeg = computed(() => {
+    const deg = Math.round((this.mapService.mapRotation() * 180) / Math.PI) % 360;
+    return deg > 180 ? deg - 360 : deg < -180 ? deg + 360 : deg;
+  });
+  readonly showCompass = computed(() => !this.mapService.is3d() && this.rotationDeg() !== 0);
+
+  resetNorth(): void {
+    this.mapService.resetNorth();
+  }
+
   toggleFullscreen(): void {
     this.mapService.toggleFullscreen();
   }

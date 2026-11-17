@@ -116,6 +116,13 @@ export class MunicipalMapComponent implements AfterViewInit, OnChanges, OnDestro
     this.mapService.closeFeatureInfoPopup();
   }
 
+  /** Docked card (default) vs popup at the clicked point. */
+  readonly docked = this.mapService.featureInfoDocked;
+
+  setDocked(value: boolean): void {
+    this.mapService.setFeatureInfoDocked(value);
+  }
+
   private tryInit(): void {
     if (this.initialized || !this.mapContainer || this.layers.length === 0) {
       return;
