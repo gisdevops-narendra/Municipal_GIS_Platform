@@ -59,6 +59,7 @@ import { GroundwaterService } from './groundwater.service';
 import { OutbreakService } from './outbreak.service';
 import { EvPlanningService } from './ev-planning.service';
 import { HazardsService } from './hazards.service';
+import { AirStationsService } from './air-stations.service';
 
 @Module({
   imports: [AuthModule, ModuleAccessModule, AiClientModule],
@@ -122,6 +123,7 @@ import { HazardsService } from './hazards.service';
     OutbreakService,
     EvPlanningService,
     HazardsService,
+    AirStationsService,
   ],
   exports: [
     GisWorkspaceService,

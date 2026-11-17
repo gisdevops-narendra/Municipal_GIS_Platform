@@ -943,3 +943,17 @@ model GISWellReading {
   @@index([layerId, featureId, readingDate])
   @@map("gis_well_readings")
 }
+
+/// Hourly CPCB air-quality snapshots, captured by the server, for trends.
+model GISAqiSnapshot {
+  station String
+  hour    DateTime @db.Timestamptz(6)
+  city    String?
+  aqi     Int?
+  pm25    Float?
+  pm10    Float?
+
+  @@id([station, hour])
+  @@index([city, hour])
+  @@map("gis_aqi_snapshots")
+}

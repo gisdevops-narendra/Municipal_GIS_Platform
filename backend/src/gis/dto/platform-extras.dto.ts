@@ -349,7 +349,7 @@ export class EvCoverageDto {
 
 export class HazardAreaDto {
   @IsString()
-  @MaxLength(120)
+  @MaxLength(300)
   id!: string;
 
   /** GeoJSON (EPSG:4326) — a point (quake epicentre) or alert polygon. */

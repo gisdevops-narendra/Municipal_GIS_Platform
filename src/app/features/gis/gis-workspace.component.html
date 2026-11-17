@@ -308,6 +308,9 @@
           <app-ev-charging [class.gis-ws__panel--hidden]="leftTool() !== 'ev-charging'" [layers]="layers()" />
         }
 
+        @if (openedLeftTools().has('air-stations')) {
+          <app-air-stations [class.gis-ws__panel--hidden]="leftTool() !== 'air-stations'" [layers]="layers()" />
+        }
         @if (openedLeftTools().has('hazards') && layersReady()) {
           <app-hazards [class.gis-ws__panel--hidden]="leftTool() !== 'hazards'" [layers]="layers()" />
         }

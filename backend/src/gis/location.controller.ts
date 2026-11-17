@@ -1,3 +1,4 @@
+import { AirStationsService } from './air-stations.service';
 import { BadRequestException, Controller, Get, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { RequireMunicipalityMember } from '../auth/decorators/authorization.decorators';
@@ -17,7 +18,10 @@ function lonLat(lonRaw?: string, latRaw?: string): [number, number] {
 
 @Controller('gis')
 export class LocationController {
-  constructor(private readonly location: LocationService) {}
+  constructor(
+    private readonly location: LocationService,
+    private readonly air: AirStationsService,
+  ) {}
 
   /** What's here? GET /gis/location/reverse?lon=&lat= */
   @RequireMunicipalityMember()
@@ -33,6 +37,29 @@ export class LocationController {
   streetImagery(@Query('lon') lon?: string, @Query('lat') lat?: string) {
     const [x, y] = lonLat(lon, lat);
     return this.location.streetImages(x, y);
+  }
+
+  /** Every CPCB station in India: GET /gis/location/air-stations/india */
+  @RequireMunicipalityMember()
+  @Get('location/air-stations/india')
+  airIndia() {
+    return this.air.india();
+  }
+
+  /** Captured AQI trend: GET /gis/location/air-stations/history?station=|city=&days= */
+  @RequireMunicipalityMember()
+  @Get('location/air-stations/history')
+  airHistory(@Query('station') station?: string, @Query('city') city?: string, @Query('days') days?: string) {
+    return this.air.history(station?.slice(0, 200) || undefined, city?.slice(0, 120) || undefined, Math.min(90, Math.max(1, Number(days) || 7)));
+  }
+
+  /** Live air-quality stations: GET /gis/location/air-stations?lon=&lat=&radiusKm= */
+  @RequireMunicipalityMember()
+  @Get('location/air-stations')
+  airStations(@Query('lon') lon?: string, @Query('lat') lat?: string, @Query('radiusKm') radiusKm?: string) {
+    const [x, y] = lonLat(lon, lat);
+    const r = Math.min(200, Math.max(1, Number(radiusKm) || 25));
+    return this.air.near(x, y, r);
   }
 
   /** Which optional lookups the server has switched on. */
