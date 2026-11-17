@@ -12,7 +12,8 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Subscription } from 'rxjs';
+import { Subject, Subscription, catchError, debounceTime, map, of, switchMap, tap } from 'rxjs';
+import { FieldValues, GisLayersService } from '../../../../core/services/gis-layers.service';
 import { ButtonModule } from 'primeng/button';
 import { SelectModule } from 'primeng/select';
 import { InputTextModule } from 'primeng/inputtext';
@@ -77,6 +78,42 @@ export class QueryBuilderComponent implements OnChanges, OnDestroy {
   private readonly attributeService = inject(AttributeTableService);
   private readonly queryService = inject(QueryService);
   private readonly savedQueryService = inject(SavedQueryService);
+  private readonly gisLayersApi = inject(GisLayersService);
+
+  // ----- value picker: the field's distinct values, searchable -----
+  /** uid of the condition whose value list is open. */
+  readonly valuesFor = signal<string | null>(null);
+  readonly valueOptions = signal<FieldValues['values']>([]);
+  readonly valuesLoading = signal(false);
+  readonly valuesApproximate = signal(false);
+  /** Highlighted row (arrow keys); -1: none. */
+  readonly activeValue = signal(-1);
+  private readonly valueCache = new Map<string, FieldValues>();
+  private readonly valueQuery = new Subject<{ layerId: string; field: string; q: string }>();
+  private readonly valueSub = this.valueQuery
+    .pipe(
+      debounceTime(150),
+      switchMap(({ layerId, field, q }) => {
+        const key = `${layerId}|${field}|${q.toLowerCase()}`;
+        const cached = this.valueCache.get(key);
+        if (cached) return of(cached);
+        this.valuesLoading.set(true);
+        return this.gisLayersApi.fieldValues(layerId, field, q).pipe(
+          tap((result) => {
+            this.valueCache.set(key, result);
+            if (this.valueCache.size > 300) this.valueCache.delete(this.valueCache.keys().next().value as string);
+          }),
+          catchError(() => of({ values: [], approximate: false } as FieldValues)),
+        );
+      }),
+      tap(() => this.valuesLoading.set(false)),
+      map((result) => result),
+    )
+    .subscribe((result) => {
+      this.activeValue.set(-1);
+      this.valueOptions.set(result.values);
+      this.valuesApproximate.set(result.approximate);
+    });
 
   /** Signal-backed so `layerOptions` recomputes when the list arrives or
    *  changes (a plain field is read once by `computed()` and cached). */
@@ -178,6 +215,7 @@ export class QueryBuilderComponent implements OnChanges, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.valueSub.unsubscribe();
     this.drawSub?.unsubscribe();
     this.mapService.cancelDraw();
   }
@@ -251,6 +289,80 @@ export class QueryBuilderComponent implements OnChanges, OnDestroy {
     const allowed = this.operatorsFor(value).map((o) => o.op);
     if (!allowed.includes(condition.operator)) {
       condition.operator = allowed[0] ?? '=';
+    }
+    this.revalidate();
+  }
+
+  /** Operators whose value can be picked from the field's values. */
+  hasValuePicker(operator: AttrOperator): boolean {
+    return operator === '=' || operator === '<>' || operator === 'IN';
+  }
+
+  /** The text being searched: the whole value, or for IN the last item. */
+  private valueToken(condition: AttrCondition): string {
+    const text = condition.value ?? '';
+    return condition.operator === 'IN' ? (text.split(',').pop() ?? '').trim() : text.trim();
+  }
+
+  openValues(condition: AttrCondition): void {
+    if (!this.def.layerId || !condition.field) return;
+    if (this.valuesFor() !== condition.uid) {
+      this.valuesFor.set(condition.uid);
+      this.valueOptions.set([]);
+    }
+    this.valueQuery.next({ layerId: this.def.layerId, field: condition.field, q: this.valueToken(condition) });
+  }
+
+  onValueTyped(condition: AttrCondition): void {
+    this.revalidate();
+    if (this.hasValuePicker(condition.operator)) this.openValues(condition);
+  }
+
+  /** Up / Down move the highlight, Enter picks it, Escape closes. */
+  onValueKey(condition: AttrCondition, event: KeyboardEvent): void {
+    const count = this.valueOptions().length;
+    if (event.key === 'Escape') {
+      this.closeValues();
+      return;
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (this.valuesFor() !== condition.uid) {
+        this.openValues(condition);
+        return;
+      }
+      if (!count) return;
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      const next = (this.activeValue() + step + count) % count;
+      this.activeValue.set(next);
+      document.getElementById(`qb-value-${condition.uid}-${next}`)?.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    if (event.key === 'Enter' && this.valuesFor() === condition.uid && this.activeValue() >= 0) {
+      const picked = this.valueOptions()[this.activeValue()];
+      if (picked) {
+        event.preventDefault();
+        this.pickValue(condition, picked.value);
+      }
+    }
+  }
+
+  closeValues(): void {
+    this.activeValue.set(-1);
+    this.valuesFor.set(null);
+    this.valuesLoading.set(false);
+  }
+
+  /** Puts the picked value in (for IN: replaces the item being typed). */
+  pickValue(condition: AttrCondition, value: string): void {
+    if (condition.operator === 'IN') {
+      const items = (condition.value ?? '').split(',').map((s) => s.trim());
+      items[items.length - 1] = value;
+      const unique = [...new Set(items.filter(Boolean))];
+      condition.value = unique.join(', ') + ', ';
+    } else {
+      condition.value = value;
+      this.closeValues();
     }
     this.revalidate();
   }

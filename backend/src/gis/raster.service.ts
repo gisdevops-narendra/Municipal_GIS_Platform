@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { execFile, spawn } from 'child_process';
@@ -19,6 +20,7 @@ import { GdalService } from './gdal.service';
 import { GisAuthorizationService } from './gis-authorization.service';
 import { GisLayersService } from './gis-layers.service';
 import { StyleService } from './style.service';
+import { StorageUsageService } from './storage-usage.service';
 import { deriveLayerCode, generateLayerTableName } from './layer-naming.util';
 import { rasterFilePath } from './raster-paths.util';
 import { rasterYsld, type RasterStyleSpec } from './raster-style';
@@ -131,6 +133,8 @@ export class RasterService {
     private readonly gisAuth: GisAuthorizationService,
     private readonly gisLayers: GisLayersService,
     private readonly styles: StyleService,
+    /** Optional so unit tests need not stub it. */
+    @Optional() private readonly storageUsage?: StorageUsageService,
   ) {
     this.storageRoot = path.resolve(
       this.config.get<string>('GIS_UPLOAD_STORAGE_DIR', './storage/uploads'),
@@ -152,6 +156,11 @@ export class RasterService {
     }
     const source = file.path;
     try {
+      await this.storageUsage?.assertCanStore(
+        appUser.municipalityId,
+        appUser.systemRole === 'MUNICIPALITY_OWNER' ? dto.departmentId : appUser.departmentId,
+        file.size,
+      );
       if (!RASTER_EXTENSIONS.test(file.originalname)) {
         throw new BadRequestException('Only GeoTIFF rasters (.tif / .tiff) are supported.');
       }
@@ -523,6 +532,7 @@ export class RasterService {
    *  vector layer — call before writing the table (Geoprocessing too). */
   async prepareVectorOutput(appUser: AppUser, name: string, departmentId?: string) {
     const owner = this.outputOwnership(appUser, departmentId);
+    await this.storageUsage?.assertCanStore(appUser.municipalityId, owner.departmentId);
     const { workspace, code } = await this.newLayerCode(appUser, name);
     return { owner, workspace, code, table: generateLayerTableName() };
   }

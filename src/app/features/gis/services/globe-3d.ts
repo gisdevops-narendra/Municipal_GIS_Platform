@@ -49,6 +49,14 @@ export interface DemGrid {
   max: number;
 }
 
+/** One extruded building footprint: outer ring + holes, [lon, lat]. */
+export interface GlobeBuilding {
+  rings: number[][][];
+  height: number;
+  color: string;
+  label?: string;
+}
+
 /** What the globe mirrors from the 2D map. */
 export interface GlobeContext {
   extent: Extent4326 | null;
@@ -111,6 +119,8 @@ export class Globe3d {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private dataLayers: any[] = [];
   readonly hasTerrain = !!environment.cesiumIonToken;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private buildings: any = null;
 
   private constructor(
     private readonly Cesium: Cesium,
@@ -204,6 +214,42 @@ export class Globe3d {
         return added;
       });
     }
+  }
+
+  /** Extruded 3D buildings (replaces any shown before; null clears). */
+  setBuildings(list: GlobeBuilding[] | null): void {
+    const Cesium = this.Cesium;
+    if (this.viewer.isDestroyed()) return;
+    if (this.buildings) {
+      this.viewer.dataSources.remove(this.buildings, true);
+      this.buildings = null;
+    }
+    if (!list?.length) return;
+    const source = new Cesium.CustomDataSource('buildings');
+    const onGround = this.hasTerrain || this.viewer.scene.globe.depthTestAgainstTerrain;
+    for (const b of list) {
+      const [outer, ...holes] = b.rings;
+      if (!outer || outer.length < 4) continue;
+      const toPositions = (ring: number[][]) => Cesium.Cartesian3.fromDegreesArray(ring.flatMap(([x, y]) => [x, y]));
+      source.entities.add({
+        name: b.label,
+        polygon: {
+          hierarchy: new Cesium.PolygonHierarchy(
+            toPositions(outer),
+            holes.filter((h) => h.length >= 4).map((h) => new Cesium.PolygonHierarchy(toPositions(h)))
+          ),
+          height: 0,
+          extrudedHeight: b.height,
+          ...(onGround
+            ? { heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, extrudedHeightReference: Cesium.HeightReference.RELATIVE_TO_GROUND }
+            : {}),
+          material: Cesium.Color.fromCssColorString(b.color).withAlpha(0.92),
+          outline: false
+        }
+      });
+    }
+    this.buildings = source;
+    void this.viewer.dataSources.add(source);
   }
 
   /** Swaps the relief source when the visible DEM changes (the ion world

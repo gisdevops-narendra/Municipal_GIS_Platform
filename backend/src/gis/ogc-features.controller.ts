@@ -1,5 +1,5 @@
 import { BadRequestException, Controller, Get, Header, NotFoundException, Param, Query } from '@nestjs/common';
-import { RequireMunicipalityMember } from '../auth/decorators/authorization.decorators';
+import { RequireMemberOrApiKey } from '../auth/decorators/authorization.decorators';
 import { CurrentAppUser } from '../auth/decorators/current-app-user.decorator';
 import type { AppUser } from '../auth/types/app-user.type';
 import { PrismaService } from '../prisma/prisma.service';
@@ -12,6 +12,7 @@ const MAX_LIMIT = 10_000;
  * layers, read straight from PostGIS. GeoServer's own OGC API extension is
  * not installed, and this keeps the same per-layer VIEW permission as the
  * rest of the app. Collections are layer ids; geometries are CRS84.
+ * Outside systems may call it with an API key (X-API-Key header).
  */
 @Controller('gis/ogc')
 export class OgcFeaturesController {
@@ -20,7 +21,7 @@ export class OgcFeaturesController {
     private readonly prisma: PrismaService,
   ) {}
 
-  @RequireMunicipalityMember()
+  @RequireMemberOrApiKey()
   @Get()
   landing() {
     return {
@@ -32,7 +33,7 @@ export class OgcFeaturesController {
     };
   }
 
-  @RequireMunicipalityMember()
+  @RequireMemberOrApiKey()
   @Get('conformance')
   conformance() {
     return {
@@ -43,7 +44,7 @@ export class OgcFeaturesController {
     };
   }
 
-  @RequireMunicipalityMember()
+  @RequireMemberOrApiKey()
   @Get('collections')
   async collections(@CurrentAppUser() appUser: AppUser) {
     const layers = await this.gisLayers.listForMunicipality(appUser);
@@ -53,7 +54,7 @@ export class OgcFeaturesController {
     };
   }
 
-  @RequireMunicipalityMember()
+  @RequireMemberOrApiKey()
   @Get('collections/:id')
   async collectionById(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
     const layer = await this.gisLayers.getById(appUser, id);
@@ -61,7 +62,7 @@ export class OgcFeaturesController {
     return this.collection(layer);
   }
 
-  @RequireMunicipalityMember()
+  @RequireMemberOrApiKey()
   @Get('collections/:id/items')
   @Header('Content-Type', 'application/geo+json')
   async items(
@@ -118,7 +119,7 @@ export class OgcFeaturesController {
     };
   }
 
-  @RequireMunicipalityMember()
+  @RequireMemberOrApiKey()
   @Get('collections/:id/items/:fid')
   @Header('Content-Type', 'application/geo+json')
   async item(@CurrentAppUser() appUser: AppUser, @Param('id') id: string, @Param('fid') fid: string) {

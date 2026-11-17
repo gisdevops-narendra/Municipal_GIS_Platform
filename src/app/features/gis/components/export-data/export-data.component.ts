@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
 import { ButtonModule } from 'primeng/button';
 import { SelectModule } from 'primeng/select';
+import { AutoCompleteCompleteEvent, AutoCompleteModule } from 'primeng/autocomplete';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { LAYER_EXPORT_FORMATS, LayerExportFormat, LayerExportFormatOption } from '../../../../core/models/layer-export.model';
 import { GisLayersService } from '../../../../core/services/gis-layers.service';
@@ -20,7 +21,7 @@ import { CrsPickerComponent } from '../crs-picker/crs-picker.component';
 @Component({
   selector: 'app-export-data',
   standalone: true,
-  imports: [FormsModule, ButtonModule, SelectModule, CrsPickerComponent],
+  imports: [FormsModule, ButtonModule, SelectModule, AutoCompleteModule, CrsPickerComponent],
   templateUrl: './export-data.component.html',
   styleUrl: './export-data.component.scss'
 })
@@ -53,6 +54,27 @@ export class ExportDataComponent {
       .filter((layer) => layer.layerType === 'VECTOR')
       .map((layer) => ({ label: layer.name, value: layer.id }))
   );
+
+  /** Layer picker (same searchable dropdown as the CRS picker). */
+  readonly layerSuggestions = signal<{ label: string; value: string }[]>([]);
+  readonly selectedLayerOption = computed(() => {
+    const layer = this.selectedLayer();
+    return layer ? { label: layer.name, value: layer.id } : null;
+  });
+
+  searchLayers(event: AutoCompleteCompleteEvent): void {
+    // Focusing a filled picker searches for the shown name — show everything.
+    const typed = (event.query ?? '').trim().toLowerCase();
+    const query = typed === this.selectedLayerOption()?.label.toLowerCase() ? '' : typed;
+    this.layerSuggestions.set(this.layerOptions().filter((o) => !query || o.label.toLowerCase().includes(query)));
+  }
+
+  pickLayer(id: string): void {
+    if (id === this.selectedLayer()?.id) return;
+    this.layerId.set(id);
+    this.error.set(null);
+    this.toggleFilter(false);
+  }
 
   readonly formatOptions = computed(() => {
     const allowed = this.allowedSignal();

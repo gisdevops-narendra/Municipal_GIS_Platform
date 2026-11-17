@@ -1,4 +1,24 @@
-<div #mapContainer class="municipal-map" role="application" aria-label="Municipal GIS map"></div>
+<div #mapContainer class="municipal-map" role="application" aria-label="Municipal GIS map" (contextmenu)="onContextMenu($event)"></div>
+
+<!-- Right-click menu -->
+@if (contextMenu(); as menu) {
+  <div class="map-ctx" role="menu" [style.left.px]="menu.x" [style.top.px]="menu.y" (contextmenu)="$event.preventDefault()">
+    <div class="map-ctx__head">{{ menu.lonLat[1].toFixed(5) }}, {{ menu.lonLat[0].toFixed(5) }}</div>
+    <button type="button" role="menuitem" class="map-ctx__item" (click)="openStreetView()">
+      <i class="pi pi-camera" aria-hidden="true"></i> Street View here
+    </button>
+    <button type="button" role="menuitem" class="map-ctx__item" (click)="openGoogleStreetView()">
+      <i class="pi pi-external-link" aria-hidden="true"></i> Open in Google Street View
+    </button>
+  </div>
+}
+
+<!-- Street View card opened from the right-click menu -->
+@if (streetViewAt(); as at) {
+  <div class="map-street">
+    <app-street-view [at]="at" (closed)="closeStreetView()" />
+  </div>
+}
 
 <!-- Identify popup — an OpenLayers Overlay; OL moves this element into its
      own overlay container and positions it at the clicked coordinate. -->

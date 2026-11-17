@@ -3,7 +3,9 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { IntegrationsService } from './integrations.service';
 import { ConfigService } from '@nestjs/config';
 import { GisGeometryType, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
@@ -109,6 +111,8 @@ export class VectorToolsService {
     private readonly raster: RasterService,
     private readonly moduleAccess: ModuleAccessService,
     private readonly config: ConfigService,
+    /** Optional so unit tests need not stub it. */
+    @Optional() private readonly webhooks?: IntegrationsService,
   ) {}
 
   // ----- New layer (Draw & Mark) -----
@@ -1056,6 +1060,12 @@ export class VectorToolsService {
       f ? ({ properties: f.properties, geometry: f.geometry } as Prisma.InputJsonValue) : Prisma.DbNull;
     // Every edit passes here: cached tiles of the layer are now stale.
     this.gisLayers.scheduleTileRefresh(layerId);
+    const event = action === 'INSERT' ? 'feature.created' : action === 'UPDATE' ? 'feature.updated' : 'feature.deleted';
+    this.webhooks?.emitForLayer(layerId, event, {
+      featureId,
+      properties: (after ?? before)?.properties ?? null,
+      changedBy: userName,
+    });
     return tx.gISFeatureHistory.create({
       data: {
         layerId,

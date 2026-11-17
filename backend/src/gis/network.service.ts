@@ -10,7 +10,15 @@ import { PrismaService } from '../prisma/prisma.service';
 import type { AppUser } from '../auth/types/app-user.type';
 import { GisLayersService } from './gis-layers.service';
 import { isSafeGeneratedTableName } from './layer-naming.util';
-import type { NearestFacilityDto, RouteDto, ServiceAreaDto, TraceDto } from './dto/network.dto';
+import type {
+  FleetRoutesDto,
+  NearestFacilityDto,
+  OdMatrixDto,
+  RouteDto,
+  ServiceAreaDto,
+  SiteSelectionDto,
+  TraceDto,
+} from './dto/network.dto';
 
 /**
  * `road`: lines are split where they cross, so street intersections connect.
@@ -45,6 +53,34 @@ interface Graph {
   builtAt: number;
   /** Table write counter when built (see writeStamp) — a change rebuilds. */
   stamp: string;
+  /** Large layers: the lon/lat window this partial network covers, with
+   *  every road in it (absent for a main-roads-only build). */
+  window?: Box;
+}
+
+/** How a large layer's partial network is cut out: an SQL filter on `t`,
+ *  a cache key, and — for an all-roads window — the window itself. */
+interface AreaPlan {
+  key: string;
+  clause: string;
+  describe: string;
+  fullWindow?: Box;
+}
+
+/** Road-class tiers detected in a layer: the class column and its values
+ *  per tier (main roads first). */
+interface RoadClasses {
+  column: string;
+  tiers: string[][];
+}
+
+/** Lon/lat box: [minLon, minLat, maxLon, maxLat]. */
+type Box = [number, number, number, number];
+
+/** Where a request works: its points and how far around them it may go. */
+interface Reach {
+  points: LonLat[];
+  radiusM: number;
 }
 
 /** One stretch of a route: (part of) an edge, in travel order. */
@@ -78,6 +114,14 @@ interface EdgeSnap {
   point: LonLat;
   /** Metres along the edge from node a. */
   fromA: number;
+}
+
+/** A demand point / stop / candidate site read from a layer or clicked. */
+interface Site {
+  label: string;
+  point: LonLat;
+  weight: number;
+  props: Record<string, unknown>;
 }
 
 interface SearchResult {
@@ -119,6 +163,33 @@ const WARMUP_DELAY_MS = 15_000;
 /** How often layers are checked for changes (a cheap stats query each). */
 const WARMUP_INTERVAL_MS = 60_000;
 const DEMO_TABLES = new Set(['gis_demo_roads']);
+/** Layers with more lines than this are never built whole: each request
+ *  builds (and caches) only the network around its points. */
+const LARGE_NETWORK_LINES = 100_000;
+/** A partial network may hold at most this many lines. */
+const MAX_AREA_LINES = 150_000;
+/** Extra room around a request's points, so routes can detour. */
+const MIN_AREA_MARGIN_M = 5_000;
+const AREA_MARGIN_SHARE = 0.15;
+/** Long routes on a large layer: every road within this of each stop,
+ *  only main roads elsewhere. */
+const LOCAL_DETAIL_M = 5_000;
+/** Road-class columns (OSM `highway`, `fclass`, `road_type`, ...). */
+const ROAD_CLASS_COLUMN = /^(highway|fclass|f_class|road_?class|road_?type|roadtype|rd_?type|class|category|road_?cat|hierarchy|func_?class|type)$/i;
+/** Main-road values, by tier (top first). Matched case-insensitively
+ *  against the values the layer actually holds. */
+const ROAD_TIERS: RegExp[] = [
+  /^(motorway|trunk|primary)(_link)?$|expressway|national|^nh\b|^n\.?h\.?$|freeway|arterial|^(class|grade)\s*[a1]$/i,
+  /^(secondary|tertiary)(_link)?$|state\s*h|^sh\b|^s\.?h\.?$|district|^mdr|major|collector|^(class|grade)\s*[b2]$/i,
+];
+const ROAD_CLASS_CACHE_MS = 60 * 60 * 1000;
+/** Windows are snapped outward to this grid (degrees), so nearby requests
+ *  share a cached partial network. */
+const AREA_GRID_DEG = 0.05;
+/** Default reach for nearest-facility / trace on a large layer. */
+const DEFAULT_AREA_REACH_M = 20_000;
+/** Postgres-side limit on a build, so an abandoned build cannot run on. */
+const BUILD_STATEMENT_TIMEOUT_MS = 110_000;
 
 /**
  * GIS Advanced Tools — Basic Routing, Nearest Facility and Network Tracing
@@ -133,6 +204,7 @@ export class NetworkService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly cache = new Map<string, Graph>();
   /** Builds in progress, keyed by graph key + table stamp. */
   private readonly building = new Map<string, Promise<Graph>>();
+  private readonly roadClassCache = new Map<string, { at: number; classes: Promise<RoadClasses | null> }>();
   private warming = false;
   private warmTimer?: NodeJS.Timeout;
   private warmInterval?: NodeJS.Timeout;
@@ -161,7 +233,7 @@ export class NetworkService implements OnApplicationBootstrap, OnModuleDestroy {
       throw new BadRequestException('Pick a start and a destination.');
     }
     const areas = this.checkAreas(dto.avoidAreas);
-    const graph = await this.graphFor(appUser, dto.layerId, 'road');
+    const graph = await this.graphFor(appUser, dto.layerId, 'road', { points: stops, radiusM: 0 });
     const blocked = this.blockedEdges(graph, areas, dto.avoidPoints ?? []);
     const base = (edge: number) => (blocked.has(edge) ? Infinity : 1);
     const snaps = stops.map((point, i) =>
@@ -463,7 +535,10 @@ export class NetworkService implements OnApplicationBootstrap, OnModuleDestroy {
    * blocked roads work as in route().
    */
   async nearest(appUser: AppUser, dto: NearestFacilityDto) {
-    const graph = await this.graphFor(appUser, dto.layerId, 'road');
+    const graph = await this.graphFor(appUser, dto.layerId, 'road', {
+      points: [dto.from],
+      radiusM: dto.maxDistanceM ?? DEFAULT_AREA_REACH_M,
+    });
     const facilities = await this.gisLayers.networkSource(
       appUser,
       dto.facilityLayerId,
@@ -592,7 +667,10 @@ export class NetworkService implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   async trace(appUser: AppUser, dto: TraceDto) {
-    const graph = await this.graphFor(appUser, dto.layerId, 'pipe');
+    const graph = await this.graphFor(appUser, dto.layerId, 'pipe', {
+      points: [dto.at],
+      radiusM: dto.maxDistanceM ?? DEFAULT_AREA_REACH_M,
+    });
     const [start] = await this.snap(graph, [dto.at]);
     const limit = dto.maxDistanceM ?? Infinity;
     const search = this.dijkstra(graph, start, { maxDist: limit });
@@ -622,14 +700,17 @@ export class NetworkService implements OnApplicationBootstrap, OnModuleDestroy {
   /** Service Area: roads reachable from a point within each break, and a
    *  polygon around them (the reached roads buffered by 50 m). */
   async serviceArea(appUser: AppUser, dto: ServiceAreaDto) {
-    const graph = await this.graphFor(appUser, dto.layerId, 'road');
-    const [start] = await this.snap(graph, [dto.at]);
     const toMetres = (b: number) => (dto.speedKmh ? (b / 60) * dto.speedKmh * 1000 : b);
     const breaks = [...new Set(dto.breaks)].sort((a, b) => a - b);
     const limits = breaks.map(toMetres);
     if (limits[limits.length - 1] > 100_000) {
       throw new BadRequestException('Service areas are limited to 100 km.');
     }
+    const graph = await this.graphFor(appUser, dto.layerId, 'road', {
+      points: [dto.at],
+      radiusM: limits[limits.length - 1],
+    });
+    const [start] = await this.snap(graph, [dto.at]);
     const search = this.dijkstra(graph, start, { maxDist: limits[limits.length - 1] });
     const areas: { break: number; distanceM: number; lengthM: number; roads: unknown; area: unknown }[] = [];
     for (let i = 0; i < breaks.length; i++) {
@@ -662,12 +743,415 @@ export class NetworkService implements OnApplicationBootstrap, OnModuleDestroy {
     return { unit: dto.speedKmh ? 'min' : 'm', areas };
   }
 
+  // ----- network planning: OD matrix, fleet routes, site selection -----
+
+  /** Road distance from every origin to every destination, with the
+   *  closest destination of each origin and its route. */
+  async odMatrix(appUser: AppUser, dto: OdMatrixDto) {
+    const origins = dto.originLayerId
+      ? await this.loadSites(appUser, dto.originLayerId, { labelField: dto.originLabelField, limit: 100 })
+      : this.manualSites(dto.origins, 'Origin');
+    const destinations = dto.destinationLayerId
+      ? await this.loadSites(appUser, dto.destinationLayerId, { labelField: dto.destinationLabelField, limit: 1000 })
+      : this.manualSites(dto.destinations, 'Destination');
+    if (!origins.sites.length) throw new BadRequestException('Add at least one origin.');
+    if (!destinations.sites.length) throw new BadRequestException('Add at least one destination.');
+
+    const graph = await this.graphFor(appUser, dto.layerId, 'road', {
+      points: [...origins.sites, ...destinations.sites].map((s) => s.point),
+      radiusM: dto.maxDistanceM ?? DEFAULT_AREA_REACH_M,
+    });
+    const from = this.snapSites(graph, origins.sites);
+    const to = this.snapSites(graph, destinations.sites);
+    if (!from.snapped.length || !to.snapped.length) {
+      throw new BadRequestException('The origins or destinations are too far from the road network.');
+    }
+    const targets = to.snapped.map((d) => d.snap);
+    const limit = dto.maxDistanceM ?? Infinity;
+    const minutes = (m: number | null) => (m !== null && dto.speedKmh ? Math.round((m / 1000 / dto.speedKmh) * 600) / 10 : null);
+
+    const distancesM = from.snapped.map((o) =>
+      this.costsFrom(graph, o.snap, targets, () => 1).map((road, j) => {
+        const total = road + o.snap.distance + to.snapped[j].snap.distance;
+        return Number.isFinite(total) && total <= limit ? Math.round(total) : null;
+      }),
+    );
+    const nearest = from.snapped.map((o, i) => {
+      let best = -1;
+      distancesM[i].forEach((d, j) => {
+        if (d !== null && (best < 0 || d < (distancesM[i][best] as number))) best = j;
+      });
+      if (best < 0) return { origin: i, destination: null, distanceM: null, minutes: null, path: null };
+      const route = this.bestRoute(graph, o.snap, to.snapped[best].snap);
+      return {
+        origin: i,
+        destination: best,
+        distanceM: distancesM[i][best],
+        minutes: minutes(distancesM[i][best]),
+        path: route ? { type: 'MultiLineString', coordinates: route.pieces.map((p) => p.coords) } : null,
+      };
+    });
+    return {
+      origins: from.snapped.map((o) => ({ label: o.site.label, point: o.site.point })),
+      destinations: to.snapped.map((d) => ({ label: d.site.label, point: d.site.point })),
+      distancesM,
+      minutes: dto.speedKmh ? distancesM.map((row) => row.map(minutes)) : null,
+      nearest,
+      offNetwork: { origins: from.off.length, destinations: to.off.length },
+      truncated: origins.truncated || destinations.truncated,
+    };
+  }
+
+  /**
+   * Fleet routes (vehicle routing): split the stops across `vehicles` from
+   * one depot and order each trip. Clarke–Wright savings under a load
+   * limit, then each trip is re-ordered (nearest neighbour + 2-opt).
+   */
+  async fleetRoutes(appUser: AppUser, dto: FleetRoutesDto) {
+    const stops = dto.stopLayerId
+      ? await this.loadSites(appUser, dto.stopLayerId, { labelField: dto.stopLabelField, weightField: dto.demandField, limit: 200 })
+      : this.manualSites(dto.stops, 'Stop');
+    if (!stops.sites.length) throw new BadRequestException('Add at least one stop.');
+    const graph = await this.graphFor(appUser, dto.layerId, 'road', {
+      points: [dto.depot, ...stops.sites.map((s) => s.point)],
+      radiusM: DEFAULT_AREA_REACH_M,
+    });
+    const depot = this.snapToEdge(graph, dto.depot, () => true, 'the depot');
+    const snapped = this.snapSites(graph, stops.sites);
+    const nodes = [depot, ...snapped.snapped.map((s) => s.snap)];
+    const cost = nodes.map((n, i) =>
+      this.costsFrom(graph, n, nodes, () => 1).map((road, j) => (i === j ? 0 : road + n.distance + nodes[j].distance)),
+    );
+    const returnToDepot = dto.returnToDepot !== false;
+    const unassigned: string[] = snapped.off.map((s) => s.label);
+    const ids: number[] = [];
+    for (let j = 1; j < nodes.length; j++) {
+      if (Number.isFinite(cost[0][j]) && (!returnToDepot || Number.isFinite(cost[j][0]))) ids.push(j);
+      else unassigned.push(snapped.snapped[j - 1].site.label);
+    }
+    if (!ids.length) throw new BadRequestException('No stop can be reached from the depot on this network.');
+    const demand = (j: number) => Math.max(0, snapped.snapped[j - 1].site.weight);
+    const total = ids.reduce((sum, j) => sum + demand(j), 0);
+    const balanced = dto.capacity === undefined;
+    const capacity = dto.capacity ?? Math.max(Math.ceil(total / dto.vehicles), ...ids.map(demand));
+    const tooBig = ids.filter((j) => demand(j) > capacity);
+    if (tooBig.length) {
+      throw new BadRequestException(`${tooBig.length} stop(s) need more than one vehicle's capacity (${capacity}).`);
+    }
+
+    // Clarke–Wright savings.
+    const routeOf = new Map<number, number[]>();
+    for (const j of ids) routeOf.set(j, [j]);
+    const load = (r: number[]) => r.reduce((sum, j) => sum + demand(j), 0);
+    const savings: [number, number, number][] = [];
+    for (let a = 0; a < ids.length; a++) {
+      for (let b = a + 1; b < ids.length; b++) {
+        const i = ids[a];
+        const j = ids[b];
+        const s = (returnToDepot ? cost[i][0] : 0) + cost[0][j] - cost[i][j];
+        if (Number.isFinite(s)) savings.push([s, i, j]);
+      }
+    }
+    savings.sort((x, y) => y[0] - x[0]);
+    for (const [s, i, j] of savings) {
+      if (s <= 0) break;
+      let r1 = routeOf.get(i)!;
+      let r2 = routeOf.get(j)!;
+      if (r1 === r2) continue;
+      const iEnd = r1[0] === i || r1[r1.length - 1] === i;
+      const jEnd = r2[0] === j || r2[r2.length - 1] === j;
+      if (!iEnd || !jEnd || load(r1) + load(r2) > capacity) continue;
+      if (r1[0] === i && r1.length > 1) r1 = [...r1].reverse();
+      if (r2[r2.length - 1] === j && r2.length > 1) r2 = [...r2].reverse();
+      const merged = [...r1, ...r2];
+      for (const k of merged) routeOf.set(k, merged);
+    }
+    let routes = [...new Set(routeOf.values())];
+    // Even sharing: merge the cheapest pairs until the fleet is enough.
+    while (balanced && routes.length > dto.vehicles) {
+      let best: { a: number; b: number; extra: number } | null = null;
+      for (let a = 0; a < routes.length; a++) {
+        for (let b = a + 1; b < routes.length; b++) {
+          const ra = routes[a];
+          const rb = routes[b];
+          const extra = cost[ra[ra.length - 1]][rb[0]] - (returnToDepot ? cost[ra[ra.length - 1]][0] : 0) - cost[0][rb[0]];
+          if (!best || extra < best.extra) best = { a, b, extra };
+        }
+      }
+      if (!best) break;
+      const merged = [...routes[best.a], ...routes[best.b]];
+      routes = routes.filter((_, k) => k !== best!.a && k !== best!.b).concat([merged]);
+    }
+
+    const minutes = (m: number, n: number) =>
+      dto.speedKmh ? Math.round(((m / 1000 / dto.speedKmh) * 60 + n * (dto.serviceMinutes ?? 0)) * 10) / 10 : null;
+    const trips = routes
+      .map((route) => {
+        const order = this.orderTrip(cost, route, returnToDepot);
+        const sequence = returnToDepot ? [0, ...order, 0] : [0, ...order];
+        let lengthM = 0;
+        const lines: LonLat[][] = [];
+        for (let k = 0; k < sequence.length - 1; k++) {
+          lengthM += cost[sequence[k]][sequence[k + 1]];
+          const leg = this.bestRoute(graph, nodes[sequence[k]], nodes[sequence[k + 1]]);
+          if (leg) lines.push(...leg.pieces.map((p) => p.coords));
+        }
+        return {
+          stops: order.map((j) => ({ label: snapped.snapped[j - 1].site.label, point: snapped.snapped[j - 1].site.point })),
+          load: load(order),
+          lengthM: Math.round(lengthM),
+          minutes: minutes(lengthM, order.length),
+          path: { type: 'MultiLineString', coordinates: lines },
+        };
+      })
+      .sort((a, b) => b.lengthM - a.lengthM)
+      .map((trip, k) => ({ vehicle: k + 1, ...trip }));
+    return {
+      depot: dto.depot,
+      capacity,
+      vehiclesUsed: trips.length,
+      vehiclesNeeded: trips.length > dto.vehicles ? trips.length : null,
+      totalLengthM: trips.reduce((sum, t) => sum + t.lengthM, 0),
+      trips,
+      unassigned,
+      truncated: stops.truncated,
+    };
+  }
+
+  /** Stop order for one trip (depot = index 0 of `cost`). */
+  private orderTrip(cost: number[][], route: number[], roundTrip: boolean): number[] {
+    if (route.length < 3) return route;
+    const ids = [0, ...route];
+    const sub = ids.map((i) => ids.map((j) => cost[i][j]));
+    if (roundTrip) return this.optimizeOrder(sub, true).slice(1).map((k) => ids[k]);
+    // Open trip: a free end = a dummy stop costing nothing to reach.
+    const withEnd = sub.map((row) => [...row, 0]);
+    withEnd.push(Array(ids.length + 1).fill(0));
+    return this.optimizeOrder(withEnd, false)
+      .filter((k) => k !== 0 && k !== ids.length)
+      .map((k) => ids[k]);
+  }
+
+  /**
+   * Site selection (location-allocation): pick `count` candidate sites
+   * that, with any existing facilities, minimise weighted road distance to
+   * the demand (p-median) or cover the most demand within `cutoffM`
+   * (maximal coverage). Greedy start, then swap improvement.
+   */
+  async siteSelection(appUser: AppUser, dto: SiteSelectionDto) {
+    if (dto.objective === 'MAX_COVERAGE' && !dto.cutoffM) {
+      throw new BadRequestException('Maximum coverage needs a service distance.');
+    }
+    const demand = await this.loadSites(appUser, dto.demandLayerId, { weightField: dto.weightField, limit: 5000 });
+    const candidates = await this.loadSites(appUser, dto.candidateLayerId, { labelField: dto.candidateLabelField, limit: 300 });
+    const existing = dto.existingLayerId
+      ? await this.loadSites(appUser, dto.existingLayerId, { limit: 300 })
+      : { name: '', sites: [] as Site[], truncated: false };
+    if (!demand.sites.length) throw new BadRequestException(`"${demand.name}" has no features.`);
+    if (dto.count > candidates.sites.length) {
+      throw new BadRequestException(`"${candidates.name}" has only ${candidates.sites.length} candidate site(s).`);
+    }
+    const graph = await this.graphFor(appUser, dto.layerId, 'road', {
+      points: [...demand.sites, ...candidates.sites, ...existing.sites].map((s) => s.point),
+      radiusM: dto.cutoffM ?? DEFAULT_AREA_REACH_M,
+    });
+    const D = this.snapSites(graph, demand.sites);
+    const C = this.snapSites(graph, candidates.sites);
+    const E = this.snapSites(graph, existing.sites);
+    if (!D.snapped.length || C.snapped.length < dto.count) {
+      throw new BadRequestException('Too few demand features or candidate sites are near the road network.');
+    }
+    const demandSnaps = D.snapped.map((d) => d.snap);
+    const distances = (f: { snap: EdgeSnap & { distance: number } }) =>
+      Float64Array.from(
+        this.costsFrom(graph, f.snap, demandSnaps, () => 1).map((road, k) => road + f.snap.distance + D.snapped[k].snap.distance),
+      );
+    const candRows = C.snapped.map(distances);
+    const existRows = E.snapped.map(distances);
+    const w = D.snapped.map((d) => Math.max(0, d.site.weight));
+    const n = w.length;
+    const cutoff = dto.cutoffM ?? Infinity;
+    const UNREACHED = 1e9;
+    // Lower is better.
+    const penalty = (d: number) =>
+      dto.objective === 'MAX_COVERAGE' ? (d <= cutoff ? d * 1e-9 : 1) : Number.isFinite(d) ? d : UNREACHED;
+    const baseBest = new Float64Array(n).fill(Infinity);
+    for (const row of existRows) for (let k = 0; k < n; k++) if (row[k] < baseBest[k]) baseBest[k] = row[k];
+    const scoreWith = (best: Float64Array, extra: Float64Array | null) => {
+      let sum = 0;
+      for (let k = 0; k < n; k++) sum += w[k] * penalty(extra && extra[k] < best[k] ? extra[k] : best[k]);
+      return sum;
+    };
+    const bestOf = (chosen: number[]) => {
+      const best = Float64Array.from(baseBest);
+      for (const c of chosen) for (let k = 0; k < n; k++) if (candRows[c][k] < best[k]) best[k] = candRows[c][k];
+      return best;
+    };
+
+    const chosen: number[] = [];
+    let current = bestOf(chosen);
+    while (chosen.length < dto.count) {
+      let pick = -1;
+      let pickScore = Infinity;
+      candRows.forEach((row, c) => {
+        if (chosen.includes(c)) return;
+        const s = scoreWith(current, row);
+        if (s < pickScore) {
+          pick = c;
+          pickScore = s;
+        }
+      });
+      if (pick < 0) break;
+      chosen.push(pick);
+      current = bestOf(chosen);
+    }
+    // Swap improvement (Teitz–Bart), a few passes.
+    let score = scoreWith(current, null);
+    for (let pass = 0, improved = true; improved && pass < 3; pass++) {
+      improved = false;
+      for (let i = 0; i < chosen.length; i++) {
+        const others = bestOf(chosen.filter((_, k) => k !== i));
+        for (let c = 0; c < candRows.length; c++) {
+          if (chosen.includes(c)) continue;
+          const s = scoreWith(others, candRows[c]);
+          if (s < score - 1e-6) {
+            chosen[i] = c;
+            score = s;
+            improved = true;
+            break;
+          }
+        }
+      }
+      current = bestOf(chosen);
+    }
+
+    // Allocation: each demand feature to its closest facility.
+    const facilities = [
+      ...chosen.map((c) => ({ kind: 'new' as const, site: C.snapped[c].site, row: candRows[c] })),
+      ...E.snapped.map((e, k) => ({ kind: 'existing' as const, site: e.site, row: existRows[k] })),
+    ];
+    const stats = facilities.map(() => ({ count: 0, weight: 0, distSum: 0, lines: [] as LonLat[][] }));
+    let coveredWeight = 0;
+    let reachedWeight = 0;
+    let distWeighted = 0;
+    let beforeWeighted = 0;
+    let beforeWeight = 0;
+    for (let k = 0; k < n; k++) {
+      let f = -1;
+      facilities.forEach((fac, i) => {
+        if (Number.isFinite(fac.row[k]) && (f < 0 || fac.row[k] < facilities[f].row[k])) f = i;
+      });
+      if (Number.isFinite(baseBest[k])) {
+        beforeWeighted += w[k] * baseBest[k];
+        beforeWeight += w[k];
+      }
+      if (f < 0) continue;
+      const d = facilities[f].row[k];
+      stats[f].count++;
+      stats[f].weight += w[k];
+      stats[f].distSum += w[k] * d;
+      if (stats[f].lines.length < 1500) stats[f].lines.push([D.snapped[k].site.point, facilities[f].site.point]);
+      reachedWeight += w[k];
+      distWeighted += w[k] * d;
+      if (d <= cutoff) coveredWeight += w[k];
+    }
+    const totalWeight = w.reduce((a, b) => a + b, 0);
+    const minutes = (m: number | null) => (m !== null && dto.speedKmh ? Math.round((m / 1000 / dto.speedKmh) * 600) / 10 : null);
+    return {
+      objective: dto.objective,
+      cutoffM: dto.cutoffM ?? null,
+      facilities: facilities.map((fac, i) => {
+        const avg = stats[i].weight > 0 ? Math.round(stats[i].distSum / stats[i].weight) : null;
+        return {
+          kind: fac.kind,
+          label: fac.site.label,
+          point: fac.site.point,
+          properties: fac.site.props,
+          demandCount: stats[i].count,
+          weight: stats[i].weight,
+          avgDistanceM: avg,
+          avgMinutes: minutes(avg),
+          allocation: { type: 'MultiLineString', coordinates: stats[i].lines },
+        };
+      }),
+      stats: {
+        demandFeatures: demand.sites.length,
+        offNetwork: D.off.length,
+        totalWeight,
+        reachedWeight,
+        coveredWeight: Number.isFinite(cutoff) ? coveredWeight : null,
+        avgDistanceM: reachedWeight > 0 ? Math.round(distWeighted / reachedWeight) : null,
+        avgDistanceBeforeM: beforeWeight > 0 && E.snapped.length ? Math.round(beforeWeighted / beforeWeight) : null,
+      },
+      truncated: demand.truncated || candidates.truncated || existing.truncated,
+    };
+  }
+
+  /** Features of a point / polygon layer as sites (a point on each). */
+  private async loadSites(
+    appUser: AppUser,
+    layerId: string,
+    options: { labelField?: string; weightField?: string; limit: number },
+  ): Promise<{ name: string; sites: Site[]; truncated: boolean }> {
+    const source = await this.gisLayers.siteSource(appUser, layerId);
+    this.assertTable(source.table);
+    const columns = await this.tableColumns(source.table);
+    for (const field of [options.labelField, options.weightField]) {
+      if (field && !columns.includes(field)) {
+        throw new BadRequestException(`"${field}" is not a field of "${source.name}".`);
+      }
+    }
+    const scope = this.scope(source.table, source.workspaceId, 1);
+    const rows = await this.prisma.$queryRawUnsafe<{ lon: number; lat: number; props: Record<string, unknown> }[]>(
+      `SELECT ST_X(p) AS lon, ST_Y(p) AS lat, to_jsonb(s) - 'geom' - 'p' AS props
+         FROM (SELECT t.*, ST_Transform(ST_PointOnSurface(t.geom), 4326) AS p
+                 FROM "${source.table}" t
+                WHERE t.geom IS NOT NULL ${scope.clause}
+                LIMIT ${options.limit + 1}) s
+        WHERE p IS NOT NULL`,
+      ...scope.params,
+    );
+    const sites = rows.slice(0, options.limit).map((row, i) => {
+      const label = options.labelField ? row.props[options.labelField] : null;
+      const weight = options.weightField ? Number(row.props[options.weightField]) : 1;
+      return {
+        label: label !== null && label !== undefined && label !== '' ? String(label) : this.facilityLabel(row.props, i),
+        point: [Number(row.lon), Number(row.lat)] as LonLat,
+        weight: Number.isFinite(weight) ? weight : 0,
+        props: row.props,
+      };
+    });
+    return { name: source.name, sites, truncated: rows.length > options.limit };
+  }
+
+  private manualSites(points: LonLat[] | undefined, prefix: string) {
+    return {
+      name: prefix,
+      sites: (points ?? []).map((point, i) => ({ label: `${prefix} ${i + 1}`, point, weight: 1, props: {} })),
+      truncated: false,
+    };
+  }
+
+  /** Sites snapped onto the network; those over MAX_FACILITY_SNAP_M away
+   *  are returned in `off`. */
+  private snapSites(graph: Graph, sites: Site[]) {
+    const snapped: { site: Site; snap: EdgeSnap & { distance: number } }[] = [];
+    const off: Site[] = [];
+    for (const site of sites) {
+      const snap = this.trySnap(graph, site.point, () => true, MAX_FACILITY_SNAP_M);
+      if (snap) snapped.push({ site, snap });
+      else off.push(site);
+    }
+    return { snapped, off };
+  }
+
   // ----- graph -----
 
   private async graphFor(
     appUser: AppUser,
     layerId: string,
     kind: NetworkKind,
+    reach: Reach,
   ): Promise<Graph> {
     const { table, workspaceId } = await this.gisLayers.networkSource(
       appUser,
@@ -677,7 +1161,139 @@ export class NetworkService implements OnApplicationBootstrap, OnModuleDestroy {
       // layers marked for routing.
       { routing: kind === 'road' },
     );
-    return this.graphForTable(table, workspaceId, kind);
+    this.assertTable(table);
+    const plan = (await this.isLarge(table)) ? await this.planArea(table, workspaceId, kind, reach) : undefined;
+    return this.graphForTable(table, workspaceId, kind, plan);
+  }
+
+  /**
+   * Which part of a large layer to build: every road in the request's
+   * window when that fits; else every road near the stops plus only the
+   * main roads in between (the road class is detected from the data),
+   * trying fewer tiers until it fits.
+   */
+  private async planArea(table: string, workspaceId: string | null, kind: NetworkKind, reach: Reach): Promise<AreaPlan> {
+    const [col] = await this.prisma.$queryRawUnsafe<{ srid: number }[]>(
+      `SELECT srid FROM geometry_columns WHERE f_table_schema = 'public' AND f_table_name = $1 LIMIT 1`,
+      table,
+    );
+    const tableSrid = col?.srid ?? 4326;
+    const env = (b: Box) => {
+      const e = `ST_MakeEnvelope(${b.join(', ')}, 4326)`;
+      return tableSrid > 0 && tableSrid !== 4326 ? `ST_Transform(${e}, ${tableSrid})` : e;
+    };
+    const scope = this.scope(table, workspaceId, 1);
+    const fits = async (clause: string) => {
+      const [row] = await this.prisma.$queryRawUnsafe<{ n: number }[]>(
+        `SELECT count(*)::int AS n FROM (SELECT 1 FROM "${table}" t
+           WHERE t.geom IS NOT NULL AND ${clause} ${scope.clause}
+           LIMIT ${MAX_AREA_LINES + 1}) s`,
+        ...scope.params,
+      );
+      return (row?.n ?? 0) <= MAX_AREA_LINES;
+    };
+
+    const window = this.windowFor(reach);
+    const all = `t.geom && ${env(window)}`;
+    if (await fits(all)) {
+      return { key: `all:${window.join(',')}`, clause: all, describe: `all roads in [${window.join(', ')}]`, fullWindow: window };
+    }
+
+    const classes = kind === 'road' ? await this.roadClasses(table) : null;
+    if (!classes) {
+      throw new BadRequestException(
+        'This area of the network is too dense to analyse in one go — pick points closer together or a shorter distance.',
+      );
+    }
+    // Every road close to each stop, so the stops reach the main roads.
+    const locals = [...new Set(reach.points.map((p) => this.windowFor({ points: [p], radiusM: LOCAL_DETAIL_M }).join(',')))]
+      .map((k) => k.split(',').map(Number) as Box);
+    const localClause = locals.map((b) => `t.geom && ${env(b)}`).join(' OR ');
+    const quote = (v: string) => `'${v.replace(/'/g, "''")}'`;
+    const column = `t."${classes.column.replace(/"/g, '""')}"`;
+    for (let depth = classes.tiers.length; depth >= 1; depth--) {
+      const values = classes.tiers.slice(0, depth).flat();
+      if (!values.length) continue;
+      const clause = `${all} AND (${column}::text IN (${values.map(quote).join(', ')}) OR ${localClause})`;
+      if (await fits(clause)) {
+        return {
+          key: `main${depth}:${window.join(',')}:${locals.map((b) => b.join(',')).join(';')}`,
+          clause,
+          describe: `main roads (tier 1–${depth}) in [${window.join(', ')}] + all roads near ${locals.length} stop(s)`,
+        };
+      }
+    }
+    throw new BadRequestException(
+      'This route is too long for this road layer, even using main roads only — split it into shorter legs.',
+    );
+  }
+
+  /** The layer's road-class column and its main-road values by tier
+   *  (sampled from the data; cached). Null when it has none. */
+  private roadClasses(table: string): Promise<RoadClasses | null> {
+    const hit = this.roadClassCache.get(table);
+    if (hit && Date.now() - hit.at < ROAD_CLASS_CACHE_MS) return hit.classes;
+    const classes = (async (): Promise<RoadClasses | null> => {
+      const cols = await this.prisma.$queryRawUnsafe<{ name: string }[]>(
+        `SELECT column_name AS name FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = $1
+            AND data_type IN ('text', 'character varying', 'character')`,
+        table,
+      );
+      for (const { name } of cols.filter((c) => ROAD_CLASS_COLUMN.test(c.name))) {
+        const rows = await this.prisma.$queryRawUnsafe<{ v: string }[]>(
+          `SELECT DISTINCT v FROM (SELECT "${name.replace(/"/g, '""')}"::text AS v
+             FROM "${table}" TABLESAMPLE SYSTEM (2) LIMIT 200000) s
+            WHERE v IS NOT NULL LIMIT 500`,
+        );
+        const values = rows.map((r) => r.v.trim()).filter(Boolean);
+        const tiers = ROAD_TIERS.map((re) => values.filter((v) => re.test(v)));
+        // Main roads must be a real subset, not every value.
+        if (tiers[0].length && tiers.flat().length < values.length) {
+          this.logger.log(`Road classes of ${table}: "${name}" — ${tiers.map((t) => t.join('/')).join(' | ')}`);
+          return { column: name, tiers };
+        }
+      }
+      return null;
+    })();
+    classes.catch(() => this.roadClassCache.delete(table));
+    this.roadClassCache.set(table, { at: Date.now(), classes });
+    return classes;
+  }
+
+  /** More lines than one in-memory network should hold (planner estimate,
+   *  or a capped count when the table was never analysed). */
+  private async isLarge(table: string): Promise<boolean> {
+    const [row] = await this.prisma.$queryRawUnsafe<{ n: number }[]>(
+      `SELECT reltuples::float8 AS n FROM pg_class
+        WHERE relname = $1 AND relnamespace = 'public'::regnamespace`,
+      table,
+    );
+    if (row && row.n >= 0) return row.n > LARGE_NETWORK_LINES;
+    const [counted] = await this.prisma.$queryRawUnsafe<{ n: number }[]>(
+      `SELECT count(*)::int AS n FROM (SELECT 1 FROM "${table}" LIMIT ${LARGE_NETWORK_LINES + 1}) s`,
+    );
+    return (counted?.n ?? 0) > LARGE_NETWORK_LINES;
+  }
+
+  /** The lon/lat window a request needs: its points' box, grown by its
+   *  reach plus a detour margin, snapped outward to AREA_GRID_DEG. */
+  private windowFor(reach: Reach): Box {
+    const lons = reach.points.map((p) => p[0]);
+    const lats = reach.points.map((p) => p[1]);
+    let box: Box = [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)];
+    const midLat = (box[1] + box[3]) / 2;
+    const mPerLon = 111_320 * Math.max(0.1, Math.cos((midLat * Math.PI) / 180));
+    const spanM = Math.hypot((box[2] - box[0]) * mPerLon, (box[3] - box[1]) * 111_320);
+    const margin = reach.radiusM + Math.max(MIN_AREA_MARGIN_M, spanM * AREA_MARGIN_SHARE);
+    box = [box[0] - margin / mPerLon, box[1] - margin / 111_320, box[2] + margin / mPerLon, box[3] + margin / 111_320];
+    const g = AREA_GRID_DEG;
+    return [
+      Math.max(-180, Math.floor(box[0] / g) * g),
+      Math.max(-90, Math.floor(box[1] / g) * g),
+      Math.min(180, Math.ceil(box[2] / g) * g),
+      Math.min(90, Math.ceil(box[3] / g) * g),
+    ].map((v) => Number(v.toFixed(6))) as Box;
   }
 
   /** The cached graph if its table is unchanged, else a fresh build. A
@@ -687,30 +1303,56 @@ export class NetworkService implements OnApplicationBootstrap, OnModuleDestroy {
     table: string,
     workspaceId: string | null,
     kind: NetworkKind,
+    plan?: AreaPlan,
   ): Promise<Graph> {
     this.assertTable(table);
-    const key = `${table}|${workspaceId ?? ''}|${kind}`;
+    const base = `${table}|${workspaceId ?? ''}|${kind}`;
+    const key = plan ? `${base}|${plan.key}` : base;
+    const window = plan?.fullWindow;
     const stamp = await this.writeStamp(table);
-    const cached = this.cache.get(key);
-    if (cached && cached.stamp === stamp && Date.now() - cached.builtAt < CACHE_TTL_MS) {
+    const fresh = (g: Graph) => g.stamp === stamp && Date.now() - g.builtAt < CACHE_TTL_MS;
+    let hitKey: string | undefined;
+    const exact = this.cache.get(key);
+    if (exact && fresh(exact)) hitKey = key;
+    else if (window) {
+      // A cached all-roads network that already covers this window will do.
+      for (const [k, g] of this.cache) {
+        if (k.startsWith(`${base}|`) && g.window && fresh(g) && boxContains(g.window, window)) {
+          hitKey = k;
+          break;
+        }
+      }
+    }
+    if (hitKey) {
+      const cached = this.cache.get(hitKey) as Graph;
       // Most recently used last, so eviction drops the least used.
-      this.cache.delete(key);
-      this.cache.set(key, cached);
+      this.cache.delete(hitKey);
+      this.cache.set(hitKey, cached);
       return cached;
     }
 
     const buildKey = `${key}|${stamp}`;
     let pending = this.building.get(buildKey);
     if (!pending) {
-      pending = this.buildGraph(table, workspaceId, kind)
+      const started = Date.now();
+      if (plan) this.logger.log(`Building ${kind} network of ${table}: ${plan.describe}...`);
+      pending = this.buildGraph(table, workspaceId, kind, plan)
         .then((graph) => {
+          if (plan) {
+            this.logger.log(`Area network of ${table} ready: ${graph.edges.length} segments in ${Date.now() - started} ms.`);
+          }
           graph.stamp = stamp;
+          graph.window = window;
           this.cache.delete(key);
           this.cache.set(key, graph);
           while (this.cache.size > MAX_CACHED_GRAPHS) {
             this.cache.delete(this.cache.keys().next().value as string);
           }
           return graph;
+        })
+        .catch((error: unknown) => {
+          this.logger.warn(`Network build of ${table} failed after ${Date.now() - started} ms: ${(error as Error).message}`);
+          throw error;
         })
         .finally(() => this.building.delete(buildKey));
       this.building.set(buildKey, pending);
@@ -766,6 +1408,8 @@ export class NetworkService implements OnApplicationBootstrap, OnModuleDestroy {
     if (layer.layerType !== 'VECTOR' || layer.geometryType !== 'LINE' || !layer.routingEnabled) return;
     const { table, workspaceId } = this.gisLayers.styleSource(layer);
     if (!table) return;
+    // Large layers are built per area, on demand — never whole.
+    if (await this.isLarge(table).catch(() => true)) return;
     const key = `${table}|${workspaceId ?? ''}|road`;
     const before = this.cache.get(key);
     const started = Date.now();
@@ -785,6 +1429,7 @@ export class NetworkService implements OnApplicationBootstrap, OnModuleDestroy {
     table: string,
     workspaceId: string | null,
     kind: NetworkKind,
+    plan?: AreaPlan,
   ): Promise<Graph> {
     const [col] = await this.prisma.$queryRawUnsafe<{ srid: number }[]>(
       `SELECT srid FROM geometry_columns
@@ -794,6 +1439,7 @@ export class NetworkService implements OnApplicationBootstrap, OnModuleDestroy {
     // Geographic data is worked in Web Mercator so snapping is in metres.
     const srid = !col || col.srid === 4326 || col.srid === 0 ? 3857 : col.srid;
     const scope = this.scope(table, workspaceId, 2);
+    const windowClause = plan ? ` AND (${plan.clause})` : '';
     const nameColumn = kind === 'road' ? await this.roadNameColumn(table) : null;
     const nameExpr = nameColumn ? `NULLIF(trim(t."${nameColumn.replace(/"/g, '""')}"::text), '')` : 'NULL::text';
     type PartRow = { sx: number; sy: number; ex: number; ey: number; len: number; gj: string; nm: string | null };
@@ -802,12 +1448,14 @@ export class NetworkService implements OnApplicationBootstrap, OnModuleDestroy {
     // only by the lines its index finds touching it (~4 s, same network).
     const rows = await this.prisma.$transaction(
       async (tx) => {
+        // Postgres stops the build too if it overruns (not just the client).
+        await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = ${BUILD_STATEMENT_TIMEOUT_MS}`);
         await tx.$executeRawUnsafe(
           `CREATE TEMP TABLE net_lines ON COMMIT DROP AS
              SELECT row_number() OVER () AS id, g, nm FROM (
                SELECT (ST_Dump(ST_Force2D(ST_Transform(t.geom, $1::int)))).geom AS g, ${nameExpr} AS nm
                  FROM "${table}" t
-                WHERE t.geom IS NOT NULL ${scope.clause}) s
+                WHERE t.geom IS NOT NULL ${windowClause} ${scope.clause}) s
               WHERE GeometryType(g) = 'LINESTRING' AND NOT ST_IsEmpty(g)`,
           srid,
           ...scope.params,
@@ -841,7 +1489,9 @@ export class NetworkService implements OnApplicationBootstrap, OnModuleDestroy {
       { timeout: 120_000 },
     );
     if (rows.length === 0) {
-      throw new BadRequestException('This layer has no lines to build a network from.');
+      throw new BadRequestException(
+        plan ? 'There are no roads of this layer near the chosen points.' : 'This layer has no lines to build a network from.',
+      );
     }
 
     const tol = SNAP_TOLERANCE_M[kind];
@@ -1207,6 +1857,11 @@ export class NetworkService implements OnApplicationBootstrap, OnModuleDestroy {
     if (isSafeGeneratedTableName(table) || DEMO_TABLES.has(table)) return;
     throw new BadRequestException('This layer cannot be used as a network.');
   }
+}
+
+/** Whether box `outer` fully covers box `inner`. */
+function boxContains(outer: Box, inner: Box): boolean {
+  return outer[0] <= inner[0] && outer[1] <= inner[1] && outer[2] >= inner[2] && outer[3] >= inner[3];
 }
 
 /** Binary min-heap of (node, priority). */

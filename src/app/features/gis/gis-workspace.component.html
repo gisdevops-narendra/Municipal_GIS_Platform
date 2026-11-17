@@ -255,6 +255,51 @@
           />
         }
 
+        @if (openedLeftTools().has('add-service')) {
+          <app-add-service [class.gis-ws__panel--hidden]="leftTool() !== 'add-service'" />
+        }
+
+        <!-- Point pickers: destroyed on close so a pending map click is released -->
+        @if (leftTool() === 'whats-here' && layersReady()) {
+          <app-whats-here />
+        }
+
+        @if (openedLeftTools().has('share') && layersReady()) {
+          <app-share-map [class.gis-ws__panel--hidden]="leftTool() !== 'share'" [layers]="layers()" />
+        }
+
+        @if (openedLeftTools().has('network-planning') && layersReady()) {
+          <app-network-planning [class.gis-ws__panel--hidden]="leftTool() !== 'network-planning'" [layers]="layers()" />
+        }
+
+        @if ((openedLeftTools().has('sensors') || sensorFeedsSaved) && layersReady()) {
+          <app-live-sensors [class.gis-ws__panel--hidden]="leftTool() !== 'sensors'" />
+        }
+
+        @if (openedLeftTools().has('buildings-3d') && layersReady()) {
+          <app-buildings-3d [class.gis-ws__panel--hidden]="leftTool() !== 'buildings-3d'" [layers]="layers()" />
+        }
+
+        @if (openedLeftTools().has('weather') && layersReady()) {
+          <app-weather [class.gis-ws__panel--hidden]="leftTool() !== 'weather'" />
+        }
+
+        @if (openedLeftTools().has('osm-import') && layersReady()) {
+          <app-osm-import [class.gis-ws__panel--hidden]="leftTool() !== 'osm-import'" (layerCreated)="onLayerCreated($event)" />
+        }
+
+        @if (openedLeftTools().has('catalog') && layersReady()) {
+          <app-data-catalog [class.gis-ws__panel--hidden]="leftTool() !== 'catalog'" [layers]="layers()" />
+        }
+
+        @if (openedLeftTools().has('storage')) {
+          <app-storage-usage [class.gis-ws__panel--hidden]="leftTool() !== 'storage'" />
+        }
+
+        @if (openedLeftTools().has('integrations')) {
+          <app-integrations [class.gis-ws__panel--hidden]="leftTool() !== 'integrations'" />
+        }
+
         <!-- Layer-gated tools before layers have loaded (layers/bookmarks/
              workspace show their own state instead) -->
         @if (activeLeftTool(); as tool) {
@@ -263,7 +308,10 @@
             tool.available &&
             tool.id !== 'layers' &&
             tool.id !== 'bookmarks' &&
-            tool.id !== 'workspace'
+            tool.id !== 'workspace' &&
+            tool.id !== 'add-service' &&
+            tool.id !== 'integrations' &&
+            tool.id !== 'storage'
           ) {
             <p class="gis-ws__hint">{{ layersError() ?? 'Loading map…' }}</p>
           }

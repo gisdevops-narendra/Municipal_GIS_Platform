@@ -8,6 +8,13 @@ import { AnalyticsField, DensityPoints, FieldSummary, GroupRequest, GroupResult,
 import { GisLayerPermissionMatrix, GisPermission } from '../models/gis-layer-permission.model';
 import { ManagedRole } from '../models/municipality-user.model';
 
+/** GET /api/gis/layers/:id/fields/values — `approximate`: counts are
+ *  estimates (very large layers). */
+export interface FieldValues {
+  values: { value: string; count: number }[];
+  approximate: boolean;
+}
+
 /** Body of POST /api/gis/layers/:id/report (a PDF layer data report). */
 export interface LayerReportRequest {
   title?: string;
@@ -90,6 +97,11 @@ export class GisLayersService {
   }
 
   /** Analytics: whole-layer summary of one field. */
+  /** Distinct values of a field, most frequent first; `q` filters them. */
+  fieldValues(id: string, field: string, q = ''): Observable<FieldValues> {
+    return this.http.get<FieldValues>(`${this.baseUrl}/${id}/fields/values`, { params: { field, q } });
+  }
+
   analyticsSummary(id: string, field: string): Observable<FieldSummary> {
     return this.http.get<FieldSummary>(`${this.baseUrl}/${id}/analytics/summary`, { params: { field } });
   }

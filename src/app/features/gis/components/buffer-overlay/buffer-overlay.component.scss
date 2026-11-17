@@ -432,3 +432,80 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+// Routing stop: search box (name or lat, lon) with a suggestion list.
+.bo__stop-field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.bo__stop-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  background: var(--color-surface);
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-ink-700);
+  text-overflow: ellipsis;
+
+  &:focus {
+    outline: none;
+    border-color: var(--color-primary, #0f766e);
+  }
+}
+
+.bo__suggest {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  background: var(--color-surface);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+}
+
+.bo__suggest-item {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover,
+  &--active {
+    background: var(--color-surface-muted, rgba(0, 0, 0, 0.06));
+  }
+}
+
+.bo__suggest-name {
+  font-size: 12px;
+  color: var(--color-ink-700);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bo__suggest-layer,
+.bo__suggest-empty {
+  font-size: 11px;
+  color: var(--color-ink-500, #6b7280);
+}
+
+.bo__suggest-empty {
+  padding: 5px 8px;
+}

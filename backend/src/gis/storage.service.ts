@@ -4,7 +4,8 @@ import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as fsp from 'fs/promises';
 import * as path from 'path';
-import AdmZip from 'adm-zip';
+import { pipeline } from 'stream/promises';
+import * as yauzl from 'yauzl';
 
 export class UploadTooLargeError extends Error {}
 export class UnsafeArchiveError extends Error {}
@@ -43,14 +44,14 @@ export class StorageService {
       this.config.get<string>('GIS_UPLOAD_STORAGE_DIR', './storage/uploads'),
     );
     this.maxUploadBytes =
-      Number(this.config.get<string>('GIS_UPLOAD_MAX_FILE_SIZE_MB', '3000')) *
+      Number(this.config.get<string>('GIS_UPLOAD_MAX_FILE_SIZE_MB', '3072')) *
       1024 *
       1024;
     this.maxExternalImportBytes =
       Number(this.config.get<string>('EXTERNAL_DB_MAX_FILE_SIZE_MB', '30720')) * 1024 * 1024;
     this.maxExtractedZipBytes =
       Number(
-        this.config.get<string>('GIS_UPLOAD_MAX_EXTRACTED_ZIP_SIZE_MB', '2000'),
+        this.config.get<string>('GIS_UPLOAD_MAX_EXTRACTED_ZIP_SIZE_MB', '102400'),
       ) *
       1024 *
       1024;
@@ -130,8 +131,7 @@ export class StorageService {
    * Every entry is validated BEFORE anything is written — Task 7 §36:
    *
    * - rejects `../` / absolute-path entry names (zip-slip / path traversal)
-   * - rejects symlink entries (adm-zip exposes the external attributes we
-   *   need to detect these)
+   * - rejects symlink entries (detected from the entry's unix mode bits)
    * - rejects more than `maxZipFileCount` entries
    * - rejects if the sum of uncompressed entry sizes would exceed
    *   `maxExtractedZipBytes` (a cheap, effective zip-bomb guard — checked
@@ -150,16 +150,39 @@ export class StorageService {
     municipalityId: string,
     uploadId: string,
   ): Promise<ExtractedZip> {
-    let zip: AdmZip;
+    // Streaming reader (yauzl): only the central directory is held in
+    // memory and each entry is inflated straight to disk, so archives
+    // larger than Node's 2 GiB Buffer limit (national road networks etc.)
+    // work — adm-zip loaded the whole file into one Buffer and could not.
+    let zip: yauzl.ZipFile;
+    let entries: yauzl.Entry[];
     try {
-      zip = new AdmZip(zipPath);
-    } catch (error) {
-      throw new UnsafeArchiveError(
-        `Could not read ZIP archive: ${(error as Error).message}`,
+      zip = await this.openZip(zipPath);
+      entries = (await this.readZipEntries(zip)).filter(
+        (entry) => !entry.fileName.endsWith('/'),
       );
+    } catch (error) {
+      throw this.toArchiveError(error);
     }
 
-    const entries = zip.getEntries().filter((entry) => !entry.isDirectory);
+    try {
+      return await this.extractEntries(
+        zip,
+        entries,
+        municipalityId,
+        uploadId,
+      );
+    } finally {
+      zip.close();
+    }
+  }
+
+  private async extractEntries(
+    zip: yauzl.ZipFile,
+    entries: yauzl.Entry[],
+    municipalityId: string,
+    uploadId: string,
+  ): Promise<ExtractedZip> {
     if (entries.length === 0) {
       throw new UnsafeArchiveError('ZIP archive contains no files.');
     }
@@ -171,10 +194,10 @@ export class StorageService {
 
     const seenBasenames = new Set<string>();
     let totalUncompressed = 0;
-    const planned: { entry: (typeof entries)[number]; basename: string }[] = [];
+    const planned: { entry: yauzl.Entry; basename: string }[] = [];
 
     for (const entry of entries) {
-      const entryName = entry.entryName;
+      const entryName = entry.fileName;
 
       // Zip-slip: absolute paths or any ".." segment, checked on the raw
       // entry name (before any normalization can hide it).
@@ -185,10 +208,10 @@ export class StorageService {
         throw new UnsafeArchiveError(`Unsafe path in archive: "${entryName}".`);
       }
 
-      // Symlinks: adm-zip stores unix permission bits in the top 16 bits
-      // of externalAttributes; 0o120000 is S_IFLNK. Never follow/extract
+      // Symlinks: unix permission bits live in the top 16 bits of
+      // externalFileAttributes; 0o120000 is S_IFLNK. Never follow/extract
       // these — they could point outside the extraction directory.
-      const unixMode = (entry.header.attr >>> 16) & 0xffff;
+      const unixMode = (entry.externalFileAttributes >>> 16) & 0xffff;
 
       if ((unixMode & 0o170000) === 0o120000) {
         throw new UnsafeArchiveError(
@@ -207,7 +230,7 @@ export class StorageService {
       }
       seenBasenames.add(basename.toLowerCase());
 
-      totalUncompressed += entry.header.size;
+      totalUncompressed += entry.uncompressedSize;
       if (totalUncompressed > this.maxExtractedZipBytes) {
         throw new UnsafeArchiveError(
           `Extracted archive size exceeds the limit of ${Math.round(this.maxExtractedZipBytes / 1024 / 1024)} MB.`,
@@ -229,10 +252,18 @@ export class StorageService {
       // it already (belt-and-braces against any path library surprise).
       if (!targetPath.startsWith(resolvedDestDir)) {
         throw new UnsafeArchiveError(
-          `Unsafe path in archive: "${entry.entryName}".`,
+          `Unsafe path in archive: "${entry.fileName}".`,
         );
       }
-      await fsp.writeFile(targetPath, entry.getData());
+      // yauzl verifies the inflated byte count equals the declared
+      // uncompressedSize (validateEntrySizes), so the size guard above
+      // can't be bypassed by a lying header.
+      try {
+        const readStream = await this.openEntryStream(zip, entry);
+        await pipeline(readStream, fs.createWriteStream(targetPath));
+      } catch (error) {
+        throw this.toArchiveError(error);
+      }
       files.push(basename);
     }
 
@@ -240,6 +271,51 @@ export class StorageService {
       `Safely extracted ${files.length} file(s) (${totalUncompressed} bytes) from upload ${uploadId}.`,
     );
     return { dir: destDir, files };
+  }
+
+  private openZip(zipPath: string): Promise<yauzl.ZipFile> {
+    return new Promise((resolve, reject) => {
+      yauzl.open(
+        zipPath,
+        { lazyEntries: true, autoClose: false },
+        (error, zip) => (error || !zip ? reject(error) : resolve(zip)),
+      );
+    });
+  }
+
+  private readZipEntries(zip: yauzl.ZipFile): Promise<yauzl.Entry[]> {
+    return new Promise((resolve, reject) => {
+      const entries: yauzl.Entry[] = [];
+      zip.on('entry', (entry: yauzl.Entry) => {
+        entries.push(entry);
+        zip.readEntry();
+      });
+      zip.once('end', () => resolve(entries));
+      zip.once('error', reject);
+      zip.readEntry();
+    });
+  }
+
+  private openEntryStream(
+    zip: yauzl.ZipFile,
+    entry: yauzl.Entry,
+  ): Promise<NodeJS.ReadableStream> {
+    return new Promise((resolve, reject) => {
+      zip.openReadStream(entry, (error, stream) =>
+        error || !stream ? reject(error) : resolve(stream),
+      );
+    });
+  }
+
+  /** yauzl rejects "../" and absolute entry names itself while reading the
+   *  central directory — report those as the same "Unsafe path" error. */
+  private toArchiveError(error: unknown): UnsafeArchiveError {
+    if (error instanceof UnsafeArchiveError) return error;
+    const message = (error as Error)?.message ?? String(error);
+    if (/invalid relative path|absolute path/i.test(message)) {
+      return new UnsafeArchiveError(`Unsafe path in archive: ${message}`);
+    }
+    return new UnsafeArchiveError(`Could not read ZIP archive: ${message}`);
   }
 
   /** Deletes an upload's temporary/ directory (extracted ZIP contents) —

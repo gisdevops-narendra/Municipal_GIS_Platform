@@ -1,7 +1,7 @@
 import { Component, Input, OnDestroy, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Observable, Subscription } from 'rxjs';
+import { Observable, Subject, Subscription, catchError, debounceTime, map, of, switchMap, tap } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { SelectModule } from 'primeng/select';
 import { MultiSelectModule } from 'primeng/multiselect';
@@ -10,6 +10,14 @@ import { MapService, RING_COLORS } from '../../services/map.service';
 import { FacilityResult, LonLat, NearestResult, NetworkService, RouteOption, RouteResult } from '../../services/network.service';
 import { GisLayersService } from '../../../../core/services/gis-layers.service';
 import { AnalyticsField } from '../../../../core/models/layer-analytics.model';
+
+/** A place a routing stop can be set to, found by name (or typed lat, lon). */
+interface PlaceSuggestion {
+  label: string;
+  source: string;
+  point: LonLat;
+}
+const MAX_PLACE_SUGGESTIONS = 8;
 
 type Mode = 'route' | 'nearest' | 'trace' | 'service';
 /** What the next map click sets: a point, a routing stop (by index), or
@@ -35,6 +43,19 @@ const MAX_STOPS = 25;
 /** Nearest-facility results, nearest first (cycled past ten). */
 const FACILITY_COLORS = ['#1d4ed8', '#ea580c', '#7c3aed', '#0891b2', '#be185d', '#4d7c0f', '#b45309', '#4338ca', '#0f766e', '#9f1239'];
 
+function placeKey(p: LonLat): string {
+  return `${p[0].toFixed(6)},${p[1].toFixed(6)}`;
+}
+
+/** "lat, lon" (or "lat lon") typed into a stop box → [lon, lat]. */
+function parseLatLon(text: string): LonLat | null {
+  const m = text.trim().match(/^(-?\d+(?:\.\d+)?)\s*[,\s]\s*(-?\d+(?:\.\d+)?)$/);
+  if (!m) return null;
+  const lat = Number(m[1]);
+  const lon = Number(m[2]);
+  return Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? [lon, lat] : null;
+}
+
 /** "A", "B", … "Z", then "27" … — same labels as the backend's directions. */
 export function stopLabel(index: number): string {
   return index < 26 ? String.fromCharCode(65 + index) : String(index + 1);
@@ -50,6 +71,46 @@ export class AdvancedToolsComponent implements OnDestroy {
   private readonly mapService = inject(MapService);
   private readonly network = inject(NetworkService);
   private readonly gisLayers = inject(GisLayersService);
+
+  // ----- stop search by name -----
+  /** Stop whose box is being typed in (null: none). */
+  readonly searchIndex = signal<number | null>(null);
+  readonly searchText = signal('');
+  readonly searching = signal(false);
+  readonly suggestions = signal<PlaceSuggestion[]>([]);
+  /** Highlighted suggestion (arrow keys); -1: none. */
+  readonly activeSuggestion = signal(-1);
+  /** Names of stops set by search, keyed by their position. */
+  private readonly placeNames = new Map<string, string>();
+  private readonly searchInput = new Subject<string>();
+  /** Recent answers by query, so retyping / backspacing is instant. */
+  private readonly placeCache = new Map<string, PlaceSuggestion[]>();
+  private readonly searchSub = this.searchInput
+    .pipe(
+      debounceTime(120),
+      switchMap((q) => {
+        const typed = parseLatLon(q);
+        if (typed) return of([{ label: `${typed[1].toFixed(5)}, ${typed[0].toFixed(5)}`, source: 'Coordinates', point: typed }]);
+        const key = q.trim().toLowerCase();
+        if (key.length < 2) return of([]);
+        const cached = this.placeCache.get(key);
+        if (cached) return of(cached);
+        this.searching.set(true);
+        return this.network.places(q.trim()).pipe(
+          map((hits) => hits.map((h) => ({ label: h.label, source: h.layerName, point: h.point }))),
+          tap((list) => {
+            this.placeCache.set(key, list);
+            if (this.placeCache.size > 200) this.placeCache.delete(this.placeCache.keys().next().value as string);
+          }),
+          catchError(() => of([] as PlaceSuggestion[])),
+        );
+      }),
+      tap(() => this.searching.set(false)),
+    )
+    .subscribe((list) => {
+      this.activeSuggestion.set(-1);
+      this.suggestions.set(list.slice(0, MAX_PLACE_SUGGESTIONS));
+    });
 
   @Input() set layers(value: GisLayer[]) {
     this.layersSignal.set(value ?? []);
@@ -145,6 +206,7 @@ export class AdvancedToolsComponent implements OnDestroy {
   private pickSub?: Subscription;
 
   ngOnDestroy(): void {
+    this.searchSub.unsubscribe();
     this.pickSub?.unsubscribe();
     this.mapService.cancelDraw();
     this.stopDragOff?.();
@@ -254,7 +316,71 @@ export class AdvancedToolsComponent implements OnDestroy {
   }
 
   pointLabel(point: LonLat | null): string {
-    return point ? `${point[1].toFixed(5)}, ${point[0].toFixed(5)}` : 'not set';
+    if (!point) return 'not set';
+    return this.placeNames.get(placeKey(point)) ?? `${point[1].toFixed(5)}, ${point[0].toFixed(5)}`;
+  }
+
+  startStopSearch(index: number): void {
+    if (this.searchIndex() === index) return;
+    this.searchIndex.set(index);
+    this.searchText.set('');
+    this.suggestions.set([]);
+  }
+
+  onStopSearch(index: number, text: string): void {
+    this.searchIndex.set(index);
+    this.searchText.set(text);
+    this.searchInput.next(text);
+  }
+
+  /** Up / Down move the highlight, Enter picks it (or the first). */
+  onStopSearchKey(index: number, event: KeyboardEvent): void {
+    const count = this.suggestions().length;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (!count) return;
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      const next = (this.activeSuggestion() + step + count) % count;
+      this.activeSuggestion.set(next);
+      document.getElementById(`stop-suggest-${index}-${next}`)?.scrollIntoView({ block: 'nearest' });
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      const active = this.suggestions()[this.activeSuggestion()];
+      if (active) this.chooseSuggestion(index, active);
+      else this.chooseFirstSuggestion(index);
+    } else if (event.key === 'Escape') {
+      this.endStopSearch();
+    }
+  }
+
+  endStopSearch(): void {
+    this.activeSuggestion.set(-1);
+    this.searchIndex.set(null);
+    this.searchText.set('');
+    this.suggestions.set([]);
+    this.searching.set(false);
+  }
+
+  chooseFirstSuggestion(index: number): void {
+    const first = this.suggestions()[0] ?? (parseLatLon(this.searchText()) && {
+      label: this.searchText(),
+      source: 'Coordinates',
+      point: parseLatLon(this.searchText()) as LonLat,
+    });
+    if (first) this.chooseSuggestion(index, first);
+  }
+
+  /** Sets the stop to a searched place, then re-routes / redraws. */
+  chooseSuggestion(index: number, place: PlaceSuggestion): void {
+    this.cancelPick();
+    if (place.source !== 'Coordinates') this.placeNames.set(placeKey(place.point), place.label);
+    this.stops.update((stops) => stops.map((s, i) => (i === index ? place.point : s)));
+    this.endStopSearch();
+    (document.activeElement as HTMLElement | null)?.blur();
+    this.error.set(null);
+    this.afterRoutingInputChange(true);
+    const set = this.stops().filter((s): s is LonLat => !!s);
+    this.mapService.zoomToGeometries(set.map((p) => ({ type: 'Point', coordinates: p })));
   }
 
   run(): void {

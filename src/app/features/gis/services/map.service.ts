@@ -45,6 +45,8 @@ import { getArea, getLength } from 'ol/sphere';
 import { defaults as defaultControls } from 'ol/control';
 import ScaleLine from 'ol/control/ScaleLine';
 import MousePosition from 'ol/control/MousePosition';
+import OverviewMap from 'ol/control/OverviewMap';
+import { ExternalLayerSpec, FetchText, buildExternalLayer } from './external-layers';
 import { createStringXY, toStringHDMS } from 'ol/coordinate';
 import type { Coordinate } from 'ol/coordinate';
 import { fromLonLat, get as getProjection, getPointResolution, toLonLat, transform, transformExtent } from 'ol/proj';
@@ -60,7 +62,7 @@ import { Sketch } from '../models/sketch.model';
 import { parseLegend } from '../components/layer-legend/legend-model';
 import { legendToOlStyle, ruleScalesFromSld } from '../components/layer-legend/legend-ol-style';
 import './projections';
-import { DemGrid, Extent4326, Globe3d, GlobeContext } from './globe-3d';
+import { DemGrid, Extent4326, Globe3d, GlobeBuilding, GlobeContext } from './globe-3d';
 import { RasterService } from './raster.service';
 
 const MAP_PROJECTION = 'EPSG:3857';
@@ -179,7 +181,7 @@ export interface PrintMapContext {
  *  use — suitable for a non-production demo/dev deployment like the
  *  others here. Note Esri's tile path is `{z}/{y}/{x}` (y before x),
  *  unlike every other entry below. */
-const BASEMAPS: Record<string, { label: string; attribution: string; build: () => BaseLayer }> = {
+export const BASEMAPS: Record<string, { label: string; attribution: string; build: () => BaseLayer }> = {
   osm: {
     label: 'OpenStreetMap',
     attribution: '© OpenStreetMap contributors',
@@ -463,7 +465,16 @@ export class MapService {
           projection: this.coordFormat.crs,
           placeholder: '',
           target: statusTargets.mousePositionTarget
-        }))
+        })),
+        // Overview minimap (bottom-left, collapsed until opened).
+        new OverviewMap({
+          className: 'ol-overviewmap gis-overview',
+          collapsed: true,
+          collapseLabel: '\u00AB',
+          label: '\u00BB',
+          tipLabel: 'Overview map',
+          layers: [new TileLayer({ source: new OSM() })]
+        })
       ])
     });
     this.map.on('pointermove', (event) => {
@@ -491,9 +502,178 @@ export class MapService {
     });
     this.resetView();
     this.setPanEnabled(this.panEnabled);
+    for (const spec of this.externalLayers()) this.mountExternal(spec);
+  }
+
+  // ----- Add Service: outside map services -----
+
+  /** Outside layers on the map, in the order added (topmost last). */
+  readonly externalLayers = signal<ExternalLayerSpec[]>([]);
+  private readonly externalOl = new Map<string, BaseLayer>();
+  /** WFS loader; the Add Service panel swaps in a proxy-aware one. */
+  externalFetchText: FetchText | undefined;
+
+  addExternalLayer(spec: ExternalLayerSpec): void {
+    this.externalLayers.update((list) => [...list.filter((s) => s.id !== spec.id), spec]);
+    this.mountExternal(spec);
+  }
+
+  removeExternalLayer(id: string): void {
+    const layer = this.externalOl.get(id);
+    if (layer) this.map?.removeLayer(layer);
+    this.externalOl.delete(id);
+    this.externalLayers.update((list) => list.filter((s) => s.id !== id));
+  }
+
+  updateExternalLayer(id: string, patch: Partial<Pick<ExternalLayerSpec, 'visible' | 'opacity'>>): void {
+    const layer = this.externalOl.get(id);
+    if (patch.visible !== undefined) layer?.setVisible(patch.visible);
+    if (patch.opacity !== undefined) layer?.setOpacity(patch.opacity);
+    this.externalLayers.update((list) => list.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  }
+
+  private mountExternal(spec: ExternalLayerSpec): void {
+    if (!this.map) return;
+    const old = this.externalOl.get(spec.id);
+    if (old) this.map.removeLayer(old);
+    const layer = buildExternalLayer(spec, this.externalFetchText);
+    this.externalOl.set(spec.id, layer);
+    this.map.addLayer(layer);
+  }
+
+  // ----- Share Map / What's Here helpers -----
+
+  /** Current view as WGS84 centre + zoom, and the active basemap. */
+  viewSnapshot(): { center: [number, number]; zoom: number; basemap: string } | null {
+    const view = this.map?.getView();
+    const center = view?.getCenter();
+    if (!view || !center) return null;
+    const [lon, lat] = toLonLat(center, view.getProjection());
+    return { center: [lon, lat], zoom: Math.round((view.getZoom() ?? 2) * 100) / 100, basemap: this.activeBasemap() };
+  }
+
+  /** WGS84 position under a pixel of the map viewport (right-click menu). */
+  lonLatAtPixel(pixel: [number, number]): [number, number] | null {
+    const coordinate = this.map?.getCoordinateFromPixel(pixel);
+    return coordinate ? (toLonLat(coordinate, this.map!.getView().getProjection()) as [number, number]) : null;
+  }
+
+  // ----- Weather overlay -----
+
+  private weatherLayer: TileLayer<XYZ> | null = null;
+
+  /** Rain radar tiles over the map (null removes them). `maxZoom` is the
+   *  deepest zoom the provider serves; OpenLayers enlarges beyond it. */
+  setWeatherRadar(url: string | null, opacity = 0.7, maxZoom = 7): void {
+    if (!this.map) return;
+    if (!url) {
+      if (this.weatherLayer) this.map.removeLayer(this.weatherLayer);
+      this.weatherLayer = null;
+      return;
+    }
+    if (!this.weatherLayer) {
+      this.weatherLayer = new TileLayer({ zIndex: 450, opacity });
+      this.map.addLayer(this.weatherLayer);
+    }
+    const current = this.weatherLayer.getSource()?.getUrls()?.[0];
+    if (current !== url) {
+      this.weatherLayer.setSource(
+        new XYZ({ url, maxZoom, attributions: 'Radar © <a href="https://www.rainviewer.com" target="_blank">RainViewer</a>', crossOrigin: 'anonymous' })
+      );
+    }
+    this.weatherLayer.setOpacity(opacity);
+  }
+
+  // ----- Live Sensors -----
+
+  private readonly sensorLayers = new Map<string, VectorLayer<VectorSource>>();
+
+  /** Draws (replaces) one sensor feed's latest readings. */
+  setSensorReadings(feedId: string, readings: { point: [number, number]; value: string; alert: boolean; label: string }[]): void {
+    if (!this.map) return;
+    let layer = this.sensorLayers.get(feedId);
+    if (!layer) {
+      const styles = new Map<string, Style>();
+      layer = new VectorLayer({
+        source: new VectorSource(),
+        zIndex: 9980,
+        style: (feature) => {
+          const alert = !!feature.get('alert');
+          const value = String(feature.get('value') ?? '');
+          const key = `${alert}|${value}`;
+          let style = styles.get(key);
+          if (!style) {
+            style = new Style({
+              image: new CircleStyle({
+                radius: alert ? 8 : 6,
+                fill: new Fill({ color: alert ? '#dc2626' : '#0d9488' }),
+                stroke: new Stroke({ color: '#ffffff', width: 2 })
+              }),
+              text: value
+                ? new TextStyle({
+                    text: value,
+                    offsetY: -16,
+                    font: '600 11px "IBM Plex Sans", sans-serif',
+                    fill: new Fill({ color: alert ? '#991b1b' : '#134e4a' }),
+                    stroke: new Stroke({ color: '#ffffff', width: 3 })
+                  })
+                : undefined
+            });
+            if (styles.size > 500) styles.clear();
+            styles.set(key, style);
+          }
+          return style;
+        }
+      });
+      this.sensorLayers.set(feedId, layer);
+      this.map.addLayer(layer);
+    }
+    const source = layer.getSource()!;
+    source.clear();
+    source.addFeatures(
+      readings.map((r) => {
+        const f = new Feature(new Point(fromLonLat(r.point)));
+        f.setProperties({ value: r.value, alert: r.alert, label: r.label });
+        return f;
+      })
+    );
+  }
+
+  removeSensorLayer(feedId: string): void {
+    const layer = this.sensorLayers.get(feedId);
+    if (layer) this.map?.removeLayer(layer);
+    this.sensorLayers.delete(feedId);
+  }
+
+  private pinLayer: VectorLayer<VectorSource> | null = null;
+
+  /** Drops (or clears, with null) a single location pin. */
+  markLocation(lonLat: [number, number] | null): void {
+    if (!this.map) return;
+    if (!this.pinLayer) {
+      this.pinLayer = new VectorLayer({
+        source: new VectorSource(),
+        zIndex: 9995,
+        style: new Style({
+          image: new CircleStyle({
+            radius: 7,
+            fill: new Fill({ color: '#dc2626' }),
+            stroke: new Stroke({ color: '#ffffff', width: 2.5 })
+          })
+        })
+      });
+      this.map.addLayer(this.pinLayer);
+    }
+    const source = this.pinLayer.getSource()!;
+    source.clear();
+    if (lonLat) source.addFeature(new Feature(new Point(fromLonLat(lonLat))));
   }
 
   destroy(): void {
+    this.externalOl.clear();
+    this.sensorLayers.clear();
+    this.weatherLayer = null;
+    this.pinLayer = null;
     this.globe?.destroy();
     this.globe = null;
     this.is3d.set(false);
@@ -1742,7 +1922,7 @@ export class MapService {
 
   /** User's Identify toggle (map-controls button) — on by default; works
    *  only while the Information Tool module gate is also open. */
-  readonly identifyActive = signal(true);
+  readonly identifyActive = signal(false);
 
   toggleIdentify(): void {
     this.identifyActive.update((on) => !on);
@@ -2067,7 +2247,7 @@ export class MapService {
       this.setLayerVisibility(id, this.defaultVisible(entry.layer));
     }
     if (this.activeBasemap() !== 'osm') this.setBasemap('osm');
-    this.identifyActive.set(true);
+    this.identifyActive.set(false);
     this.resetView();
     this.resetNavHistory();
   }
@@ -2289,6 +2469,22 @@ export class MapService {
   private globeDemId: string | null = null;
   private readonly demCache = new Map<string, Promise<DemGrid | null>>();
 
+  /** 3D Buildings: extruded footprints shown whenever the globe is on. */
+  private globeBuildings: GlobeBuilding[] | null = null;
+
+  setGlobeBuildings(list: GlobeBuilding[] | null): void {
+    this.globeBuildings = list;
+    this.globe?.setBuildings(list);
+  }
+
+  /** The 2D view's extent in lon/lat, or the globe's when in 3D. */
+  currentExtent4326(): Extent4326 | null {
+    if (this.globe) return this.globe.viewExtent();
+    const size = this.map?.getSize();
+    const view = this.map?.getView();
+    return view && size ? (transformExtent(view.calculateExtent(size), MAP_PROJECTION, 'EPSG:4326') as Extent4326) : null;
+  }
+
   /** Switches the map between 2D and 3D in place, keeping the area in view. */
   async set3d(on: boolean): Promise<void> {
     if (!this.map || on === this.is3d() || this.globeBusy()) return;
@@ -2308,6 +2504,7 @@ export class MapService {
       const dem = await this.findDem();
       this.globeDemId = dem?.id ?? null;
       this.globe = await Globe3d.create(host, this.globeContext(), dem?.grid ?? null, this.globeExaggeration());
+      this.globe.setBuildings(this.globeBuildings);
       this.is3d.set(true);
     } catch (error) {
       this.notifyGlobeError?.((error as Error).message);

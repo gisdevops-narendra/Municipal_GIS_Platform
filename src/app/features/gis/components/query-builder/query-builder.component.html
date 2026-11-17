@@ -88,7 +88,39 @@
                       (onChange)="onOperatorChange(condition, $event.value)"
                       appendTo="body"
                     />
-                    @if (operatorArity(condition.operator) === 1) {
+                    @if (operatorArity(condition.operator) === 1 && hasValuePicker(condition.operator)) {
+                      <span class="qb__value">
+                        <input
+                          pInputText
+                          class="qb__input"
+                          type="text"
+                          autocomplete="off"
+                          [placeholder]="condition.operator === 'IN' ? 'pick or type: a, b, c' : 'pick or type a value'"
+                          [(ngModel)]="condition.value"
+                          (ngModelChange)="onValueTyped(condition)"
+                          (focus)="openValues(condition)"
+                          (blur)="closeValues()"
+                          (keydown)="onValueKey(condition, $event)"
+                          role="combobox"
+                          [attr.aria-expanded]="valuesFor() === condition.uid"
+                          [attr.aria-activedescendant]="valuesFor() === condition.uid && activeValue() >= 0 ? 'qb-value-' + condition.uid + '-' + activeValue() : null"
+                        />
+                        @if (valuesFor() === condition.uid) {
+                          <ul class="qb__values" role="listbox">
+                            @for (v of valueOptions(); track v.value; let vi = $index) {
+                              <li [id]="'qb-value-' + condition.uid + '-' + vi" role="option" [attr.aria-selected]="vi === activeValue()">
+                                <button type="button" class="qb__values-item" tabindex="-1" [class.qb__values-item--active]="vi === activeValue()" (mouseenter)="activeValue.set(vi)" (mousedown)="$event.preventDefault()" (click)="pickValue(condition, v.value)">
+                                  <span class="qb__values-name">{{ v.value }}</span>
+                                  <span class="qb__values-count">{{ valuesApproximate() ? '~' : '' }}{{ v.count }}</span>
+                                </button>
+                              </li>
+                            } @empty {
+                              <li class="qb__values-empty">{{ valuesLoading() ? 'Loading values…' : 'No matching value' }}</li>
+                            }
+                          </ul>
+                        }
+                      </span>
+                    } @else if (operatorArity(condition.operator) === 1) {
                       <input
                         pInputText
                         class="qb__input"

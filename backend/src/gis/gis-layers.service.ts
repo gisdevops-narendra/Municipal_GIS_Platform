@@ -932,6 +932,12 @@ export class GisLayersService {
   }
 
   /** Analytics: whole-layer summary of one field (VIEW-gated). */
+  /** Distinct values of a field, optionally searched (VIEW-gated). */
+  async layerFieldValues(appUser: AppUser, layerId: string, field: string, q?: string) {
+    const { table, workspaceId } = await this.analyticsSource(appUser, layerId);
+    return this.fieldStats.distinctValues(table, field, workspaceId, q);
+  }
+
   async layerFieldSummary(appUser: AppUser, layerId: string, field: string) {
     const { table, workspaceId } = await this.analyticsSource(appUser, layerId);
     return this.fieldStats.summary(table, field, workspaceId);
@@ -1112,6 +1118,16 @@ export class GisLayersService {
       name: layer.name,
       ...(await this.analyticsSource(appUser, layerId)),
     };
+  }
+
+  /** Network planning (OD matrix, fleet routes, site selection): a
+   *  permission-checked point or polygon layer read as a set of sites. */
+  async siteSource(appUser: AppUser, layerId: string) {
+    const layer = await this.findLayerInMunicipality(appUser.municipalityId, layerId);
+    if (layer.layerType !== 'VECTOR' || (layer.geometryType !== 'POINT' && layer.geometryType !== 'POLYGON')) {
+      throw new BadRequestException(`"${layer.name}" must be a point or polygon layer.`);
+    }
+    return { name: layer.name, geometryType: layer.geometryType, ...(await this.analyticsSource(appUser, layerId)) };
   }
 
   async layerStyleAttributes(appUser: AppUser, layerId: string) {

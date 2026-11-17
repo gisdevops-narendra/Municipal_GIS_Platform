@@ -1,7 +1,8 @@
-import { AfterViewInit, Component, ElementRef, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChanges, ViewChild, inject } from '@angular/core';
+import { AfterViewInit, Component, ElementRef, EventEmitter, HostListener, Input, OnChanges, OnDestroy, Output, SimpleChanges, ViewChild, inject, signal } from '@angular/core';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { FeatureInfoResult, MapService } from '../../services/map.service';
 import { FeatureInfoComponent } from '../feature-info/feature-info.component';
+import { StreetViewComponent } from '../platform-extras/street-view.component';
 
 /**
  * OpenLayers map surface only — no layer-panel UI of its own. Owns map
@@ -13,7 +14,7 @@ import { FeatureInfoComponent } from '../feature-info/feature-info.component';
 @Component({
   selector: 'app-municipal-map',
   standalone: true,
-  imports: [FeatureInfoComponent],
+  imports: [FeatureInfoComponent, StreetViewComponent],
   templateUrl: './municipal-map.component.html',
   styleUrl: './municipal-map.component.scss'
 })
@@ -39,6 +40,12 @@ export class MunicipalMapComponent implements AfterViewInit, OnChanges, OnDestro
   /** Identify popup state (contents + visibility), owned by MapService. */
   readonly popup = this.mapService.featureInfoPopup;
 
+  /** Right-click menu: where it is drawn (px in the map) and the WGS84
+   *  point it acts on. */
+  readonly contextMenu = signal<{ x: number; y: number; lonLat: [number, number] } | null>(null);
+  /** Street View card opened from the menu. */
+  readonly streetViewAt = signal<[number, number] | null>(null);
+
   private initialized = false;
   private resizeObserver: ResizeObserver | null = null;
 
@@ -58,6 +65,51 @@ export class MunicipalMapComponent implements AfterViewInit, OnChanges, OnDestro
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.mapService.destroy();
+  }
+
+  onContextMenu(event: MouseEvent): void {
+    event.preventDefault();
+    const box = this.mapContainer.nativeElement.getBoundingClientRect();
+    const x = event.clientX - box.left;
+    const y = event.clientY - box.top;
+    const lonLat = this.mapService.lonLatAtPixel([x, y]);
+    if (!lonLat) return;
+    // Keep the menu inside the map.
+    const menuW = 210;
+    const menuH = 96;
+    this.contextMenu.set({
+      x: Math.max(4, Math.min(x, box.width - menuW - 4)),
+      y: Math.max(4, Math.min(y, box.height - menuH - 4)),
+      lonLat
+    });
+  }
+
+  openStreetView(): void {
+    const menu = this.contextMenu();
+    this.contextMenu.set(null);
+    if (menu) this.streetViewAt.set([...menu.lonLat]);
+  }
+
+  openGoogleStreetView(): void {
+    const menu = this.contextMenu();
+    this.contextMenu.set(null);
+    if (!menu) return;
+    const [lon, lat] = menu.lonLat;
+    window.open(`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lon}`, '_blank', 'noopener');
+  }
+
+  closeStreetView(): void {
+    this.streetViewAt.set(null);
+  }
+
+  @HostListener('document:pointerdown', ['$event'])
+  onDocumentPointerDown(event: PointerEvent): void {
+    if (this.contextMenu() && !(event.target as HTMLElement | null)?.closest('.map-ctx')) this.contextMenu.set(null);
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscape(): void {
+    this.contextMenu.set(null);
   }
 
   closePopup(): void {

@@ -3,6 +3,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -202,5 +203,167 @@ export class ServiceAreaDto {
   @IsNumber()
   @Min(1)
   @Max(150)
+  speedKmh?: number;
+}
+
+/** POST /api/gis/network/od-matrix — road distance from every origin to
+ *  every destination. Each side is a point/polygon layer or clicked points. */
+export class OdMatrixDto {
+  @IsUUID()
+  layerId!: string;
+
+  @IsOptional()
+  @IsUUID()
+  originLayerId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsLonLat({ each: true })
+  origins?: LonLat[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(63)
+  originLabelField?: string;
+
+  @IsOptional()
+  @IsUUID()
+  destinationLayerId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(1000)
+  @IsLonLat({ each: true })
+  destinations?: LonLat[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(63)
+  destinationLabelField?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(200)
+  speedKmh?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(200_000)
+  maxDistanceM?: number;
+}
+
+/** POST /api/gis/network/fleet-routes — split stops across vehicles from
+ *  one depot (vehicle routing). */
+export class FleetRoutesDto {
+  @IsUUID()
+  layerId!: string;
+
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(2)
+  @IsNumber({}, { each: true })
+  depot!: LonLat;
+
+  @IsOptional()
+  @IsUUID()
+  stopLayerId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsLonLat({ each: true })
+  stops?: LonLat[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(63)
+  stopLabelField?: string;
+
+  /** Numeric field with each stop's load (default 1 per stop). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(63)
+  demandField?: string;
+
+  @IsInt()
+  @Min(1)
+  @Max(20)
+  vehicles!: number;
+
+  /** Max load per vehicle; omitted = share stops evenly. */
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  capacity?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  returnToDepot?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(200)
+  speedKmh?: number;
+
+  /** Minutes spent at each stop (added to the trip time). */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(240)
+  serviceMinutes?: number;
+}
+
+/** POST /api/gis/network/site-selection — pick the best `count` candidate
+ *  sites to serve a demand layer (location-allocation). */
+export class SiteSelectionDto {
+  @IsUUID()
+  layerId!: string;
+
+  @IsUUID()
+  demandLayerId!: string;
+
+  /** Numeric field weighting each demand feature (e.g. population). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(63)
+  weightField?: string;
+
+  @IsUUID()
+  candidateLayerId!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(63)
+  candidateLabelField?: string;
+
+  /** Facilities that already exist and stay. */
+  @IsOptional()
+  @IsUUID()
+  existingLayerId?: string;
+
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  count!: number;
+
+  @IsString()
+  @IsIn(['MIN_DISTANCE', 'MAX_COVERAGE'])
+  objective!: 'MIN_DISTANCE' | 'MAX_COVERAGE';
+
+  /** Service distance: demand further than this is "not covered". */
+  @IsOptional()
+  @IsNumber()
+  @Min(50)
+  @Max(200_000)
+  cutoffM?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(200)
   speedKmh?: number;
 }

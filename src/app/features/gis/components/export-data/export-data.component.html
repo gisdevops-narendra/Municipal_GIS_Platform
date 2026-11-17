@@ -2,18 +2,32 @@
   @if (layerOptions().length === 0) {
     <p class="export__hint">No vector layers to export.</p>
   } @else {
-    <label class="export__field">
+    <label class="export__field" #layerField>
       <span class="export__label">Layer</span>
-      <p-select
-        class="export__select"
-        [options]="layerOptions()"
+      <p-autocomplete
+        class="export__ac"
+        [ngModel]="selectedLayerOption()"
+        [suggestions]="layerSuggestions()"
+        (completeMethod)="searchLayers($event)"
+        (onSelect)="pickLayer($event.value.value)"
         optionLabel="label"
-        optionValue="value"
-        [ngModel]="selectedLayer()?.id"
-        (ngModelChange)="layerId.set($event); error.set(null); toggleFilter(false)"
-        [filter]="layerOptions().length > 8"
+        [dropdown]="true"
+        [completeOnFocus]="true"
+        [forceSelection]="true"
+        placeholder="Search layer…"
         appendTo="body"
-      />
+        [panelStyle]="{ width: layerField.clientWidth + 'px', maxWidth: 'calc(100vw - 32px)' }"
+        size="small"
+        scrollHeight="18rem"
+        styleClass="w-full"
+        inputStyleClass="w-full"
+        [fluid]="true"
+        emptyMessage="No matching layer"
+      >
+        <ng-template let-option #item>
+          <div class="export__layer-item"><i class="pi pi-map" aria-hidden="true"></i><span>{{ option.label }}</span></div>
+        </ng-template>
+      </p-autocomplete>
     </label>
 
     @if (canFilter()) {
@@ -22,9 +36,11 @@
       <span>Only features where…</span>
     </label>
     @if (filterOn) {
-      <div class="export__filter">
-        <p-select class="export__select" [options]="filterFields()" optionLabel="label" optionValue="value" [(ngModel)]="filterField" [filter]="true" placeholder="Field" appendTo="body" />
-        <p-select class="export__select" [options]="filterOps" optionLabel="label" optionValue="value" [(ngModel)]="filterOp" appendTo="body" />
+      <div class="export__filter" #filterBox>
+        <p-select class="export__select" [options]="filterFields()" optionLabel="label" optionValue="value" [(ngModel)]="filterField" [filter]="true" placeholder="Field" appendTo="body"
+        panelStyleClass="export-select-overlay" [panelStyle]="{ width: filterBox.clientWidth - 20 + 'px' }" />
+        <p-select class="export__select" [options]="filterOps" optionLabel="label" optionValue="value" [(ngModel)]="filterOp" appendTo="body"
+        panelStyleClass="export-select-overlay" [panelStyle]="{ width: filterBox.clientWidth - 20 + 'px' }" />
         @if (filterOp !== 'empty' && filterOp !== 'notempty') {
           <input type="text" class="export__input" [(ngModel)]="filterValue" placeholder="Value" />
         }
@@ -53,7 +69,7 @@
     @if (selectedFormat()?.value !== 'kml') {
       <label class="export__field">
         <span class="export__label">Coordinate system</span>
-        <app-crs-picker [(ngModel)]="crs" emptyLabel="Layer's own CRS" />
+        <app-crs-picker [(ngModel)]="crs" emptyLabel="Layer's own CRS" size="small" class="export__ac" />
       </label>
     }
 

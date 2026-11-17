@@ -23,6 +23,7 @@ import { LayerReportService } from './layer-report.service';
 import { YsldGenerator } from './ysld-generator';
 import { NetworkController } from './network.controller';
 import { NetworkService } from './network.service';
+import { PlaceSearchService } from './place-search.service';
 import { RasterController } from './raster.controller';
 import { RasterService } from './raster.service';
 import { RasterToolsService } from './raster-tools.service';
@@ -43,6 +44,16 @@ import { ExternalDbController } from './external-db.controller';
 import { ExternalDbService } from './external-db.service';
 import { TileArchiveService } from './tile-archive.service';
 import { OgcFeaturesController } from './ogc-features.controller';
+import { LocationController } from './location.controller';
+import { LocationService } from './location.service';
+import { ShareLinksController } from './share-links.controller';
+import { ShareLinksService } from './share-links.service';
+import { IntegrationsController } from './integrations.controller';
+import { IntegrationsService } from './integrations.service';
+import { DataPlatformController } from './data-platform.controller';
+import { CatalogService } from './catalog.service';
+import { StorageUsageService } from './storage-usage.service';
+import { OsmImportService } from './osm-import.service';
 
 @Module({
   imports: [AuthModule, ModuleAccessModule, AiClientModule],
@@ -59,6 +70,10 @@ import { OgcFeaturesController } from './ogc-features.controller';
     DataToolsController,
     CrsController,
     ExternalDbController,
+    LocationController,
+    ShareLinksController,
+    IntegrationsController,
+    DataPlatformController,
   ],
   providers: [
     GisWorkspaceService,
@@ -76,6 +91,7 @@ import { OgcFeaturesController } from './ogc-features.controller';
     LayerReportService,
     YsldGenerator,
     NetworkService,
+    PlaceSearchService,
     RasterService,
     RasterToolsService,
     RasterJobsService,
@@ -90,6 +106,12 @@ import { OgcFeaturesController } from './ogc-features.controller';
     UploadReviewService,
     UploadSchemaService,
     TileArchiveService,
+    LocationService,
+    ShareLinksService,
+    IntegrationsService,
+    CatalogService,
+    StorageUsageService,
+    OsmImportService,
   ],
   exports: [
     GisWorkspaceService,

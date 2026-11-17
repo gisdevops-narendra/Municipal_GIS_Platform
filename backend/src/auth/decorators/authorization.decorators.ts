@@ -2,6 +2,7 @@ import { applyDecorators, UseGuards } from '@nestjs/common';
 import { KeycloakJwtGuard } from '../guards/keycloak-jwt.guard';
 import { AppUserGuard } from '../guards/app-user.guard';
 import { RolesGuard } from '../guards/roles.guard';
+import { ApiKeyOrJwtGuard } from '../guards/api-key-or-jwt.guard';
 import { Roles } from './roles.decorator';
 
 /**
@@ -16,6 +17,14 @@ import { Roles } from './roles.decorator';
  */
 export function RequireMunicipalityMember() {
   return UseGuards(KeycloakJwtGuard, AppUserGuard);
+}
+
+/**
+ * Like RequireMunicipalityMember, but an API key (X-API-Key) is accepted
+ * too — for the read-only endpoints outside systems call.
+ */
+export function RequireMemberOrApiKey() {
+  return UseGuards(ApiKeyOrJwtGuard);
 }
 
 /**

@@ -214,6 +214,12 @@ services:
       # operation with no LLM (still fully validated + compiled). Off unless
       # explicitly set.
       GIS_AI_ENABLE_RAW_PLAN: ${GIS_AI_ENABLE_RAW_PLAN:-}
+      # Add Service / webhooks / What's Here / Street View — backend/.env.example.
+      EXTERNAL_FETCH_ALLOW_PRIVATE: ${EXTERNAL_FETCH_ALLOW_PRIVATE:-false}
+      REVERSE_GEOCODER: ${REVERSE_GEOCODER:-on}
+      REVERSE_GEOCODER_URL: ${REVERSE_GEOCODER_URL:-https://nominatim.openstreetmap.org/reverse}
+      MAPILLARY_ACCESS_TOKEN: ${MAPILLARY_ACCESS_TOKEN:-}
+      OVERPASS_URL: ${OVERPASS_URL:-https://overpass-api.de/api/interpreter}
       # Reaches Postgres via the compose network, not localhost.
       DATABASE_URL: postgresql://${POSTGRES_USER:-municipal_gis}:${POSTGRES_PASSWORD:-municipal_gis_dev_password}@postgres:5432/${POSTGRES_DB:-municipal_gis}?schema=public
       BACKEND_PORT: 3000
@@ -254,7 +260,7 @@ services:
       GIS_UPLOAD_STORAGE_DIR: /app/storage/uploads
       GIS_UPLOAD_MAX_FILE_SIZE_MB: ${GIS_UPLOAD_MAX_FILE_SIZE_MB:-3072}
       GIS_RASTER_MAX_FILE_SIZE_MB: ${GIS_RASTER_MAX_FILE_SIZE_MB:-8192}
-      GIS_UPLOAD_MAX_EXTRACTED_ZIP_SIZE_MB: ${GIS_UPLOAD_MAX_EXTRACTED_ZIP_SIZE_MB:-2000}
+      GIS_UPLOAD_MAX_EXTRACTED_ZIP_SIZE_MB: ${GIS_UPLOAD_MAX_EXTRACTED_ZIP_SIZE_MB:-102400}
       GIS_UPLOAD_MAX_ZIP_FILE_COUNT: ${GIS_UPLOAD_MAX_ZIP_FILE_COUNT:-100}
       # When "true", newly registered municipalities are seeded with the
       # three sample demo layers. Off by default — a fresh registration

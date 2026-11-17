@@ -11,6 +11,12 @@ export const routes: Routes = [
     title: 'Municipal GIS Platform'
   },
   {
+    // Share Map: public, read-only — no sign-in.
+    path: 'share/:token',
+    loadComponent: () => import('./features/share/public-map.component').then((m) => m.PublicMapComponent),
+    title: 'Shared map — Municipal GIS Platform'
+  },
+  {
     path: 'login',
     loadComponent: () => import('./features/auth/login/login.component').then((m) => m.LoginComponent),
     title: 'Login — Municipal GIS Platform'

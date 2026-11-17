@@ -58,6 +58,18 @@ import { RasterAnalysisComponent, RASTER_TOOL_MODULE_IDS } from './components/ra
 import { AiChatComponent } from './components/ai-chat/ai-chat.component';
 import { PrintLayoutComponent } from './components/print-layout/print-layout.component';
 import { ExportDataComponent } from './components/export-data/export-data.component';
+import { AddServiceComponent, loadSavedExternalLayers, saveExternalLayers } from './components/platform-extras/add-service.component';
+import { WhatsHereComponent } from './components/platform-extras/whats-here.component';
+import { ShareMapComponent } from './components/platform-extras/share-map.component';
+import { IntegrationsComponent } from './components/platform-extras/integrations.component';
+import { PlatformExtrasService } from './services/platform-extras.service';
+import { NetworkPlanningComponent } from './components/platform-extras/network-planning.component';
+import { LiveSensorsComponent, hasSavedSensorFeeds } from './components/platform-extras/live-sensors.component';
+import { Buildings3dComponent } from './components/platform-extras/buildings-3d.component';
+import { WeatherComponent } from './components/platform-extras/weather.component';
+import { OsmImportComponent } from './components/platform-extras/osm-import.component';
+import { DataCatalogComponent } from './components/platform-extras/data-catalog.component';
+import { StorageUsageComponent } from './components/platform-extras/storage-usage.component';
 import { SketchComponent } from './components/sketch/sketch.component';
 import { LayerStatisticsComponent } from './components/layer-statistics/layer-statistics.component';
 import { DensityMapComponent } from './components/density-map/density-map.component';
@@ -99,6 +111,9 @@ export interface WsTool {
    *  modules: shown when ANY of them is granted (the tool then gates each
    *  part itself). */
   anyModuleIds?: number[];
+  /** Role needed beyond module access: 'manager' = Owner or Department
+   *  Head (e.g. making data public), 'owner' = Municipality Owner. */
+  minRole?: 'manager' | 'owner';
 }
 
 type WsToolGroup = 'data' | 'explore' | 'analysis' | 'output' | 'admin';
@@ -118,11 +133,18 @@ const GROUP_ORDER: { id: WsToolGroup; label: string }[] = [
  *  AI Assistant=900, Workspace Details=960. */
 const TOOLS: WsTool[] = [
   { id: 'layers', label: 'Layers', icon: 'pi pi-clone', group: 'data', dock: 'left', available: true, moduleId: 1 },
+  { id: 'add-service', label: 'Add Service', icon: 'pi pi-globe', group: 'data', dock: 'left', available: true },
+  { id: 'osm-import', label: 'OSM Download', icon: 'pi pi-cloud-download', group: 'data', dock: 'left', available: true },
+  { id: 'catalog', label: 'Data Catalog', icon: 'pi pi-book', group: 'data', dock: 'left', available: true },
   // Legend lives inside the Layers panel (per-visible-layer swatch) — no
   // separate tool needed. Identify shows feature info in an on-map popup
   // (see MunicipalMapComponent), so it isn't a dock tool either.
   { id: 'attributes', label: 'Attribute Table', icon: 'pi pi-table', group: 'explore', dock: 'bottom', available: true, moduleId: 15 },
   { id: 'assistant', label: 'AI Assistant', icon: 'pi pi-comments', group: 'explore', dock: 'left', available: true, moduleId: AI_ASSISTANT_MODULE_ID },
+  { id: 'weather', label: 'Weather', icon: 'pi pi-cloud', group: 'explore', dock: 'left', available: true },
+  { id: 'sensors', label: 'Live Sensors', icon: 'pi pi-wifi', group: 'explore', dock: 'left', available: true },
+  { id: 'buildings-3d', label: '3D Buildings', icon: 'pi pi-box', group: 'explore', dock: 'left', available: true },
+  { id: 'whats-here', label: "What's Here", icon: 'pi pi-map-marker', group: 'explore', dock: 'left', available: true },
   { id: 'bookmarks', label: 'Bookmarks', icon: 'pi pi-bookmark', group: 'explore', dock: 'left', available: true, moduleId: 4 },
   { id: 'query', label: 'Query Builder', icon: 'pi pi-filter', group: 'analysis', dock: 'left', available: true, moduleId: 2 },
   { id: 'measure', label: 'Measure', icon: 'pi pi-arrows-h', group: 'analysis', dock: 'left', available: true, moduleId: 11 },
@@ -132,12 +154,16 @@ const TOOLS: WsTool[] = [
   // Draw & Mark also hosts feature editing (Edit Panel module) — there is no separate Edit Features tool.
   { id: 'sketch', label: 'Draw & Mark', icon: 'pi pi-pencil', group: 'analysis', dock: 'left', available: true, anyModuleIds: [DRAW_MODULE_ID, MARKING_TOOL_MODULE_ID, EDIT_PANEL_MODULE_ID] },
   { id: 'advanced', label: 'Advanced Tools', icon: 'pi pi-directions', group: 'analysis', dock: 'left', available: true, anyModuleIds: [BASIC_ROUTING_MODULE_ID, NEAREST_FACILITY_MODULE_ID, NETWORK_TRACING_MODULE_ID, SERVICE_AREA_MODULE_ID] },
+  { id: 'network-planning', label: 'Network Planning', icon: 'pi pi-sitemap', group: 'analysis', dock: 'left', available: true, anyModuleIds: [BASIC_ROUTING_MODULE_ID, NEAREST_FACILITY_MODULE_ID, SERVICE_AREA_MODULE_ID] },
   { id: 'raster', label: 'Raster Analysis', icon: 'pi pi-images', group: 'analysis', dock: 'left', available: true, anyModuleIds: RASTER_TOOL_MODULE_IDS },
   { id: 'heatmap', label: 'Heatmap & Clusters', icon: 'pi pi-sun', group: 'analysis', dock: 'left', available: true, moduleId: HEATMAP_MODULE_ID },
   { id: 'statistics', label: 'Statistics', icon: 'pi pi-chart-bar', group: 'analysis', dock: 'bottom', available: true, anyModuleIds: [ANALYTICS_MODULE_ID, DATA_VISUALISATION_MODULE_ID] },
   { id: 'print', label: 'Print Layout', icon: 'pi pi-print', group: 'output', dock: 'left', available: true, moduleId: 3 },
   { id: 'reports', label: 'Reports', icon: 'pi pi-file', group: 'output', dock: 'left', available: true, moduleId: 251 },
   { id: 'export', label: 'Export Data', icon: 'pi pi-download', group: 'output', dock: 'left', available: true, moduleId: 226 },
+  { id: 'share', label: 'Share Map', icon: 'pi pi-share-alt', group: 'output', dock: 'left', available: true, minRole: 'manager' },
+  { id: 'storage', label: 'Storage', icon: 'pi pi-database', group: 'admin', dock: 'left', available: true, minRole: 'manager' },
+  { id: 'integrations', label: 'API & Webhooks', icon: 'pi pi-key', group: 'admin', dock: 'left', available: true, minRole: 'owner' },
   { id: 'workspace', label: 'Workspace Details', icon: 'pi pi-server', group: 'admin', dock: 'left', available: true, moduleId: WORKSPACE_DETAILS_MODULE_ID }
 ];
 
@@ -173,6 +199,17 @@ const TOOLS: WsTool[] = [
     AiChatComponent,
     PrintLayoutComponent,
     ExportDataComponent,
+    AddServiceComponent,
+    WhatsHereComponent,
+    ShareMapComponent,
+    IntegrationsComponent,
+    NetworkPlanningComponent,
+    LiveSensorsComponent,
+    Buildings3dComponent,
+    WeatherComponent,
+    OsmImportComponent,
+    DataCatalogComponent,
+    StorageUsageComponent,
     SketchComponent,
     LayerStatisticsComponent,
     DensityMapComponent,
@@ -204,6 +241,10 @@ export class GisWorkspaceComponent {
   readonly municipalityName = signal<string | null>(null);
   readonly workspace = signal<GisWorkspace | null>(null);
   readonly isOwner = signal(false);
+  /** Live Sensors keep polling saved feeds even before the panel is opened. */
+  readonly sensorFeedsSaved = hasSavedSensorFeeds();
+  /** Owner or Department Head. */
+  readonly isManager = signal(false);
   /** Layer whose saved analysis report is open (layer More menu). */
   readonly reportLayer = signal<GisLayer | null>(null);
   readonly loading = signal(true);
@@ -242,6 +283,8 @@ export class GisWorkspaceComponent {
   });
 
   private hasModuleAccess(tool: WsTool): boolean {
+    if (tool.minRole === 'owner' && !this.isOwner()) return false;
+    if (tool.minRole === 'manager' && !this.isManager()) return false;
     const granted = this.myModuleIds();
     if (tool.anyModuleIds) {
       return tool.anyModuleIds.some((id) => granted.has(id));
@@ -289,6 +332,7 @@ export class GisWorkspaceComponent {
   readonly leftPanelWidth = computed(() => {
     const tool = this.leftTool();
     if (tool === 'raster') return Math.max(this.leftWidth(), 420);
+    if (tool === 'catalog') return Math.max(this.leftWidth(), 380);
     if (tool === 'assistant' && this.assistantPanelMode() === 'wide') return Math.max(this.leftWidth(), 520);
     if (tool === 'assistant' && this.assistantPanelMode() === 'floating') return 400;
     return this.leftWidth();
@@ -376,6 +420,13 @@ export class GisWorkspaceComponent {
   });
 
   constructor() {
+    // Add Service: outside layers saved in this browser come back, and
+    // every change is saved again. WFS goes via the API proxy when CORS
+    // blocks it.
+    this.mapService.externalFetchText = inject(PlatformExtrasService).smartFetchText;
+    for (const spec of loadSavedExternalLayers()) this.mapService.addExternalLayer(spec);
+    effect(() => saveExternalLayers(this.mapService.externalLayers()));
+
     // Saved Draw & Mark sketches belong on the map from the start, not only
     // once their panel has been opened.
     effect(() => {
@@ -393,6 +444,7 @@ export class GisWorkspaceComponent {
       next: (user) => {
         this.municipalityName.set(user.municipality.name);
         this.isOwner.set(user.systemRole === 'MUNICIPALITY_OWNER');
+        this.isManager.set(user.systemRole === 'MUNICIPALITY_OWNER' || user.systemRole === 'DEPARTMENT_HEAD');
       }
     });
 

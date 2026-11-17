@@ -10,6 +10,8 @@ import { ConfigService } from '@nestjs/config';
 import { AiClientService } from '../gis-ai/ai-client.service';
 import { UploadReviewService } from './upload-review.service';
 import { NetworkService } from './network.service';
+import { IntegrationsService } from './integrations.service';
+import { StorageUsageService } from './storage-usage.service';
 import { UploadSchemaService } from './upload-schema.service';
 import type { ApplyUploadSchemaDto } from './dto/upload-schema.dto';
 import * as path from 'path';
@@ -109,6 +111,8 @@ export class GisUploadsService {
     @Optional() private readonly ai?: AiClientService,
     @Optional() private readonly review?: UploadReviewService,
     @Optional() private readonly schema?: UploadSchemaService,
+    @Optional() private readonly webhooks?: IntegrationsService,
+    @Optional() private readonly storageUsage?: StorageUsageService,
     @Optional() private readonly network?: NetworkService,
     @Optional() private readonly crs?: CrsService,
     @Optional() private readonly gisLayers?: GisLayersService,
@@ -127,6 +131,12 @@ export class GisUploadsService {
         'GIS workspace is not ready for uploads yet.',
       );
     }
+
+    await this.storageUsage?.assertCanStore(
+      appUser.municipalityId,
+      dto.departmentId ?? (appUser.systemRole === 'MUNICIPALITY_OWNER' ? null : appUser.departmentId),
+      file.size,
+    );
 
     if (dto.departmentId) {
       const department = await this.prisma.department.findFirst({
@@ -697,6 +707,12 @@ export class GisUploadsService {
         });
 
         return layerRow;
+      });
+
+      this.webhooks?.emit(appUser.municipalityId, 'layer.published', {
+        layerId: savedLayer.id,
+        layerName: savedLayer.name,
+        replaced: !!existingLayer,
       });
 
       // Task 8: a brand-new DEPARTMENT layer's owning department gets its

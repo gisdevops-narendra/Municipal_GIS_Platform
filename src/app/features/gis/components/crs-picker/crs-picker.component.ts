@@ -1,4 +1,4 @@
-import { Component, Input, forwardRef, inject, signal } from '@angular/core';
+import { Component, ElementRef, Input, forwardRef, inject, signal } from '@angular/core';
 import { ControlValueAccessor, FormsModule, NG_VALUE_ACCESSOR } from '@angular/forms';
 import { AutoCompleteCompleteEvent, AutoCompleteModule } from 'primeng/autocomplete';
 import { CrsInfo, CrsService, crsLabel } from '../../services/crs.service';
@@ -38,6 +38,8 @@ interface CrsOption {
       [disabled]="disabled()"
       [inputId]="inputId"
       appendTo="body"
+      [panelStyle]="{ width: host.nativeElement.clientWidth + 'px', maxWidth: 'calc(100vw - 32px)' }"
+      [size]="$any(size)"
       scrollHeight="18rem"
       styleClass="crs-picker w-full"
       inputStyleClass="w-full"
@@ -59,6 +61,7 @@ interface CrsOption {
   `,
   styles: [
     `
+      :host { display: block; min-width: 0; }
       .crs-picker__item { display: flex; align-items: baseline; gap: 0.5rem; min-width: 0; font-size: 0.85rem; }
       .crs-picker__code { font-family: var(--font-mono, monospace); font-weight: 600; white-space: nowrap; }
       .crs-picker__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -69,6 +72,11 @@ interface CrsOption {
 })
 export class CrsPickerComponent implements ControlValueAccessor {
   private readonly crsService = inject(CrsService);
+  /** List is pinned to the picker's own width so it never spills past its panel. */
+  protected readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+
+  /** 'small' matches compact side-panel controls. */
+  @Input() size: 'small' | 'large' | undefined;
 
   @Input() placeholder = 'Search EPSG code or name…';
   /** Optional "no CRS chosen" choice; its value is ''. */

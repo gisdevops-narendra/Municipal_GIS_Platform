@@ -26,6 +26,7 @@
 .export__select.p-select,
 .export__select ::ng-deep .p-select {
   width: 100%;
+  min-width: 0;
   height: 30px;
 }
 
@@ -38,7 +39,7 @@
 
 .export__formats {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
   gap: 6px;
 }
 
@@ -71,7 +72,8 @@
 }
 
 .export__download {
-  align-self: flex-start;
+  width: 100%;
+  justify-content: center;
 }
 
 .export__error {
@@ -93,7 +95,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 4px 0 8px;
+  margin: 0;
   font-size: 13px;
   color: var(--color-ink-700);
   cursor: pointer;
@@ -102,11 +104,17 @@
 .export__filter {
   display: grid;
   gap: 6px;
-  margin-bottom: 12px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
 }
 
 .export__input {
+  box-sizing: border-box;
   width: 100%;
+  min-width: 0;
   padding: 7px 10px;
   font: inherit;
   font-size: 13px;
@@ -114,4 +122,32 @@
   background: var(--color-surface);
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-sm);
+}
+
+/* Layer + CRS pickers: same compact searchable dropdown. */
+.export__ac ::ng-deep {
+  .p-autocomplete { width: 100%; min-width: 0; }
+
+  .p-autocomplete-input {
+    height: 30px;
+    min-width: 0;
+    padding: 0 8px;
+    font-size: 12px;
+  }
+
+  .p-autocomplete-dropdown {
+    width: 30px;
+    height: 30px;
+  }
+}
+
+.export__layer-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 0.85rem;
+
+  i { flex: none; font-size: 12px; opacity: 0.55; }
+  span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }

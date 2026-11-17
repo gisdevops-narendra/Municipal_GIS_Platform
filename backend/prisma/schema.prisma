@@ -166,6 +166,8 @@ model Municipality {
   officialEmail String             @unique @map("official_email")
   contactNumber String             @map("contact_number")
   status        MunicipalityStatus @default(ACTIVE)
+  /// Storage limit for all GIS data, in MB (null = no limit).
+  storageQuotaMb Int?             @map("storage_quota_mb")
   /// Getting Started guide: optional steps the Owner acknowledged and
   /// whether the guide was dismissed — `{ acknowledged: string[],
   /// dismissed: boolean }`. Mandatory steps are derived from live data
@@ -178,6 +180,9 @@ model Municipality {
   departments  Department[]
   gisWorkspace GISWorkspace?
   uploads      GISLayerUpload[]
+  shareLinks   GISShareLink[]
+  apiKeys      ApiKey[]
+  webhooks     Webhook[]
 
   @@map("municipalities")
 }
@@ -222,6 +227,9 @@ model GISLayer {
   name               String
   code               String
   description        String?
+  /// Data Catalog metadata: { source, licence, keywords[], contact,
+  /// updateFrequency, dataDate, notes } — free-form, owner-editable.
+  metadata           Json             @default("{}")
   layerType          GisLayerType     @default(VECTOR) @map("layer_type")
   /// Denormalized copy of the parent workspace's geoserverWorkspace at
   /// publish time — lets a layer response be self-contained (frontend can
@@ -454,6 +462,8 @@ model Department {
   code           String
   description    String?
   status         DepartmentStatus @default(ACTIVE)
+  /// Storage limit for this department's GIS data, in MB (null = none).
+  storageQuotaMb Int?             @map("storage_quota_mb")
   /// User.id of the MUNICIPALITY_OWNER who created this department. Plain
   /// audit field, not a Prisma relation — see docs/backend.md "Audit" for
   /// why a full audit log is deferred.
@@ -844,4 +854,72 @@ model AiFieldMetadata {
   @@id([layerId, field])
   @@index([municipalityId])
   @@map("ai_field_metadata")
+}
+
+/// Public, read-only map link ("Share Map"). `config` holds the shared
+/// view: { layerIds: string[], external: ExternalLayerSpec[], basemap,
+/// center: [lon, lat], zoom }. Layer ids were checked viewable by the
+/// creator when the link was made. Anyone with the token can open it.
+model GISShareLink {
+  id             String    @id @default(uuid())
+  token          String    @unique
+  municipalityId String    @map("municipality_id")
+  title          String
+  description    String?
+  config         Json
+  createdById    String    @map("created_by")
+  expiresAt      DateTime? @map("expires_at")
+  revokedAt      DateTime? @map("revoked_at")
+  viewCount      Int       @default(0) @map("view_count")
+  lastViewedAt   DateTime? @map("last_viewed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  municipality Municipality @relation(fields: [municipalityId], references: [id], onDelete: Cascade)
+
+  @@index([municipalityId])
+  @@map("gis_share_links")
+}
+
+/// Key for outside systems. Only a SHA-256 hash of the secret is stored;
+/// the key acts with its creator's permissions (read-only endpoints).
+model ApiKey {
+  id             String    @id @default(uuid())
+  municipalityId String    @map("municipality_id")
+  name           String
+  /// First characters of the key, shown so the owner can tell keys apart.
+  prefix         String
+  keyHash        String    @unique @map("key_hash")
+  createdById    String    @map("created_by")
+  lastUsedAt     DateTime? @map("last_used_at")
+  expiresAt      DateTime? @map("expires_at")
+  revokedAt      DateTime? @map("revoked_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  municipality Municipality @relation(fields: [municipalityId], references: [id], onDelete: Cascade)
+
+  @@index([municipalityId])
+  @@map("api_keys")
+}
+
+/// Outgoing HTTP callback, signed with HMAC-SHA256 of the body.
+model Webhook {
+  id              String    @id @default(uuid())
+  municipalityId  String    @map("municipality_id")
+  name            String
+  url             String
+  /// Event names, e.g. "feature.created"; "*" = all.
+  events          String[]
+  secret          String
+  active          Boolean   @default(true)
+  createdById     String    @map("created_by")
+  lastStatus      Int?      @map("last_status")
+  lastError       String?   @map("last_error")
+  lastDeliveredAt DateTime? @map("last_delivered_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  municipality Municipality @relation(fields: [municipalityId], references: [id], onDelete: Cascade)
+
+  @@index([municipalityId])
+  @@map("webhooks")
 }

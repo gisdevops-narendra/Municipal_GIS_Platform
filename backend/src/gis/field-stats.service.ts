@@ -33,6 +33,12 @@ const DISTINCT_CAP = 50;
 /** Analytics: bars shown per categorical field (the rest fold into
  *  `otherCount`) and histogram bins per numeric field. */
 const TOP_CATEGORIES = 12;
+/** Distinct values (Query Builder value picker). */
+const DISTINCT_VALUES_LIMIT = 50;
+/** Above this many rows, counts come from statistics or a capped scan. */
+const DISTINCT_EXACT_MAX_ROWS = 300_000;
+const DISTINCT_SCAN_ROWS = 300_000;
+const DISTINCT_TIMEOUT_MS = 5000;
 const HISTOGRAM_BINS = 10;
 
 export interface FieldSummary {
@@ -250,6 +256,84 @@ export class FieldStatsService {
    *  count / min / max / mean / sum / median + an equal-width histogram;
    *  everything else gets its most frequent values. Same field whitelist
    *  and tenant scoping as `fieldStats`. */
+  /**
+   * Distinct values of a field (most frequent first), optionally only
+   * those containing `q` — for picking a value in the Query Builder.
+   * Big tables: Postgres' own column statistics when not searching
+   * (instant, counts estimated), else a capped scan of the matches.
+   */
+  async distinctValues(
+    table: string,
+    field: string,
+    workspaceId: string | null,
+    q?: string,
+  ): Promise<{ values: { value: string; count: number }[]; approximate: boolean }> {
+    this.assertTable(table);
+    const attribute = (await this.attributes(table, workspaceId)).find((a) => a.name === field);
+    if (!attribute) {
+      throw new BadRequestException(`"${field}" is not an attribute of this layer.`);
+    }
+    const col = `"${field.replace(/"/g, '')}"`;
+    const demo = workspaceId && this.isDemoTable(table);
+    const search = (q ?? '').trim().slice(0, 100);
+    const [size] = await this.prisma.$queryRawUnsafe<{ rows: number }[]>(
+      `SELECT GREATEST(reltuples, 0)::float8 AS rows FROM pg_class
+        WHERE relname = $1 AND relnamespace = 'public'::regnamespace`,
+      table,
+    );
+    const rows = Number(size?.rows ?? 0);
+    const big = rows > DISTINCT_EXACT_MAX_ROWS;
+
+    if (big && !search && !demo) {
+      const [stats] = await this.prisma.$queryRawUnsafe<{ vals: string[] | null; freqs: number[] | null }[]>(
+        `SELECT most_common_vals::text::text[] AS vals, most_common_freqs::float8[] AS freqs
+           FROM pg_stats WHERE schemaname = 'public' AND tablename = $1 AND attname = $2`,
+        table,
+        field,
+      );
+      // Few common values (e.g. names) → the capped scan below lists more.
+      if ((stats?.vals?.length ?? 0) >= 10 && stats?.vals) {
+        return {
+          values: stats.vals
+            .map((value, i) => ({ value, count: Math.max(1, Math.round((stats.freqs?.[i] ?? 0) * rows)) }))
+            .slice(0, DISTINCT_VALUES_LIMIT),
+          approximate: true,
+        };
+      }
+    }
+
+    const params: unknown[] = [];
+    const where = [`${col} IS NOT NULL`];
+    if (demo) {
+      params.push(workspaceId);
+      where.push(`gis_workspace_id = $${params.length}`);
+    }
+    let rank = '0';
+    if (search) {
+      const like = search.replace(/[\\%_]/g, (m) => `\\${m}`);
+      params.push(`%${like}%`, search.toLowerCase(), `${like}%`);
+      const n = params.length;
+      where.push(`${col}::text ILIKE $${n - 2}`);
+      rank = `CASE WHEN lower(v) = $${n - 1} THEN 0 WHEN v ILIKE $${n} THEN 1 ELSE 2 END`;
+    }
+    const values = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = ${DISTINCT_TIMEOUT_MS}`);
+      return tx.$queryRawUnsafe<{ value: string; count: bigint }[]>(
+        `SELECT v AS value, COUNT(*) AS count
+           FROM (SELECT ${col}::text AS v FROM "${table}" WHERE ${where.join(' AND ')}
+                 ${big ? `LIMIT ${DISTINCT_SCAN_ROWS}` : ''}) s
+          GROUP BY v
+          ORDER BY ${rank}, 2 DESC, 1
+          LIMIT ${DISTINCT_VALUES_LIMIT}`,
+        ...params,
+      );
+    });
+    return {
+      values: values.map((v) => ({ value: v.value, count: Number(v.count) })),
+      approximate: big,
+    };
+  }
+
   async summary(
     table: string,
     field: string,

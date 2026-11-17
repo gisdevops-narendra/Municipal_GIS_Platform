@@ -320,6 +320,21 @@ export class GisLayersController {
     );
   }
 
+  /** Distinct values of a field (Query Builder value picker). */
+  @RequireMunicipalityMember()
+  @Get('layers/:id/fields/values')
+  fieldValues(
+    @CurrentAppUser() appUser: AppUser,
+    @Param('id') id: string,
+    @Query('field') field: string | undefined,
+    @Query('q') q: string | undefined,
+  ) {
+    if (!field) {
+      throw new BadRequestException('field is required.');
+    }
+    return this.gisLayersService.layerFieldValues(appUser, id, field, q);
+  }
+
   @RequireMunicipalityMember()
   @Get('layers/:id/analytics/summary')
   analyticsSummary(
