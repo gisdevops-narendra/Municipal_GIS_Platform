@@ -53,6 +53,8 @@ function symbolStyle(s: LegendSymbol, z: number): Style {
   const image =
     s.mark === 'square'
       ? shape(4, undefined, Math.PI / 4)
+      : s.mark === 'diamond'
+        ? shape(4)
       : s.mark === 'triangle'
         ? shape(3)
         : s.mark === 'star'

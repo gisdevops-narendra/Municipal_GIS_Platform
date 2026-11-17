@@ -6,10 +6,10 @@ import { chipSvg, labelsSvg, rampSvg, swatchSvg } from './legend-svg';
  * The print version of the app's native legend. MapFish puts a legend
  * class's name and icon on separate rows, so each legend line (symbol +
  * label, in the app's font) is drawn here as ONE PNG and MapFish only
- * stacks them. Row size matches the legend.jrxml column: 272 × 18 pt.
+ * stacks them. Row size matches the legend.jrxml column: 190 × 18 pt.
  */
 
-const ROW_W = 272;
+const ROW_W = 190;
 const ROW_H = 18;
 const SW = 26;
 const SH = 16;

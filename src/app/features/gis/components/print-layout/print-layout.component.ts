@@ -21,6 +21,18 @@ import { PrintService } from '../../../../core/services/print.service';
 
 type PanelState = 'idle' | 'generating' | 'done' | 'error';
 
+/** Size of the printed map area per layout, in points (1/72 in) — must
+ *  match the map frames in mapfish-print/gen_print.py. */
+const MAP_AREA_PT: Record<string, [number, number]> = {
+  'A4 landscape': [600, 474],
+  'A4 portrait': [555, 560],
+  'A3 landscape': [935, 712],
+  'A3 portrait': [794, 860]
+};
+
+/** Standard map scales offered besides "current view". */
+const FIXED_SCALES = [500, 1000, 2000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000];
+
 /** Every live-map basemap id the print backend can actually render — see
  *  PrintBasemapId. */
 const PRINTABLE_BASEMAP_IDS: ReadonlySet<PrintBasemapId> = new Set([
@@ -74,11 +86,16 @@ export class PrintLayoutComponent implements OnDestroy {
   readonly orientation = signal<PrintOrientation>('landscape');
   readonly format = signal<PrintFormat>('pdf');
   readonly dpi = signal<number>(150);
-  readonly dpiOptions = signal<{ label: string; value: number }[]>([
-    { label: '96 dpi', value: 96 },
-    { label: '150 dpi', value: 150 },
-    { label: '300 dpi', value: 300 }
-  ]);
+  readonly dpiOptions = signal<{ label: string; value: number }[]>([96, 150, 300].map((v) => ({ label: this.dpiLabel(v), value: v })));
+
+  /** 0 = the current map view's scale; otherwise a fixed 1 : N. */
+  readonly scaleChoice = signal<number>(0);
+  readonly scaleOptions = [
+    { label: 'Current view', value: 0 },
+    ...FIXED_SCALES.map((n) => ({ label: `1 : ${n.toLocaleString()}`, value: n }))
+  ];
+  /** Dashed frame on the live map showing exactly what will print. */
+  readonly showFrame = signal(true);
 
   title = '';
   metadata = '';
@@ -86,6 +103,10 @@ export class PrintLayoutComponent implements OnDestroy {
   includeScalebar = true;
   includeNorthArrow = true;
   includeDate = true;
+  includeOverview = true;
+  includeGrid = false;
+  preparedBy = '';
+  notes = '';
 
   readonly state = signal<PanelState>('idle');
   readonly errorMsg = signal<string | null>(null);
@@ -102,7 +123,15 @@ export class PrintLayoutComponent implements OnDestroy {
     // zooms, and a stale scale would not match what gets printed.
     effect(() => {
       this.mapService.viewRevision();
-      untracked(() => this.refreshScale());
+      this.mapService.centerRevision();
+      this.pageSize();
+      this.orientation();
+      this.scaleChoice();
+      this.showFrame();
+      untracked(() => {
+        this.refreshScale();
+        this.drawFrame();
+      });
     });
     // MapFish capabilities are advisory — the panel stays fully usable if
     // the call fails (the defaults above still apply).
@@ -114,7 +143,7 @@ export class PrintLayoutComponent implements OnDestroy {
           this.dpiOptions.set(
             suggestions
               .filter((v): v is number => typeof v === 'number')
-              .map((value) => ({ label: `${value} dpi`, value }))
+              .map((value) => ({ label: this.dpiLabel(value), value }))
           );
         }
       },
@@ -124,6 +153,56 @@ export class PrintLayoutComponent implements OnDestroy {
 
   ngOnDestroy(): void {
     this.releaseObjectUrl();
+    this.mapService.setPrintFrame(null);
+  }
+
+  /** Panel hidden (another tool shown): hide the frame too. */
+  @Input() set active(value: boolean) {
+    this.isActive = value;
+    this.drawFrame();
+  }
+  private isActive = true;
+
+  private dpiLabel(value: number): string {
+    if (value <= 96) return `${value} dpi · draft`;
+    if (value <= 150) return `${value} dpi · recommended`;
+    return `${value} dpi · high quality`;
+  }
+
+  /** The scale that will be printed. */
+  private printScale(): number | null {
+    return this.scaleChoice() || this.mapService.currentScaleDenominator();
+  }
+
+  /** Map units covered by the printed map area at the print scale. */
+  private drawFrame(): void {
+    const scale = this.printScale();
+    const area = MAP_AREA_PT[`${this.pageSize()} ${this.orientation()}`];
+    if (!this.isActive || !this.showFrame() || !scale || !area) {
+      this.mapService.setPrintFrame(null);
+      return;
+    }
+    const metres = (pt: number) => (pt / 72) * 0.0254 * scale;
+    this.mapService.setPrintFrame({ widthM: metres(area[0]), heightM: metres(area[1]) });
+  }
+
+  /** Zooms the map so the whole print area is in view. */
+  fitFrame(): void {
+    const scale = this.printScale();
+    const area = MAP_AREA_PT[`${this.pageSize()} ${this.orientation()}`];
+    const view = this.mapService.viewSnapshot();
+    if (!scale || !area || !view) return;
+    const half = (pt: number) => ((pt / 72) * 0.0254 * scale) / 2;
+    const [lon, lat] = view.center;
+    // Map units (EPSG:3857) → degrees, for the 4326 extent helper.
+    const k = 180 / 20037508.34;
+    const cx = (lon * 20037508.34) / 180;
+    const cy = Math.log(Math.tan(((90 + lat) * Math.PI) / 360)) * (20037508.34 / Math.PI);
+    const toLat = (y: number) => (Math.atan(Math.exp((y / 20037508.34) * Math.PI)) * 360) / Math.PI - 90;
+    const pad = 1.08;
+    const w = half(area[0]) * pad;
+    const h = half(area[1]) * pad;
+    this.mapService.zoomToExtent4326([(cx - w) * k, toLat(cy - h), (cx + w) * k, toLat(cy + h)]);
   }
 
   /** Falls back to OpenStreetMap when the live map's active basemap isn't
@@ -156,7 +235,7 @@ export class PrintLayoutComponent implements OnDestroy {
 
   /** Recomputes the scale readout from the current view. */
   refreshScale(): void {
-    const denominator = this.mapService.currentScaleDenominator();
+    const denominator = this.printScale();
     this.scaleLabel.set(
       denominator ? `1 : ${Math.round(denominator).toLocaleString()}` : '—'
     );
@@ -198,11 +277,16 @@ export class PrintLayoutComponent implements OnDestroy {
       includeScalebar: this.includeScalebar,
       includeNorthArrow: this.includeNorthArrow,
       includeDate: this.includeDate,
+      includeOverview: this.includeOverview,
+      includeGrid: this.includeGrid,
+      preparedBy: this.preparedBy.trim() || undefined,
+      notes: this.notes.trim() || undefined,
       basemapId: this.toPrintBasemapId(context.basemapId),
       map: {
         center: context.center,
-        scale: context.scale,
-        rotation: context.rotation,
+        scale: this.scaleChoice() || context.scale,
+        // OpenLayers works in radians, MapFish in degrees.
+        rotation: (context.rotation * 180) / Math.PI,
         projection: context.projection
       },
       layers: context.layers.map((layer, i) => ({

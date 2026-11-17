@@ -37,6 +37,10 @@ export interface PrintReportRequest {
   includeScalebar: boolean;
   includeNorthArrow: boolean;
   includeDate: boolean;
+  includeOverview?: boolean;
+  includeGrid?: boolean;
+  preparedBy?: string;
+  notes?: string;
   basemapId?: PrintBasemapId;
   map: {
     center: [number, number];

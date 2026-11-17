@@ -258,3 +258,23 @@
     color: var(--color-primary-700);
   }
 }
+
+/* Map area: frame toggle + fit link on one row. */
+.pl__frame-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pl__hint {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--color-ink-500);
+}
+
+.pl__textarea {
+  min-height: 52px;
+  resize: vertical;
+  font: inherit;
+}

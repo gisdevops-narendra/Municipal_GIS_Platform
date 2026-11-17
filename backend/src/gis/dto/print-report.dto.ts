@@ -113,6 +113,28 @@ export class PrintReportDto {
   @IsBoolean()
   includeDate!: boolean;
 
+  /** Small locator map of the wider area in the side panel. */
+  @IsOptional()
+  @IsBoolean()
+  includeOverview?: boolean;
+
+  /** Latitude / longitude grid over the map. */
+  @IsOptional()
+  @IsBoolean()
+  includeGrid?: boolean;
+
+  /** "Prepared by" line in the map information box. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  preparedBy?: string;
+
+  /** Notes / disclaimer printed in the footer. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  notes?: string;
+
   /** Basemap id, resolved by the backend against a fixed allowlist — never
    *  a URL. `none` prints the WMS layers on a white background. */
   @IsOptional()

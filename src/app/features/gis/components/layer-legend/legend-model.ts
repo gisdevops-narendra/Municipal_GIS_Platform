@@ -136,7 +136,8 @@ function parseSymbolizer(s: Json): LegendSymbol | null {
     const image = typeof g['external-graphic-url'] === 'string' ? g['external-graphic-url'] : null;
     return {
       kind: 'point',
-      mark: String(g.mark ?? 'circle').replace(/^shape:\/\//, ''),
+      // GeoServer draws its 'rectangle' mark as a square.
+      mark: String(g.mark ?? 'circle').replace(/^shape:\/\//, '').replace(/^rectangle$/, 'square'),
       size: num(p.size, 8),
       fill: color(g.fill) ?? (g.mark || image ? null : '#808080'),
       fillOpacity: num(g['fill-opacity'], 1),

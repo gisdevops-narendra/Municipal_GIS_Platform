@@ -749,6 +749,7 @@ export class MapService {
     this.envOverlays.clear();
     this.filledLayer = null;
     this.pinLayer = null;
+    this.printFrameLayer = null;
     this.infoPinLayer = null;
     this.lastInfoCoordinate = null;
     this.globe?.destroy();
@@ -2802,6 +2803,39 @@ export class MapService {
    *  selection) and the basemap are excluded here — the backend adds the
    *  basemap from `basemapId`, and the transient overlays are not part of
    *  a printed map. `null` before the map is ready. */
+  // ----- Print Layout: print-area frame -----
+  private printFrameLayer: VectorLayer<VectorSource> | null = null;
+
+  /** Draws (or clears, with null) the area a print will cover: a frame
+   *  of `widthM` × `heightM` map units centred on the current view. */
+  setPrintFrame(size: { widthM: number; heightM: number } | null): void {
+    if (!this.map) return;
+    const center = this.map.getView().getCenter();
+    if (!size || !center) {
+      this.printFrameLayer?.getSource()?.clear();
+      return;
+    }
+    if (!this.printFrameLayer) {
+      this.printFrameLayer = new VectorLayer({
+        source: new VectorSource(),
+        zIndex: 9990,
+        style: new Style({
+          stroke: new Stroke({ color: '#0f766e', width: 2, lineDash: [8, 6] }),
+          fill: new Fill({ color: 'rgba(15, 118, 110, 0.04)' })
+        }),
+        properties: { selectionOverlay: true }
+      });
+      this.map.addLayer(this.printFrameLayer);
+    }
+    const [cx, cy] = center;
+    const hw = size.widthM / 2;
+    const hh = size.heightM / 2;
+    const ring = [[cx - hw, cy - hh], [cx + hw, cy - hh], [cx + hw, cy + hh], [cx - hw, cy + hh], [cx - hw, cy - hh]];
+    const source = this.printFrameLayer.getSource()!;
+    source.clear();
+    source.addFeature(new Feature(new Polygon([ring])));
+  }
+
   getPrintContext(): PrintMapContext | null {
     const view = this.map?.getView();
     const center = view?.getCenter();

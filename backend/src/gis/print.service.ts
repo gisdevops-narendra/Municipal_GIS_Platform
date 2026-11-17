@@ -32,13 +32,17 @@ interface BasemapDefinition {
 
 /** The subset of the MapFish v3 request spec this service produces. */
 export interface MapFishMapLayer {
-  type: 'wms' | 'osm';
-  baseURL: string;
+  type: 'wms' | 'osm' | 'grid';
+  /** 'geoserver': MapFish passes the print DPI so GeoServer scales
+   *  symbols, line widths and labels to their on-screen size. */
+  serverType?: 'geoserver';
+  baseURL?: string;
   layers?: string[];
   imageFormat?: string;
   imageExtension?: string;
   opacity?: number;
   customParams?: Record<string, string>;
+  [gridOption: string]: unknown;
 }
 
 export interface MapFishPrintSpec {
@@ -49,9 +53,16 @@ export interface MapFishPrintSpec {
     metadata: string;
     printDate: string;
     attribution: string;
+    organisation: string;
+    preparedBy: string;
+    notes: string;
+    scaleText: string;
+    crsText: string;
     showLegend: boolean;
     showScalebar: boolean;
     showNorthArrow: boolean;
+    showOverview: boolean;
+    overviewMap: { layers: MapFishMapLayer[] };
     legend: { name: string; classes: MapFishLegendClass[] };
     scalebar: Record<string, never>;
     northArrow: Record<string, never>;
@@ -247,6 +258,7 @@ export class PrintService {
       baseURL: `${this.geoserverUrl}/${layer.geoserverWorkspace}/wms`,
       layers: [`${layer.geoserverWorkspace}:${layer.geoserverLayer}`],
       imageFormat: 'image/png',
+      serverType: 'geoserver',
       opacity: layer.opacity,
       customParams: {
         TRANSPARENT: 'true',
@@ -254,17 +266,15 @@ export class PrintService {
       },
     }));
 
-    if (basemap) {
-      mapLayers.push({
-        type: 'osm',
-        baseURL: basemap.baseURL,
-        imageExtension: 'png',
-      });
-    }
+    const basemapLayer: MapFishMapLayer | null = basemap
+      ? { type: 'osm', baseURL: basemap.baseURL, imageExtension: 'png' }
+      : null;
+    if (basemapLayer) mapLayers.push(basemapLayer);
+    // Latitude / longitude grid, drawn on top of everything.
+    if (dto.includeGrid) mapLayers.unshift(this.gridLayer());
 
-    const attribution = [municipalityName, basemap?.attribution]
-      .filter(Boolean)
-      .join('  ·  ');
+    const attribution = basemap?.attribution ?? '';
+    const date = new Date().toISOString().slice(0, 10);
 
     const legendClasses = dto.includeLegend
       ? layers.map((layer) => this.legendClass(layer))
@@ -276,8 +286,19 @@ export class PrintService {
       attributes: {
         title: dto.title ?? '',
         metadata: dto.metadata ?? '',
-        printDate: dto.includeDate ? new Date().toISOString().slice(0, 10) : '',
+        printDate: dto.includeDate ? date : '',
         attribution,
+        organisation: municipalityName,
+        preparedBy: dto.preparedBy?.trim() ?? '',
+        notes: dto.notes?.trim() ?? '',
+        scaleText: `1 : ${Math.round(dto.map.scale).toLocaleString('en-US')}`,
+        crsText: 'EPSG:3857 · Web Mercator',
+        showOverview: !!dto.includeOverview,
+        // Locator: the basemap alone (fast); the data layers when there is
+        // no basemap. Always sent — the template only shows it when asked.
+        overviewMap: {
+          layers: basemapLayer ? [basemapLayer] : mapLayers.filter((l) => l.type === 'wms').slice(0, 3),
+        },
         showLegend: dto.includeLegend,
         showScalebar: dto.includeScalebar,
         showNorthArrow: dto.includeNorthArrow,
@@ -295,6 +316,26 @@ export class PrintService {
           layers: mapLayers,
         },
       },
+    };
+  }
+
+  /** MapFish grid layer: lines with WGS84 degree labels. */
+  private gridLayer(): MapFishMapLayer {
+    return {
+      type: 'grid',
+      gridType: 'LINES',
+      numberOfLines: [5, 4],
+      renderAsSvg: true,
+      labelProjection: 'EPSG:4326',
+      longitudeFirst: true,
+      valueFormat: '0.000',
+      unitFormat: '%s',
+      gridColor: '#8A949E',
+      haloColor: '#FFFFFF',
+      haloRadius: 2,
+      labelColor: '#2F3A45',
+      font: { name: ['SansSerif'], size: 7, style: 'PLAIN' },
+      indent: 4,
     };
   }
 

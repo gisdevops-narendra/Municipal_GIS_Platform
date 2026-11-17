@@ -408,6 +408,7 @@
         @if (openedLeftTools().has('print') && layersReady()) {
           <app-print-layout
             [class.gis-ws__panel--hidden]="leftTool() !== 'print'"
+            [active]="leftTool() === 'print' && !leftMinimized()"
             [layers]="layers()"
           />
         }

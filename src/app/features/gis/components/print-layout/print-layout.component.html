@@ -63,6 +63,31 @@
     </div>
   </section>
 
+  <!-- ============ map area ============ -->
+  <section class="pl__card">
+    <h3 class="pl__card-title">Map area</h3>
+    <label class="pl__field">
+      <span class="pl__label">Scale</span>
+      <p-select
+        class="pl__select"
+        [options]="scaleOptions"
+        optionLabel="label"
+        optionValue="value"
+        [ngModel]="scaleChoice()"
+        (ngModelChange)="scaleChoice.set($event); optionChanged()"
+        appendTo="body"
+      />
+    </label>
+    <div class="pl__frame-row">
+      <label class="pl__check">
+        <p-checkbox [binary]="true" [ngModel]="showFrame()" (ngModelChange)="showFrame.set($event)" inputId="pl-frame" />
+        <span>Show print area on map</span>
+      </label>
+      <button type="button" class="pl__link" (click)="fitFrame()">Fit to view</button>
+    </div>
+    <p class="pl__hint">Pan the map to place the dashed frame — everything inside it prints.</p>
+  </section>
+
   <!-- ============ labels ============ -->
   <section class="pl__card">
     <h3 class="pl__card-title">Labels</h3>
@@ -78,7 +103,7 @@
       />
     </label>
     <label class="pl__field">
-      <span class="pl__label">Subtitle / notes</span>
+      <span class="pl__label">Subtitle</span>
       <input
         pInputText
         class="pl__input"
@@ -87,6 +112,29 @@
         maxlength="500"
         placeholder="Optional second line"
       />
+    </label>
+    <label class="pl__field">
+      <span class="pl__label">Prepared by</span>
+      <input
+        pInputText
+        class="pl__input"
+        [(ngModel)]="preparedBy"
+        (ngModelChange)="optionChanged()"
+        maxlength="80"
+        placeholder="Name or department"
+      />
+    </label>
+    <label class="pl__field">
+      <span class="pl__label">Notes / disclaimer</span>
+      <textarea
+        pInputText
+        class="pl__input pl__textarea"
+        rows="2"
+        [(ngModel)]="notes"
+        (ngModelChange)="optionChanged()"
+        maxlength="300"
+        placeholder="e.g. For planning purposes only. Boundaries are indicative."
+      ></textarea>
     </label>
   </section>
 
@@ -110,6 +158,14 @@
         <p-checkbox [binary]="true" [(ngModel)]="includeDate" (ngModelChange)="optionChanged()" inputId="pl-date" />
         <span>Date</span>
       </label>
+      <label class="pl__check">
+        <p-checkbox [binary]="true" [(ngModel)]="includeOverview" (ngModelChange)="optionChanged()" inputId="pl-overview" />
+        <span>Locator map</span>
+      </label>
+      <label class="pl__check">
+        <p-checkbox [binary]="true" [(ngModel)]="includeGrid" (ngModelChange)="optionChanged()" inputId="pl-grid" />
+        <span>Lat / long grid</span>
+      </label>
     </div>
   </section>
 
@@ -117,7 +173,7 @@
   <p class="pl__context">
     <i class="pi pi-map" aria-hidden="true"></i>
     <span>
-      Prints the current map view · scale <strong>{{ scaleLabel() }}</strong>
+      Prints the {{ scaleChoice() ? 'framed area' : 'current map view' }} · scale <strong>{{ scaleLabel() }}</strong>
       · {{ layers.length }} layer{{ layers.length === 1 ? '' : 's' }} available
     </span>
   </p>
