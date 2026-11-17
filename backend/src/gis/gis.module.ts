@@ -58,6 +58,7 @@ import { PlanningToolsController } from './planning-tools.controller';
 import { GroundwaterService } from './groundwater.service';
 import { OutbreakService } from './outbreak.service';
 import { EvPlanningService } from './ev-planning.service';
+import { HazardsService } from './hazards.service';
 
 @Module({
   imports: [AuthModule, ModuleAccessModule, AiClientModule],
@@ -120,6 +121,7 @@ import { EvPlanningService } from './ev-planning.service';
     GroundwaterService,
     OutbreakService,
     EvPlanningService,
+    HazardsService,
   ],
   exports: [
     GisWorkspaceService,

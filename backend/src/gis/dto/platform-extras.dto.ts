@@ -346,3 +346,29 @@ export class EvCoverageDto {
   @IsNumber({}, { each: true })
   bbox!: number[];
 }
+
+export class HazardAreaDto {
+  @IsString()
+  @MaxLength(120)
+  id!: string;
+
+  /** GeoJSON (EPSG:4326) — a point (quake epicentre) or alert polygon. */
+  @IsObject()
+  geometry!: Record<string, unknown>;
+
+  /** Ground distance around the geometry that counts as exposed (km). */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(500)
+  bufferKm?: number;
+}
+
+export class HazardExposureDto {
+  @IsUUID()
+  layerId!: string;
+
+  @IsArray()
+  @ArrayMaxSize(50)
+  areas!: HazardAreaDto[];
+}

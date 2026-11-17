@@ -74,6 +74,7 @@ import { GroundwaterComponent } from './components/platform-extras/groundwater.c
 import { OutbreakComponent } from './components/platform-extras/outbreak.component';
 import { EvChargingComponent } from './components/platform-extras/ev-charging.component';
 import { TourismComponent } from './components/platform-extras/tourism.component';
+import { HazardsComponent } from './components/platform-extras/hazards.component';
 import { SketchComponent } from './components/sketch/sketch.component';
 import { LayerStatisticsComponent } from './components/layer-statistics/layer-statistics.component';
 import { DensityMapComponent } from './components/density-map/density-map.component';
@@ -146,6 +147,7 @@ const TOOLS: WsTool[] = [
   { id: 'attributes', label: 'Attribute Table', icon: 'pi pi-table', group: 'explore', dock: 'bottom', available: true, moduleId: 15 },
   { id: 'assistant', label: 'AI Assistant', icon: 'pi pi-comments', group: 'explore', dock: 'left', available: true, moduleId: AI_ASSISTANT_MODULE_ID },
   { id: 'tourism', label: 'Tourism', icon: 'pi pi-ticket', group: 'explore', dock: 'left', available: true },
+  { id: 'hazards', label: 'Hazard Alerts', icon: 'pi pi-exclamation-triangle', group: 'explore', dock: 'left', available: true },
   { id: 'weather', label: 'Weather', icon: 'pi pi-cloud', group: 'explore', dock: 'left', available: true },
   { id: 'sensors', label: 'Live Sensors', icon: 'pi pi-wifi', group: 'explore', dock: 'left', available: true },
   { id: 'buildings-3d', label: '3D Buildings', icon: 'pi pi-box', group: 'explore', dock: 'left', available: true },
@@ -222,6 +224,7 @@ const TOOLS: WsTool[] = [
     OutbreakComponent,
     EvChargingComponent,
     TourismComponent,
+    HazardsComponent,
     SketchComponent,
     LayerStatisticsComponent,
     DensityMapComponent,

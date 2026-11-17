@@ -2,9 +2,10 @@ import { Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe, Post, Que
 import { RequireMunicipalityMember } from '../auth/decorators/authorization.decorators';
 import { CurrentAppUser } from '../auth/decorators/current-app-user.decorator';
 import type { AppUser } from '../auth/types/app-user.type';
-import { EvCoverageDto, OutbreakDto, WellImportDto, WellReadingDto } from './dto/platform-extras.dto';
+import { EvCoverageDto, HazardExposureDto, OutbreakDto, WellImportDto, WellReadingDto } from './dto/platform-extras.dto';
 import { EvPlanningService } from './ev-planning.service';
 import { GroundwaterService } from './groundwater.service';
+import { HazardsService } from './hazards.service';
 import { OutbreakService } from './outbreak.service';
 
 /** Groundwater monitoring, disease outbreak mapping and EV charging
@@ -15,6 +16,7 @@ export class PlanningToolsController {
     private readonly groundwater: GroundwaterService,
     private readonly outbreak: OutbreakService,
     private readonly ev: EvPlanningService,
+    private readonly hazards: HazardsService,
   ) {}
 
   @RequireMunicipalityMember()
@@ -65,5 +67,12 @@ export class PlanningToolsController {
   @HttpCode(200)
   evCoverage(@CurrentAppUser() appUser: AppUser, @Body() dto: EvCoverageDto) {
     return this.ev.coverage(appUser, dto);
+  }
+
+  @RequireMunicipalityMember()
+  @Post('hazards/exposure')
+  @HttpCode(200)
+  hazardExposure(@CurrentAppUser() appUser: AppUser, @Body() dto: HazardExposureDto) {
+    return this.hazards.exposure(appUser, dto);
   }
 }
