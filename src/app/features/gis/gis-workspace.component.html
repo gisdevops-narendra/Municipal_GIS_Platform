@@ -1,9 +1,10 @@
-<app-site-header />
+@if (!focusMode()) { <app-site-header compact /> }
 
 <div
   class="gis-ws"
   [class.gis-ws--left-open]="activeLeftTool()"
   [class.gis-ws--bottom-open]="activeBottomTool()"
+  [class.gis-ws--focus]="focusMode()"
 >
   <!-- ============ toolbar ============ -->
   <nav class="gis-ws__bar" aria-label="GIS tools">
@@ -26,7 +27,7 @@
         <div class="gis-ws__bar-menu" [class.is-end]="group.id === 'admin'" (keydown)="onMenuKeydown($event)">
           <button type="button" class="gis-ws__bar-btn" role="menuitem" aria-haspopup="menu"
                   [class.is-open]="openMenu() === group.id" [class.has-active]="isGroupActive(group)"
-                  [attr.aria-expanded]="openMenu() === group.id" (click)="toggleMenu(group.id)" (mouseenter)="hoverMenu(group.id)">
+                  [attr.aria-expanded]="openMenu() === group.id" [attr.title]="group.label" (click)="toggleMenu(group.id)" (mouseenter)="hoverMenu(group.id)">
             <i [class]="group.icon" aria-hidden="true"></i>
             <span>{{ group.label }}</span>
             <i class="pi pi-chevron-down gis-ws__bar-caret" aria-hidden="true"></i>
@@ -73,6 +74,15 @@
       }
     </div>
 
+    @if (layersReady() && canSearch()) {
+      <app-gis-search
+        class="gis-ws__place-search"
+        (layerSelected)="onSearchLayerSelected($event)"
+        (featureSelected)="onSearchFeatureSelected($event)"
+        (cleared)="onSearchCleared()"
+      />
+    }
+
     <div class="gis-ws__bar-search" (keydown)="onMenuKeydown($event)">
       <label class="gis-ws__bar-search-box">
         <i class="pi pi-search" aria-hidden="true"></i>
@@ -114,6 +124,55 @@
         </div>
       }
     </div>
+
+    <div class="gis-ws__bar-menu" (keydown)="onMenuKeydown($event)">
+      <button type="button" class="gis-ws__bar-btn gis-ws__bar-icon" [class.is-open]="openMenu() === 'layout'" aria-haspopup="menu"
+              [attr.aria-expanded]="openMenu() === 'layout'" aria-label="Layout" title="Layout" (click)="toggleLayoutMenu()">
+        <i class="pi pi-objects-column" aria-hidden="true"></i>
+      </button>
+      @if (openMenu() === 'layout') {
+        <div class="gis-ws__dropdown gis-ws__dropdown--end" role="menu" aria-label="Layout">
+          <div class="gis-ws__dropdown-head">
+            <span>Layout</span>
+            <span>Your panels and sizes are remembered</span>
+          </div>
+          @for (p of layoutPresets; track p.id) {
+            <button type="button" role="menuitem" class="gis-ws__dropdown-item" (click)="applyLayoutPreset(p.id)">
+              <i [class]="p.icon" aria-hidden="true"></i>
+              <span class="gis-ws__dropdown-text">
+                <span class="gis-ws__dropdown-label">{{ p.label }}</span>
+                <span class="gis-ws__dropdown-hint">{{ p.hint }}</span>
+              </span>
+            </button>
+          }
+          <button type="button" role="menuitem" class="gis-ws__dropdown-item" (click)="setLayersDock(layersDock() === 'left' ? 'right' : 'left'); closeMenu()">
+            <i class="pi pi-arrow-right-arrow-left" aria-hidden="true"></i>
+            <span class="gis-ws__dropdown-text">
+              <span class="gis-ws__dropdown-label">Layers on the {{ layersDock() === 'left' ? 'right' : 'left' }}</span>
+              <span class="gis-ws__dropdown-hint">Move the Layers panel to the other side</span>
+            </span>
+          </button>
+          <button type="button" role="menuitem" class="gis-ws__dropdown-item" (click)="resetPanelSizes()">
+            <i class="pi pi-arrows-alt" aria-hidden="true"></i>
+            <span class="gis-ws__dropdown-text">
+              <span class="gis-ws__dropdown-label">Reset panel sizes</span>
+              <span class="gis-ws__dropdown-hint">Default widths and heights</span>
+            </span>
+          </button>
+        </div>
+      }
+    </div>
+
+    <button type="button" class="gis-ws__bar-btn gis-ws__bar-icon" [pTooltip]="isDark() ? 'Light theme ([)' : 'Dark theme ([)'" tooltipPosition="bottom"
+            [attr.aria-label]="isDark() ? 'Switch to light theme' : 'Switch to dark theme'" (click)="toggleTheme()">
+      <i class="pi" [class.pi-moon]="!isDark()" [class.pi-sun]="isDark()" aria-hidden="true"></i>
+    </button>
+    <button type="button" class="gis-ws__bar-btn gis-ws__bar-icon" [class.is-active]="focusMode()"
+            [pTooltip]="focusMode() ? 'Exit full screen (F)' : 'Full-screen map (F)'" tooltipPosition="bottom"
+            [attr.aria-label]="focusMode() ? 'Exit full screen' : 'Full-screen map'" [attr.aria-pressed]="focusMode()"
+            (click)="toggleFocusMode()">
+      <i class="pi" [class.pi-window-maximize]="!focusMode()" [class.pi-window-minimize]="focusMode()" aria-hidden="true"></i>
+    </button>
   </nav>
 
   <!-- ============ left dock ============ -->
@@ -151,13 +210,45 @@
     class="gis-ws__left"
     [class.is-collapsed]="!activeLeftTool() || !!styleTargetLayer()"
     [class.is-floating]="assistantFloating()"
+    [class.is-minimized]="leftMinimized()"
     [style.width.px]="leftPanelWidth()"
   >
-    <header class="gis-ws__panel-head">
-      <span class="gis-ws__panel-title">{{ activeLeftTool()?.label }}</span>
-      <button type="button" class="gis-ws__icon-btn" aria-label="Close panel" (click)="closeLeft()">
-        <i class="pi pi-times" aria-hidden="true"></i>
+    @if (leftMinimized()) {
+      <button type="button" class="gis-ws__edge-tab" [attr.aria-label]="'Restore ' + activeLeftTool()?.label" (click)="toggleLeftMinimized()">
+        <i class="pi pi-angle-double-right" aria-hidden="true"></i>
+        <span>{{ activeLeftTool()?.label }}</span>
       </button>
+    }
+    <header class="gis-ws__panel-head" [class.has-tabs]="leftTabs().length > 1">
+      @if (leftTabs().length > 1) {
+        <div class="gis-ws__tabs" role="tablist" aria-label="Open panels">
+          @for (tab of leftTabs(); track tab.id) {
+            <button type="button" role="tab" class="gis-ws__tab" [class.is-active]="leftTool() === tab.id"
+                    [attr.aria-selected]="leftTool() === tab.id" [title]="tab.label" (click)="switchLeftTab(tab)"
+                    (auxclick)="$event.button === 1 && closeLeftTab(tab, $event)">
+              <i [class]="tab.icon" aria-hidden="true"></i>
+              <span>{{ tab.label }}</span>
+              <span class="gis-ws__tab-close" role="button" tabindex="-1" [attr.aria-label]="'Close ' + tab.label"
+                    (click)="closeLeftTab(tab, $event)"><i class="pi pi-times" aria-hidden="true"></i></span>
+            </button>
+          }
+        </div>
+      } @else {
+        <span class="gis-ws__panel-title">{{ activeLeftTool()?.label }}</span>
+      }
+      <span class="gis-ws__panel-actions">
+        @if (leftTool() === 'layers') {
+          <button type="button" class="gis-ws__icon-btn" aria-label="Move Layers to the right" pTooltip="Move Layers to the right side" tooltipPosition="bottom" (click)="setLayersDock('right')">
+            <i class="pi pi-arrow-right" aria-hidden="true"></i>
+          </button>
+        }
+        <button type="button" class="gis-ws__icon-btn" aria-label="Minimise panel" pTooltip="Minimise" tooltipPosition="bottom" (click)="toggleLeftMinimized()">
+          <i class="pi pi-angle-double-left" aria-hidden="true"></i>
+        </button>
+        <button type="button" class="gis-ws__icon-btn" aria-label="Close panel" pTooltip="Close" tooltipPosition="bottom" (click)="closeLeft()">
+          <i class="pi pi-times" aria-hidden="true"></i>
+        </button>
+      </span>
     </header>
 
       <!-- Every tool panel opened at least once is kept mounted (hidden via
@@ -165,14 +256,14 @@
            form / filter / result / chat state is exactly as the user left
            it — here and after navigating away and back (route keep-alive). -->
       <div class="gis-ws__panel-body">
-        @if (openedLeftTools().has('layers')) {
+        @if (openedLeftTools().has('layers') && layersDock() === 'left') {
           @if (layersReady()) {
             <app-layer-panel
               [class.gis-ws__panel--hidden]="leftTool() !== 'layers'"
               [layers]="layers()"
               [highlightLayerId]="highlightLayerId()"
               [canStyle]="canStyleLayers()"
-              [showBasemap]="canPickBasemap()"
+              [showBasemap]="false"
               (styleLayer)="openStyleEditor($event)"
               [canManage]="isOwner()"
               (renameLayer)="renameLayer($event.layer, $event.name)"
@@ -495,7 +586,7 @@
   </aside>
 
   <!-- ============ stage: map + bottom dock + status bar ============ -->
-  <div class="gis-ws__stage">
+  <div class="gis-ws__stage" [class.is-table-max]="bottomMaximized() && !!activeBottomTool()">
     <div class="gis-ws__map">
       <app-municipal-map
         [layers]="layers()"
@@ -504,6 +595,9 @@
         (featureInfoResults)="onFeatureInfoResults($event)"
         (mapReady)="onMapReady()"
       />
+      @if (canPickBasemap()) {
+        <app-basemap-switcher />
+      }
       <app-map-controls
         [allowedModuleIds]="myModuleIds()"
         [selectingShape]="selectingShape()"
@@ -512,15 +606,6 @@
         (clearSelectionRequest)="onMapClearSelection()"
         (resetRequest)="onResetRequest()"
       />
-
-      @if (layersReady() && canSearch()) {
-        <app-gis-search
-          class="gis-ws__search"
-          (layerSelected)="onSearchLayerSelected($event)"
-          (featureSelected)="onSearchFeatureSelected($event)"
-          (cleared)="onSearchCleared()"
-        />
-      }
 
       @if (layersLoading()) {
         <div class="gis-ws__overlay"><span class="gis-ws__hint">Loading GIS layers…</span></div>
@@ -535,14 +620,25 @@
     <section
       class="gis-ws__bottom"
       [class.is-collapsed]="!activeBottomTool()"
+      [class.is-minimized]="bottomMinimized()"
       [style.height.px]="bottomHeight()"
     >
       <div class="gis-ws__resize gis-ws__resize--y" (pointerdown)="startBottomResize($event)" title="Drag to resize"></div>
       <header class="gis-ws__panel-head">
-        <span class="gis-ws__panel-title">{{ activeBottomTool()?.label }}</span>
-        <button type="button" class="gis-ws__icon-btn" aria-label="Close panel" (click)="closeBottom()">
-          <i class="pi pi-times" aria-hidden="true"></i>
-        </button>
+        <span class="gis-ws__panel-title" style="flex: 1; cursor: pointer" title="Double-click to minimise / restore" (dblclick)="toggleBottomMinimized()">{{ activeBottomTool()?.label }}</span>
+        <span class="gis-ws__panel-actions">
+          <button type="button" class="gis-ws__icon-btn" [attr.aria-label]="bottomMaximized() ? 'Show the map again' : 'Maximise panel'"
+                  [pTooltip]="bottomMaximized() ? 'Show the map again' : 'Maximise — fill the map area'" tooltipPosition="top" (click)="toggleBottomMaximized()">
+            <i class="pi" [class.pi-window-maximize]="!bottomMaximized()" [class.pi-window-minimize]="bottomMaximized()" aria-hidden="true"></i>
+          </button>
+          <button type="button" class="gis-ws__icon-btn" [attr.aria-label]="bottomMinimized() ? 'Restore panel' : 'Minimise panel'"
+                  [pTooltip]="bottomMinimized() ? 'Restore' : 'Minimise'" tooltipPosition="top" (click)="toggleBottomMinimized()">
+            <i class="pi" [class.pi-angle-double-down]="!bottomMinimized()" [class.pi-angle-double-up]="bottomMinimized()" aria-hidden="true"></i>
+          </button>
+          <button type="button" class="gis-ws__icon-btn" aria-label="Close panel" pTooltip="Close" tooltipPosition="top" (click)="closeBottom()">
+            <i class="pi pi-times" aria-hidden="true"></i>
+          </button>
+        </span>
       </header>
       <div class="gis-ws__panel-body">
         @if (openedBottomTools().has('attributes')) {
@@ -584,10 +680,23 @@
 
     <!-- status bar -->
     <footer class="gis-ws__status">
-      <span class="gis-ws__status-item">{{ municipalityName() ?? '—' }}</span>
-      @if (workspace(); as ws) {
-        <span class="gis-ws__status-item mono">{{ ws.displayCrs }}</span>
+      <span class="gis-ws__status-item" title="Municipality">
+        <i class="pi pi-building gis-ws__status-icon" aria-hidden="true"></i>{{ municipalityName() ?? '—' }}
+      </span>
+      <span class="gis-ws__status-item" title="Layers switched on">
+        <i class="pi pi-clone gis-ws__status-icon" aria-hidden="true"></i>{{ visibleLayerCount() }} visible
+      </span>
+      @if (selectedCount() > 0) {
+        <span class="gis-ws__status-item">
+          <span class="gis-ws__status-chip">{{ selectedCount() }} selected</span>
+        </span>
       }
+
+      <span class="gis-ws__status-spacer"></span>
+
+      <span class="gis-ws__status-item mono" title="Scale bar">
+        <span #scaleSlot class="gis-ws__status-slot"></span>
+      </span>
       <span class="gis-ws__status-item mono">
         <span class="gis-ws__status-key">Zoom</span>
         <input #zoomInput class="gis-ws__status-input is-short" [value]="zoomLevel() ?? ''" title="Type a zoom level and press Enter"
@@ -595,36 +704,73 @@
           (blur)="zoomInput.value = '' + (zoomLevel() ?? '')" />
       </span>
       <span class="gis-ws__status-item mono">
-        <span class="gis-ws__status-key">Scale</span><span #scaleSlot class="gis-ws__status-slot"></span>
-        <span class="gis-ws__status-key">1:</span>
+        <span class="gis-ws__status-key">Scale 1:</span>
         <input #scaleInput class="gis-ws__status-input" [value]="scaleDenominator() ?? ''" title="Type a scale (e.g. 5000) and press Enter"
           (keydown.enter)="applyStatusScale(scaleInput)" (keydown.escape)="scaleInput.value = '' + (scaleDenominator() ?? ''); scaleInput.blur()"
           (blur)="scaleInput.value = '' + (scaleDenominator() ?? '')" />
+        <select class="gis-ws__status-select" title="Pick a standard scale" aria-label="Standard scales" (change)="applyScalePreset($event)">
+          <option value="" selected hidden>▾</option>
+          @for (sc of scalePresets; track sc) { <option [value]="sc">1:{{ sc.toLocaleString() }}</option> }
+        </select>
       </span>
       <span class="gis-ws__status-item mono">
         <button type="button" class="gis-ws__status-btn gis-ws__status-key" title="Switch coordinate format" (click)="cycleCoordFormat()">{{ coordKey() }}</button>
         <button type="button" class="gis-ws__status-btn" title="Copy last cursor coordinates" (click)="copyCursorCoords()">
-          <span #coordSlot class="gis-ws__status-slot">—</span>
+          <span #coordSlot class="gis-ws__status-slot gis-ws__status-coords">—</span>
           <i class="pi pi-copy"></i>
         </button>
       </span>
-      <span class="gis-ws__status-item">
-        <span class="gis-ws__status-key">Layers</span>{{ visibleLayerCount() }}
-      </span>
-      @if (selectedCount() > 0) {
-        <span class="gis-ws__status-item">
-          <span class="gis-ws__status-key">Selected</span>{{ selectedCount() }}
+      @if (workspace(); as ws) {
+        <span class="gis-ws__status-item mono" title="Display coordinate system">
+          <span class="gis-ws__status-chip is-muted">{{ ws.displayCrs }}</span>
         </span>
       }
-      <span class="gis-ws__status-spacer"></span>
       @if (geoserverReachable() !== null) {
-        <span class="gis-ws__status-item">
+        <span class="gis-ws__status-item" [title]="geoserverReachable() ? 'Map server connected' : 'Map server not reachable'">
           <span class="gis-ws__status-dot" [class.is-ok]="geoserverReachable()" [class.is-bad]="geoserverReachable() === false"></span>
-          GeoServer
+          {{ geoserverReachable() ? 'Online' : 'Offline' }}
         </span>
       }
     </footer>
   </div>
+
+  <!-- ============ right dock (Layers, when moved here) ============ -->
+  @if (layersDock() === 'right' && rightOpen()) {
+    <aside class="gis-ws__right" [style.width.px]="rightWidth()" aria-label="Layers">
+      <div class="gis-ws__resize gis-ws__resize--x-left" (pointerdown)="startRightResize($event)" title="Drag to resize"></div>
+      <header class="gis-ws__panel-head">
+        <span class="gis-ws__panel-title">Layers</span>
+        <span class="gis-ws__panel-actions">
+          <button type="button" class="gis-ws__icon-btn" aria-label="Move Layers to the left" pTooltip="Move Layers back to the left" tooltipPosition="bottom" (click)="setLayersDock('left')">
+            <i class="pi pi-arrow-left" aria-hidden="true"></i>
+          </button>
+          <button type="button" class="gis-ws__icon-btn" aria-label="Close Layers" pTooltip="Close" tooltipPosition="bottom" (click)="rightOpen.set(false); refreshMap()">
+            <i class="pi pi-times" aria-hidden="true"></i>
+          </button>
+        </span>
+      </header>
+      <div class="gis-ws__panel-body">
+        @if (layersReady()) {
+          <app-layer-panel
+            [layers]="layers()"
+            [highlightLayerId]="highlightLayerId()"
+            [canStyle]="canStyleLayers()"
+              [showBasemap]="false"
+            (styleLayer)="openStyleEditor($event)"
+            [canManage]="isOwner()"
+            (renameLayer)="renameLayer($event.layer, $event.name)"
+            (deleteLayer)="deleteLayer($event)"
+            (fixColumnTypes)="fixColumnTypes($event)"
+            (renderModeChange)="setRenderMode($event.layer, $event.mode)"
+            (rebuildArchive)="rebuildTileArchive($event)"
+            (openReport)="reportLayer.set($event)"
+          />
+        } @else {
+          <p class="gis-ws__hint">{{ layersError() ?? 'Loading layers…' }}</p>
+        }
+      </div>
+    </aside>
+  }
 </div>
 
 <p-dialog

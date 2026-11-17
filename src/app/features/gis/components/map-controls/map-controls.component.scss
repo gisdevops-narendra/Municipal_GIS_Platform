@@ -46,6 +46,65 @@
   opacity: 0.4;
 }
 
+/* Selection: one button, options slide out to its left in a row. */
+.map-controls__group--flyout {
+  position: relative;
+  overflow: visible;
+
+  > .map-controls__btn.p-button {
+    position: relative;
+    border-radius: var(--radius-md) !important;
+  }
+}
+
+.map-controls__flyout {
+  position: absolute;
+  top: -1px;
+  right: calc(100% + 6px);
+  display: flex;
+  align-items: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+  overflow: hidden;
+  animation: map-controls-slide 0.12s ease-out;
+
+  .map-controls__btn.p-button + .map-controls__btn.p-button {
+    border-top: 0;
+    border-left: 1px solid var(--color-line);
+  }
+}
+
+.map-controls__flyout-sep {
+  align-self: stretch;
+  width: 1px;
+  background: var(--color-line);
+}
+
+@keyframes map-controls-slide {
+  from {
+    opacity: 0;
+    transform: translateX(6px);
+  }
+}
+
+.map-controls__badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--color-primary-600);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
+}
+
 /* ---------- Go To X:Y popover (rendered in <body>) ---------- */
 .goto {
   display: flex;

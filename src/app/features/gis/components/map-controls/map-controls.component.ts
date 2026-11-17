@@ -105,6 +105,16 @@ export class MapControlsComponent {
 
   select(shape: SelectShape): void {
     this.selectRequest.emit({ shape, mode: this.selectMode().value });
+    this.lastShape.set(shape);
+  }
+
+  /** The selection tools fold into one button that slides its options out. */
+  readonly selectionOpen = signal(false);
+  private readonly lastShape = signal<SelectShape>('Rectangle');
+  /** Icon of the main Select button: the shape in use, else the last one. */
+  get selectIconPath(): string {
+    const shape = this.selectingShape ?? this.lastShape();
+    return (this.selectShapes.find((o) => o.shape === shape) ?? this.selectShapes[0]).path;
   }
   readonly canGoBack = this.mapService.canGoBack;
   readonly canGoForward = this.mapService.canGoForward;

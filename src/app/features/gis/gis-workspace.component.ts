@@ -5,7 +5,7 @@ import { RasterService } from './services/raster.service';
 /** Raster Analysis → Raster Styling (seed-modules.ts). */
 const RASTER_STYLE_MODULE_ID = 912;
 import { SettingsService } from '../../core/services/settings.service';
-import { Component, ElementRef, HostListener, WritableSignal, computed, effect, inject, signal, viewChild } from '@angular/core';
+import { Component, DestroyRef, ElementRef, HostListener, WritableSignal, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
@@ -74,6 +74,8 @@ import { GroundwaterComponent } from './components/platform-extras/groundwater.c
 import { OutbreakComponent } from './components/platform-extras/outbreak.component';
 import { EvChargingComponent } from './components/platform-extras/ev-charging.component';
 import { TourismComponent } from './components/platform-extras/tourism.component';
+import { ThemeService } from '../../core/theme/theme.service';
+import { BasemapSwitcherComponent } from './components/basemap-switcher/basemap-switcher.component';
 import { HazardsComponent } from './components/platform-extras/hazards.component';
 import { AirStationsComponent } from './components/platform-extras/air-stations.component';
 import { SketchComponent } from './components/sketch/sketch.component';
@@ -278,6 +280,7 @@ const TOOLS: WsTool[] = [
     EvChargingComponent,
     TourismComponent,
     HazardsComponent,
+    BasemapSwitcherComponent,
     AirStationsComponent,
     SketchComponent,
     LayerStatisticsComponent,
@@ -424,6 +427,55 @@ export class GisWorkspaceComponent {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
       event.preventDefault();
       this.toolSearchInput()?.nativeElement.focus();
+      return;
+    }
+    // Plain "F" toggles the full-screen map — never while typing.
+    const target = event.target as HTMLElement | null;
+    const typing = !!target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+    if (!typing && !event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === 'f') {
+      event.preventDefault();
+      this.toggleFocusMode();
+    }
+  }
+
+  // ----- light / dark theme (same setting as Settings → Appearance) -----
+  private readonly themeService = inject(ThemeService);
+  readonly isDark = computed(() => {
+    this.settingsService.theme();
+    return this.themeService.resolvedTheme() === 'dark';
+  });
+
+  toggleTheme(): void {
+    this.settingsService.patch({ appearance: { theme: this.isDark() ? 'light' : 'dark' } });
+  }
+
+  // ----- full-screen map -----
+  /** Map + toolbar only: hides the site header and the side/bottom docks
+   *  (their state is kept) and asks the browser for full screen. */
+  readonly focusMode = signal(false);
+  private readonly leaveFullscreenOnExit = inject(DestroyRef).onDestroy(() => {
+    if (this.focusMode() && document.fullscreenElement) void document.exitFullscreen?.().catch(() => undefined);
+  });
+
+  toggleFocusMode(): void {
+    const on = !this.focusMode();
+    this.focusMode.set(on);
+    this.closeMenu();
+    try {
+      if (on && !document.fullscreenElement) void document.documentElement.requestFullscreen?.().catch(() => undefined);
+      if (!on && document.fullscreenElement) void document.exitFullscreen?.().catch(() => undefined);
+    } catch {
+      /* fullscreen not allowed — the in-page mode still applies */
+    }
+    this.refreshMapSize();
+  }
+
+  /** Leaving browser full screen (Esc) also leaves the full-screen map. */
+  @HostListener('document:fullscreenchange')
+  onFullscreenChange(): void {
+    if (!document.fullscreenElement && this.focusMode()) {
+      this.focusMode.set(false);
+      this.refreshMapSize();
     }
   }
 
@@ -443,7 +495,7 @@ export class GisWorkspaceComponent {
     items[next].focus();
   }
   /** Which toolbar dropdown is open ('search' = the tool-search results). */
-  readonly openMenu = signal<WsToolGroup | 'search' | null>(null);
+  readonly openMenu = signal<WsToolGroup | 'search' | 'layout' | null>(null);
   readonly menuQuery = signal('');
   readonly openMenuGroup = computed(() => this.menuGroups().find((g) => g.id === this.openMenu()) ?? null);
   /** Searching looks through every tool. */
@@ -487,7 +539,7 @@ export class GisWorkspaceComponent {
     return group.tools.some((t) => this.isToolActive(t));
   }
 
-  readonly leftTool = signal<string | null>('layers');
+  readonly leftTool = signal<string | null>(this.readLayersDock() === 'right' ? null : 'layers');
   readonly bottomTool = signal<string | null>(null);
   readonly leftWidth = signal(300);
   /** Raster Analysis needs room for its category rail + tool list. */
@@ -510,7 +562,7 @@ export class GisWorkspaceComponent {
    *  mounted (just hidden) after their first open so switching tools — or
    *  leaving and returning to the workspace — never loses their in-progress
    *  form / filter / result state. */
-  readonly openedLeftTools = signal<ReadonlySet<string>>(new Set(['layers']));
+  readonly openedLeftTools = signal<ReadonlySet<string>>(new Set(this.readLayersDock() === 'right' ? [] : ['layers']));
   readonly openedBottomTools = signal<ReadonlySet<string>>(new Set());
 
   readonly activeLeftTool = computed(() => TOOLS.find((tool) => tool.id === this.leftTool()) ?? null);
@@ -623,7 +675,10 @@ export class GisWorkspaceComponent {
     });
 
     this.moduleAccessService.getMyModuleIds().subscribe({
-      next: ({ moduleIds }) => this.myModuleIds.set(new Set(moduleIds))
+      next: ({ moduleIds }) => {
+        this.myModuleIds.set(new Set(moduleIds));
+        this.restoreLayout();
+      }
       // No error handler: if this fails, myModuleIds stays empty and every
       // moduleId-gated tool stays hidden — a safe fail-closed default
       // rather than fail-open (never show more than the caller actually
@@ -672,6 +727,15 @@ export class GisWorkspaceComponent {
     input.blur();
   }
 
+  readonly scalePresets = [500, 1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 1000000];
+
+  applyScalePreset(event: Event): void {
+    const select = event.target as HTMLSelectElement;
+    const scale = Number(select.value);
+    if (scale > 0) this.mapService.zoomToScale(scale);
+    select.value = '';
+  }
+
   applyStatusScale(input: HTMLInputElement): void {
     const scale = Number(input.value.replace(/^1\s*:\s*/, '').replace(/[,\s]/g, ''));
     if (scale > 0) this.mapService.zoomToScale(scale);
@@ -682,6 +746,22 @@ export class GisWorkspaceComponent {
   // ----- dock actions -----
   activateTool(tool: WsTool): void {
     this.rememberRecent(tool.id);
+    if (tool.id === 'layers' && this.layersDock() === 'right') {
+      this.rightOpen.update((v) => !v);
+      this.refreshMapSize();
+      return;
+    }
+    // A minimised dock: picking its tool (or any tool for it) restores it
+    // instead of toggling the tool closed.
+    const minimised = tool.dock === 'left' ? this.leftMinimized : this.bottomMinimized;
+    if (minimised()) {
+      minimised.set(false);
+      const current = tool.dock === 'left' ? this.leftTool() : this.bottomTool();
+      if (current === tool.id) {
+        this.refreshMapSize();
+        return;
+      }
+    }
     if (tool.dock === 'left') {
       this.leftTool.update((current) => (current === tool.id ? null : tool.id));
       if (this.leftTool() === tool.id) {
@@ -711,11 +791,222 @@ export class GisWorkspaceComponent {
   }
 
   isToolActive(tool: WsTool): boolean {
+    if (tool.id === 'layers' && this.layersDock() === 'right') return this.rightOpen();
     return tool.dock === 'left' ? this.leftTool() === tool.id : this.bottomTool() === tool.id;
   }
 
   closeLeft(): void {
     this.leftTool.set(null);
+    this.leftMinimized.set(false);
+    this.refreshMapSize();
+  }
+
+  // ----- saved layout & presets -----
+  /** Open panels and dock sizes, remembered in this browser and restored
+   *  on the next visit (once module access is known). */
+  private layoutRestored = false;
+  private readonly saveLayout = effect(() => {
+    const layout = {
+      left: this.leftTool(),
+      bottom: this.bottomTool(),
+      leftWidth: this.leftWidth(),
+      bottomHeight: this.bottomHeight(),
+      rightWidth: this.rightWidth(),
+      rightOpen: this.rightOpen()
+    };
+    if (!this.layoutRestored) return;
+    try {
+      localStorage.setItem('gis.layout', JSON.stringify(layout));
+    } catch {
+      /* private mode */
+    }
+  });
+
+  readonly layoutPresets: { id: 'map' | 'browse' | 'edit' | 'analysis'; label: string; hint: string; icon: string }[] = [
+    { id: 'map', label: 'Map only', hint: 'Close every panel', icon: 'pi pi-map' },
+    { id: 'browse', label: 'Viewer', hint: 'Layers beside the map', icon: 'pi pi-eye' },
+    { id: 'edit', label: 'Editing', hint: 'Layers and the attribute table', icon: 'pi pi-pencil' },
+    { id: 'analysis', label: 'Analysis', hint: 'Layers on the right, Query Builder and table', icon: 'pi pi-chart-line' }
+  ];
+
+  private restoreLayout(): void {
+    if (this.layoutRestored) return;
+    this.layoutRestored = true;
+    let saved: { left?: string | null; bottom?: string | null; leftWidth?: number; bottomHeight?: number; rightWidth?: number; rightOpen?: boolean } | null = null;
+    try {
+      saved = JSON.parse(localStorage.getItem('gis.layout') ?? 'null');
+    } catch {
+      saved = null;
+    }
+    if (!saved || typeof saved !== 'object') return;
+    const clamp = (v: unknown, lo: number, hi: number, fallback: number) =>
+      typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback;
+    this.leftWidth.set(clamp(saved.leftWidth, 240, 560, this.leftWidth()));
+    this.bottomHeight.set(clamp(saved.bottomHeight, 140, 900, this.bottomHeight()));
+    this.rightWidth.set(clamp(saved.rightWidth, 240, 520, this.rightWidth()));
+    if (this.layersDock() === 'right' && typeof saved.rightOpen === 'boolean') this.rightOpen.set(saved.rightOpen);
+    if (saved.left !== undefined) {
+      if (saved.left === null) this.leftTool.set(null);
+      else this.openPanel(saved.left, 'left');
+    }
+    if (saved.bottom) this.openPanel(saved.bottom, 'bottom');
+    this.refreshMapSize();
+  }
+
+  /** Opens a tool's panel if the caller may use it (no toggling). */
+  private openPanel(id: string, dock: 'left' | 'bottom'): void {
+    const tool = this.visibleToolList().find((t) => t.id === id && t.dock === dock);
+    if (!tool) return;
+    if (tool.id === 'layers' && this.layersDock() === 'right') {
+      this.rightOpen.set(true);
+      return;
+    }
+    if (dock === 'left') {
+      this.leftTool.set(id);
+      this.leftMinimized.set(false);
+      this.rememberOpened(this.openedLeftTools, id);
+    } else {
+      this.bottomTool.set(id);
+      this.bottomMinimized.set(false);
+      this.rememberOpened(this.openedBottomTools, id);
+    }
+  }
+
+  applyLayoutPreset(id: 'map' | 'browse' | 'edit' | 'analysis'): void {
+    this.closeMenu();
+    if (this.focusMode()) this.toggleFocusMode();
+    this.bottomMaximized.set(false);
+    this.leftTool.set(null);
+    this.bottomTool.set(null);
+    this.rightOpen.set(false);
+    if (id === 'browse' || id === 'edit') {
+      if (this.layersDock() === 'right') this.setLayersDock('left');
+      else this.openPanel('layers', 'left');
+    }
+    if (id === 'edit') this.openPanel('attributes', 'bottom');
+    if (id === 'analysis') {
+      if (this.layersDock() !== 'right') this.setLayersDock('right');
+      else this.rightOpen.set(true);
+      this.openPanel('query', 'left');
+      this.openPanel('attributes', 'bottom');
+    }
+    this.refreshMapSize();
+  }
+
+  resetPanelSizes(): void {
+    this.closeMenu();
+    this.leftWidth.set(300);
+    this.bottomHeight.set(240);
+    this.rightWidth.set(300);
+    this.refreshMapSize();
+  }
+
+  toggleLayoutMenu(): void {
+    this.openMenu.update((cur) => (cur === 'layout' ? null : 'layout'));
+  }
+
+  // ----- right dock (Layers can live there, beside any left tool) -----
+  readonly layersDock = signal<'left' | 'right'>(this.readLayersDock());
+  readonly rightOpen = signal(this.readLayersDock() === 'right');
+  readonly rightWidth = signal(300);
+
+  private readLayersDock(): 'left' | 'right' {
+    try {
+      return localStorage.getItem('gis.layersDock') === 'right' ? 'right' : 'left';
+    } catch {
+      return 'left';
+    }
+  }
+
+  setLayersDock(side: 'left' | 'right'): void {
+    this.layersDock.set(side);
+    try {
+      localStorage.setItem('gis.layersDock', side);
+    } catch {
+      /* private mode */
+    }
+    if (side === 'right') {
+      const next = new Set(this.openedLeftTools());
+      next.delete('layers');
+      this.openedLeftTools.set(next);
+      if (this.leftTool() === 'layers') {
+        const other = this.leftTabs().find((t) => t.id !== 'layers');
+        if (other) this.leftTool.set(other.id);
+        else this.leftTool.set(null);
+      }
+      this.rightOpen.set(true);
+    } else {
+      this.rightOpen.set(false);
+      this.leftMinimized.set(false);
+      this.leftTool.set('layers');
+      this.rememberOpened(this.openedLeftTools, 'layers');
+    }
+    this.refreshMapSize();
+  }
+
+  startRightResize(event: PointerEvent): void {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startW = this.rightWidth();
+    const move = (e: PointerEvent) => this.rightWidth.set(Math.min(520, Math.max(240, startW - (e.clientX - startX))));
+    this.dragUntilRelease(move);
+  }
+
+  refreshMap(): void {
+    this.refreshMapSize();
+  }
+
+  /** Tabs across the left dock for every panel opened in this session
+   *  (kept mounted), in the order they were opened. */
+  readonly leftTabs = computed(() =>
+    [...this.openedLeftTools()]
+      .map((id) => this.visibleToolList().find((t) => t.id === id && t.dock === 'left'))
+      .filter((t): t is WsTool => !!t)
+  );
+
+  switchLeftTab(tool: WsTool): void {
+    if (this.leftTool() === tool.id) return;
+    this.leftTool.set(tool.id);
+    this.rememberRecent(tool.id);
+  }
+
+  /** Closing a tab unmounts that panel (its state is dropped). */
+  closeLeftTab(tool: WsTool, event?: Event): void {
+    event?.stopPropagation();
+    const tabs = this.leftTabs();
+    const index = tabs.findIndex((t) => t.id === tool.id);
+    const next = new Set(this.openedLeftTools());
+    next.delete(tool.id);
+    this.openedLeftTools.set(next);
+    if (this.leftTool() === tool.id) {
+      const fallback = tabs[index + 1] ?? tabs[index - 1] ?? null;
+      if (fallback && fallback.id !== tool.id) this.leftTool.set(fallback.id);
+      else this.closeLeft();
+    }
+  }
+
+  /** Minimised docks fold to a thin edge tab; the panel stays mounted,
+   *  so its state is exactly as left when restored. */
+  readonly leftMinimized = signal(false);
+  readonly bottomMinimized = signal(false);
+
+  toggleLeftMinimized(): void {
+    this.leftMinimized.update((v) => !v);
+    this.refreshMapSize();
+  }
+
+  toggleBottomMinimized(): void {
+    this.bottomMinimized.update((v) => !v);
+    if (this.bottomMinimized()) this.bottomMaximized.set(false);
+    this.refreshMapSize();
+  }
+
+  /** Bottom panel fills the whole map area (e.g. a big attribute table). */
+  readonly bottomMaximized = signal(false);
+
+  toggleBottomMaximized(): void {
+    this.bottomMaximized.update((v) => !v);
+    if (this.bottomMaximized()) this.bottomMinimized.set(false);
     this.refreshMapSize();
   }
 
@@ -872,6 +1163,8 @@ export class GisWorkspaceComponent {
 
   closeBottom(): void {
     this.bottomTool.set(null);
+    this.bottomMinimized.set(false);
+    this.bottomMaximized.set(false);
     this.refreshMapSize();
   }
 
@@ -1103,8 +1396,12 @@ export class GisWorkspaceComponent {
     setTimeout(() => {
       this.sketchService.clearAll();
       this.mapService.resetMap();
-      this.leftTool.set('layers');
-      this.openedLeftTools.set(new Set(['layers']));
+      if (this.layersDock() === 'right') {
+        this.rightOpen.set(true);
+      } else {
+        this.leftTool.set('layers');
+        this.openedLeftTools.set(new Set(['layers']));
+      }
       this.refreshMapSize();
     });
   }

@@ -1,4 +1,4 @@
-import { Component, Input, computed, effect, inject, signal } from '@angular/core';
+import { Component, HostListener, Input, computed, effect, inject, signal } from '@angular/core';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { filter, map } from 'rxjs';
@@ -14,6 +14,8 @@ import {
 import { AuthService } from '../../../core/services/auth.service';
 import { CurrentUserService } from '../../../core/services/current-user.service';
 import { CurrentUser } from '../../../core/models/current-user.model';
+import { ThemeService } from '../../../core/theme/theme.service';
+import { SettingsService } from '../../../core/services/settings.service';
 
 const ROLE_LABELS: Record<CurrentUser['systemRole'], string> = {
   MUNICIPALITY_OWNER: 'Municipality Owner',
@@ -61,6 +63,20 @@ export class SiteHeaderComponent {
   /** Hides the account / nav area on screens that already are the login or
    *  registration flow, to avoid redundant navigation. */
   @Input() showActions = true;
+  /** One-row header (brand · menu · account menu) for full-screen work
+   *  pages like the Municipal GIS map. */
+  @Input({ transform: (v: boolean | string) => v !== false && v !== 'false' }) compact = false;
+  readonly accountOpen = signal(false);
+  private readonly theme = inject(ThemeService);
+  private readonly settings = inject(SettingsService);
+  readonly isDark = computed(() => {
+    this.settings.theme();
+    return this.theme.resolvedTheme() === 'dark';
+  });
+
+  toggleTheme(): void {
+    this.settings.patch({ appearance: { theme: this.isDark() ? 'light' : 'dark' } });
+  }
 
   private readonly auth = inject(AuthService);
   private readonly currentUserService = inject(CurrentUserService);
@@ -222,7 +238,13 @@ export class SiteHeaderComponent {
     return picked.toUpperCase();
   });
 
+  @HostListener('document:keydown.escape')
+  closeAccountMenu(): void {
+    this.accountOpen.set(false);
+  }
+
   logout(): void {
+    this.accountOpen.set(false);
     this.auth.logout();
   }
 }

@@ -1,4 +1,79 @@
-<header class="site-header">
+<header class="site-header" [class.site-header--compact]="compact">
+  @if (compact && showActions && isAuthenticated()) {
+    <!-- One-row header for full-screen work pages (Municipal GIS). -->
+    <div class="site-header__compact">
+      <a routerLink="/" class="site-header__brand" aria-label="Municipal GIS Platform — home">
+        <span class="site-header__mark site-header__mark--sm" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M11 1L20.5 6.5V15.5L11 21L1.5 15.5V6.5L11 1Z" stroke="currentColor" stroke-width="1.6" />
+            <path d="M11 1V21" stroke="currentColor" stroke-width="1.1" stroke-dasharray="1.6 2.2" />
+            <path d="M1.5 6.5L20.5 15.5" stroke="currentColor" stroke-width="1.1" stroke-dasharray="1.6 2.2" />
+          </svg>
+        </span>
+        <span class="site-header__title site-header__title--sm">Municipal GIS</span>
+      </a>
+
+      <nav class="site-header__compact-nav" aria-label="Primary">
+        @if (showFullNav()) {
+          @if (onboarding.showGuide()) {
+            <a routerLink="/setup" routerLinkActive="is-active" class="site-header__nav-setup">
+              <i class="pi pi-flag" aria-hidden="true"></i>
+              <span>Getting Started</span>
+              <span class="site-header__nav-progress">{{ onboarding.mandatoryDone() }}/{{ onboarding.mandatorySteps().length }}</span>
+            </a>
+          }
+          @for (item of navItems(); track item.route) {
+            @if (item.state === 'locked') {
+              <span class="site-header__nav-locked" role="link" aria-disabled="true" [pTooltip]="item.hint" tooltipPosition="bottom">
+                <span>{{ item.label }}</span>
+                <i class="pi pi-lock" aria-hidden="true"></i>
+              </span>
+            } @else {
+              <a [routerLink]="item.route" routerLinkActive="is-active" [routerLinkActiveOptions]="{ exact: item.exact }"
+                 [pTooltip]="item.hint || undefined" tooltipPosition="bottom">{{ item.label }}</a>
+            }
+          }
+        } @else {
+          <a routerLink="/gis" routerLinkActive="is-active" [routerLinkActiveOptions]="{ exact: true }">Municipal GIS</a>
+        }
+      </nav>
+
+      <div class="site-header__user">
+        @if (accountOpen()) { <div class="site-header__user-backdrop" (click)="accountOpen.set(false)" aria-hidden="true"></div> }
+        <button type="button" class="site-header__user-btn" aria-haspopup="menu" [attr.aria-expanded]="accountOpen()"
+                [attr.aria-label]="'Account: ' + displayName()" (click)="accountOpen.set(!accountOpen())">
+          <span class="user-chip__avatar user-chip__avatar--sm" aria-hidden="true">{{ initials() }}</span>
+          <span class="site-header__user-name">{{ displayName() }}</span>
+          <i class="pi pi-chevron-down" aria-hidden="true"></i>
+        </button>
+        @if (accountOpen()) {
+          <div class="site-header__user-menu" role="menu">
+            <div class="site-header__user-head">
+              <span class="user-chip__avatar" aria-hidden="true">{{ initials() }}</span>
+              <span class="user-chip__meta">
+                <span class="user-chip__name">{{ displayName() }}</span>
+                @if (roleLabel()) { <span class="user-chip__sub">{{ roleLabel() }}</span> }
+                @if (secondaryLine()) { <span class="user-chip__sub">{{ secondaryLine() }}</span> }
+              </span>
+            </div>
+            <button type="button" role="menuitemcheckbox" class="site-header__user-item" [attr.aria-checked]="isDark()" (click)="toggleTheme()">
+              <i class="pi" [class.pi-moon]="!isDark()" [class.pi-sun]="isDark()" aria-hidden="true"></i>
+              {{ isDark() ? 'Light theme' : 'Dark theme' }}
+              <kbd class="site-header__kbd">[</kbd>
+            </button>
+            @if (showFullNav()) {
+              <a routerLink="/settings" role="menuitem" class="site-header__user-item" (click)="accountOpen.set(false)">
+                <i class="pi pi-cog" aria-hidden="true"></i> Settings
+              </a>
+            }
+            <button type="button" role="menuitem" class="site-header__user-item" (click)="logout()">
+              <i class="pi pi-sign-out" aria-hidden="true"></i> Logout
+            </button>
+          </div>
+        }
+      </div>
+    </div>
+  } @else {
   <div class="site-header__bar">
     <a routerLink="/" class="site-header__brand">
       <span class="site-header__mark" aria-hidden="true">
@@ -101,6 +176,9 @@
         }
       </div>
     </nav>
+  }
+  }
+  @if (showActions && isAuthenticated()) {
     @if (showFullNav() && guideBar(); as bar) {
       <div class="site-header__guide" [attr.data-tone]="bar.tone" role="status">
         <div class="site-header__guide-inner">

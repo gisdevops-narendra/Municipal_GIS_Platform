@@ -5,12 +5,22 @@
    GIS tool is a dockable panel driven off the TOOLS list.
    ============================================================ */
 
+:host {
+  /* Compact one-row site header (48px + border) above the workspace. */
+  --app-header-h: 49px;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+}
+
 .gis-ws {
+  flex: 1;
+  min-height: 0;
   position: relative;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   grid-template-rows: auto minmax(0, 1fr);
-  height: calc(100dvh - var(--app-header-h, 112px));
   overflow: hidden;
   background: var(--color-surface);
   border-top: 1px solid var(--color-line);
@@ -345,6 +355,21 @@
   white-space: nowrap;
 }
 
+.gis-ws__bar-icon {
+  width: 32px;
+  padding: 0;
+  justify-content: center;
+}
+
+/* Full-screen map: only the toolbar and the map stay. */
+.gis-ws--focus {
+  .gis-ws__left,
+  .gis-ws__right,
+  .gis-ws__bottom {
+    display: none !important;
+  }
+}
+
 /* ---------- left dock ---------- */
 .gis-ws__left {
   grid-column: 1;
@@ -359,7 +384,7 @@
 
 /* AI Assistant "floating" panel mode: a card over the map instead of a
    column that squeezes it. */
-.gis-ws__left.is-floating:not(.is-collapsed) {
+.gis-ws__left.is-floating:not(.is-collapsed):not(.is-minimized) {
   position: absolute;
   top: 56px;
   bottom: 12px;
@@ -383,6 +408,73 @@
   display: none;
 }
 
+/* Minimised docks: a thin edge tab (left) or just the header (bottom). */
+.gis-ws__panel-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.gis-ws__left.is-minimized {
+  width: 34px !important;
+
+  > .gis-ws__panel-head,
+  > .gis-ws__panel-body,
+  > .gis-ws__resize {
+    display: none;
+  }
+}
+
+.gis-ws__edge-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 100%;
+  padding: 12px 0;
+  border: 0;
+  background: var(--color-surface-alt);
+  color: var(--color-ink-700, var(--color-ink-900));
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+
+  span {
+    writing-mode: vertical-rl;
+    white-space: nowrap;
+  }
+
+  .pi {
+    font-size: 12px;
+    color: var(--color-ink-500);
+  }
+
+  &:hover {
+    background: var(--color-surface);
+    color: var(--color-primary-600);
+
+    .pi {
+      color: var(--color-primary-600);
+    }
+  }
+}
+
+.gis-ws__bottom.is-minimized {
+  height: auto !important;
+
+  > .gis-ws__panel-body,
+  > .gis-ws__resize {
+    display: none;
+  }
+
+  > .gis-ws__panel-head {
+    cursor: pointer;
+  }
+}
+
 /* A tool panel that has been opened but isn't the one currently shown:
    kept mounted so its state survives, just not visible. `!important` beats
    any `:host { display: … }` a panel component sets. */
@@ -391,6 +483,89 @@
 }
 
 /* ---------- shared panel chrome ---------- */
+/* Tabs for the panels opened in the left dock. */
+.gis-ws__panel-head.has-tabs {
+  align-items: stretch;
+  padding-left: 0;
+}
+
+.gis-ws__tabs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.gis-ws__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  max-width: 170px;
+  padding: 0 6px 0 12px;
+  border: 0;
+  border-right: 1px solid var(--color-line);
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--color-ink-500);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+
+  > i {
+    font-size: 12px;
+  }
+
+  > span:not(.gis-ws__tab-close) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &:hover {
+    color: var(--color-ink-900);
+    background: var(--color-surface);
+  }
+
+  &.is-active {
+    background: var(--color-surface);
+    color: var(--color-primary-600);
+    font-weight: 600;
+    border-bottom-color: var(--color-primary-600);
+  }
+}
+
+.gis-ws__tab-close {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--color-ink-500);
+  opacity: 0;
+
+  .pi {
+    font-size: 9px;
+  }
+
+  .gis-ws__tab:hover &,
+  .gis-ws__tab.is-active & {
+    opacity: 1;
+  }
+
+  &:hover {
+    background: var(--color-surface-alt);
+    color: var(--color-ink-900);
+  }
+}
+
 .gis-ws__panel-head {
   display: flex;
   align-items: center;
@@ -479,6 +654,26 @@
   cursor: row-resize;
 }
 
+/* ---------- right dock ---------- */
+.gis-ws__right {
+  grid-column: 3;
+  grid-row: 2;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--color-surface);
+  border-left: 1px solid var(--color-line);
+}
+
+.gis-ws__resize--x-left {
+  top: 0;
+  left: 0;
+  width: 5px;
+  height: 100%;
+  cursor: col-resize;
+}
+
 /* ---------- stage ---------- */
 .gis-ws__stage {
   grid-column: 2;
@@ -490,6 +685,25 @@
   overflow: hidden;
 }
 
+/* Maximised bottom panel: the map row shrinks to nothing (kept mounted,
+   just hidden) and the panel takes the whole stage. */
+.gis-ws__stage.is-table-max {
+  grid-template-rows: 0 minmax(0, 1fr) auto;
+
+  > .gis-ws__map {
+    visibility: hidden;
+  }
+
+  > .gis-ws__bottom {
+    height: auto !important;
+    max-height: none;
+
+    > .gis-ws__resize {
+      display: none;
+    }
+  }
+}
+
 .gis-ws__map {
   position: relative;
   min-height: 0;
@@ -497,58 +711,36 @@
   background: var(--color-surface-alt);
 }
 
-/* Search floats on the map's top-left. Collapsed to a single round
-   magnifier button until hovered / focused / holding a query. */
-.gis-ws__search {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  z-index: 8;
+/* Map search (layers, roads, wards…) lives in the toolbar. */
+.gis-ws__place-search {
+  flex-shrink: 1;
   display: block;
-  width: 36px;
-  transition: width 0.18s ease;
+  width: 280px;
+  min-width: 160px;
+  margin-left: 8px;
 }
 
-.gis-ws__search:hover,
-.gis-ws__search:focus-within,
-.gis-ws__search:has(input:not(:placeholder-shown)) {
-  width: min(340px, calc(100% - 80px));
-}
-
-.gis-ws__search ::ng-deep .gis-search {
+.gis-ws__place-search ::ng-deep .gis-search {
   max-width: none;
 }
 
-.gis-ws__search ::ng-deep .gis-search__input {
-  height: 36px;
-  background: var(--color-surface);
-  box-shadow: var(--shadow-panel);
-  border-radius: 50% !important;
-  cursor: pointer;
-  transition: border-radius 0.18s ease;
+.gis-ws__place-search ::ng-deep .gis-search__input {
+  height: 30px;
+  border-color: var(--color-line);
+  border-radius: var(--radius-md) !important;
+  background: var(--color-surface-alt);
+  font-size: 12.5px;
+
+  &:focus {
+    background: var(--color-surface);
+  }
 }
 
-/* collapsed: hide the placeholder text, centre the icon */
-.gis-ws__search:not(:hover):not(:focus-within):not(:has(input:not(:placeholder-shown))) ::ng-deep .gis-search__input {
-  padding-left: 0 !important;
-  padding-right: 0 !important;
-  color: transparent;
-}
-
-.gis-ws__search:not(:hover):not(:focus-within):not(:has(input:not(:placeholder-shown))) ::ng-deep .gis-search__input::placeholder {
-  color: transparent;
-}
-
-.gis-ws__search:not(:hover):not(:focus-within):not(:has(input:not(:placeholder-shown))) ::ng-deep .gis-search__icon {
-  left: 50%;
-  transform: translateX(-50%);
-}
-
-.gis-ws__search:hover ::ng-deep .gis-search__input,
-.gis-ws__search:focus-within ::ng-deep .gis-search__input,
-.gis-ws__search:has(input:not(:placeholder-shown)) ::ng-deep .gis-search__input {
-  border-radius: var(--radius-sm) !important;
-  cursor: text;
+.gis-ws__place-search ::ng-deep .gis-search__results {
+  left: auto;
+  right: 0;
+  min-width: 360px;
+  max-height: min(420px, calc(100dvh - 160px));
 }
 
 .gis-ws__overlay {
@@ -686,6 +878,50 @@
   &:hover {
     color: var(--color-ink-700, inherit);
   }
+}
+
+.gis-ws__status-icon {
+  font-size: 11px;
+  color: var(--color-ink-300);
+}
+
+.gis-ws__status-chip {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-primary-600) 12%, var(--color-surface));
+  color: var(--color-primary-600);
+  font-weight: 600;
+
+  &.is-muted {
+    background: var(--color-surface-alt);
+    color: var(--color-ink-500);
+    font-weight: 500;
+  }
+}
+
+.gis-ws__status-select {
+  width: 18px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--color-ink-500);
+  font: inherit;
+  cursor: pointer;
+  appearance: none;
+  text-align: center;
+
+  &:hover,
+  &:focus {
+    background: var(--color-surface-alt);
+    color: var(--color-ink-900);
+    outline: 0;
+  }
+}
+
+.gis-ws__status-coords {
+  min-width: 150px;
 }
 
 .gis-ws__status-spacer {
@@ -960,6 +1196,28 @@
   margin-top: 4px;
 }
 
+/* Medium screens: tighter searches, then icon-only menus. */
+@media (max-width: 1440px) {
+  .gis-ws__place-search {
+    width: 220px;
+  }
+
+  .gis-ws__bar-search-box {
+    width: 170px;
+  }
+
+  .gis-ws__kbd {
+    display: none;
+  }
+}
+
+@media (max-width: 1180px) {
+  .gis-ws__bar-menus .gis-ws__bar-btn span,
+  .gis-ws__bar-menus .gis-ws__bar-caret {
+    display: none;
+  }
+}
+
 /* ---------- responsive ---------- */
 @media (max-width: 900px) {
   .gis-ws {
@@ -980,6 +1238,19 @@
 
   .gis-ws__bar-search-box {
     width: 130px;
+  }
+
+  .gis-ws__place-search {
+    flex-shrink: 0;
+    width: 170px;
+  }
+
+  .gis-ws__place-search ::ng-deep .gis-search__results {
+    position: fixed;
+    top: auto;
+    left: 8px;
+    right: 8px;
+    min-width: 0;
   }
 
   .gis-ws__kbd {
@@ -1011,6 +1282,16 @@
 
   .gis-ws__stage {
     grid-column: 1;
+  }
+
+  .gis-ws__right {
+    position: absolute;
+    top: 44px;
+    bottom: 0;
+    right: 0;
+    z-index: 30;
+    width: min(340px, 100%) !important;
+    box-shadow: -8px 0 28px -10px rgba(16, 34, 31, 0.28);
   }
 
   .gis-ws__left {
