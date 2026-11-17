@@ -279,27 +279,59 @@
                   }
                 </p-message>
               }
-              <dl class="gis-ws__facts">
-                <div><dt>Municipality</dt><dd>{{ municipalityName() ?? '—' }}</dd></div>
-                <div><dt>Workspace</dt><dd>{{ ws.name }}</dd></div>
-                <div><dt>Code</dt><dd class="mono">{{ ws.code }}</dd></div>
-                @if (ws.description) { <div><dt>Description</dt><dd>{{ ws.description }}</dd></div> }
-                <div><dt>Storage CRS</dt><dd class="mono">{{ ws.defaultCrs }}</dd></div>
-                <div><dt>Display CRS</dt><dd class="mono">{{ ws.displayCrs }}</dd></div>
-                <div><dt>GeoServer workspace</dt><dd class="mono">{{ ws.geoserverWorkspace }}</dd></div>
-                <div>
-                  <dt>Status</dt>
-                  <dd><p-tag [severity]="ws.status === 'ACTIVE' ? 'success' : ws.status === 'PROVISIONING' ? 'info' : 'danger'" [value]="ws.status"></p-tag></dd>
+              <div class="gis-wsd">
+                <!-- identity header -->
+                <header class="gis-wsd__head">
+                  <span class="gis-wsd__avatar" aria-hidden="true"><i class="pi pi-server"></i></span>
+                  <div class="gis-wsd__title">
+                    <h3>{{ ws.name }}</h3>
+                    <span>{{ municipalityName() ?? '—' }}</span>
+                  </div>
+                </header>
+                @if (ws.description) {
+                  <p class="gis-wsd__desc">{{ ws.description }}</p>
+                }
+
+                <!-- health -->
+                <div class="gis-wsd__health">
+                  <div class="gis-wsd__tile"
+                       [class.is-ok]="ws.status === 'ACTIVE'"
+                       [class.is-info]="ws.status === 'PROVISIONING'"
+                       [class.is-bad]="ws.status === 'PROVISIONING_FAILED'">
+                    <span class="gis-wsd__tile-label">Workspace</span>
+                    <span class="gis-wsd__tile-value"><i class="gis-wsd__dot"></i>
+                      {{ ws.status === 'ACTIVE' ? 'Active' : ws.status === 'PROVISIONING' ? 'Provisioning' : 'Failed' }}
+                    </span>
+                  </div>
+                  <div class="gis-wsd__tile"
+                       [class.is-ok]="geoserverReachable() === true"
+                       [class.is-bad]="geoserverReachable() === false">
+                    <span class="gis-wsd__tile-label">GeoServer</span>
+                    <span class="gis-wsd__tile-value"><i class="gis-wsd__dot"></i>
+                      {{ geoserverReachable() === true ? 'Reachable' : geoserverReachable() === false ? 'Unreachable' : 'Checking…' }}
+                    </span>
+                  </div>
                 </div>
-                <div>
-                  <dt>GeoServer</dt>
-                  <dd>
-                    @if (geoserverReachable() === true) { <p-tag severity="success" value="Reachable"></p-tag> }
-                    @else if (geoserverReachable() === false) { <p-tag severity="danger" value="Unreachable"></p-tag> }
-                    @else { <span class="gis-ws__hint">Checking…</span> }
-                  </dd>
-                </div>
-              </dl>
+
+                <!-- identifiers -->
+                <section class="gis-wsd__section">
+                  <h4>Identifiers</h4>
+                  <dl class="gis-wsd__rows">
+                    <div><dt>Code</dt><dd class="mono">{{ ws.code }}</dd></div>
+                    <div><dt>GeoServer workspace</dt><dd class="mono">{{ ws.geoserverWorkspace }}</dd></div>
+                  </dl>
+                </section>
+
+                <!-- coordinate systems -->
+                <section class="gis-wsd__section">
+                  <h4>Coordinate systems</h4>
+                  <div class="gis-wsd__crs">
+                    <div><span>Storage</span><code>{{ ws.defaultCrs }}</code></div>
+                    <i class="pi pi-arrow-right" aria-hidden="true"></i>
+                    <div><span>Display</span><code>{{ ws.displayCrs }}</code></div>
+                  </div>
+                </section>
+              </div>
               @if (isOwner()) {
                 <button pButton type="button" label="Configure workspace" icon="pi pi-cog" class="p-button-outlined p-button-sm gis-ws__ws-config" (click)="openEditDialog()"></button>
               }

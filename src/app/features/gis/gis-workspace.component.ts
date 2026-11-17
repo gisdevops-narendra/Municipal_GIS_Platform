@@ -15,7 +15,6 @@ import { DialogModule } from 'primeng/dialog';
 import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
 import { SelectModule } from 'primeng/select';
-import { TagModule } from 'primeng/tag';
 import { MessageModule } from 'primeng/message';
 import { TooltipModule } from 'primeng/tooltip';
 import { SiteHeaderComponent } from '../../shared/components/site-header/site-header.component';
@@ -155,7 +154,6 @@ const TOOLS: WsTool[] = [
     InputTextModule,
     TextareaModule,
     SelectModule,
-    TagModule,
     MessageModule,
     TooltipModule,
     SiteHeaderComponent,
