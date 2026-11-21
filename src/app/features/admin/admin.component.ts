@@ -37,6 +37,8 @@ const ACTIONS: Record<string, ActionMeta> = {
   'admin.revoked': { label: 'Admin revoked', icon: 'pi-shield', tone: 'info' },
   'backup.completed': { label: 'Backup completed', icon: 'pi-save', tone: 'ok' },
   'backup.failed': { label: 'Backup failed', icon: 'pi-save', tone: 'bad' },
+  'system.geoserver_restarted': { label: 'GeoServer restarted', icon: 'pi-replay', tone: 'warn' },
+  'system.geoserver_restart_failed': { label: 'GeoServer restart failed', icon: 'pi-replay', tone: 'bad' },
 };
 
 /**
