@@ -1,0 +1,87 @@
+<div class="uh">
+  <div class="uh__bar">
+    <div class="uh__chips" role="tablist" aria-label="Filter uploads">
+      <button type="button" role="tab" [class.is-on]="filter() === 'all'" [attr.aria-selected]="filter() === 'all'" (click)="filter.set('all')">All <span>{{ counts().all }}</span></button>
+      <button type="button" role="tab" [class.is-on]="filter() === 'failed'" [attr.aria-selected]="filter() === 'failed'" (click)="filter.set('failed')">Failed @if (counts().failed) { <span class="is-bad">{{ counts().failed }}</span> }</button>
+      <button type="button" role="tab" [class.is-on]="filter() === 'unfinished'" [attr.aria-selected]="filter() === 'unfinished'" (click)="filter.set('unfinished')">Not finished @if (counts().unfinished) { <span>{{ counts().unfinished }}</span> }</button>
+      <button type="button" role="tab" [class.is-on]="filter() === 'published'" [attr.aria-selected]="filter() === 'published'" (click)="filter.set('published')">On map</button>
+    </div>
+    <button type="button" class="uh__icon" aria-label="Refresh" title="Refresh" [disabled]="loading()" (click)="load()">
+      <i class="pi pi-refresh" [class.pi-spin]="loading()"></i>
+    </button>
+  </div>
+
+  @if (error(); as e) {
+    <div class="uh__empty">
+      <i class="pi pi-exclamation-circle"></i>
+      <p>{{ e }}</p>
+      <button pButton type="button" size="small" [outlined]="true" label="Try again" (click)="load()"></button>
+    </div>
+  } @else if (!loading() && items().length === 0) {
+    <div class="uh__empty">
+      <i class="pi pi-cloud-upload"></i>
+      <p>No uploads yet.</p>
+      <button pButton type="button" size="small" icon="pi pi-upload" label="Upload data" (click)="uploadNew.emit()"></button>
+    </div>
+  } @else {
+    <ul class="uh__list">
+      @for (u of visible(); track u.id) {
+        @let k = kind(u);
+        <li class="uh__item" [attr.data-kind]="k">
+          <span class="uh__badge" [attr.data-kind]="k" aria-hidden="true">
+            <i class="pi"
+               [class.pi-check]="k === 'published'"
+               [class.pi-times]="k === 'failed'"
+               [class.pi-spinner]="k === 'processing'" [class.pi-spin]="k === 'processing'"
+               [class.pi-pause]="k === 'unfinished'"></i>
+          </span>
+
+          <div class="uh__main">
+            <div class="uh__top">
+              <span class="uh__name" [title]="u.layer.name">{{ u.layer.name }}</span>
+              <span class="uh__pill" [attr.data-kind]="k">{{ statusLabel(u) }}</span>
+            </div>
+            <div class="uh__meta">
+              <span [title]="u.filename">{{ u.filename }}</span>
+              <span>{{ size(u.fileSize) }}</span>
+              @if (geometry(u); as g) { <span>{{ g }}</span> }
+              <span [title]="u.createdAt | date: 'medium'">{{ u.createdAt | date: 'd MMM, HH:mm' }}</span>
+            </div>
+            @if (reason(u); as r) {
+              <p class="uh__reason" [class.is-open]="expanded() === u.id" (click)="toggle(u.id)" [title]="expanded() === u.id ? '' : 'Show full message'">{{ r }}</p>
+            }
+          </div>
+
+          <div class="uh__actions">
+            @switch (k) {
+              @case ('published') {
+                @if (u.publish.layerId; as id) {
+                  <button pButton type="button" size="small" [text]="true" icon="pi pi-map" label="Show" (click)="showLayer.emit(id)"></button>
+                }
+              }
+              @case ('failed') {
+                <button pButton type="button" size="small" icon="pi pi-replay" label="Retry" (click)="retry.emit(u)"></button>
+              }
+              @case ('unfinished') {
+                <button pButton type="button" size="small" [outlined]="true" icon="pi pi-play" label="Finish" (click)="retry.emit(u)"></button>
+              }
+            }
+            @if (k !== 'published' && k !== 'processing') {
+              <button type="button" class="uh__icon" aria-label="Discard upload" title="Discard" [disabled]="discarding() === u.id" (click)="discard(u)">
+                <i class="pi" [class.pi-trash]="discarding() !== u.id" [class.pi-spinner]="discarding() === u.id" [class.pi-spin]="discarding() === u.id"></i>
+              </button>
+            }
+          </div>
+        </li>
+      } @empty {
+        <li class="uh__none">{{ loading() ? 'Loading…' : 'Nothing here.' }}</li>
+      }
+    </ul>
+
+    @if (hasMore()) {
+      <div class="uh__more">
+        <button pButton type="button" size="small" [text]="true" [loading]="loading()" label="Show older uploads" (click)="load(true)"></button>
+      </div>
+    }
+  }
+</div>

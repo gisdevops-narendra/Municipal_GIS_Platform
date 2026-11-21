@@ -21,6 +21,10 @@
       <i class="pi pi-upload" aria-hidden="true"></i>
       <span>Upload Data</span>
     </button>
+    <button type="button" class="gis-ws__bar-btn gis-ws__bar-history" aria-label="Upload history" pTooltip="Upload history — retry failed uploads" tooltipPosition="bottom" (click)="openHistory()">
+      <i class="pi pi-history" aria-hidden="true"></i>
+      <span>History</span>
+    </button>
     <span class="gis-ws__bar-sep" aria-hidden="true"></span>
 
     <div class="gis-ws__bar-group">
@@ -970,6 +974,20 @@
     [breakpoints]="{ '600px': '95vw' }"
     appendTo="body"
   >
-    <app-upload-wizard (closed)="uploadOpen.set(false)" (published)="onUploadPublished($event)" />
+    <app-upload-wizard [resume]="resumeUpload()" (closed)="uploadOpen.set(false)" (published)="onUploadPublished($event)" />
+  </p-dialog>
+}
+
+@if (historyOpen()) {
+  <p-dialog
+    [visible]="historyOpen()"
+    (visibleChange)="historyOpen.set($event)"
+    [modal]="true"
+    header="Upload history"
+    [style]="{ width: 'auto', maxWidth: '95vw' }"
+    [breakpoints]="{ '600px': '95vw' }"
+    appendTo="body"
+  >
+    <app-upload-history (retry)="retryUpload($event)" (showLayer)="showUploadedLayer($event)" (uploadNew)="historyOpen.set(false); openUpload()" />
   </p-dialog>
 }

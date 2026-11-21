@@ -13,6 +13,7 @@ import { ActivatedRoute, NavigationEnd, Router, RouterLink } from '@angular/rout
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
 import { UploadWizardComponent } from './components/upload-wizard/upload-wizard.component';
+import { UploadHistoryComponent } from './components/upload-history/upload-history.component';
 import { GisUpload } from '../../core/models/gis-upload.model';
 import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
@@ -245,6 +246,7 @@ const TOOLS: WsTool[] = [
     ButtonModule,
     DialogModule,
     UploadWizardComponent,
+    UploadHistoryComponent,
     InputTextModule,
     TextareaModule,
     SelectModule,
@@ -334,10 +336,31 @@ export class GisWorkspaceComponent {
 
   // ----- upload (the whole Upload → Process → View flow lives on the map) -----
   readonly uploadOpen = signal(false);
+  /** Upload re-opened from the history to retry / finish (null = new). */
+  readonly resumeUpload = signal<GisUpload | null>(null);
+  readonly historyOpen = signal(false);
 
   openUpload(): void {
     this.closeMenu();
+    this.resumeUpload.set(null);
     this.uploadOpen.set(true);
+  }
+
+  openHistory(): void {
+    this.closeMenu();
+    this.historyOpen.set(true);
+  }
+
+  /** Retry / finish an upload from the history in the upload wizard. */
+  retryUpload(upload: GisUpload): void {
+    this.historyOpen.set(false);
+    this.resumeUpload.set(upload);
+    this.uploadOpen.set(true);
+  }
+
+  showUploadedLayer(layerId: string): void {
+    this.historyOpen.set(false);
+    void this.router.navigate(['/gis'], { queryParams: { layer: layerId } }).then(() => this.loadLayers());
   }
 
   /** Processed and published: close the dialog, load the new layer and

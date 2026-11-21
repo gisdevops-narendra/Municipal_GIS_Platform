@@ -1535,6 +1535,11 @@
   font-weight: 600;
 }
 
+/* Desktop: icon only (tooltip explains); phones show the label. */
+.gis-ws__bar-history > span {
+  display: none;
+}
+
 .gis-ws__empty {
   display: flex;
   flex-direction: column;
@@ -1696,7 +1701,12 @@
     display: contents;
   }
 
+  .gis-ws__bar-history > span {
+    display: inline;
+  }
+
   .gis-ws__bar-upload,
+  .gis-ws__bar-history,
   .gis-ws__bar-group .gis-ws__bar-btn,
   .gis-ws__bar-more > .gis-ws__bar-btn {
     flex-direction: column;
