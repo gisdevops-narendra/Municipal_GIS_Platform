@@ -15,21 +15,24 @@
  *  (they must also be allowed: see KEYCLOAK_EXTRA_PUBLIC_URLS and
  *  CORS_ORIGIN in .env, and the Keycloak client's redirect URIs). */
 const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+/** Opened over an HTTPS tunnel (ngrok demo): every service is reached
+ *  same-origin through the dev-server proxy (proxy.tunnel.json). */
+const tunnel = typeof window !== 'undefined' && window.location.protocol === 'https:' ? window.location.origin : '';
 
 export const environment = {
   production: false,
   /** Shown in Settings → About. Bump alongside a release. */
   version: '1.0.0-dev',
-  appUrl: `http://${host}:4200`,
+  appUrl: tunnel || `http://${host}:4200`,
   keycloak: {
-    url: `http://${host}:8180`,
+    url: tunnel || `http://${host}:8180`,
     realm: 'municipal-gis',
     clientId: 'municipal-gis-frontend'
   },
   /** Placeholder for the future NestJS API. No requests are made yet — this
    *  only tells the bearer-token interceptor which origin it may attach the
    *  Keycloak access token to. */
-  apiUrl: `http://${host}:3000/api`,
+  apiUrl: tunnel ? `${tunnel}/api` : `http://${host}:3000/api`,
   /** GeoServer's browser-facing base URL (Task 6). Angular talks to
    *  GeoServer's public, anonymous OGC endpoints (WMS/WFS/GetLegendGraphic)
    *  directly for map tiles/features — never its REST Admin API, and never
@@ -38,10 +41,10 @@ export const environment = {
    *  own default config). Workspace/layer *names* always come from the
    *  backend's tenant-scoped APIs, never hardcoded here — this is only the
    *  "which server" part, analogous to apiUrl/keycloak.url above. */
-  geoserverUrl: `http://${host}:8600/geoserver`,
+  geoserverUrl: tunnel ? `${tunnel}/geoserver` : `http://${host}:8600/geoserver`,
   /** TiTiler (COG tile server) for raster layers rendered as "COG". Its
    *  absence is fine: those layers fall back to GeoServer tiles. */
-  titilerUrl: `http://${host}:8700`,
+  titilerUrl: tunnel ? `${tunnel}/titiler` : `http://${host}:8700`,
   /** Optional Cesium ion access token (https://ion.cesium.com — free tier):
    *  turns on world 3D terrain and 3D buildings in the 3D View. Empty →
    *  imagery and GIS layers on the globe without terrain. Public by design

@@ -1,0 +1,7 @@
+{
+  "/api": { "target": "http://localhost:3000", "secure": false },
+  "/realms": { "target": "http://localhost:8180", "secure": false },
+  "/resources": { "target": "http://localhost:8180", "secure": false },
+  "/geoserver": { "target": "http://localhost:8600", "secure": false },
+  "/titiler": { "target": "http://localhost:8700", "secure": false, "pathRewrite": { "^/titiler": "" } }
+}
