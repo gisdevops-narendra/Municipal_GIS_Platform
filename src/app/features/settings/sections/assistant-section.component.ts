@@ -68,7 +68,7 @@ import {
         @if (layersLoading()) {
           <p class="muted">Loading layers…</p>
         } @else if (layers().length === 0) {
-          <p class="muted">This municipality has no active GIS layers yet.</p>
+          <p class="muted">You have no layers yet — upload data on the map first.</p>
         } @else {
           <div class="layers__bar">
             <span class="muted">{{ a().layerIds.length }} of {{ layers().length }} chosen</span>
@@ -119,7 +119,7 @@ import {
     <h3 class="group">Your chats</h3>
     <app-setting-toggle
       label="Save chat history"
-      hint="Keep conversations in “Your chats” to reopen later. Off: new chats are not kept. Your municipality's Owner still sees questions in the question log."
+      hint="Keep conversations in “Your chats” to reopen later. Off: new chats are not kept."
       [value]="a().saveHistory"
       (valueChange)="patch({ saveHistory: $event })"
     />
@@ -129,24 +129,7 @@ import {
 
     <div class="foot">
       <button pButton type="button" class="p-button-text p-button-sm" label="Restore defaults" icon="pi pi-refresh" (click)="s.resetAssistant()"></button>
-      @if (isOwner()) {
-        <button
-          pButton
-          type="button"
-          class="p-button-sm"
-          label="Save as municipality default"
-          icon="pi pi-building"
-          [loading]="savingDefaults()"
-          (click)="saveDefaults()"
-        ></button>
-      }
     </div>
-    @if (isOwner()) {
-      <p class="muted foot__hint">
-        As the Owner you can make these settings the starting point for everyone in your municipality.
-        Users who changed a setting themselves keep their own choice.
-      </p>
-    }
   `,
   styles: [
     `

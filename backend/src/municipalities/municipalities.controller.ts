@@ -4,18 +4,18 @@ import { AppUserGuard } from '../auth/guards/app-user.guard';
 import { CurrentKeycloakUser } from '../auth/decorators/current-keycloak-user.decorator';
 import type { KeycloakJwtPayload } from '../auth/strategies/keycloak-jwt.strategy';
 import { MunicipalitiesService } from './municipalities.service';
-import { RegisterMunicipalityDto } from './dto/register-municipality.dto';
+import { RegisterAccountDto } from './dto/register-account.dto';
 
 @Controller('municipalities')
 export class MunicipalitiesController {
   constructor(private readonly municipalitiesService: MunicipalitiesService) {}
 
-  /** Public: no Keycloak session exists yet at registration time. The
-   *  backend creates the Keycloak identity itself and links it to the new
-   *  owner — the browser never supplies a keycloak_user_id or a role. */
+  /** Public account sign-up. The backend creates the Keycloak identity
+   *  and the account's private GIS workspace — the browser never supplies
+   *  a keycloak_user_id or a role. */
   @Post('register')
-  register(@Body() dto: RegisterMunicipalityDto) {
-    return this.municipalitiesService.registerMunicipality(dto);
+  register(@Body() dto: RegisterAccountDto) {
+    return this.municipalitiesService.registerAccount(dto);
   }
 
   /**

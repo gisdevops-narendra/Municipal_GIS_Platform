@@ -25,7 +25,6 @@ import type {
   ClassificationMethod,
   LayerStyleSpecDto,
 } from './dto/layer-style.dto';
-import { ModuleAccessService } from '../module-access/module-access.service';
 import { CrsService } from './crs.service';
 import { TileArchiveService, type ArchiveSource } from './tile-archive.service';
 import { RENDER_MODES_BY_TYPE, type RenderMode } from './dto/render-mode.dto';
@@ -138,7 +137,6 @@ export class GisLayersService {
     private readonly storage: StorageService,
     private readonly styleService: StyleService,
     private readonly fieldStats: FieldStatsService,
-    private readonly moduleAccess: ModuleAccessService,
     /** Optional so unit tests need not stub it. */
     @Optional() private readonly ai?: AiClientService,
     @Optional() private readonly crs?: CrsService,
@@ -317,26 +315,11 @@ export class GisLayersService {
         'You do not have permission to export this layer.',
       );
     }
-    const modules =
-      await this.moduleAccess.getEffectiveModuleIdsForAppUser(appUser);
-    if (
-      !modules.has(EXPORT_DATA_MODULE_ID) ||
-      !modules.has(LAYER_EXPORT_FORMAT_MODULE_IDS[format])
-    ) {
-      throw new ForbiddenException(
-        `Your module access does not include ${format} export.`,
-      );
-    }
     const ids = featureIds
       ? selectionFeatureIds(layer.geoserverLayer, featureIds)
       : undefined;
     if (ids) filter = undefined;
     const base = layer.code.toLowerCase() + (ids ? '_selected' : '');
-    if (filter && !modules.has(EXPORT_FILTER_MODULE_ID)) {
-      throw new ForbiddenException(
-        'Your module access does not include Export with Filter.',
-      );
-    }
     const cqlFilter = filter
       ? await this.exportFilterCql(layer, filter)
       : undefined;
@@ -950,13 +933,6 @@ export class GisLayersService {
     layerId: string,
     weightField?: string,
   ) {
-    const modules =
-      await this.moduleAccess.getEffectiveModuleIdsForAppUser(appUser);
-    if (!modules.has(HEATMAP_MODULE_ID)) {
-      throw new ForbiddenException(
-        'Your module access does not include Heatmap & Clusters.',
-      );
-    }
     const { table, workspaceId } = await this.analyticsSource(appUser, layerId);
     return this.fieldStats.densityPoints(table, weightField, workspaceId);
   }

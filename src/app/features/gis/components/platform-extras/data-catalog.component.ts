@@ -94,7 +94,6 @@ const FREQUENCIES = [
             <h4>Facts</h4>
             <dl class="px__kv">
               @if (e.featureCount !== null) { <dt>Features</dt><dd>~{{ e.featureCount | number }}</dd> }
-              <dt>Owner</dt><dd>{{ e.department ?? 'Municipality (shared)' }}</dd>
               <dt>Added by</dt><dd>{{ e.createdBy ?? '—' }}</dd>
               <dt>Added</dt><dd>{{ e.createdAt | date: 'mediumDate' }}</dd>
               <dt>Last changed</dt><dd>{{ e.updatedAt | date: 'mediumDate' }}</dd>
@@ -149,10 +148,6 @@ const FREQUENCIES = [
             <option value="POLYGON">Areas</option>
             <option value="RASTER">Rasters</option>
           </select>
-          <select class="px__native-select" [ngModel]="deptFilter()" (ngModelChange)="deptFilter.set($event)" aria-label="Owner">
-            <option value="">All owners</option>
-            @for (d of departments(); track d) { <option [value]="d">{{ d }}</option> }
-          </select>
         </div>
         <div class="px__secret" style="justify-content: space-between">
           <span class="px__item-sub">{{ filtered().length }} of {{ entries().length }} layers</span>
@@ -173,7 +168,7 @@ const FREQUENCIES = [
                 <div class="px__item-main">
                   <span class="px__item-title" [title]="e.name">{{ e.name }}</span>
                   <span class="px__item-sub" [title]="e.description ?? ''">
-                    {{ e.department ?? 'Shared' }}@if (e.featureCount !== null) { · {{ e.featureCount | number }} } · {{ e.updatedAt | date: 'd MMM y' }}
+                    @if (e.featureCount !== null) { {{ e.featureCount | number }} features · }{{ e.updatedAt | date: 'd MMM y' }}
                   </span>
                 </div>
                 @if (!e.metadata.source && !e.description) { <span class="px__badge" title="No description or source yet">incomplete</span> }
@@ -204,7 +199,6 @@ export class DataCatalogComponent {
   readonly loading = signal(false);
   readonly query = signal('');
   readonly typeFilter = signal('');
-  readonly deptFilter = signal('');
   readonly sort = signal<'name' | 'updated' | 'size'>('name');
   readonly selectedId = signal<string | null>(null);
   readonly selected = computed(() => this.entries().find((e) => e.id === this.selectedId()) ?? null);
@@ -212,17 +206,11 @@ export class DataCatalogComponent {
   readonly saving = signal(false);
   draft = { description: '', source: '', licence: '', keywords: '', contact: '', updateFrequency: '', dataDate: '', notes: '' };
 
-  readonly departments = computed(() =>
-    [...new Set(this.entries().map((e) => e.department ?? 'Shared'))].sort((a, b) => a.localeCompare(b))
-  );
-
   readonly filtered = computed(() => {
     const q = this.query().trim().toLowerCase();
     const type = this.typeFilter();
-    const dept = this.deptFilter();
     const list = this.entries().filter((e) => {
       if (type === 'RASTER' ? e.layerType !== 'RASTER' : type && e.geometryType !== type) return false;
-      if (dept && (e.department ?? 'Shared') !== dept) return false;
       if (!q) return true;
       const m = e.metadata;
       return [e.name, e.description, e.code, e.department, m.source, m.licence, m.contact, m.notes, ...(m.keywords ?? [])]

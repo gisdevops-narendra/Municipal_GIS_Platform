@@ -6,7 +6,6 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { GisLayer } from '../../core/models/gis-layer.model';
 import { GisLayersService } from '../../core/services/gis-layers.service';
-import { ModuleAccessService } from '../../core/services/module-access.service';
 import { NotificationService } from '../../core/services/notification.service';
 import {
   ATTACHMENTS_MODULE_ID,
@@ -39,7 +38,6 @@ interface Fix {
 })
 export class CollectComponent implements OnInit, OnDestroy {
   private readonly gisLayers = inject(GisLayersService);
-  private readonly moduleAccess = inject(ModuleAccessService);
   private readonly vectorTools = inject(VectorToolsService);
   private readonly notify = inject(NotificationService);
 
@@ -76,15 +74,9 @@ export class CollectComponent implements OnInit, OnDestroy {
     void this.refreshQueue().then(() => {
       if (this.online() && this.queue().length) void this.sync();
     });
-    this.moduleAccess.getMyModuleIds().subscribe({
-      next: ({ moduleIds }) => {
-        const ids = new Set(moduleIds);
-        this.allowed.set(ids.has(FIELD_COLLECTION_MODULE_ID));
-        this.photosAllowed.set(ids.has(ATTACHMENTS_MODULE_ID));
-        if (ids.has(FIELD_COLLECTION_MODULE_ID)) this.loadLayers();
-      },
-      error: () => this.allowed.set(false)
-    });
+    this.allowed.set(true);
+    this.photosAllowed.set(true);
+    this.loadLayers();
   }
 
   ngOnDestroy(): void {

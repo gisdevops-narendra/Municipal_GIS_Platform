@@ -19,6 +19,7 @@ import {
   GISLayerUpload,
   GisGeometryType,
   GisPermission,
+  GisUploadStatus,
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -94,6 +95,10 @@ function mapGeometryType(raw: string | null): GisGeometryType | null {
  * server-side from the JWT — never a client-supplied tenant/department id
  * (Task 7 §40/§41).
  */
+/** Imported but not yet on the map — auto-published (DRAFT), or left
+ *  behind by the removed review workflow (IN_REVIEW / REJECTED). */
+const AWAITING_PUBLISH = new Set<GisUploadStatus>(['DRAFT', 'IN_REVIEW', 'REJECTED']);
+
 @Injectable()
 export class GisUploadsService {
   private readonly logger = new Logger(GisUploadsService.name);
@@ -123,6 +128,9 @@ export class GisUploadsService {
     dto: CreateUploadDto,
     file: Express.Multer.File,
   ) {
+    // No departments: every upload is an account-wide layer.
+    dto.ownershipType = 'CANONICAL';
+    dto.departmentId = undefined;
     const workspace = await this.prisma.gISWorkspace.findUnique({
       where: { municipalityId: appUser.municipalityId },
     });
@@ -183,9 +191,8 @@ export class GisUploadsService {
         layerName: dto.layerName.trim(),
         layerCode,
         description: dto.description?.trim() || null,
-        departmentId:
-          dto.ownershipType === 'DEPARTMENT' ? dto.departmentId : null,
-        ownershipType: dto.ownershipType,
+        departmentId: null,
+        ownershipType: 'CANONICAL',
         routingEnabled: dto.routingEnabled === true,
         sourceCrs: dto.sourceCrs ?? null,
         targetCrs: dto.targetCrs?.toUpperCase() ?? workspace.defaultCrs,
@@ -211,6 +218,7 @@ export class GisUploadsService {
     });
 
     await this.runValidation(upload.id, dto);
+    await this.autoPublish(upload.id, appUser);
 
     return this.toResponse(await this.mustFind(upload.id));
   }
@@ -218,8 +226,32 @@ export class GisUploadsService {
   async validate(uploadId: string, appUser: AppUser) {
     const upload = await this.findScoped(uploadId, appUser);
     this.assertCanManage(appUser, upload);
-    await this.runValidation(uploadId);
+    // Already imported (e.g. left in review by the old workflow): just
+    // publish it. Otherwise re-run the import first.
+    if (!(AWAITING_PUBLISH.has(upload.status) && upload.postgisTable)) {
+      await this.runValidation(uploadId);
+    }
+    await this.autoPublish(uploadId, appUser);
     return this.toResponse(await this.mustFind(uploadId));
+  }
+
+  /** Simplified flow: once an upload is processed (DRAFT) it goes straight
+   *  to the map — no review/approval stage. A publish failure is recorded
+   *  on the upload (PUBLISH_FAILED, retryable via POST …/publish) rather
+   *  than failing the upload request itself. */
+  private async autoPublish(uploadId: string, appUser: AppUser): Promise<void> {
+    const upload = await this.mustFind(uploadId);
+    if (!AWAITING_PUBLISH.has(upload.status)) return;
+    await this.prisma.gISLayerUpload.update({
+      where: { id: uploadId },
+      data: {
+        status: 'APPROVED',
+        reviewedById: appUser.id,
+        reviewedAt: new Date(),
+        schemaConfirmedAt: upload.schemaConfirmedAt ?? new Date(),
+      },
+    });
+    await this.publish(uploadId, appUser).catch(() => undefined);
   }
 
   async list(appUser: AppUser, page: number, pageSize: number) {

@@ -1,8 +1,9 @@
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { SiteHeaderComponent } from '../../shared/components/site-header/site-header.component';
 import { SiteFooterComponent } from '../../shared/components/site-footer/site-footer.component';
+import { AuthService } from '../../core/services/auth.service';
 
 interface CapabilityItem {
   label: string;
@@ -17,12 +18,14 @@ interface CapabilityItem {
   styleUrl: './landing.component.scss'
 })
 export class LandingComponent {
+  readonly isAuthenticated = inject(AuthService).isAuthenticated;
+
   readonly capabilities: CapabilityItem[] = [
-    { label: 'Municipal GIS', description: 'One authoritative map per municipality — parcels, wards, roads and utilities in a single workspace.' },
-    { label: 'GIS Data Management', description: 'Upload, validate and publish shapefiles, GeoJSON, CSV and raster data with CRS checks built in.' },
-    { label: 'Municipal Assets', description: 'Track streetlights, pipelines, drains and more against a common asset model.' },
-    { label: 'Property & Parcels', description: 'Connect parcels to tax, water, sewer and building records at the source.' },
-    { label: 'Projects', description: 'Give capital works a geography, a budget and a timeline in the same place.' },
-    { label: 'Field Operations', description: 'Assignments, inspections and evidence captured from the field, synced back to the map.' }
+    { label: 'Upload & publish', description: 'Shapefile ZIP, GeoJSON or CSV — validated, reprojected and on the map automatically.' },
+    { label: 'Style & label', description: 'Colour by category or value, labels, icons and heatmaps, previewed live on the map.' },
+    { label: 'Query & attributes', description: 'Filter features, browse and edit the attribute table, and export the results.' },
+    { label: 'Measure & analyse', description: 'Distances, areas, buffers, overlays, statistics and raster analysis.' },
+    { label: 'Edit & collect', description: 'Draw and edit features on the map, or collect them in the field, even offline.' },
+    { label: 'Print & share', description: 'Print maps with scale, legend and grid, or share a read-only link.' }
   ];
 }

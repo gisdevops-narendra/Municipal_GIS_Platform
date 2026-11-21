@@ -1,3 +1,6 @@
+@if (accountOnly) {
+  @if (isAuthenticated()) { <ng-container [ngTemplateOutlet]="accountMenu" /> }
+} @else {
 <header class="site-header" [class.site-header--compact]="compact">
   @if (compact && showActions && isAuthenticated()) {
     <!-- One-row header for full-screen work pages (Municipal GIS). -->
@@ -14,64 +17,12 @@
       </a>
 
       <nav class="site-header__compact-nav" aria-label="Primary">
-        @if (showFullNav()) {
-          @if (onboarding.showGuide()) {
-            <a routerLink="/setup" routerLinkActive="is-active" class="site-header__nav-setup">
-              <i class="pi pi-flag" aria-hidden="true"></i>
-              <span>Getting Started</span>
-              <span class="site-header__nav-progress">{{ onboarding.mandatoryDone() }}/{{ onboarding.mandatorySteps().length }}</span>
-            </a>
-          }
-          @for (item of navItems(); track item.route) {
-            @if (item.state === 'locked') {
-              <span class="site-header__nav-locked" role="link" aria-disabled="true" [pTooltip]="item.hint" tooltipPosition="bottom">
-                <span>{{ item.label }}</span>
-                <i class="pi pi-lock" aria-hidden="true"></i>
-              </span>
-            } @else {
-              <a [routerLink]="item.route" routerLinkActive="is-active" [routerLinkActiveOptions]="{ exact: item.exact }"
-                 [pTooltip]="item.hint || undefined" tooltipPosition="bottom">{{ item.label }}</a>
-            }
-          }
-        } @else {
-          <a routerLink="/gis" routerLinkActive="is-active" [routerLinkActiveOptions]="{ exact: true }">Municipal GIS</a>
+        @for (item of navItems; track item.route) {
+          <a [routerLink]="item.route" routerLinkActive="is-active" [routerLinkActiveOptions]="{ exact: item.exact }">{{ item.label }}</a>
         }
       </nav>
 
-      <div class="site-header__user">
-        @if (accountOpen()) { <div class="site-header__user-backdrop" (click)="accountOpen.set(false)" aria-hidden="true"></div> }
-        <button type="button" class="site-header__user-btn" aria-haspopup="menu" [attr.aria-expanded]="accountOpen()"
-                [attr.aria-label]="'Account: ' + displayName()" (click)="accountOpen.set(!accountOpen())">
-          <span class="user-chip__avatar user-chip__avatar--sm" aria-hidden="true">{{ initials() }}</span>
-          <span class="site-header__user-name">{{ displayName() }}</span>
-          <i class="pi pi-chevron-down" aria-hidden="true"></i>
-        </button>
-        @if (accountOpen()) {
-          <div class="site-header__user-menu" role="menu">
-            <div class="site-header__user-head">
-              <span class="user-chip__avatar" aria-hidden="true">{{ initials() }}</span>
-              <span class="user-chip__meta">
-                <span class="user-chip__name">{{ displayName() }}</span>
-                @if (roleLabel()) { <span class="user-chip__sub">{{ roleLabel() }}</span> }
-                @if (secondaryLine()) { <span class="user-chip__sub">{{ secondaryLine() }}</span> }
-              </span>
-            </div>
-            <button type="button" role="menuitemcheckbox" class="site-header__user-item" [attr.aria-checked]="isDark()" (click)="toggleTheme()">
-              <i class="pi" [class.pi-moon]="!isDark()" [class.pi-sun]="isDark()" aria-hidden="true"></i>
-              {{ isDark() ? 'Light theme' : 'Dark theme' }}
-              <kbd class="site-header__kbd">[</kbd>
-            </button>
-            @if (showFullNav()) {
-              <a routerLink="/settings" role="menuitem" class="site-header__user-item" (click)="accountOpen.set(false)">
-                <i class="pi pi-cog" aria-hidden="true"></i> Settings
-              </a>
-            }
-            <button type="button" role="menuitem" class="site-header__user-item" (click)="logout()">
-              <i class="pi pi-sign-out" aria-hidden="true"></i> Logout
-            </button>
-          </div>
-        }
-      </div>
+      <ng-container [ngTemplateOutlet]="accountMenu" />
     </div>
   } @else {
   <div class="site-header__bar">
@@ -92,103 +43,51 @@
     @if (showActions) {
       <div class="site-header__account">
         @if (isAuthenticated()) {
-          <div class="user-chip" title="Signed in via Keycloak">
-            <span class="user-chip__avatar" aria-hidden="true">{{ initials() }}</span>
-            <span class="user-chip__meta">
-              <span class="user-chip__name">{{ displayName() }}</span>
-              @if (roleLabel() || secondaryLine()) {
-                <span class="user-chip__sub">{{ roleLabel() || secondaryLine() }}</span>
-              }
-            </span>
-          </div>
-          <button
-            pButton
-            type="button"
-            class="p-button-outlined p-button-sm site-header__logout"
-            icon="pi pi-sign-out"
-            label="Logout"
-            aria-label="Logout"
-            (click)="logout()"
-          ></button>
+          <a routerLink="/gis" pButton class="p-button-sm site-header__open-map" icon="pi pi-map" label="Open Map" aria-label="Open Map"></a>
+          <ng-container [ngTemplateOutlet]="accountMenu" />
         } @else {
           <a routerLink="/login" pButton class="p-button-text p-button-sm" label="Login"></a>
-          <a routerLink="/register" pButton class="p-button-sm site-header__register site-header__register--full" label="Register Municipality"></a>
+          <a routerLink="/register" pButton class="p-button-sm site-header__register site-header__register--full" label="Create Account"></a>
           <a routerLink="/register" pButton class="p-button-sm site-header__register site-header__register--compact" label="Register"></a>
         }
       </div>
     }
   </div>
 
-  @if (showActions && isAuthenticated()) {
-    <nav class="site-header__nav" aria-label="Primary">
-      <div class="site-header__nav-inner">
-        @if (showFullNav()) {
-          @if (onboarding.showGuide()) {
-            <a routerLink="/setup" routerLinkActive="is-active" class="site-header__nav-setup">
-              <i class="pi pi-flag" aria-hidden="true"></i>
-              <span>Getting Started</span>
-              <span class="site-header__nav-progress">
-                {{ onboarding.mandatoryDone() }}/{{ onboarding.mandatorySteps().length }}
-              </span>
-            </a>
-          }
-          @for (item of navItems(); track item.route) {
-            @if (item.state === 'locked') {
-              <span
-                class="site-header__nav-locked"
-                role="link"
-                aria-disabled="true"
-                [pTooltip]="item.hint"
-                tooltipPosition="bottom"
-              >
-                @if (item.step) {
-                  <span class="site-header__nav-step">{{ item.step }}</span>
-                }
-                <span>{{ item.label }}</span>
-                <i class="pi pi-lock" aria-hidden="true"></i>
-              </span>
-            } @else {
-              <a
-                [routerLink]="item.route"
-                routerLinkActive="is-active"
-                [routerLinkActiveOptions]="{ exact: item.exact }"
-                [class.is-done]="item.state === 'done'"
-                [pTooltip]="item.hint || undefined"
-                tooltipPosition="bottom"
-              >
-                @if (item.state === 'done') {
-                  <span class="site-header__nav-step site-header__nav-step--done"><i class="pi pi-check" aria-hidden="true"></i></span>
-                } @else if (item.step) {
-                  <span class="site-header__nav-step">{{ item.step }}</span>
-                }
-                <span>{{ item.label }}</span>
-              </a>
-            }
-          }
-        } @else {
-          <a routerLink="/gis" routerLinkActive="is-active" [routerLinkActiveOptions]="{ exact: true }">Municipal GIS</a>
-        }
-        @if (showFullNav()) {
-          <a routerLink="/settings" routerLinkActive="is-active" class="site-header__nav-settings" aria-label="Settings">
-            <i class="pi pi-cog" aria-hidden="true"></i>
-            <span>Settings</span>
-          </a>
-        }
-      </div>
-    </nav>
-  }
-  }
-  @if (showActions && isAuthenticated()) {
-    @if (showFullNav() && guideBar(); as bar) {
-      <div class="site-header__guide" [attr.data-tone]="bar.tone" role="status">
-        <div class="site-header__guide-inner">
-          <i [class]="bar.tone === 'done' ? 'pi pi-check-circle' : 'pi pi-compass'" aria-hidden="true"></i>
-          <span class="site-header__guide-text">{{ bar.text }}</span>
-          <a [routerLink]="bar.linkRoute" class="site-header__guide-link">
-            {{ bar.linkLabel }} <i class="pi pi-arrow-right" aria-hidden="true"></i>
-          </a>
-        </div>
-      </div>
-    }
   }
 </header>
+}
+
+<ng-template #accountMenu>
+  <div class="site-header__user">
+    @if (accountOpen()) { <div class="site-header__user-backdrop" (click)="accountOpen.set(false)" aria-hidden="true"></div> }
+    <button type="button" class="site-header__user-btn" aria-haspopup="menu" [attr.aria-expanded]="accountOpen()"
+            [attr.aria-label]="'Account: ' + displayName()" (click)="accountOpen.set(!accountOpen())">
+      <span class="user-chip__avatar user-chip__avatar--sm" aria-hidden="true">{{ initials() }}</span>
+      <span class="site-header__user-name">{{ displayName() }}</span>
+      <i class="pi pi-chevron-down" aria-hidden="true"></i>
+    </button>
+    @if (accountOpen()) {
+      <div class="site-header__user-menu" role="menu">
+        <div class="site-header__user-head">
+          <span class="user-chip__avatar" aria-hidden="true">{{ initials() }}</span>
+          <span class="user-chip__meta">
+            <span class="user-chip__name">{{ displayName() }}</span>
+            @if (secondaryLine()) { <span class="user-chip__sub">{{ secondaryLine() }}</span> }
+          </span>
+        </div>
+        <button type="button" role="menuitemcheckbox" class="site-header__user-item" [attr.aria-checked]="isDark()" (click)="toggleTheme()">
+          <i class="pi" [class.pi-moon]="!isDark()" [class.pi-sun]="isDark()" aria-hidden="true"></i>
+          {{ isDark() ? 'Light theme' : 'Dark theme' }}
+          <kbd class="site-header__kbd">[</kbd>
+        </button>
+        <a routerLink="/settings" role="menuitem" class="site-header__user-item" (click)="accountOpen.set(false)">
+          <i class="pi pi-cog" aria-hidden="true"></i> Settings
+        </a>
+        <button type="button" role="menuitem" class="site-header__user-item" (click)="logout()">
+          <i class="pi pi-sign-out" aria-hidden="true"></i> Logout
+        </button>
+      </div>
+    }
+  </div>
+</ng-template>

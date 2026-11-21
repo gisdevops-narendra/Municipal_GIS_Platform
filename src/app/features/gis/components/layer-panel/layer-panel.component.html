@@ -130,28 +130,12 @@
 
     @if (canonicalLayers.length > 0) {
       <div class="layer-panel__group">
-        <h3 class="layer-panel__group-title">Canonical Layers</h3>
+        <h3 class="layer-panel__group-title">Uploaded Layers</h3>
         <ul class="layer-panel__list">
           @for (layer of canonicalLayers; track layer.id) {
             <ng-container *ngTemplateOutlet="row; context: { $implicit: layer }" />
           }
         </ul>
-      </div>
-    }
-
-    @if (departmentGroups.length > 0) {
-      <div class="layer-panel__group">
-        <h3 class="layer-panel__group-title">Department Layers</h3>
-        @for (group of departmentGroups; track group.departmentId) {
-          <div class="layer-panel__subgroup">
-            <h4 class="layer-panel__subgroup-title">{{ group.departmentName }}</h4>
-            <ul class="layer-panel__list">
-              @for (layer of group.layers; track layer.id) {
-                <ng-container *ngTemplateOutlet="row; context: { $implicit: layer }" />
-              }
-            </ul>
-          </div>
-        }
       </div>
     }
 

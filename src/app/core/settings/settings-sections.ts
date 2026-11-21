@@ -38,7 +38,7 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     label: 'Profile & Account',
     icon: 'pi pi-user',
     group: 'account',
-    blurb: 'Your name, contact number, role and municipality.',
+    blurb: 'Your name, contact number and email.',
   },
   {
     id: 'appearance',

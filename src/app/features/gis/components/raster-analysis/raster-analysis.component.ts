@@ -9,8 +9,6 @@ import { ButtonModule } from 'primeng/button';
 import { SelectModule } from 'primeng/select';
 import { MultiSelectModule } from 'primeng/multiselect';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
-import { Department } from '../../../../core/models/department.model';
-import { DepartmentService } from '../../../../core/services/department.service';
 import { MapService } from '../../services/map.service';
 import { GisAiService } from '../../services/gis-ai.service';
 import { SettingsService } from '../../../../core/services/settings.service';
@@ -205,7 +203,6 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
   private readonly mapService = inject(MapService);
   private readonly api = inject(RasterService);
   private readonly gisAi = inject(GisAiService);
-  private readonly departmentService = inject(DepartmentService);
   private readonly settings = inject(SettingsService);
 
   constructor() {
@@ -242,15 +239,8 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
   }
   private readonly allowedSignal = signal<ReadonlySet<number>>(new Set());
 
-  /** The owner may publish an upload into any department. */
   @Input() set isOwner(value: boolean) {
     this.owner = value;
-    if (value && this.departments().length === 0) {
-      this.departmentService.list().subscribe({
-        next: (list: Department[]) =>
-          this.departments.set(list.filter((d) => d.status === 'ACTIVE').map((d) => ({ label: d.name, value: d.id })))
-      });
-    }
   }
   get isOwner(): boolean {
     return this.owner;
@@ -339,7 +329,6 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
   readonly polygonLayers = computed(() => this.vectorLayers().filter((l) => l.geometryType === 'POLYGON'));
   readonly needsRasterInput = computed(() => !NO_RASTER_INPUT.includes(this.tool()));
   readonly needsVectorInput = computed(() => VECTOR_TOOLS.includes(this.tool()));
-  readonly departments = signal<{ label: string; value: string }[]>([]);
 
   // ----- input raster -----
   readonly layerId = signal<string | null>(null);

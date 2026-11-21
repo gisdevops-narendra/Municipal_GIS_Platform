@@ -1,11 +1,12 @@
-import { ForbiddenException, NotFoundException, type ExecutionContext } from '@nestjs/common';
+import { NotFoundException, type ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { RasterModuleGuard } from './raster-module.guard';
 import { RASTER_MODULES, terrainModules } from './raster-tool-registry';
 
+/** Module Access was removed: every signed-in account may use every raster
+ *  tool. The guard now only rejects an unknown `:tool` job. */
 describe('RasterModuleGuard', () => {
   const handler = () => undefined;
-  let granted: Set<number>;
   let rule: unknown;
 
   const context = (params: Record<string, string> = {}, body: unknown = {}) =>
@@ -14,45 +15,31 @@ describe('RasterModuleGuard', () => {
       switchToHttp: () => ({ getRequest: () => ({ appUser: { id: 'u1' }, params, body }) }),
     }) as unknown as ExecutionContext;
 
-  const guard = () =>
-    new RasterModuleGuard(
-      { get: () => rule } as unknown as Reflector,
-      { getEffectiveModuleIdsForAppUser: jest.fn().mockResolvedValue(granted) } as never,
-    );
+  const guard = () => new RasterModuleGuard({ get: () => rule } as unknown as Reflector);
 
   beforeEach(() => {
-    granted = new Set();
     rule = undefined;
   });
 
-  it('allows a route without a raster rule', async () => {
-    await expect(guard().canActivate(context())).resolves.toBe(true);
+  it('allows a route without a raster rule', () => {
+    expect(guard().canActivate(context())).toBe(true);
   });
 
-  it('allows when any listed module is granted', async () => {
-    rule = [RASTER_MODULES.statistics, RASTER_MODULES.style];
-    granted = new Set([RASTER_MODULES.style]);
-    await expect(guard().canActivate(context())).resolves.toBe(true);
-  });
-
-  it('rejects when none of the modules is granted', async () => {
+  it('allows any listed raster tool', () => {
     rule = [RASTER_MODULES.upload];
-    granted = new Set([RASTER_MODULES.style]);
-    await expect(guard().canActivate(context())).rejects.toBeInstanceOf(ForbiddenException);
+    expect(guard().canActivate(context())).toBe(true);
   });
 
-  it('derives terrain modules from the requested kind', async () => {
+  it('allows terrain tools of any kind', () => {
     rule = terrainModules;
-    granted = new Set([RASTER_MODULES.slope]);
-    await expect(guard().canActivate(context({}, { kind: 'slope' }))).resolves.toBe(true);
-    await expect(guard().canActivate(context({}, { kind: 'TPI' }))).rejects.toBeInstanceOf(ForbiddenException);
+    expect(guard().canActivate(context({}, { kind: 'slope' }))).toBe(true);
+    expect(guard().canActivate(context({}, { kind: 'TPI' }))).toBe(true);
   });
 
-  it('gates a job by its :tool param', async () => {
+  it('allows known job tools and rejects unknown ones', () => {
     rule = 'job';
-    granted = new Set([RASTER_MODULES.online]);
-    await expect(guard().canActivate(context({ tool: 'online' }))).resolves.toBe(true);
-    await expect(guard().canActivate(context({ tool: 'mosaic' }))).rejects.toBeInstanceOf(ForbiddenException);
-    await expect(guard().canActivate(context({ tool: 'nope' }))).rejects.toBeInstanceOf(NotFoundException);
+    expect(guard().canActivate(context({ tool: 'online' }))).toBe(true);
+    expect(guard().canActivate(context({ tool: 'mosaic' }))).toBe(true);
+    expect(() => guard().canActivate(context({ tool: 'nope' }))).toThrow(NotFoundException);
   });
 });

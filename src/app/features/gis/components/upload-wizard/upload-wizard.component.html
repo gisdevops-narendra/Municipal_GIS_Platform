@@ -97,47 +97,6 @@
           placeholder="What this layer shows, its source and date"></textarea>
       </div>
 
-      @if (isOwner) {
-        <div class="upload-wizard__field">
-          <span class="field-label">Ownership</span>
-          <div class="upload-wizard__choices" role="radiogroup" aria-label="Ownership">
-            @for (opt of ownershipOptions; track opt.value) {
-              <button
-                type="button"
-                role="radio"
-                class="upload-wizard__choice"
-                [class.upload-wizard__choice--active]="f.ownershipType.value === opt.value"
-                [attr.aria-checked]="f.ownershipType.value === opt.value"
-                (click)="selectOwnership(opt.value)"
-              >
-                <i [class]="'pi ' + opt.icon"></i>
-                <span class="upload-wizard__choice-text">
-                  <span class="upload-wizard__choice-title">{{ opt.label }}</span>
-                  <span class="upload-wizard__choice-desc">{{ opt.description }}</span>
-                </span>
-              </button>
-            }
-          </div>
-        </div>
-      }
-
-      @if (f.ownershipType.value === 'DEPARTMENT') {
-        <div class="upload-wizard__field">
-          <label class="field-label" for="wiz-department">Department <span class="upload-wizard__req">*</span></label>
-          <p-select
-            inputId="wiz-department"
-            [options]="departmentOptions"
-            optionLabel="label"
-            optionValue="value"
-            formControlName="departmentId"
-            placeholder="Select a department"
-            styleClass="w-full"
-            [disabled]="!isOwner"
-            [filter]="departmentOptions.length > 8"
-          ></p-select>
-        </div>
-      }
-
       @if (canRoute) {
         <label class="upload-wizard__routing">
           <p-checkbox formControlName="routingEnabled" [binary]="true" inputId="wiz-routing" />
@@ -222,10 +181,12 @@
   @if (step() === 'VALIDATION') {
     @if (upload(); as u) {
       <div class="upload-wizard__validation">
-        @if (u.status === 'DRAFT') {
-          <p-message severity="success" text="File structure valid — ready for review." styleClass="w-full" />
+        @if (u.status === 'PUBLISHED') {
+          <p-message severity="success" text="Processed and published — your layer is on the map." styleClass="w-full" />
+        } @else if (submitting() || u.status === 'VALIDATING' || u.status === 'UPLOAD_PENDING') {
+          <p-message severity="info" text="Processing your data…" styleClass="w-full" />
         } @else {
-          <p-message severity="error" [text]="u.errorMessage || 'Validation failed.'" styleClass="w-full" />
+          <p-message severity="error" [text]="u.errorMessage || 'Processing failed.'" styleClass="w-full" />
         }
 
         @if (u.validation.summary; as summary) {
@@ -289,58 +250,20 @@
           }
         }
 
+        @if (submitError(); as message) {
+          <p-message severity="error" [text]="message" styleClass="w-full" />
+        }
+
         <div class="upload-wizard__actions">
           <button pButton type="button" label="Back" class="p-button-text" (click)="backToFileInfo()"></button>
-          @if (u.status === 'DRAFT') {
-            <button pButton type="button" label="Next: Review columns" (click)="goToColumns()"></button>
+          @if (u.status === 'PUBLISHED') {
+            <button pButton type="button" icon="pi pi-map" label="View on map" (click)="viewOnMap()"></button>
+          } @else if (u.status !== 'FAILED') {
+            <button pButton type="button" icon="pi pi-refresh" label="Retry" [loading]="submitting()" (click)="retryProcessing()"></button>
           }
         </div>
       </div>
     }
   }
 
-  @if (step() === 'COLUMNS') {
-    @if (upload(); as u) {
-      <app-upload-columns [uploadId]="u.id" (confirmed)="onColumnsConfirmed($event)" (back)="step.set('VALIDATION')" />
-    }
-  }
-
-  @if (step() === 'PREVIEW') {
-    <div class="upload-wizard__preview">
-      @if (previewLoading()) {
-        <p class="upload-wizard__hint">Loading preview…</p>
-      } @else if (previewLayer()) {
-        <div class="upload-wizard__preview-map">
-          <app-municipal-map [layers]="previewLayers()" />
-        </div>
-
-        <details class="upload-wizard__style" [open]="styleOpen()">
-          <summary (click)="toggleStyle($event)">
-            <i class="pi pi-palette" aria-hidden="true"></i> Style layer
-            <span class="upload-wizard__style-hint">optional — applied on the preview and kept when published</span>
-          </summary>
-          @if (styleOpen() && upload(); as up) {
-            <app-style-editor
-              [target]="{ kind: 'upload', id: up.id }"
-              [geometry]="previewGeometry()"
-              [layerName]="up.layer.name"
-              [live]="true"
-              (applied)="onStyleApplied()"
-            />
-          }
-        </details>
-      } @else {
-        <p-message severity="warn" text="Preview could not be loaded." styleClass="w-full" />
-      }
-
-      @if (submitError(); as message) {
-        <p-message severity="error" [text]="message" styleClass="w-full" />
-      }
-
-      <div class="upload-wizard__actions">
-        <button pButton type="button" label="Back" class="p-button-text" (click)="step.set('COLUMNS')"></button>
-        <button pButton type="button" label="Submit for Review" [loading]="submitting()" (click)="submitForReview()"></button>
-      </div>
-    </div>
-  }
 </div>

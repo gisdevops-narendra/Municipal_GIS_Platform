@@ -11,14 +11,8 @@ import { CheckboxModule } from 'primeng/checkbox';
 import { TagModule } from 'primeng/tag';
 import { ProgressBarModule } from 'primeng/progressbar';
 import { GisUploadsService } from '../../../../core/services/gis-uploads.service';
-import { DepartmentService } from '../../../../core/services/department.service';
-import { Department } from '../../../../core/models/department.model';
-import { CurrentUser } from '../../../../core/models/current-user.model';
 import { GisUpload, GisUploadPreview } from '../../../../core/models/gis-upload.model';
 import { MapService } from '../../services/map.service';
-import { MunicipalMapComponent } from '../municipal-map/municipal-map.component';
-import { StyleEditorComponent } from '../style-editor/style-editor.component';
-import { UploadColumnsComponent } from '../upload-columns/upload-columns.component';
 import { UploadDatabaseComponent } from '../upload-database/upload-database.component';
 import { ExternalDbService } from '../../../../core/services/external-db.service';
 import { ExternalDbSelection } from '../../../../core/models/external-db.model';
@@ -64,10 +58,7 @@ const ACCEPTED_EXTENSIONS = ['zip', 'geojson', 'json', 'csv'];
     CheckboxModule,
     TagModule,
     ProgressBarModule,
-    MunicipalMapComponent,
     CrsPickerComponent,
-    StyleEditorComponent,
-    UploadColumnsComponent,
     UploadDatabaseComponent
   ],
   providers: [MapService],
@@ -83,17 +74,16 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
     this.uploadSub?.unsubscribe();
   }
 
-  @Input({ required: true }) currentUser!: CurrentUser;
   /** An existing DRAFT upload to continue — opens at step 3 (Columns), or
    *  at step 4 if its columns are already confirmed. */
   @Input() resume: GisUpload | null = null;
   @Output() closed = new EventEmitter<void>();
-  @Output() submittedForReview = new EventEmitter<GisUpload>();
+  /** The upload was processed and its layer is now on the map. */
+  @Output() published = new EventEmitter<GisUpload>();
 
   private readonly fb = inject(FormBuilder);
   private readonly uploadsService = inject(GisUploadsService);
   private readonly externalDb = inject(ExternalDbService);
-  private readonly departmentService = inject(DepartmentService);
   private readonly mapService = inject(MapService);
   private readonly workspaceService = inject(GisWorkspaceService);
   /** The workspace's storage CRS — the default for new layers. */
@@ -124,7 +114,6 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
   }
 
   readonly step = signal<WizardStep>('FILE_INFO');
-  readonly departments = signal<Department[]>([]);
   readonly selectedFile = signal<File | null>(null);
   /** Step 1 source: an uploaded file, or a table from the user's database. */
   readonly source = signal<'FILE' | 'DATABASE'>('FILE');
@@ -140,7 +129,7 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
   readonly styleOpen = signal(false);
   readonly dragOver = signal(false);
 
-  readonly stepLabels = ['File & Layer Info', 'Validation', 'Columns', 'Preview & Submit'];
+  readonly stepLabels = ['Upload', 'View on map'];
   readonly stepIndex = computed(() => STEP_ORDER.indexOf(this.step()));
 
   /** CSV gives points; routing needs line data. */
@@ -166,21 +155,6 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
     }
   }
 
-  readonly ownershipOptions = [
-    {
-      value: 'DEPARTMENT' as const,
-      label: 'Department',
-      description: 'Owned and maintained by one department',
-      icon: 'pi-building'
-    },
-    {
-      value: 'CANONICAL' as const,
-      label: 'Canonical',
-      description: 'Municipality-wide reference layer',
-      icon: 'pi-globe'
-    }
-  ];
-
   /** Layer name last auto-filled from a file name — replaced when another
    *  file is picked, but never once the user has typed their own. */
   private suggestedName = '';
@@ -188,9 +162,7 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
   readonly form = this.fb.nonNullable.group({
     layerName: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(150)]],
     description: [''],
-    ownershipType: ['DEPARTMENT' as 'CANONICAL' | 'DEPARTMENT', Validators.required],
     routingEnabled: [false],
-    departmentId: [''],
     sourceCrs: [''],
     targetCrs: [''],
     latitudeField: [''],
@@ -208,43 +180,16 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
       error: () => undefined
     });
     if (this.resume) {
+      // An older upload that never reached the map: re-process it, which
+      // publishes it straight away.
       this.upload.set(this.resume);
-      if (this.resume.schema?.confirmedAt) {
-        this.goToPreview();
-      } else {
-        this.step.set('COLUMNS');
-      }
-    }
-
-    this.departmentService.list().subscribe({
-      next: (departments) => {
-        this.departments.set(departments.filter((d) => d.status === 'ACTIVE'));
-      }
-    });
-
-    if (this.currentUser.systemRole !== 'MUNICIPALITY_OWNER') {
-      // A Department Head/User may only ever upload DEPARTMENT layers to
-      // their own department (Task 7 §12/§26, Task 8 §4) — the backend
-      // enforces this regardless, but the form reflects it directly
-      // rather than letting the user pick something that will just be
-      // rejected.
-      this.form.patchValue({
-        ownershipType: 'DEPARTMENT',
-        departmentId: this.currentUser.department?.id ?? ''
-      });
+      this.step.set('VALIDATION');
+      this.retryProcessing();
     }
   }
 
   get f() {
     return this.form.controls;
-  }
-
-  get isOwner(): boolean {
-    return this.currentUser.systemRole === 'MUNICIPALITY_OWNER';
-  }
-
-  get departmentOptions(): { label: string; value: string }[] {
-    return this.departments().map((d) => ({ label: d.name, value: d.id }));
   }
 
   get isCsv(): boolean {
@@ -291,11 +236,6 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
     return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  }
-
-  selectOwnership(value: 'CANONICAL' | 'DEPARTMENT'): void {
-    this.form.patchValue({ ownershipType: value });
-    this.onOwnershipChange(value);
   }
 
   /** Shows which projection the file is in (the import detects it again). */
@@ -354,12 +294,6 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
       .slice(0, 150);
   }
 
-  onOwnershipChange(value: 'CANONICAL' | 'DEPARTMENT'): void {
-    if (value === 'CANONICAL') {
-      this.form.patchValue({ departmentId: '' });
-    }
-  }
-
   submitUpload(): void {
     if (this.source() === 'DATABASE') {
       this.importFromDatabase();
@@ -376,10 +310,6 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
     }
 
     const value = this.form.getRawValue();
-    if (value.ownershipType === 'DEPARTMENT' && !value.departmentId) {
-      this.submitError.set('Select a department.');
-      return;
-    }
     if ((value.xField || value.yField) && !CRS_PATTERN.test(value.sourceCrs)) {
       this.submitError.set('Choose the Source CRS of the X/Y columns — X/Y is never assumed to be WGS84.');
       return;
@@ -393,9 +323,7 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
       .create(file, {
         layerName: value.layerName,
         description: value.description || undefined,
-        ownershipType: value.ownershipType,
         routingEnabled: value.routingEnabled,
-        departmentId: value.ownershipType === 'DEPARTMENT' ? value.departmentId : undefined,
         sourceCrs: value.sourceCrs || undefined,
         targetCrs: value.targetCrs && value.targetCrs !== this.workspaceCrs() ? value.targetCrs : undefined,
         latitudeField: value.latitudeField || undefined,
@@ -433,10 +361,6 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
       return;
     }
     const value = this.form.getRawValue();
-    if (value.ownershipType === 'DEPARTMENT' && !value.departmentId) {
-      this.submitError.set('Select a department.');
-      return;
-    }
     const { points, ...dataset } = selection;
     this.uploading.set(true);
     this.submitError.set(null);
@@ -445,9 +369,7 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
         ...dataset,
         layerName: value.layerName,
         description: value.description || undefined,
-        ownershipType: value.ownershipType,
         routingEnabled: !points && value.routingEnabled,
-        departmentId: value.ownershipType === 'DEPARTMENT' ? value.departmentId : undefined,
         targetCrs: value.targetCrs && value.targetCrs !== this.workspaceCrs() ? value.targetCrs : undefined
       })
       .subscribe({
@@ -548,14 +470,27 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
     this.mapService.refreshLayerStyle('preview');
   }
 
-  submitForReview(): void {
+  /** Processing finished and the layer is live — hand off to the map. */
+  viewOnMap(): void {
+    const current = this.upload();
+    if (current) this.published.emit(current);
+  }
+
+  /** Re-runs processing (FAILED / never-published uploads) or just the
+   *  publish step (PUBLISH_FAILED). Either way it ends on the map. */
+  retryProcessing(): void {
     const current = this.upload();
     if (!current) return;
     this.submitting.set(true);
-    this.uploadsService.submitForReview(current.id).subscribe({
+    this.submitError.set(null);
+    const request =
+      current.status === 'PUBLISH_FAILED' || current.status === 'APPROVED'
+        ? this.uploadsService.publish(current.id)
+        : this.uploadsService.validate(current.id);
+    request.subscribe({
       next: (updated) => {
         this.submitting.set(false);
-        this.submittedForReview.emit(updated);
+        this.upload.set(updated);
       },
       error: (error: HttpErrorResponse) => {
         this.submitting.set(false);

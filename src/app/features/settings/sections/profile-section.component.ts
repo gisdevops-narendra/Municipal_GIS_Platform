@@ -8,12 +8,6 @@ import { CurrentUserService } from '../../../core/services/current-user.service'
 import { NotificationService } from '../../../core/services/notification.service';
 import { CurrentUser } from '../../../core/models/current-user.model';
 
-const ROLE_LABELS: Record<CurrentUser['systemRole'], string> = {
-  MUNICIPALITY_OWNER: 'Municipality Owner',
-  DEPARTMENT_HEAD: 'Department Head',
-  DEPARTMENT_USER: 'Department User',
-};
-
 /**
  * Settings → Profile & Account. Editable: full name and mobile number
  * (`PATCH /api/me`). Email, role, department and municipality are shown
@@ -48,9 +42,6 @@ const ROLE_LABELS: Record<CurrentUser['systemRole'], string> = {
 
         <div class="readonly">
           <div><span>Email</span><strong>{{ me()!.email }}</strong></div>
-          <div><span>Role</span><strong>{{ roleLabel() }}</strong></div>
-          <div><span>Department</span><strong>{{ me()!.department?.name ?? '—' }}</strong></div>
-          <div><span>Municipality</span><strong>{{ me()!.municipality.name }}</strong></div>
         </div>
 
         <div class="actions">
@@ -137,11 +128,6 @@ export class ProfileSectionComponent {
     fullName: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(150)]],
     mobileNumber: ['', [Validators.pattern(/^[0-9+\-\s()]{7,20}$/)]],
   });
-
-  roleLabel(): string {
-    const me = this.me();
-    return me ? ROLE_LABELS[me.systemRole] : '';
-  }
 
   constructor() {
     this.users.getMe().subscribe({

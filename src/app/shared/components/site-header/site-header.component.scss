@@ -470,6 +470,11 @@
     display: none;
   }
 
+  /* …but always show name + email inside the account menu itself. */
+  .site-header__user-head .user-chip__meta {
+    display: flex;
+  }
+
   .site-header__logout ::ng-deep .p-button-label {
     display: none;
   }
@@ -510,5 +515,49 @@
   .site-header__title--sm,
   .site-header__user-name {
     display: none;
+  }
+}
+
+/* Embedded in the map toolbar: avatar only, to save space. */
+:host-context(.gis-ws__bar) .site-header__user-name,
+:host-context(.gis-ws__bar) .site-header__user-btn > .pi-chevron-down {
+  display: none;
+}
+
+:host-context(.gis-ws__bar) .site-header__user-btn {
+  height: 32px;
+  padding: 0 3px;
+}
+
+/* Phones: "Open Map" becomes an icon button so the account menu fits. */
+@media (max-width: 480px) {
+  .site-header__open-map ::ng-deep .p-button-label {
+    display: none;
+  }
+
+  .site-header__account {
+    gap: 8px;
+  }
+}
+
+/* In the map toolbar on narrow screens the toolbar scrolls sideways,
+   which would clip an absolutely positioned dropdown — pin it to the
+   viewport instead. */
+@media (max-width: 900px) {
+  :host-context(.gis-ws__bar) .site-header__user-menu {
+    position: fixed;
+    top: 50px;
+    right: 8px;
+  }
+}
+
+/* Phones: the map toolbar no longer scrolls sideways, so the account
+   menu can sit normally under the avatar again. */
+@media (max-width: 640px) {
+  :host-context(.gis-ws__bar) .site-header__user-menu {
+    position: fixed;
+    top: 58px;
+    left: auto;
+    right: 8px;
   }
 }

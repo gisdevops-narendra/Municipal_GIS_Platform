@@ -43,7 +43,6 @@ export class ShortcutService {
       { id: 'help', keys: '?', label: 'Show keyboard shortcuts', group: 'General', run: () => this.helpOpen.set(true) },
       { id: 'goto-settings', keys: 'g s', label: 'Open Settings', group: 'Navigation', run: () => this.router.navigate(['/settings']) },
       { id: 'goto-gis', keys: 'g m', label: 'Open Municipal GIS', group: 'Navigation', run: () => this.router.navigate(['/gis']) },
-      { id: 'goto-dashboard', keys: 'g d', label: 'Open Dashboard', group: 'Navigation', run: () => this.router.navigate(['/dashboard']) },
       { id: 'goto-layers', keys: 'g l', label: 'Open GIS Layers', group: 'Navigation', run: () => this.router.navigate(['/gis/layers']) },
       {
         id: 'toggle-theme',

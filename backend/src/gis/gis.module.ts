@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { ModuleAccessModule } from '../module-access/module-access.module';
 import { AuthModule } from '../auth/auth.module';
 import { AiClientModule } from '../gis-ai/ai-client.module';
 import { GisWorkspaceController } from './gis-workspace.controller';
@@ -62,7 +61,7 @@ import { HazardsService } from './hazards.service';
 import { AirStationsService } from './air-stations.service';
 
 @Module({
-  imports: [AuthModule, ModuleAccessModule, AiClientModule],
+  imports: [AuthModule, AiClientModule],
   controllers: [
     OgcFeaturesController,
     GisWorkspaceController,

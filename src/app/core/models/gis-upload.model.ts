@@ -93,7 +93,7 @@ export interface CreateGisUploadRequest {
   layerName: string;
   description?: string;
   departmentId?: string;
-  ownershipType: GisLayerOwnershipType;
+  ownershipType?: GisLayerOwnershipType;
   /** Mark as a routing (road network) layer — applies to line data only. */
   routingEnabled?: boolean;
   sourceCrs?: string;

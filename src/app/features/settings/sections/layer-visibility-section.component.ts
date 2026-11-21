@@ -23,7 +23,7 @@ import { GisLayer } from '../../../core/models/gis-layer.model';
     } @else if (error()) {
       <p-message severity="error" [text]="error()!" />
     } @else if (layers().length === 0) {
-      <p class="muted">This municipality has no active GIS layers yet.</p>
+      <p class="muted">You have no layers yet — upload data on the map first.</p>
     } @else {
       <ul class="rows">
         @for (l of layers(); track l.id) {

@@ -9,9 +9,11 @@ import { Component, DestroyRef, ElementRef, HostListener, WritableSignal, comput
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, NavigationEnd, Router, RouterLink } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
+import { UploadWizardComponent } from './components/upload-wizard/upload-wizard.component';
+import { GisUpload } from '../../core/models/gis-upload.model';
 import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
 import { SelectModule } from 'primeng/select';
@@ -21,7 +23,7 @@ import { SiteHeaderComponent } from '../../shared/components/site-header/site-he
 import { GisWorkspaceService } from '../../core/services/gis-workspace.service';
 import { GisLayersService } from '../../core/services/gis-layers.service';
 import { CurrentUserService } from '../../core/services/current-user.service';
-import { ModuleAccessService } from '../../core/services/module-access.service';
+import { ALL_MODULES } from '../../core/utils/all-modules';
 import { GisWorkspace } from '../../core/models/gis-workspace.model';
 import { GisLayer, GisRenderMode } from '../../core/models/gis-layer.model';
 import { formatInfo } from './services/render-formats';
@@ -179,7 +181,7 @@ const TOOL_INFO: Record<string, { hint: string; section?: string }> = {
   share: { hint: 'Public link to a map view' },
   storage: { hint: 'Space used and limits' },
   integrations: { hint: 'API keys and webhooks' },
-  workspace: { hint: 'Workspace name, members and settings' }
+  workspace: { hint: 'Workspace name, map projection and settings' }
 };
 
 /** Shown directly on the rail — everything else lives in group menus. */
@@ -242,12 +244,14 @@ const TOOLS: WsTool[] = [
     FormsModule,
     ButtonModule,
     DialogModule,
+    UploadWizardComponent,
     InputTextModule,
     TextareaModule,
     SelectModule,
     MessageModule,
     TooltipModule,
     SiteHeaderComponent,
+    RouterLink,
     MunicipalMapComponent,
     LayerPanelComponent,
     MapControlsComponent,
@@ -302,7 +306,6 @@ export class GisWorkspaceComponent {
   private readonly rasterService = inject(RasterService);
   private readonly settingsService = inject(SettingsService);
   private readonly currentUserService = inject(CurrentUserService);
-  private readonly moduleAccessService = inject(ModuleAccessService);
   private readonly fb = inject(FormBuilder);
   private readonly route = inject(ActivatedRoute);
   private readonly mapService = inject(MapService);
@@ -326,6 +329,30 @@ export class GisWorkspaceComponent {
   readonly layers = signal<GisLayer[]>([]);
   readonly layersLoading = signal(true);
   readonly layersError = signal<string | null>(null);
+  /** Loaded, and the account has no layers yet — show the upload prompt. */
+  readonly layersEmpty = computed(() => !this.layersLoading() && !this.layersError() && this.layers().length === 0);
+
+  // ----- upload (the whole Upload → Process → View flow lives on the map) -----
+  readonly uploadOpen = signal(false);
+
+  openUpload(): void {
+    this.closeMenu();
+    this.uploadOpen.set(true);
+  }
+
+  /** Processed and published: close the dialog, load the new layer and
+   *  zoom to it (via the ?layer= deep link, which reloads if needed). */
+  onUploadPublished(upload: GisUpload): void {
+    this.uploadOpen.set(false);
+    const layerId = upload.publish.layerId;
+    // Always reload (the map may have had no layers at all, in which case
+    // the deep link alone has nothing to re-check against), then zoom.
+    if (layerId) {
+      void this.router.navigate(['/gis'], { queryParams: { layer: layerId } }).then(() => this.loadLayers());
+    } else {
+      this.loadLayers();
+    }
+  }
   /** True once a layer list is loaded — and it stays true while the list is
    *  reloaded (after an analysis, rename, delete …). Tying it to "not
    *  loading" destroyed and rebuilt every open tool panel on each reload,
@@ -339,7 +366,7 @@ export class GisWorkspaceComponent {
    *  moduleId (see WsTool) is never gated. Never used to gate anything
    *  the backend doesn't independently re-check itself (each tool's own
    *  API calls are authorized server-side regardless of the rail).  */
-  readonly myModuleIds = signal<Set<number>>(new Set());
+  readonly myModuleIds = signal<ReadonlySet<number>>(ALL_MODULES);
 
   /** Layer Styling module — whether the Layers panel offers the style
    *  editor at all (saving a style is still MANAGE-checked server-side). */
@@ -495,7 +522,7 @@ export class GisWorkspaceComponent {
     items[next].focus();
   }
   /** Which toolbar dropdown is open ('search' = the tool-search results). */
-  readonly openMenu = signal<WsToolGroup | 'search' | 'layout' | null>(null);
+  readonly openMenu = signal<WsToolGroup | 'search' | 'layout' | 'all' | null>(null);
   readonly menuQuery = signal('');
   readonly openMenuGroup = computed(() => this.menuGroups().find((g) => g.id === this.openMenu()) ?? null);
   /** Searching looks through every tool. */
@@ -507,6 +534,12 @@ export class GisWorkspaceComponent {
 
   toggleMenu(id: WsToolGroup): void {
     this.openMenu.update((cur) => (cur === id ? null : id));
+  }
+
+  /** Phones: one "Tools" menu listing every tool group (the per-group
+   *  menus don't fit the toolbar there). */
+  toggleAllTools(): void {
+    this.openMenu.update((cur) => (cur === 'all' ? null : 'all'));
   }
 
   /** Menu-bar behaviour: with one dropdown open, hovering another opens it. */
@@ -621,6 +654,12 @@ export class GisWorkspaceComponent {
   /** Signature of the query params the deep-link was last applied for — so a
    *  kept-alive workspace re-applies only when the params actually change. */
   private lastDeepLinkKey: string | null = null;
+  /** Deep-linked layer id we already reloaded the list for (avoids loops). */
+  private deepLinkReloadedFor: string | null = null;
+  private readonly router = inject(Router);
+  /** The workspace is kept alive while other pages are open; true while
+   *  /gis itself is the current page. */
+  private onMapPage = true;
 
   /** Active Query Builder result — drives the WMS filter, the map highlight,
    *  and the Attribute Table's locked filter. */
@@ -701,16 +740,7 @@ export class GisWorkspaceComponent {
       error: () => undefined
     });
 
-    this.moduleAccessService.getMyModuleIds().subscribe({
-      next: ({ moduleIds }) => {
-        this.myModuleIds.set(new Set(moduleIds));
-        this.restoreLayout();
-      }
-      // No error handler: if this fails, myModuleIds stays empty and every
-      // moduleId-gated tool stays hidden — a safe fail-closed default
-      // rather than fail-open (never show more than the caller actually
-      // has just because the check itself broke).
-    });
+    this.restoreLayout();
 
     this.loadWorkspace();
     this.loadLayers();
@@ -724,6 +754,16 @@ export class GisWorkspaceComponent {
     // deep links (from the dashboard) arrive on re-navigation, not just at
     // construction — react to every change, not a one-shot snapshot read.
     this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe(() => this.tryApplyDeepLink());
+
+    // Coming back to the (kept-alive) map from another page — e.g. right
+    // after uploading on My Layers — reload the layer list so new or
+    // changed layers show without a full page refresh.
+    this.router.events.pipe(takeUntilDestroyed()).subscribe((event) => {
+      if (!(event instanceof NavigationEnd)) return;
+      const onMap = /^\/gis(?:[?#]|$)/.test(event.urlAfterRedirects);
+      if (onMap && !this.onMapPage) this.loadLayers();
+      this.onMapPage = onMap;
+    });
   }
 
   get f() {
@@ -1065,13 +1105,16 @@ export class GisWorkspaceComponent {
     this.refreshMapSize();
   }
 
-  /** Tabs across the left dock for every panel opened in this session
-   *  (kept mounted), in the order they were opened. */
-  readonly leftTabs = computed(() =>
-    [...this.openedLeftTools()]
+  /** The left dock shows ONE tool at a time — opening another tool
+   *  replaces it (no tab strip). Panels opened earlier stay mounted but
+   *  hidden (see openedLeftTools), so switching back keeps their state. */
+  readonly leftTabs = computed(() => {
+    const active = this.leftTool();
+    return [...this.openedLeftTools()]
+      .filter((id) => id === active)
       .map((id) => this.visibleToolList().find((t) => t.id === id && t.dock === 'left'))
-      .filter((t): t is WsTool => !!t)
-  );
+      .filter((t): t is WsTool => !!t);
+  });
 
   switchLeftTab(tool: WsTool): void {
     if (this.leftTool() === tool.id) return;
@@ -1402,6 +1445,13 @@ export class GisWorkspaceComponent {
 
     if (layerId) {
       const layer = this.layers().find((candidate) => candidate.id === layerId);
+      if (!layer && this.deepLinkReloadedFor !== layerId) {
+        // A layer published since the list was loaded — fetch it, then retry.
+        this.deepLinkReloadedFor = layerId;
+        this.lastDeepLinkKey = null;
+        this.loadLayers();
+        return;
+      }
       if (layer) {
         this.mapService.setLayerVisibility(layer.id, true);
         this.mapService.zoomToLayer(layer);

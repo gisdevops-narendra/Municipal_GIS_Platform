@@ -53,6 +53,18 @@ kcadm update "realms/$REALM" \
 
 echo "   applied: resetPasswordAllowed=true + SMTP -> mailpit:1025"
 
+# Realm Frontend URL: the public address Keycloak puts in its login links
+# and token issuer. Empty (the default) = use whatever address the browser
+# opened Keycloak on (localhost / LAN IP). Set KEYCLOAK_FRONTEND_URL in .env
+# only while serving through a tunnel (e.g. an ngrok https URL) — a stale
+# tunnel URL here sends every sign-in to a dead address.
+FRONTEND_URL_VALUE="${KEYCLOAK_FRONTEND_URL:-}"
+if [ -z "$FRONTEND_URL_VALUE" ] && [ -f "$(dirname "$0")/../.env" ]; then
+  FRONTEND_URL_VALUE="$(sed -n 's/^KEYCLOAK_FRONTEND_URL=//p' "$(dirname "$0")/../.env" | tr -d '\r' | head -n1)"
+fi
+kcadm update "realms/$REALM" -s "attributes.frontendUrl=$FRONTEND_URL_VALUE"
+echo "   applied: frontendUrl=${FRONTEND_URL_VALUE:-(none: the browser address is used)}"
+
 # App origins the browser opens the app from (localhost, and a LAN IP for a
 # demo) — the same list the backend allows in CORS_ORIGIN. Keycloak must
 # redirect back to each of them after sign-in / sign-out.

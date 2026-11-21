@@ -5,38 +5,41 @@
     <div class="page-container hero__inner">
       <div class="hero__content">
         <span class="eyebrow">Municipal GIS Platform</span>
-        <h1 class="hero__heading">Manage your municipality through GIS</h1>
+        <h1 class="hero__heading">Your GIS data on a map in minutes</h1>
         <p class="hero__lede">
-          One secure platform to manage municipal GIS data, assets, properties, projects and
-          operations — built for Indian Urban Local Bodies, from Nagar Panchayats to Municipal
-          Corporations.
+          Create an account, upload a Shapefile, GeoJSON or CSV, and see it on the map straight
+          away — then style, query, measure, analyse and print it.
         </p>
         <div class="hero__actions">
-          <a routerLink="/register" pButton label="Register Municipality" class="p-button-lg"></a>
-          <a routerLink="/login" pButton label="Login" class="p-button-lg p-button-outlined"></a>
+          @if (isAuthenticated()) {
+            <a routerLink="/gis" pButton icon="pi pi-map" label="Open Map" class="p-button-lg"></a>
+          } @else {
+            <a routerLink="/register" pButton label="Create Account" class="p-button-lg"></a>
+            <a routerLink="/login" pButton label="Login" class="p-button-lg p-button-outlined"></a>
+          }
         </div>
       </div>
 
       <div class="hero__panel survey-panel" aria-hidden="true">
         <div class="hero__panel-header">
-          <span class="hero__panel-label">SHEET REF.</span>
-          <span class="hero__panel-value">MGP&nbsp;/&nbsp;ULB&nbsp;/&nbsp;01</span>
+          <span class="hero__panel-label">HOW IT WORKS</span>
+          <span class="hero__panel-value">4&nbsp;STEPS</span>
         </div>
         <ul class="hero__panel-list">
-          <li><span>Municipality</span><span>Isolated workspace</span></li>
-          <li><span>Ward Boundaries</span><span>Canonical layer</span></li>
-          <li><span>Property Parcels</span><span>Linked to tax &amp; utilities</span></li>
-          <li><span>Asset Layers</span><span>Roads · Water · Lighting</span></li>
+          <li><span>1 · Create account</span><span>Name, email, password</span></li>
+          <li><span>2 · Upload data</span><span>Shapefile ZIP · GeoJSON · CSV</span></li>
+          <li><span>3 · Processed</span><span>Validated &amp; reprojected</span></li>
+          <li><span>4 · View on map</span><span>Published automatically</span></li>
         </ul>
-        <div class="hero__panel-footer">CRS: EPSG:4326 (WGS 84) · Configurable per municipality</div>
+        <div class="hero__panel-footer">Any EPSG projection · detected from the file</div>
       </div>
     </div>
   </section>
 
   <section class="capabilities">
     <div class="page-container">
-      <span class="eyebrow">What the platform covers</span>
-      <h2 class="capabilities__heading">A single operating layer for municipal work</h2>
+      <span class="eyebrow">What you can do</span>
+      <h2 class="capabilities__heading">Everything after the upload</h2>
 
       <div class="capabilities__grid">
         @for (item of capabilities; track item.label) {

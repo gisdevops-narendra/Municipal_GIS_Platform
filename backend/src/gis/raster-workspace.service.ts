@@ -7,7 +7,6 @@ import * as fsp from 'fs/promises';
 import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AppUser } from '../auth/types/app-user.type';
-import { ModuleAccessService } from '../module-access/module-access.service';
 import { RasterJobsService } from './raster-jobs.service';
 import { rasterJobContext } from './raster-job-context';
 import { RasterToolsService } from './raster-tools.service';
@@ -35,7 +34,6 @@ export class RasterWorkspaceService {
     private readonly prisma: PrismaService,
     private readonly jobs: RasterJobsService,
     private readonly tools: RasterToolsService,
-    private readonly moduleAccess: ModuleAccessService,
     config: ConfigService,
   ) {
     this.storageRoot = path.resolve(config.get<string>('GIS_UPLOAD_STORAGE_DIR', './storage/uploads'));
@@ -80,12 +78,9 @@ export class RasterWorkspaceService {
     const wf = await this.prisma.rasterWorkflow.findUnique({ where: { id } });
     if (!wf || wf.municipalityId !== appUser.municipalityId) throw new NotFoundException('Workflow not found.');
     const steps = wf.steps as unknown as WorkflowStep[];
-    const granted = await this.moduleAccess.getEffectiveModuleIdsForAppUser(appUser);
     for (const step of steps) {
-      const def = RASTER_JOB_TOOLS[step.tool];
-      const ids = typeof def?.modules === 'function' ? def.modules(step.body) : def?.modules ?? [];
-      if (!def || !ids.some((m) => granted.has(m))) {
-        throw new ForbiddenException(`Your module access does not include step "${step.tool}".`);
+      if (!RASTER_JOB_TOOLS[step.tool]) {
+        throw new BadRequestException(`Unknown workflow step "${step.tool}".`);
       }
     }
     const usesInput = JSON.stringify(steps).includes(INPUT);

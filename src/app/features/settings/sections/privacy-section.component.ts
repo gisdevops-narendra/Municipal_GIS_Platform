@@ -13,15 +13,14 @@ import { Component } from '@angular/core';
         Your preferences on this screen are saved against your user account in the
         platform database, and mirrored to this browser's local storage so the app can
         apply your theme before it finishes loading. No preference here is shared with
-        other users or with your municipality.
+        other users.
       </p>
 
       <h3>Your profile</h3>
       <p>
-        Your name, email, mobile number, role and department are held to operate the
-        platform — authentication, layer permissions and audit trails. Email and role
-        are managed by your Municipality Owner; you can edit your own name and mobile
-        number under Profile &amp; Account.
+        Your name, email and mobile number are held to operate the platform —
+        sign-in and audit trails. You can edit your name and mobile number under
+        Profile &amp; Account.
       </p>
 
       <h3>Map &amp; usage data</h3>
@@ -35,8 +34,8 @@ import { Component } from '@angular/core';
       <h3>Clearing your data</h3>
       <p>
         “Reset Settings” removes every preference on this screen from both the database
-        and this browser. Removing your account entirely is done by your Municipality
-        Owner from the Users screen.
+        and this browser. To remove your account entirely, contact the platform
+        administrator.
       </p>
     </div>
   `,

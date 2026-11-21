@@ -34,8 +34,11 @@ export class CreateUploadDto {
   @IsUUID()
   departmentId?: string;
 
+  /** Departments were removed — every layer belongs to the account's
+   *  workspace. Accepted for old clients, always stored as CANONICAL. */
+  @IsOptional()
   @IsIn(['CANONICAL', 'DEPARTMENT'])
-  ownershipType!: 'CANONICAL' | 'DEPARTMENT';
+  ownershipType?: 'CANONICAL' | 'DEPARTMENT';
 
   /** The uploader marks this as a routing (road network) layer. Multipart
    *  sends text, so "true" / "false" are accepted. Ignored unless the data

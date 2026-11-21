@@ -6,7 +6,7 @@
       <span class="eyebrow">Sign in</span>
       <h1 class="auth-card__heading">Sign in to your Municipal GIS</h1>
       <p class="auth-card__lede">
-        You'll sign in on your municipality's secure identity provider. Enter your email below to
+        You'll sign in on the secure sign-in page. Enter your email below to
         continue, or leave it blank.
       </p>
 
@@ -20,7 +20,7 @@
             formControlName="email"
             class="w-full"
             autocomplete="email"
-            placeholder="you@municipality.gov.in"
+            placeholder="you@example.com"
           />
           @if (email.invalid && email.touched) {
             <div class="field-error">
@@ -58,8 +58,8 @@
       <div class="auth-card__divider"></div>
 
       <p class="auth-card__footer-text">
-        New municipality?
-        <a routerLink="/register">Register your municipality</a>
+        New here?
+        <a routerLink="/register">Create an account</a>
       </p>
     </div>
   </div>

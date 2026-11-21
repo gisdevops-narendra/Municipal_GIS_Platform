@@ -13,7 +13,6 @@ import { mkdir, readFile, rm, writeFile } from 'fs/promises';
 import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AppUser } from '../auth/types/app-user.type';
-import { ModuleAccessService } from '../module-access/module-access.service';
 import { GisLayersService } from './gis-layers.service';
 import { RasterService } from './raster.service';
 import { GisAuthorizationService } from './gis-authorization.service';
@@ -25,14 +24,6 @@ export const EDIT_PANEL_MODULE_ID = 55;
 export const DRAW_MODULE_ID = 32;
 export const EDIT_HISTORY_MODULE_ID = 1001;
 export const GEOPROCESSING_MODULE_ID = 1002;
-/** Sub-modules of Geoprocessing for the tools added later (seed-modules.ts). */
-const GEOPROCESS_GROUP_MODULE: Record<string, [number, string]> = {
-  symdifference: [1031, 'Advanced Overlay'], merge: [1031, 'Advanced Overlay'],
-  nearest: [1032, 'Proximity Analysis'], selectbylocation: [1032, 'Proximity Analysis'], voronoi: [1032, 'Proximity Analysis'],
-  centroids: [1033, 'Geometry Tools'], convexhull: [1033, 'Geometry Tools'], envelope: [1033, 'Geometry Tools'], simplify: [1033, 'Geometry Tools'],
-  explode: [1033, 'Geometry Tools'], polygonstolines: [1033, 'Geometry Tools'], linestopolygons: [1033, 'Geometry Tools'], pointsalonglines: [1033, 'Geometry Tools'],
-  squaregrid: [1034, 'Grid Analysis'], hexgrid: [1034, 'Grid Analysis'],
-};
 export const IMPACT_REPORT_MODULE_ID = 1003;
 export const ATTACHMENTS_MODULE_ID = 1005;
 export const PARCEL_TOOLS_MODULE_ID = 1006;
@@ -109,7 +100,6 @@ export class VectorToolsService {
     private readonly gisLayers: GisLayersService,
     private readonly gisAuth: GisAuthorizationService,
     private readonly raster: RasterService,
-    private readonly moduleAccess: ModuleAccessService,
     private readonly config: ConfigService,
     /** Optional so unit tests need not stub it. */
     @Optional() private readonly webhooks?: IntegrationsService,
@@ -120,7 +110,6 @@ export class VectorToolsService {
   /** Creates an empty, editable vector layer — `ogc_fid` key, the user's
    *  fields, a Multi* `geom` in the chosen CRS — and publishes it. */
   async createBlankLayer(appUser: AppUser, dto: CreateBlankLayerDto) {
-    await this.requireModule(appUser, DRAW_MODULE_ID, 'Draw');
     const names = new Set<string>();
     const columns = dto.fields.map((f) => {
       const name = f.name.trim().toLowerCase();
@@ -167,7 +156,6 @@ export class VectorToolsService {
   // ----- Feature Editing -----
 
   async editSchema(appUser: AppUser, layerId: string) {
-    await this.requireModule(appUser, EDIT_PANEL_MODULE_ID, 'Edit Panel');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
     const columns = await this.columns(source.table);
     return {
@@ -186,7 +174,6 @@ export class VectorToolsService {
     lat: number,
     toleranceM: number,
   ): Promise<EditableFeature | null> {
-    await this.requireModule(appUser, EDIT_PANEL_MODULE_ID, 'Edit Panel');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
     const srid = await this.srid(source.table);
     const tolerance = Math.min(Math.max(toleranceM, 0.5), 500);
@@ -214,7 +201,6 @@ export class VectorToolsService {
     geometry: Record<string, unknown>,
     properties: Record<string, unknown> = {},
   ) {
-    await this.requireModule(appUser, EDIT_PANEL_MODULE_ID, 'Edit Panel');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
     const columns = await this.columns(source.table);
     this.checkRules(source.layer.fieldRules as FieldRules | null, properties, true);
@@ -254,7 +240,6 @@ export class VectorToolsService {
     geometry: Record<string, unknown> | undefined,
     properties: Record<string, unknown> | undefined,
   ) {
-    await this.requireModule(appUser, EDIT_PANEL_MODULE_ID, 'Edit Panel');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
     const columns = await this.columns(source.table);
     const sets: string[] = [];
@@ -282,7 +267,6 @@ export class VectorToolsService {
   }
 
   async deleteFeature(appUser: AppUser, layerId: string, featureId: number) {
-    await this.requireModule(appUser, EDIT_PANEL_MODULE_ID, 'Edit Panel');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
     const userName = await this.userName(appUser);
     await this.prisma.$transaction(async (tx) => {
@@ -297,7 +281,6 @@ export class VectorToolsService {
   // ----- Edit history -----
 
   async history(appUser: AppUser, layerId: string, featureId?: number) {
-    await this.requireModule(appUser, EDIT_HISTORY_MODULE_ID, 'Edit History');
     await this.gisLayers.vectorSource(appUser, layerId, 'view');
     return this.prisma.gISFeatureHistory.findMany({
       where: { layerId, ...(featureId !== undefined ? { featureId } : {}) },
@@ -309,9 +292,6 @@ export class VectorToolsService {
   // ----- Geoprocessing -----
 
   async geoprocess(appUser: AppUser, dto: GeoprocessDto) {
-    await this.requireModule(appUser, GEOPROCESSING_MODULE_ID, 'Geoprocessing');
-    const group = GEOPROCESS_GROUP_MODULE[dto.operation];
-    if (group) await this.requireModule(appUser, group[0], group[1]);
     const a = await this.gisLayers.vectorSource(appUser, dto.inputLayerId, 'view');
     const needsB = ['intersect', 'clip', 'erase', 'join', 'merge', 'symdifference', 'nearest', 'selectbylocation'].includes(dto.operation);
     const b = needsB
@@ -647,7 +627,6 @@ export class VectorToolsService {
     geometry: Record<string, unknown>,
     distance = 0,
   ): Promise<{ filename: string; body: string; count: number }> {
-    await this.requireModule(appUser, IMPACT_REPORT_MODULE_ID, 'Impact Report');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'view');
     if (!(await this.gisAuth.canExport(appUser, source.layer))) {
       throw new ForbiddenException('You do not have permission to export this layer.');
@@ -697,7 +676,6 @@ export class VectorToolsService {
   /** Cuts a polygon (or line) feature with a drawn line: the first piece
    *  keeps the feature, the others become new features with its attributes. */
   async splitFeature(appUser: AppUser, layerId: string, featureId: number, line: Record<string, unknown>) {
-    await this.requireModule(appUser, PARCEL_TOOLS_MODULE_ID, 'Parcel Tools');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
     const type = this.geometryTypeOf(source);
     if (type === 'POINT') throw new BadRequestException('Points cannot be split.');
@@ -742,7 +720,6 @@ export class VectorToolsService {
   /** Unions several features into `keepId` (its attributes win) and
    *  deletes the rest. */
   async mergeFeatures(appUser: AppUser, layerId: string, featureIds: number[], keepId: number) {
-    await this.requireModule(appUser, PARCEL_TOOLS_MODULE_ID, 'Parcel Tools');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
     const type = this.geometryTypeOf(source);
     const ids = [...new Set([keepId, ...featureIds])];
@@ -777,7 +754,6 @@ export class VectorToolsService {
   // ----- Attachments -----
 
   async listAttachments(appUser: AppUser, layerId: string, featureId: number) {
-    await this.requireModule(appUser, ATTACHMENTS_MODULE_ID, 'Attachments');
     await this.gisLayers.vectorSource(appUser, layerId, 'view');
     return this.prisma.gISFeatureAttachment.findMany({
       where: { layerId, featureId },
@@ -791,7 +767,6 @@ export class VectorToolsService {
     featureId: number,
     file: { originalname: string; mimetype: string; size: number; buffer: Buffer },
   ) {
-    await this.requireModule(appUser, ATTACHMENTS_MODULE_ID, 'Attachments');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
     if (file.size > MAX_ATTACHMENT_BYTES) throw new BadRequestException('Attachments are limited to 20 MB.');
     if (!ATTACHMENT_TYPES.test(file.mimetype)) {
@@ -816,7 +791,6 @@ export class VectorToolsService {
   }
 
   async attachmentFile(appUser: AppUser, layerId: string, attachmentId: string) {
-    await this.requireModule(appUser, ATTACHMENTS_MODULE_ID, 'Attachments');
     await this.gisLayers.vectorSource(appUser, layerId, 'view');
     const row = await this.prisma.gISFeatureAttachment.findFirst({ where: { id: attachmentId, layerId } });
     if (!row) throw new NotFoundException('Attachment not found.');
@@ -827,7 +801,6 @@ export class VectorToolsService {
   }
 
   async deleteAttachment(appUser: AppUser, layerId: string, attachmentId: string) {
-    await this.requireModule(appUser, ATTACHMENTS_MODULE_ID, 'Attachments');
     await this.gisLayers.vectorSource(appUser, layerId, 'edit');
     const row = await this.prisma.gISFeatureAttachment.findFirst({ where: { id: attachmentId, layerId } });
     if (!row) throw new NotFoundException('Attachment not found.');
@@ -887,13 +860,6 @@ export class VectorToolsService {
   }
 
   // ----- internals -----
-
-  async requireModule(appUser: AppUser, moduleId: number, label: string) {
-    const modules = await this.moduleAccess.getEffectiveModuleIdsForAppUser(appUser);
-    if (!modules.has(moduleId)) {
-      throw new ForbiddenException(`Your module access does not include ${label}.`);
-    }
-  }
 
   private required(value: string | undefined, message: string): string {
     if (!value) throw new BadRequestException(message);

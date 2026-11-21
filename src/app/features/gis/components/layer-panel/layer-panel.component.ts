@@ -210,10 +210,10 @@ export class LayerPanelComponent {
     this.mapService.zoomToLayer(layer);
   }
 
+  /** Every uploaded layer in one list — departments were removed, so old
+   *  DEPARTMENT-ownership layers are listed here too. */
   get canonicalLayers(): GisLayer[] {
-    return this.layers.filter(
-      (layer) => layer.ownershipType === 'CANONICAL' && !layer.rasterAnalysis && !layer.drawnLayer && !layer.aiGenerated
-    );
+    return this.layers.filter((layer) => !layer.rasterAnalysis && !layer.drawnLayer && !layer.aiGenerated);
   }
 
   /** Layers created from scratch in Draw & Mark, whoever owns them. */
@@ -229,22 +229,6 @@ export class LayerPanelComponent {
   /** Raster Analysis uploads, downloads and results, whoever owns them. */
   get rasterAnalysisLayers(): GisLayer[] {
     return this.layers.filter((layer) => layer.rasterAnalysis);
-  }
-
-  get departmentGroups(): LayerPanelDepartmentGroup[] {
-    const groups = new Map<string, LayerPanelDepartmentGroup>();
-    for (const layer of this.layers) {
-      if (layer.ownershipType !== 'DEPARTMENT' || layer.rasterAnalysis || layer.drawnLayer || layer.aiGenerated) continue;
-      const departmentId = layer.departmentId ?? 'unassigned';
-      const departmentName = layer.departmentName ?? 'Unassigned';
-      const existing = groups.get(departmentId);
-      if (existing) {
-        existing.layers.push(layer);
-      } else {
-        groups.set(departmentId, { departmentId, departmentName, layers: [layer] });
-      }
-    }
-    return [...groups.values()].sort((a, b) => a.departmentName.localeCompare(b.departmentName));
   }
 
   /** Layers whose full legend is expanded under the row. */

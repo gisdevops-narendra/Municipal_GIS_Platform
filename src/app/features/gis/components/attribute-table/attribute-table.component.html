@@ -64,7 +64,23 @@
         }
       }
 
-      <span class="attr-table__report">{{ pageReport() }}</span>
+      <!-- compact pager, inline in the toolbar (no separate footer row) -->
+      <span class="attr-table__pager">
+        <button type="button" class="attr-table__pager-btn" aria-label="Previous page" pTooltip="Previous page" tooltipPosition="top"
+                [disabled]="first() === 0 || loading()" (click)="goPage(-1)">
+          <i class="pi pi-chevron-left" aria-hidden="true"></i>
+        </button>
+        <span class="attr-table__report">{{ pageReport() }}</span>
+        <button type="button" class="attr-table__pager-btn" aria-label="Next page" pTooltip="Next page" tooltipPosition="top"
+                [disabled]="first() + pageSize() >= total() || loading()" (click)="goPage(1)">
+          <i class="pi pi-chevron-right" aria-hidden="true"></i>
+        </button>
+        <select class="attr-table__pager-size" aria-label="Rows per page" [ngModel]="pageSize()" (ngModelChange)="onPage({ first: 0, rows: +$event })">
+          @for (size of pageSizes; track size) {
+            <option [ngValue]="size">{{ size }} / page</option>
+          }
+        </select>
+      </span>
 
       @if (selectHint(); as hint) {
         <span class="attr-table__select-hint" role="status">
@@ -303,16 +319,5 @@
       </p-table>
     </div>
 
-    <!-- pagination -->
-    <div class="attr-table__foot">
-      <p-paginator
-        [rows]="pageSize()"
-        [totalRecords]="total()"
-        [first]="first()"
-        [rowsPerPageOptions]="pageSizes"
-        (onPageChange)="onPage($event)"
-        styleClass="attr-table__paginator"
-      />
-    </div>
   </div>
 }

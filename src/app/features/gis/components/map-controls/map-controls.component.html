@@ -62,7 +62,7 @@
           pButton
           type="button"
           icon="pi pi-window-maximize"
-          class="p-button-text map-controls__btn"
+          class="p-button-text map-controls__btn map-controls__btn--fullscreen"
           aria-label="Toggle fullscreen"
           pTooltip="Fullscreen"
           tooltipPosition="left"
@@ -118,7 +118,7 @@
   </p-popover>
 
   @if (showNavHistory()) {
-    <div class="map-controls__group">
+    <div class="map-controls__group map-controls__group--history">
       <button
         pButton
         type="button"

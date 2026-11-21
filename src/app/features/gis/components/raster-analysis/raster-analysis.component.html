@@ -96,21 +96,6 @@
       <span class="bo__label">Layer name</span>
       <input type="text" class="bo__input" maxlength="80" [(ngModel)]="uploadName" />
     </label>
-    @if (isOwner) {
-      <label class="bo__field">
-        <span class="bo__label">Department</span>
-        <p-select
-          class="bo__select"
-          [options]="departments()"
-          optionLabel="label"
-          optionValue="value"
-          [(ngModel)]="uploadDepartmentId"
-          [showClear]="true"
-          placeholder="Municipality-wide (no department)"
-          appendTo="body"
-        />
-      </label>
-    }
     @if (uploadProgress() !== null || (running() && tool() === 'upload')) {
       <div class="ra__progress" role="progressbar" [attr.aria-valuenow]="uploadProgress()">
         <div class="ra__progress-bar" [class.is-indeterminate]="uploadProgress() === null || uploadProgress() === 100" [style.width.%]="uploadProgress() ?? 100"></div>
@@ -1593,21 +1578,6 @@
       <span class="bo__label">New layer name</span>
       <input type="text" class="bo__input" maxlength="80" [(ngModel)]="outputName" />
     </label>
-    @if (isOwner) {
-      <label class="bo__field">
-        <span class="bo__label">Save the result to</span>
-        <p-select
-          class="bo__select"
-          [options]="departments()"
-          optionLabel="label"
-          optionValue="value"
-          [(ngModel)]="outputDepartmentId"
-          [showClear]="true"
-          placeholder="Municipality-wide (no department)"
-          appendTo="body"
-        />
-      </label>
-    }
   }
 
   }
@@ -1703,9 +1673,6 @@
         <li class="bo__ring">
           <span class="bo__ring-label">{{ f.label }}</span>
           <span class="bo__ring-count">{{ f.value }}</span>
-          <button type="button" class="ra__pin" [class.is-pinned]="pinnedLabels().has(f.label)" (click)="pinFact(f)" title="Pin to the Dashboard">
-            <i class="pi pi-thumbtack"></i>
-          </button>
         </li>
       }
     </ul>

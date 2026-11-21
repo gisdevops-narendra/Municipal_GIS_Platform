@@ -5,8 +5,6 @@ import { environment } from '../../../environments/environment';
 import { GisLayer, GisRenderMode } from '../models/gis-layer.model';
 import { LayerExportFormat } from '../models/layer-export.model';
 import { AnalyticsField, DensityPoints, FieldSummary, GroupRequest, GroupResult, LayerProfile } from '../models/layer-analytics.model';
-import { GisLayerPermissionMatrix, GisPermission } from '../models/gis-layer-permission.model';
-import { ManagedRole } from '../models/municipality-user.model';
 
 /** GET /api/gis/layers/:id/fields/values — `approximate`: counts are
  *  estimates (very large layers). */
@@ -135,27 +133,5 @@ export class GisLayersService {
 
   delete(id: string): Observable<{ success: true }> {
     return this.http.delete<{ success: true }>(`${this.baseUrl}/${id}`);
-  }
-
-  /** Gated by MANAGE permission server-side. */
-  getPermissions(id: string): Observable<GisLayerPermissionMatrix> {
-    return this.http.get<GisLayerPermissionMatrix>(`${this.baseUrl}/${id}/permissions`);
-  }
-
-  /** One checkbox toggle per call — gated by MANAGE and the self-grant
-   *  guard, both enforced server-side. */
-  setPermission(
-    id: string,
-    departmentId: string,
-    role: ManagedRole,
-    permission: GisPermission,
-    granted: boolean
-  ): Observable<GisLayerPermissionMatrix> {
-    return this.http.put<GisLayerPermissionMatrix>(`${this.baseUrl}/${id}/permissions`, {
-      departmentId,
-      role,
-      permission,
-      granted
-    });
   }
 }

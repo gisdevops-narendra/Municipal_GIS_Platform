@@ -96,7 +96,7 @@ function buildService() {
 }
 
 describe('GisUploadsService — authorization', () => {
-  describe('create() ownership/department rules', () => {
+  describe('create() upload rules', () => {
     it('rejects a MUNICIPALITY_USER creating a CANONICAL layer', async () => {
       const { service, prisma } = buildService();
       prisma.gISWorkspace.findUnique.mockResolvedValue({
@@ -155,113 +155,6 @@ describe('GisUploadsService — authorization', () => {
       expect(prisma.department.findFirst).not.toHaveBeenCalled();
     });
 
-    it('rejects a MUNICIPALITY_USER uploading to a department that is not their own', async () => {
-      const { service, prisma } = buildService();
-      prisma.gISWorkspace.findUnique.mockResolvedValue({
-        id: 'ws-a',
-        status: 'ACTIVE',
-        defaultCrs: 'EPSG:32643',
-      });
-      prisma.department.findFirst.mockResolvedValue({ id: 'dept-water' });
-
-      await expect(
-        service.create(
-          STAFF_ELECTRICAL,
-          {
-            layerName: 'Water Pipeline',
-            ownershipType: 'DEPARTMENT',
-            departmentId: 'dept-water',
-          } as never,
-          {
-            originalname: 'a.geojson',
-            size: 10,
-            buffer: Buffer.from('{}'),
-          } as never,
-        ),
-      ).rejects.toBeInstanceOf(ForbiddenException);
-    });
-
-    it('rejects a view-only Department User starting a brand-new layer in their own department', async () => {
-      const { service, prisma, gisAuth, storage } = buildService();
-      prisma.gISWorkspace.findUnique.mockResolvedValue({
-        id: 'ws-a',
-        status: 'ACTIVE',
-        defaultCrs: 'EPSG:32643',
-      });
-      prisma.department.findFirst.mockResolvedValue({ id: 'dept-electrical' });
-      prisma.gISLayer.findUnique.mockResolvedValue(null);
-      gisAuth.getDefaultPermissions.mockReturnValue(new Set(['VIEW']));
-
-      await expect(
-        service.create(
-          STAFF_ELECTRICAL,
-          {
-            layerName: 'Street Poles',
-            ownershipType: 'DEPARTMENT',
-            departmentId: 'dept-electrical',
-          } as never,
-          {
-            originalname: 'a.geojson',
-            size: 10,
-            buffer: Buffer.from('{}'),
-          } as never,
-        ),
-      ).rejects.toBeInstanceOf(ForbiddenException);
-      expect(gisAuth.getDefaultPermissions).toHaveBeenCalledWith(
-        STAFF_ELECTRICAL,
-        'DEPARTMENT',
-        'dept-electrical',
-      );
-      expect(storage.saveRawFile).not.toHaveBeenCalled();
-    });
-
-    it("rejects a department id that does not belong to the caller's municipality — never confirms it exists elsewhere", async () => {
-      const { service, prisma } = buildService();
-      prisma.gISWorkspace.findUnique.mockResolvedValue({
-        id: 'ws-a',
-        status: 'ACTIVE',
-        defaultCrs: 'EPSG:32643',
-      });
-      prisma.department.findFirst.mockResolvedValue(null);
-
-      await expect(
-        service.create(
-          OWNER,
-          {
-            layerName: 'Cross Tenant',
-            ownershipType: 'DEPARTMENT',
-            departmentId: 'dept-in-another-municipality',
-          } as never,
-          {
-            originalname: 'a.geojson',
-            size: 10,
-            buffer: Buffer.from('{}'),
-          } as never,
-        ),
-      ).rejects.toBeInstanceOf(NotFoundException);
-    });
-
-    it('rejects DEPARTMENT ownership with no departmentId supplied', async () => {
-      const { service, prisma } = buildService();
-      prisma.gISWorkspace.findUnique.mockResolvedValue({
-        id: 'ws-a',
-        status: 'ACTIVE',
-        defaultCrs: 'EPSG:32643',
-      });
-
-      await expect(
-        service.create(
-          OWNER,
-          { layerName: 'No Dept', ownershipType: 'DEPARTMENT' } as never,
-          {
-            originalname: 'a.geojson',
-            size: 10,
-            buffer: Buffer.from('{}'),
-          } as never,
-        ),
-      ).rejects.toThrow('departmentId is required');
-    });
-
     it('rejects CSV X/Y columns with no sourceCrs before ever touching GDAL', async () => {
       const { service, prisma, gdal } = buildService();
       prisma.gISWorkspace.findUnique.mockResolvedValue({
@@ -269,15 +162,12 @@ describe('GisUploadsService — authorization', () => {
         status: 'ACTIVE',
         defaultCrs: 'EPSG:32643',
       });
-      prisma.department.findFirst.mockResolvedValue({ id: 'dept-electrical' });
 
       await expect(
         service.create(
-          STAFF_ELECTRICAL,
+          OWNER,
           {
             layerName: 'Assets',
-            ownershipType: 'DEPARTMENT',
-            departmentId: 'dept-electrical',
             xField: 'x',
             yField: 'y',
           } as never,

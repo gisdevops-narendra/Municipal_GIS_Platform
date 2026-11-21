@@ -6,8 +6,8 @@
    ============================================================ */
 
 :host {
-  /* Compact one-row site header (48px + border) above the workspace. */
-  --app-header-h: 49px;
+  /* No separate header row: logo + account live in the map toolbar. */
+  --app-header-h: 0px;
   display: flex;
   flex-direction: column;
   height: 100dvh;
@@ -1491,8 +1491,10 @@
 
   .gis-ws__right {
     position: absolute;
-    top: 44px;
-    bottom: 0;
+    /* Positioned inside the map area (below the toolbar), so start at its
+       top edge; stop above the 28px status bar. */
+    top: 0;
+    bottom: 28px;
     right: 0;
     z-index: 30;
     width: min(340px, 100%) !important;
@@ -1501,8 +1503,10 @@
 
   .gis-ws__left {
     position: absolute;
-    top: 44px;
-    bottom: 0;
+    /* Positioned inside the map area (below the toolbar), so start at its
+       top edge; stop above the 28px status bar. */
+    top: 0;
+    bottom: 28px;
     left: 0;
     z-index: 30;
     width: min(340px, 100%) !important;
@@ -1515,5 +1519,210 @@
 
   .gis-ws__bottom {
     max-height: calc((100dvh - var(--app-header-h, 106px)) * 0.7);
+  }
+}
+
+/* Phones: the bottom panel (attribute table etc.) opens at half the
+   screen so its rows are visible — the drag-resize is desktop-only. */
+@media (max-width: 640px) {
+  .gis-ws__bottom {
+    height: 50dvh !important;
+  }
+}
+
+.gis-ws__bar-upload {
+  color: var(--p-primary-color, #0f766e);
+  font-weight: 600;
+}
+
+.gis-ws__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.gis-ws__brand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  margin-right: 4px;
+  border-radius: 8px;
+  background: var(--color-primary-600);
+  color: #fff;
+}
+
+.gis-ws__account {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-left: 6px;
+}
+
+/* Narrow screens: the toolbar scrolls sideways, but the account menu
+   stays pinned at the right edge so it is always reachable. */
+@media (max-width: 900px) {
+  .gis-ws__account {
+    position: sticky;
+    right: -6px;
+    z-index: 2;
+    margin-left: auto;
+    padding: 0 6px 0 8px;
+    background: var(--color-surface);
+    box-shadow: -8px 0 8px -6px rgba(15, 23, 42, 0.18);
+  }
+}
+
+@media (max-width: 640px) {
+  /* "Find a tool" is a shortcut to the same menus — drop it on phones. */
+  .gis-ws__bar-search-box {
+    display: none;
+  }
+
+  .gis-ws__place-search {
+    width: 150px;
+  }
+}
+
+/* ================= phones (≤ 640px) =================
+   One row of icon buttons that fits the screen (no sideways scrolling,
+   so dropdowns are never clipped) + a full-width search row below. */
+@media (max-width: 640px) {
+  .gis-ws__bar {
+    flex-wrap: wrap;
+    height: auto;
+    row-gap: 6px;
+    column-gap: 0;
+    padding: 6px 6px 8px;
+    overflow: visible;
+  }
+
+  .gis-ws__bar-sep,
+  .gis-ws__bar-search,
+  .gis-ws__bar-icon[aria-label*='theme'],
+  .gis-ws__bar-icon[aria-label='Layout'] {
+    display: none;
+  }
+
+  .gis-ws__brand {
+    width: 28px;
+    height: 28px;
+    margin-right: 2px;
+  }
+
+  .gis-ws__bar-btn {
+    height: 32px;
+    padding: 0 6px;
+  }
+
+  .gis-ws__bar-group,
+  .gis-ws__bar-menus {
+    gap: 0;
+  }
+
+  .gis-ws__bar-menus {
+    flex: 0 1 auto;
+  }
+
+  .gis-ws__account {
+    position: static;
+    margin-left: auto;
+    padding: 0;
+    box-shadow: none;
+  }
+
+  /* Search: its own full-width row under the buttons. */
+  .gis-ws__place-search {
+    order: 99;
+    flex: 1 0 100%;
+    width: auto;
+    min-width: 0;
+    max-width: 100%;
+    margin: 0;
+  }
+
+  /* Menus open full-width under the toolbar instead of beside a button. */
+  .gis-ws__dropdown,
+  .gis-ws__bar-menu.is-end .gis-ws__dropdown,
+  .gis-ws__dropdown--end {
+    position: fixed;
+    top: 58px;
+    left: 8px;
+    right: 8px;
+    min-width: 0;
+    max-height: calc(100dvh - 76px);
+    z-index: 60; /* above the search row */
+  }
+}
+
+/* Phones: the status bar keeps layers / selection / scale bar / zoom. */
+@media (max-width: 640px) {
+  .gis-ws__status .is-wide-only {
+    display: none;
+  }
+}
+
+/* "Tools" menu button — phones only (see below). */
+.gis-ws__bar-more {
+  display: none;
+}
+
+.gis-ws__dropdown-section .pi {
+  margin-right: 4px;
+  font-size: 10px;
+}
+
+/* ===== phones: Upload · Layers · Table · Tools, evenly spaced, each with
+   a small label under its icon; everything else lives in "Tools". ===== */
+@media (max-width: 640px) {
+  .gis-ws__bar {
+    justify-content: space-between;
+  }
+
+  .gis-ws__bar-menus,
+  .gis-ws__bar-icon[aria-label*='full screen' i],
+  .gis-ws__bar-icon[aria-label*='Full-screen' i] {
+    display: none;
+  }
+
+  .gis-ws__bar-more {
+    display: block;
+  }
+
+  .gis-ws__bar-group:not(.gis-ws__bar-menus) {
+    display: contents;
+  }
+
+  .gis-ws__bar-upload,
+  .gis-ws__bar-group .gis-ws__bar-btn,
+  .gis-ws__bar-more > .gis-ws__bar-btn {
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    height: 44px;
+    min-width: 58px;
+    padding: 0 6px;
+    font-size: 10.5px;
+    font-weight: 500;
+    line-height: 1;
+
+    > i:first-child {
+      font-size: 16px;
+    }
+
+    span {
+      display: inline !important;
+    }
+  }
+
+  .gis-ws__account {
+    margin-left: 0;
+  }
+
+  .gis-ws__dropdown--all {
+    gap: 0;
   }
 }

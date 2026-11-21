@@ -106,7 +106,6 @@ export class DataToolsService {
   // ----- Field Calculator -----
 
   async fieldCalculate(appUser: AppUser, layerId: string, dto: FieldCalcDto) {
-    await this.vectorTools.requireModule(appUser, FIELD_CALCULATOR_MODULE_ID, 'Field Calculator');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
     const columns = await this.vectorTools.columns(source.table);
     const { sql, params } = compileFieldExpression(dto.expression, columns.map((c) => c.name), 1);
@@ -140,7 +139,6 @@ export class DataToolsService {
   // ----- Field management (add / rename / delete) -----
 
   async manageField(appUser: AppUser, layerId: string, dto: FieldManageDto) {
-    await this.vectorTools.requireModule(appUser, FIELD_MANAGEMENT_MODULE_ID, 'Field Management');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
     const columns = await this.vectorTools.columns(source.table);
     const exists = (name: string) => columns.some((c) => c.name === name);
@@ -179,7 +177,6 @@ export class DataToolsService {
   // ----- Calculate geometry -----
 
   async calculateGeometry(appUser: AppUser, layerId: string, dto: CalcGeometryDto) {
-    await this.vectorTools.requireModule(appUser, CALCULATE_GEOMETRY_MODULE_ID, 'Calculate Geometry');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
     const kind = source.layer.geometryType;
     if (['area_m2', 'area_ha', 'perimeter_m'].includes(dto.measure) && kind !== 'POLYGON') {
@@ -219,7 +216,6 @@ export class DataToolsService {
   // ----- Find & replace -----
 
   async findReplace(appUser: AppUser, layerId: string, dto: FindReplaceDto) {
-    await this.vectorTools.requireModule(appUser, FIND_REPLACE_MODULE_ID, 'Find & Replace');
     const source = await this.gisLayers.vectorSource(appUser, layerId, dto.preview ? 'view' : 'edit');
     const column = (await this.vectorTools.columns(source.table)).find((c) => c.name === dto.field);
     if (!column) throw new BadRequestException(`Field "${dto.field}" does not exist.`);
@@ -253,7 +249,6 @@ export class DataToolsService {
   // ----- Attribute completeness -----
 
   async completeness(appUser: AppUser, layerId: string) {
-    await this.vectorTools.requireModule(appUser, COMPLETENESS_MODULE_ID, 'Completeness Report');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'view');
     const columns = (await this.vectorTools.columns(source.table)).filter(
       (c) => !PROTECTED_COLUMNS.has(c.name.toLowerCase()) && c.dataType !== 'USER-DEFINED',
@@ -276,7 +271,6 @@ export class DataToolsService {
   // ----- Split layer by attribute -----
 
   async splitByAttribute(appUser: AppUser, layerId: string, dto: SplitLayerDto) {
-    await this.vectorTools.requireModule(appUser, SPLIT_LAYER_MODULE_ID, 'Split Layer by Attribute');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'view');
     const column = (await this.vectorTools.columns(source.table)).find((c) => c.name === dto.field);
     if (!column) throw new BadRequestException(`Field "${dto.field}" does not exist.`);
@@ -310,7 +304,6 @@ export class DataToolsService {
   // ----- Auto-number -----
 
   async autoNumber(appUser: AppUser, layerId: string, dto: AutoNumberDto) {
-    await this.vectorTools.requireModule(appUser, AUTO_NUMBER_MODULE_ID, 'Auto-number IDs');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
     const columns = await this.vectorTools.columns(source.table);
     const group = dto.groupBy ? columns.find((c) => c.name === dto.groupBy) : undefined;
@@ -339,7 +332,6 @@ export class DataToolsService {
   // ----- Change field type -----
 
   async changeType(appUser: AppUser, layerId: string, dto: ChangeTypeDto) {
-    await this.vectorTools.requireModule(appUser, CHANGE_TYPE_MODULE_ID, 'Change Field Type');
     const source = await this.gisLayers.vectorSource(appUser, layerId, dto.preview ? 'view' : 'edit');
     const column = (await this.vectorTools.columns(source.table)).find((c) => c.name === dto.field);
     if (!column || PROTECTED_COLUMNS.has(dto.field.toLowerCase())) throw new BadRequestException(`Field "${dto.field}" does not exist.`);
@@ -376,7 +368,6 @@ export class DataToolsService {
   // ----- Duplicates by attributes -----
 
   async duplicates(appUser: AppUser, layerId: string, dto: DuplicatesDto) {
-    await this.vectorTools.requireModule(appUser, DUPLICATES_MODULE_ID, 'Find Duplicates');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'view');
     const columns = await this.vectorTools.columns(source.table);
     const fields = dto.fields.map((f) => {
@@ -398,7 +389,6 @@ export class DataToolsService {
   // ----- Standardise values -----
 
   async standardise(appUser: AppUser, layerId: string, dto: StandardiseDto) {
-    await this.vectorTools.requireModule(appUser, STANDARDISE_MODULE_ID, 'Standardise Values');
     const source = await this.gisLayers.vectorSource(appUser, layerId, dto.preview ? 'view' : 'edit');
     const column = (await this.vectorTools.columns(source.table)).find((c) => c.name === dto.field);
     if (!column) throw new BadRequestException(`Field "${dto.field}" does not exist.`);
@@ -430,7 +420,6 @@ export class DataToolsService {
   // ----- Append features -----
 
   async append(appUser: AppUser, layerId: string, dto: AppendDto) {
-    await this.vectorTools.requireModule(appUser, APPEND_MODULE_ID, 'Append Features');
     const target = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
     const source = await this.gisLayers.vectorSource(appUser, dto.sourceLayerId, 'view');
     if (target.layer.id === source.layer.id) throw new BadRequestException('Choose a different layer to append from.');
@@ -462,7 +451,6 @@ export class DataToolsService {
   // ----- Change log -----
 
   async changeLog(appUser: AppUser, layerId: string) {
-    await this.vectorTools.requireModule(appUser, CHANGE_LOG_MODULE_ID, 'Change Log');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'view');
     const rows = await this.prisma.$queryRawUnsafe<{ at: Date; user: string | null; action: string; feature: number; fields: string | null }[]>(
       `SELECT h.created_at AS at, h.user_name AS "user", h.action::text AS action, h.feature_id AS feature,
@@ -481,7 +469,6 @@ export class DataToolsService {
   // ----- Table Join -----
 
   async joinTable(appUser: AppUser, layerId: string, csv: Buffer, dto: TableJoinDto) {
-    await this.vectorTools.requireModule(appUser, TABLE_JOIN_MODULE_ID, 'Table Join');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
     const columns = await this.vectorTools.columns(source.table);
     const layerKey = columns.find((c) => c.name === dto.layerKey);
@@ -545,7 +532,6 @@ export class DataToolsService {
    *  (see AddressMatcher). Publishes the matches as a new point layer at
    *  each matched value's location. Nothing leaves the server. */
   async geocode(appUser: AppUser, csv: Buffer, dto: GeocodeDto) {
-    await this.vectorTools.requireModule(appUser, GEOCODE_MODULE_ID, 'Geocode Addresses');
     const reference = await this.gisLayers.vectorSource(appUser, dto.referenceLayerId, 'view');
     const field = (await this.vectorTools.columns(reference.table)).find((c) => c.name === dto.referenceField);
     if (!field) throw new BadRequestException(`"${reference.layer.name}" has no field "${dto.referenceField}".`);
@@ -615,7 +601,6 @@ export class DataToolsService {
   // ----- Topology validation -----
 
   async validate(appUser: AppUser, layerId: string, dto: ValidateLayerDto) {
-    await this.vectorTools.requireModule(appUser, TOPOLOGY_MODULE_ID, 'Topology Validation');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'view');
     const type = source.layer.geometryType;
     const t = source.from;
@@ -793,7 +778,6 @@ export class DataToolsService {
 
   /** One-click repairs (edit permission), recorded in the edit history. */
   async fix(appUser: AppUser, layerId: string, kind: 'invalid' | 'duplicates' | 'empty') {
-    await this.vectorTools.requireModule(appUser, TOPOLOGY_MODULE_ID, 'Topology Validation');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
     const type = source.layer.geometryType;
     if (kind === 'invalid') {
@@ -826,7 +810,6 @@ export class DataToolsService {
   }
 
   async setFieldRules(appUser: AppUser, layerId: string, dto: FieldRulesDto) {
-    await this.vectorTools.requireModule(appUser, FIELD_RULES_MODULE_ID, 'Field Rules');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'view');
     if (!(await this.gisAuth.canManage(appUser, source.layer))) {
       throw new ForbiddenException('Only layer managers can change field rules.');
@@ -851,7 +834,6 @@ export class DataToolsService {
   // ----- Versions & change detection -----
 
   async listSnapshots(appUser: AppUser, layerId: string) {
-    await this.vectorTools.requireModule(appUser, VERSIONS_MODULE_ID, 'Versions');
     await this.gisLayers.vectorSource(appUser, layerId, 'view');
     return this.prisma.gISLayerSnapshot.findMany({
       where: { layerId },
@@ -861,13 +843,11 @@ export class DataToolsService {
   }
 
   async createSnapshot(appUser: AppUser, layerId: string, name: string) {
-    await this.vectorTools.requireModule(appUser, VERSIONS_MODULE_ID, 'Versions');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
     return this.snapshot(appUser, source, name);
   }
 
   async deleteSnapshot(appUser: AppUser, layerId: string, snapshotId: string) {
-    await this.vectorTools.requireModule(appUser, VERSIONS_MODULE_ID, 'Versions');
     await this.gisLayers.vectorSource(appUser, layerId, 'edit');
     const snap = await this.findSnapshot(layerId, snapshotId);
     await this.prisma.gISLayerSnapshot.delete({ where: { id: snap.id } });
@@ -879,7 +859,6 @@ export class DataToolsService {
    *  `keyField` (default the feature id — pick a real id field to compare
    *  across re-uploads, whose feature ids are new). */
   async compareSnapshot(appUser: AppUser, layerId: string, snapshotId: string, keyField?: string) {
-    await this.vectorTools.requireModule(appUser, VERSIONS_MODULE_ID, 'Versions');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'view');
     const snap = await this.findSnapshot(layerId, snapshotId);
     const current = await this.vectorTools.columns(source.table);
@@ -951,7 +930,6 @@ export class DataToolsService {
   /** Puts a snapshot's features back (a "Before restore" snapshot of the
    *  current data is taken first, so a restore can itself be undone). */
   async restoreSnapshot(appUser: AppUser, layerId: string, snapshotId: string) {
-    await this.vectorTools.requireModule(appUser, VERSIONS_MODULE_ID, 'Versions');
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
     const snap = await this.findSnapshot(layerId, snapshotId);
     await this.snapshot(appUser, source, `Before restoring "${snap.name}"`);
@@ -1008,7 +986,6 @@ export class DataToolsService {
    *  Selection) or in place (a version is saved first, so Versions → Restore
    *  undoes it). */
   async reproject(appUser: AppUser, layerId: string, dto: ReprojectLayerDto) {
-    await this.vectorTools.requireModule(appUser, PROJECTION_MODULE_ID, 'Projection');
     const target = await this.crs.require(dto.targetCrs, 'Target CRS');
     const source = await this.gisLayers.vectorSource(appUser, layerId, dto.mode === 'inplace' ? 'edit' : 'view');
     const srid = await this.crs.tableSrid(source.table);
@@ -1068,7 +1045,6 @@ export class DataToolsService {
    *  them — refused when they cannot be in that CRS. Saved as a version
    *  first, like an in-place reprojection. */
   async defineCrs(appUser: AppUser, layerId: string, dto: DefineCrsDto) {
-    await this.vectorTools.requireModule(appUser, PROJECTION_MODULE_ID, 'Projection');
     const target = await this.crs.require(dto.crs);
     const source = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
     const srid = await this.crs.tableSrid(source.table);

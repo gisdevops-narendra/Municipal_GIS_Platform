@@ -39,7 +39,7 @@ export class GisUploadsService {
     formData.append('layerName', request.layerName);
     if (request.description) formData.append('description', request.description);
     if (request.departmentId) formData.append('departmentId', request.departmentId);
-    formData.append('ownershipType', request.ownershipType);
+    if (request.ownershipType) formData.append('ownershipType', request.ownershipType);
     if (request.routingEnabled) formData.append('routingEnabled', 'true');
     if (request.sourceCrs) formData.append('sourceCrs', request.sourceCrs);
     if (request.targetCrs) formData.append('targetCrs', request.targetCrs);

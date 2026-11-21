@@ -1,8 +1,5 @@
 import { Routes } from '@angular/router';
-import { reviewStepGuard, successStepGuard } from './core/guards/registration-step.guard';
 import { authGuard } from './core/guards/auth.guard';
-import { staffOnlyGuard } from './core/guards/staff-only.guard';
-import { onboardingGuard, setupPageGuard } from './core/guards/onboarding.guard';
 
 export const routes: Routes = [
   {
@@ -23,74 +20,17 @@ export const routes: Routes = [
   },
   {
     path: 'register',
-    pathMatch: 'full',
-    redirectTo: 'register/municipality'
+    loadComponent: () => import('./features/auth/register/register.component').then((m) => m.RegisterComponent),
+    title: 'Create Account — Municipal GIS Platform'
   },
   {
-    path: 'register/municipality',
-    loadComponent: () =>
-      import('./features/auth/registration/municipality-info/municipality-info.component').then(
-        (m) => m.MunicipalityInfoComponent
-      ),
-    title: 'Register Municipality — Municipal GIS Platform'
-  },
-  {
-    path: 'register/owner',
-    loadComponent: () =>
-      import('./features/auth/registration/owner-account/owner-account.component').then(
-        (m) => m.OwnerAccountComponent
-      ),
-    title: 'Create Owner Account — Municipal GIS Platform'
-  },
-  {
-    path: 'register/review',
-    canActivate: [reviewStepGuard],
-    loadComponent: () =>
-      import('./features/auth/registration/review/review.component').then((m) => m.ReviewComponent),
-    title: 'Review & Confirm — Municipal GIS Platform'
-  },
-  {
-    path: 'register/success',
-    canActivate: [successStepGuard],
-    loadComponent: () =>
-      import('./features/auth/registration/success/success.component').then((m) => m.SuccessComponent),
-    title: 'Municipality Created — Municipal GIS Platform'
-  },
-  {
-    path: 'setup',
-    canActivate: [authGuard, staffOnlyGuard, setupPageGuard],
-    loadComponent: () =>
-      import('./features/onboarding/getting-started.component').then((m) => m.GettingStartedComponent),
-    title: 'Getting Started — Municipal GIS Platform'
-  },
-  {
-    path: 'dashboard',
-    canActivate: [authGuard, staffOnlyGuard, onboardingGuard('complete')],
-    data: { reuse: true },
-    loadComponent: () =>
-      import('./features/dashboard/dashboard-placeholder.component').then(
-        (m) => m.DashboardPlaceholderComponent
-      ),
-    title: 'Dashboard — Municipal GIS Platform'
-  },
-  {
-    path: 'departments',
-    canActivate: [authGuard, staffOnlyGuard, onboardingGuard('departments')],
-    data: { reuse: true },
-    loadComponent: () =>
-      import('./features/departments/departments.component').then((m) => m.DepartmentsComponent),
-    title: 'Departments — Municipal GIS Platform'
-  },
-  {
-    path: 'users',
-    canActivate: [authGuard, staffOnlyGuard, onboardingGuard('users')],
-    data: { reuse: true },
-    loadComponent: () => import('./features/users/users.component').then((m) => m.UsersComponent),
-    title: 'Users — Municipal GIS Platform'
+    // Old multi-step registration links.
+    path: 'register/:step',
+    redirectTo: 'register'
   },
   {
     path: 'gis',
-    canActivate: [authGuard, onboardingGuard('complete')],
+    canActivate: [authGuard],
     data: { reuse: true },
     loadComponent: () =>
       import('./features/gis/gis-workspace.component').then((m) => m.GisWorkspaceComponent),
@@ -98,51 +38,33 @@ export const routes: Routes = [
   },
   {
     path: 'collect',
-    canActivate: [authGuard, onboardingGuard('complete')],
+    canActivate: [authGuard],
     loadComponent: () => import('./features/collect/collect.component').then((m) => m.CollectComponent),
     title: 'Field Collection — Municipal GIS Platform'
   },
   {
     path: 'settings',
-    canActivate: [authGuard, staffOnlyGuard],
+    canActivate: [authGuard],
     data: { reuse: true },
     loadComponent: () =>
       import('./features/settings/settings.component').then((m) => m.SettingsComponent),
     title: 'Settings — Municipal GIS Platform'
   },
   {
-    path: 'module-access',
-    canActivate: [authGuard, staffOnlyGuard, onboardingGuard('access')],
-    data: { reuse: true },
-    loadComponent: () =>
-      import('./features/module-access/module-access.component').then(
-        (m) => m.ModuleAccessComponent
-      ),
-    title: 'Module Access — Municipal GIS Platform'
-  },
-  {
-    // Uploads are managed on the GIS Layers page now; keep old links working.
+    // Uploading and managing layers happens on the map now.
     path: 'gis/uploads',
-    redirectTo: 'gis/layers'
+    redirectTo: 'gis'
   },
+  { path: 'gis/layers', redirectTo: 'gis' },
   {
-    path: 'gis/layers',
-    canActivate: [authGuard, staffOnlyGuard, onboardingGuard('data')],
-    data: { reuse: true },
-    loadComponent: () =>
-      import('./features/gis/pages/gis-layers/gis-layers.component').then((m) => m.GisLayersComponent),
-    title: 'GIS Layers — Municipal GIS Platform'
+    // Departments, Users, Module Access and Getting Started were removed.
+    path: 'departments',
+    redirectTo: 'gis'
   },
-  {
-    path: 'gis/layers/:id/permissions',
-    canActivate: [authGuard, staffOnlyGuard, onboardingGuard('data')],
-    data: { reuse: true },
-    loadComponent: () =>
-      import('./features/gis/pages/gis-layer-permissions/gis-layer-permissions.component').then(
-        (m) => m.GisLayerPermissionsComponent
-      ),
-    title: 'Layer Permissions — Municipal GIS Platform'
-  },
+  { path: 'dashboard', redirectTo: 'gis' },
+  { path: 'users', redirectTo: 'gis' },
+  { path: 'module-access', redirectTo: 'gis' },
+  { path: 'setup', redirectTo: 'gis' },
   {
     path: '**',
     redirectTo: ''

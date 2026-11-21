@@ -10,7 +10,6 @@ import {
 import type { Prisma, RasterMonitor } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AppUser } from '../auth/types/app-user.type';
-import { ModuleAccessService } from '../module-access/module-access.service';
 import { RasterJobsService } from './raster-jobs.service';
 import { RasterMailService } from './raster-mail.service';
 import { AiClientService } from '../gis-ai/ai-client.service';
@@ -18,11 +17,6 @@ import { RASTER_MODULES } from './raster-tool-registry';
 
 export type MonitorKind = 'green-cover' | 'encroachment';
 export type MonitorFrequency = 'weekly' | 'monthly';
-
-const KIND_MODULE: Record<MonitorKind, number> = {
-  'green-cover': RASTER_MODULES.greenCover,
-  encroachment: RASTER_MODULES.encroachment,
-};
 
 /** How often the scheduler looks for due monitors. */
 const TICK_MS = 10 * 60 * 1000;
@@ -48,7 +42,6 @@ export class RasterMonitorService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jobs: RasterJobsService,
-    private readonly moduleAccess: ModuleAccessService,
     private readonly mail: RasterMailService,
     private readonly ai: AiClientService,
   ) {}
@@ -80,10 +73,6 @@ export class RasterMonitorService implements OnModuleInit, OnModuleDestroy {
     appUser: AppUser,
     dto: { name: string; kind: MonitorKind; frequency: MonitorFrequency; params: Record<string, unknown> },
   ) {
-    const granted = await this.moduleAccess.getEffectiveModuleIdsForAppUser(appUser);
-    if (!granted.has(KIND_MODULE[dto.kind])) {
-      throw new ForbiddenException('Your module access does not include this tool.');
-    }
     const params = this.cleanParams(dto.kind, dto.params);
     // Same validation the scheduled run will face, with sample dates.
     await this.jobs.validateBody(dto.kind, this.body(dto.kind, params, new Date()));

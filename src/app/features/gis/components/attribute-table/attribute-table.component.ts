@@ -18,7 +18,7 @@ import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Subject, Subscription, concatMap, debounceTime, filter as rxFilter, from, toArray } from 'rxjs';
 import { TableModule } from 'primeng/table';
-import { PaginatorModule, PaginatorState } from 'primeng/paginator';
+import type { PaginatorState } from 'primeng/paginator';
 import { ButtonModule } from 'primeng/button';
 import { SelectModule } from 'primeng/select';
 import { CheckboxModule } from 'primeng/checkbox';
@@ -91,7 +91,6 @@ const IDENTIFIER_FIELD = /(^|_)(id|fid|gid|objectid|code|no|num|number|year|yea|
     NgClass,
     FormsModule,
     TableModule,
-    PaginatorModule,
     ButtonModule,
     SelectModule,
     CheckboxModule,
@@ -456,6 +455,13 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
     }
     this.first.set(0);
     this.load();
+  }
+
+  /** Toolbar pager: one page back (-1) or forward (+1). */
+  goPage(step: -1 | 1): void {
+    const next = this.first() + step * this.pageSize();
+    if (next < 0 || next >= this.total()) return;
+    this.onPage({ first: next, rows: this.pageSize() });
   }
 
   onPage(event: PaginatorState): void {

@@ -277,11 +277,6 @@
                     <i class="pi pi-clone" aria-hidden="true"></i>
                   </button>
                 }
-                @if (msg.response?.answerKind === 'gis_operation') {
-                  <button type="button" class="aic__icon-btn" title="Pin to Dashboard" aria-label="Pin to Dashboard" [disabled]="busyIndex() !== null" (click)="pinToDashboard($index)">
-                    <i class="pi" [class.pi-thumbtack]="busyIndex() !== $index" [class.pi-spin]="busyIndex() === $index" [class.pi-spinner]="busyIndex() === $index" aria-hidden="true"></i>
-                  </button>
-                }
               </div>
             }
           </div>

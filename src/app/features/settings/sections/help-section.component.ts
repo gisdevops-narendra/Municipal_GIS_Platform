@@ -18,13 +18,12 @@ import { ShortcutService } from '../../../core/services/shortcut.service';
       </div>
 
       <div class="card">
-        <h3>Managing users &amp; layers</h3>
+        <h3>Uploading &amp; managing layers</h3>
         <p>
-          User accounts, departments and layer permissions are administered from the
-          Users, Departments and GIS Layers screens by your Municipality Owner or a
-          department head.
+          Click <strong>Upload Data</strong> on the map toolbar and choose a Shapefile ZIP,
+          GeoJSON or CSV. It is processed and added to the map automatically.
         </p>
-        <button pButton type="button" class="p-button-sm p-button-text" label="Go to Users" (click)="go('/users')"></button>
+        <button pButton type="button" class="p-button-sm p-button-text" label="Go to the map" (click)="go('/gis')"></button>
       </div>
 
       <div class="card">

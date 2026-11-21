@@ -1,4 +1,3 @@
-@if (!focusMode()) { <app-site-header compact /> }
 
 <div
   class="gis-ws"
@@ -9,6 +8,20 @@
   <!-- ============ toolbar ============ -->
   <nav class="gis-ws__bar" aria-label="GIS tools">
     @if (openMenu()) { <div class="gis-ws__bar-backdrop" (click)="closeMenu()" aria-hidden="true"></div> }
+
+    <a routerLink="/" class="gis-ws__brand" aria-label="Municipal GIS Platform — home" pTooltip="Home" tooltipPosition="bottom">
+      <svg width="16" height="16" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+        <path d="M11 1L20.5 6.5V15.5L11 21L1.5 15.5V6.5L11 1Z" stroke="currentColor" stroke-width="1.6" />
+        <path d="M11 1V21" stroke="currentColor" stroke-width="1.1" stroke-dasharray="1.6 2.2" />
+        <path d="M1.5 6.5L20.5 15.5" stroke="currentColor" stroke-width="1.1" stroke-dasharray="1.6 2.2" />
+      </svg>
+    </a>
+
+    <button type="button" class="gis-ws__bar-btn gis-ws__bar-upload" aria-label="Upload Data" pTooltip="Upload GIS data" tooltipPosition="bottom" (click)="openUpload()">
+      <i class="pi pi-upload" aria-hidden="true"></i>
+      <span>Upload Data</span>
+    </button>
+    <span class="gis-ws__bar-sep" aria-hidden="true"></span>
 
     <div class="gis-ws__bar-group">
       @for (tool of primaryTools(); track tool.id) {
@@ -21,6 +34,39 @@
     </div>
 
     <span class="gis-ws__bar-sep" aria-hidden="true"></span>
+
+    <!-- Phones only: every tool group in one menu -->
+    <div class="gis-ws__bar-menu gis-ws__bar-more" (keydown)="onMenuKeydown($event)">
+      <button type="button" class="gis-ws__bar-btn" aria-haspopup="menu" [class.is-open]="openMenu() === 'all'"
+              [attr.aria-expanded]="openMenu() === 'all'" aria-label="All tools" (click)="toggleAllTools()">
+        <i class="pi pi-bars" aria-hidden="true"></i>
+        <span>Tools</span>
+      </button>
+      @if (openMenu() === 'all') {
+        <div class="gis-ws__dropdown gis-ws__dropdown--all" role="menu" aria-label="All tools">
+          @for (group of menuGroups(); track group.id) {
+            <span class="gis-ws__dropdown-section"><i [class]="group.icon" aria-hidden="true"></i> {{ group.label }}</span>
+            @for (tool of group.tools; track tool.id) {
+              <button type="button" role="menuitem" class="gis-ws__dropdown-item" [class.is-active]="isToolActive(tool)" (click)="pickTool(tool)">
+                <i [class]="tool.icon" aria-hidden="true"></i>
+                <span class="gis-ws__dropdown-text">
+                  <span class="gis-ws__dropdown-label">{{ tool.label }}</span>
+                  @if (toolHint(tool)) { <span class="gis-ws__dropdown-hint">{{ toolHint(tool) }}</span> }
+                </span>
+                @if (isToolActive(tool)) { <i class="pi pi-check gis-ws__dropdown-check" aria-hidden="true"></i> }
+              </button>
+            }
+          }
+          <span class="gis-ws__dropdown-section"><i class="pi pi-desktop" aria-hidden="true"></i> View</span>
+          <button type="button" role="menuitem" class="gis-ws__dropdown-item" (click)="closeMenu(); toggleFocusMode()">
+            <i class="pi" [class.pi-window-maximize]="!focusMode()" [class.pi-window-minimize]="focusMode()" aria-hidden="true"></i>
+            <span class="gis-ws__dropdown-text">
+              <span class="gis-ws__dropdown-label">{{ focusMode() ? 'Exit full screen' : 'Full-screen map' }}</span>
+            </span>
+          </button>
+        </div>
+      }
+    </div>
 
     <div class="gis-ws__bar-group gis-ws__bar-menus" role="menubar">
       @for (group of menuGroups(); track group.id) {
@@ -203,16 +249,17 @@
       }
     </div>
 
-    <button type="button" class="gis-ws__bar-btn gis-ws__bar-icon" [pTooltip]="isDark() ? 'Light theme ([)' : 'Dark theme ([)'" tooltipPosition="bottom"
+    <button type="button" class="gis-ws__bar-btn gis-ws__bar-icon" [pTooltip]="isDark() ? 'Light theme ([)' : 'Dark theme ([)'" tooltipPosition="left"
             [attr.aria-label]="isDark() ? 'Switch to light theme' : 'Switch to dark theme'" (click)="toggleTheme()">
       <i class="pi" [class.pi-moon]="!isDark()" [class.pi-sun]="isDark()" aria-hidden="true"></i>
     </button>
     <button type="button" class="gis-ws__bar-btn gis-ws__bar-icon" [class.is-active]="focusMode()"
-            [pTooltip]="focusMode() ? 'Exit full screen (F)' : 'Full-screen map (F)'" tooltipPosition="bottom"
+            [pTooltip]="focusMode() ? 'Exit full screen (F)' : 'Full-screen map (F)'" tooltipPosition="left"
             [attr.aria-label]="focusMode() ? 'Exit full screen' : 'Full-screen map'" [attr.aria-pressed]="focusMode()"
             (click)="toggleFocusMode()">
       <i class="pi" [class.pi-window-maximize]="!focusMode()" [class.pi-window-minimize]="focusMode()" aria-hidden="true"></i>
     </button>
+    <app-site-header accountOnly class="gis-ws__account" />
   </nav>
 
   <!-- ============ left dock ============ -->
@@ -314,7 +361,14 @@
               (openReport)="reportLayer.set($event)"
             />
           } @else if (leftTool() === 'layers') {
+            @if (layersEmpty()) {
+            <div class="gis-ws__empty">
+              <p class="gis-ws__hint">No layers yet. Upload a Shapefile ZIP, GeoJSON or CSV to see it on the map.</p>
+              <button pButton type="button" icon="pi pi-upload" label="Upload Data" (click)="openUpload()"></button>
+            </div>
+          } @else {
             <p class="gis-ws__hint">{{ layersError() ?? 'Loading layers…' }}</p>
+          }
           }
         }
 
@@ -686,7 +740,7 @@
       } @else if (layersError()) {
         <div class="gis-ws__overlay"><p-message severity="error" [text]="layersError()!" /></div>
       } @else if (layers().length === 0) {
-        <div class="gis-ws__overlay"><span class="gis-ws__hint">No GIS layers are available for this municipality yet.</span></div>
+        <div class="gis-ws__overlay"><span class="gis-ws__hint">No layers yet — click Upload Data to add your first one.</span></div>
       }
     </div>
 
@@ -754,8 +808,8 @@
 
     <!-- status bar -->
     <footer class="gis-ws__status">
-      <span class="gis-ws__status-item" title="Municipality">
-        <i class="pi pi-building gis-ws__status-icon" aria-hidden="true"></i>{{ municipalityName() ?? '—' }}
+      <span class="gis-ws__status-item is-wide-only" title="Account">
+        <i class="pi pi-user gis-ws__status-icon" aria-hidden="true"></i>{{ municipalityName() ?? '—' }}
       </span>
       <span class="gis-ws__status-item" title="Layers switched on">
         <i class="pi pi-clone gis-ws__status-icon" aria-hidden="true"></i>{{ visibleLayerCount() }} visible
@@ -777,7 +831,7 @@
           (keydown.enter)="applyStatusZoom(zoomInput)" (keydown.escape)="zoomInput.value = '' + (zoomLevel() ?? ''); zoomInput.blur()"
           (blur)="zoomInput.value = '' + (zoomLevel() ?? '')" />
       </span>
-      <span class="gis-ws__status-item mono">
+      <span class="gis-ws__status-item mono is-wide-only">
         <span class="gis-ws__status-key">Scale 1:</span>
         <input #scaleInput class="gis-ws__status-input" [value]="scaleDenominator() ?? ''" title="Type a scale (e.g. 5000) and press Enter"
           (keydown.enter)="applyStatusScale(scaleInput)" (keydown.escape)="scaleInput.value = '' + (scaleDenominator() ?? ''); scaleInput.blur()"
@@ -787,7 +841,7 @@
           @for (sc of scalePresets; track sc) { <option [value]="sc">1:{{ sc.toLocaleString() }}</option> }
         </select>
       </span>
-      <span class="gis-ws__status-item mono">
+      <span class="gis-ws__status-item mono is-wide-only">
         <button type="button" class="gis-ws__status-btn gis-ws__status-key" title="Switch coordinate format" (click)="cycleCoordFormat()">{{ coordKey() }}</button>
         <button type="button" class="gis-ws__status-btn" title="Copy last cursor coordinates" (click)="copyCursorCoords()">
           <span #coordSlot class="gis-ws__status-slot gis-ws__status-coords">—</span>
@@ -795,12 +849,12 @@
         </button>
       </span>
       @if (workspace(); as ws) {
-        <span class="gis-ws__status-item mono" title="Display coordinate system">
+        <span class="gis-ws__status-item mono is-wide-only" title="Display coordinate system">
           <span class="gis-ws__status-chip is-muted">{{ ws.displayCrs }}</span>
         </span>
       }
       @if (geoserverReachable() !== null) {
-        <span class="gis-ws__status-item" [title]="geoserverReachable() ? 'Map server connected' : 'Map server not reachable'">
+        <span class="gis-ws__status-item is-wide-only" [title]="geoserverReachable() ? 'Map server connected' : 'Map server not reachable'">
           <span class="gis-ws__status-dot" [class.is-ok]="geoserverReachable()" [class.is-bad]="geoserverReachable() === false"></span>
           {{ geoserverReachable() ? 'Online' : 'Offline' }}
         </span>
@@ -840,7 +894,14 @@
             (openReport)="reportLayer.set($event)"
           />
         } @else {
-          <p class="gis-ws__hint">{{ layersError() ?? 'Loading layers…' }}</p>
+          @if (layersEmpty()) {
+            <div class="gis-ws__empty">
+              <p class="gis-ws__hint">No layers yet. Upload a Shapefile ZIP, GeoJSON or CSV to see it on the map.</p>
+              <button pButton type="button" icon="pi pi-upload" label="Upload Data" (click)="openUpload()"></button>
+            </div>
+          } @else {
+            <p class="gis-ws__hint">{{ layersError() ?? 'Loading layers…' }}</p>
+          }
         }
       </div>
     </aside>
@@ -898,3 +959,17 @@
 </p-dialog>
 
 <app-analysis-report [layer]="reportLayer()" (closed)="reportLayer.set(null)" />
+
+@if (uploadOpen()) {
+  <p-dialog
+    [visible]="uploadOpen()"
+    (visibleChange)="uploadOpen.set($event)"
+    [modal]="true"
+    header="Upload GIS Data"
+    [style]="{ width: 'auto', maxWidth: '95vw' }"
+    [breakpoints]="{ '600px': '95vw' }"
+    appendTo="body"
+  >
+    <app-upload-wizard (closed)="uploadOpen.set(false)" (published)="onUploadPublished($event)" />
+  </p-dialog>
+}

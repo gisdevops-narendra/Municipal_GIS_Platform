@@ -205,3 +205,22 @@
     width: 100%;
   }
 }
+
+/* Phones: pinch-zoom and the browser cover these — keep the column short. */
+@media (max-width: 640px) {
+  .map-controls {
+    top: 8px;
+    right: 8px;
+    gap: 6px;
+  }
+
+  .map-controls__group--history,
+  .map-controls__btn--fullscreen {
+    display: none !important;
+  }
+
+  .map-controls__btn.p-button {
+    width: 32px;
+    height: 32px;
+  }
+}
