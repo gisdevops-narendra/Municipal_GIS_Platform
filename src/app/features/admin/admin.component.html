@@ -1,176 +1,387 @@
-<app-site-header />
+<div class="ac" [class.ac--nav-open]="navOpen()">
+  <!-- ================= sidebar ================= -->
+  <aside class="ac__side">
+    <div class="ac__brand">
+      <span class="ac__logo" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 22 22" fill="none">
+          <path d="M11 1L20.5 6.5V15.5L11 21L1.5 15.5V6.5L11 1Z" stroke="currentColor" stroke-width="1.6" />
+          <path d="M11 1V21" stroke="currentColor" stroke-width="1.1" stroke-dasharray="1.6 2.2" />
+          <path d="M1.5 6.5L20.5 15.5" stroke="currentColor" stroke-width="1.1" stroke-dasharray="1.6 2.2" />
+        </svg>
+      </span>
+      <span class="ac__brand-text">
+        <span class="ac__brand-name">Municipal GIS</span>
+        <span class="ac__brand-sub">Admin console</span>
+      </span>
+      <button type="button" class="ac__burger" aria-label="Menu" (click)="navOpen.set(!navOpen())">
+        <i class="pi" [class.pi-bars]="!navOpen()" [class.pi-times]="navOpen()" aria-hidden="true"></i>
+      </button>
+    </div>
 
-<main class="adm">
-  <div class="adm__inner">
-    <header class="adm__head">
-      <div>
-        <h1 class="adm__title">Admin</h1>
-        <p class="adm__lede">Every account on the platform, their storage, and the activity log.</p>
-      </div>
-      <nav class="adm__tabs" role="tablist" aria-label="Admin sections">
-        <button type="button" role="tab" class="adm__tab" [class.is-active]="tab() === 'overview'" [attr.aria-selected]="tab() === 'overview'" (click)="setTab('overview')">
-          <i class="pi pi-chart-bar" aria-hidden="true"></i> Overview
-        </button>
-        <button type="button" role="tab" class="adm__tab" [class.is-active]="tab() === 'accounts'" [attr.aria-selected]="tab() === 'accounts'" (click)="setTab('accounts')">
-          <i class="pi pi-users" aria-hidden="true"></i> Accounts
-        </button>
-        <button type="button" role="tab" class="adm__tab" [class.is-active]="tab() === 'audit'" [attr.aria-selected]="tab() === 'audit'" (click)="setTab('audit')">
-          <i class="pi pi-history" aria-hidden="true"></i> Audit log
-        </button>
-      </nav>
-    </header>
+    <nav class="ac__nav" aria-label="Admin">
+      <button type="button" class="ac__nav-item" [class.is-active]="view() === 'overview'" (click)="go('overview')">
+        <i class="pi pi-th-large" aria-hidden="true"></i> Overview
+      </button>
+      <button type="button" class="ac__nav-item" [class.is-active]="view() === 'accounts'" (click)="go('accounts')">
+        <i class="pi pi-users" aria-hidden="true"></i> Accounts
+        @if (stats(); as s) { <span class="ac__nav-count">{{ s.accounts }}</span> }
+      </button>
+      <button type="button" class="ac__nav-item" [class.is-active]="view() === 'activity'" (click)="go('activity')">
+        <i class="pi pi-history" aria-hidden="true"></i> Activity
+      </button>
+    </nav>
 
-    <!-- ============ overview ============ -->
-    @if (tab() === 'overview') {
-      @if (stats(); as s) {
-        <div class="adm__stats">
-          <div class="adm__stat"><span class="adm__stat-value">{{ s.accounts | number }}</span><span class="adm__stat-label">Accounts</span></div>
-          <div class="adm__stat"><span class="adm__stat-value">{{ s.users | number }}</span><span class="adm__stat-label">Users</span></div>
-          <div class="adm__stat"><span class="adm__stat-value">{{ s.layers | number }}</span><span class="adm__stat-label">Layers</span></div>
-          <div class="adm__stat"><span class="adm__stat-value">{{ s.newAccountsLast7Days | number }}</span><span class="adm__stat-label">New accounts · 7 days</span></div>
-          <div class="adm__stat" [class.is-warn]="s.disabledUsers > 0"><span class="adm__stat-value">{{ s.disabledUsers | number }}</span><span class="adm__stat-label">Disabled users</span></div>
-          <div class="adm__stat" [class.is-warn]="s.failedUploadsLast7Days > 0"><span class="adm__stat-value">{{ s.failedUploadsLast7Days | number }}</span><span class="adm__stat-label">Failed uploads · 7 days</span></div>
+    <div class="ac__me">
+      @if (menuOpen()) {
+        <div class="ac__me-backdrop" (click)="menuOpen.set(false)" aria-hidden="true"></div>
+        <div class="ac__me-menu" role="menu">
+          <button type="button" role="menuitem" (click)="openSettings()"><i class="pi pi-cog"></i> Settings</button>
+          <button type="button" role="menuitem" (click)="toggleTheme()">
+            <i class="pi" [class.pi-moon]="!isDark()" [class.pi-sun]="isDark()"></i> {{ isDark() ? 'Light theme' : 'Dark theme' }}
+          </button>
+          <button type="button" role="menuitem" class="is-danger" (click)="logout()"><i class="pi pi-sign-out"></i> Log out</button>
         </div>
-      } @else {
-        <p class="adm__muted">Loading…</p>
       }
+      <button type="button" class="ac__me-btn" aria-haspopup="menu" [attr.aria-expanded]="menuOpen()" (click)="menuOpen.set(!menuOpen())">
+        <span class="ac__avatar ac__avatar--me">{{ initials(me()?.name, me()?.email) }}</span>
+        <span class="ac__me-text">
+          <span class="ac__me-name">{{ me()?.name ?? 'Admin' }}</span>
+          <span class="ac__me-email">{{ me()?.email }}</span>
+        </span>
+        <i class="pi pi-ellipsis-v" aria-hidden="true"></i>
+      </button>
+    </div>
+  </aside>
+
+  <!-- ================= content ================= -->
+  <main class="ac__main">
+    <!-- ---------- overview ---------- -->
+    @if (view() === 'overview') {
+      <header class="ac__head">
+        <div>
+          <h1 class="ac__title">Overview</h1>
+          <p class="ac__sub">How the platform is doing right now.</p>
+        </div>
+      </header>
+
+      <section class="ac__kpis">
+        @for (k of [
+          { icon: 'pi-users', label: 'Accounts', value: stats()?.accounts, sub: (stats()?.newAccountsLast7Days ?? 0) + ' new this week', tone: 'blue' },
+          { icon: 'pi-user', label: 'Users', value: stats()?.users, sub: (stats()?.disabledUsers ?? 0) + ' disabled', tone: 'violet' },
+          { icon: 'pi-clone', label: 'Layers', value: stats()?.layers, sub: 'across all accounts', tone: 'teal' },
+          { icon: 'pi-database', label: 'Storage used', value: null, text: size(totalStorage()), sub: 'GIS data + files', tone: 'amber' },
+          { icon: 'pi-exclamation-triangle', label: 'Failed uploads', value: stats()?.failedUploadsLast7Days, sub: 'last 7 days', tone: (stats()?.failedUploadsLast7Days ?? 0) > 0 ? 'red' : 'gray' }
+        ]; track k.label) {
+          <div class="ac__kpi">
+            <span class="ac__kpi-icon" [attr.data-tone]="k.tone"><i class="pi {{ k.icon }}" aria-hidden="true"></i></span>
+            <span class="ac__kpi-label">{{ k.label }}</span>
+            <span class="ac__kpi-value">{{ k.text ?? (k.value === undefined ? '—' : (k.value | number)) }}</span>
+            <span class="ac__kpi-sub">{{ k.sub }}</span>
+          </div>
+        }
+      </section>
+
+      <section class="ac__grid2">
+        <div class="ac__card">
+          <div class="ac__card-head">
+            <h2>Recent activity</h2>
+            <button type="button" class="ac__link" (click)="go('activity')">View all <i class="pi pi-arrow-right"></i></button>
+          </div>
+          <ul class="ac__feed">
+            @for (e of recent(); track e.id) {
+              <li class="ac__feed-row">
+                <span class="ac__ev-icon" [attr.data-tone]="meta(e.action).tone"><i class="pi {{ meta(e.action).icon }}"></i></span>
+                <span class="ac__feed-text">
+                  <span class="ac__feed-title">{{ meta(e.action).label }}</span>
+                  <span class="ac__feed-meta">{{ e.actorEmail ?? 'system' }}@if (summary(e)) { · {{ summary(e) }} }</span>
+                </span>
+                <span class="ac__feed-time">{{ e.createdAt | date: 'd MMM, HH:mm' }}</span>
+              </li>
+            } @empty {
+              <li class="ac__empty">No activity yet.</li>
+            }
+          </ul>
+        </div>
+
+        <div class="ac__card">
+          <div class="ac__card-head">
+            <h2>Largest accounts</h2>
+            <button type="button" class="ac__link" (click)="go('accounts')">All accounts <i class="pi pi-arrow-right"></i></button>
+          </div>
+          <ul class="ac__bars">
+            @for (a of topStorage(); track a.id) {
+              <li class="ac__bar-row" (click)="go('accounts'); openDetail(a)">
+                <span class="ac__bar-name" [title]="a.owner?.email ?? a.name">{{ a.owner?.fullName ?? a.name }}</span>
+                <span class="ac__bar-track"><span [style.width.%]="(a.usedBytes / maxStorage()) * 100"></span></span>
+                <span class="ac__bar-value">{{ size(a.usedBytes) }}</span>
+              </li>
+            } @empty {
+              <li class="ac__empty">No accounts yet.</li>
+            }
+          </ul>
+        </div>
+      </section>
     }
 
-    <!-- ============ accounts ============ -->
-    @if (tab() === 'accounts') {
-      <div class="adm__toolbar">
-        <span class="adm__search">
+    <!-- ---------- accounts ---------- -->
+    @if (view() === 'accounts') {
+      <header class="ac__head">
+        <div>
+          <h1 class="ac__title">Accounts</h1>
+          <p class="ac__sub">{{ peopleCount() | number }} {{ peopleCount() === 1 ? 'person' : 'people' }} in {{ accountsTotal() | number }} workspace{{ accountsTotal() === 1 ? '' : 's' }} · click a row for details</p>
+        </div>
+      </header>
+
+      <div class="ac__toolbar">
+        <span class="ac__search">
           <i class="pi pi-search" aria-hidden="true"></i>
-          <input type="search" placeholder="Search name or email" [value]="accountQuery()" (input)="searchAccounts($any($event.target).value)" aria-label="Search accounts" />
+          <input type="search" placeholder="Search by name or email" [value]="accountQuery()" (input)="searchAccounts($any($event.target).value)" aria-label="Search accounts" />
         </span>
-        <span class="adm__muted">{{ accountsTotal() | number }} account{{ accountsTotal() === 1 ? '' : 's' }}</span>
+        <div class="ac__chips" role="group" aria-label="Filter by status">
+          @for (f of [{ id: 'all', label: 'All' }, { id: 'active', label: 'Active' }, { id: 'disabled', label: 'Disabled' }, { id: 'near-limit', label: 'Near limit' }]; track f.id) {
+            <button type="button" class="ac__chip" [class.is-active]="statusFilter() === f.id" (click)="statusFilter.set($any(f.id))">{{ f.label }}</button>
+          }
+        </div>
       </div>
 
-      <div class="adm__table-wrap">
-        <table class="adm__table">
+      <div class="ac__card ac__card--flush">
+        <table class="ac__table">
           <thead>
             <tr>
-              <th>Account</th>
-              <th>Created</th>
-              <th class="num">Layers</th>
-              <th class="storage">Storage</th>
+              <th>Person</th>
+              <th class="hide-sm">Created</th>
+              <th class="num hide-sm">Layers</th>
+              <th>Storage</th>
               <th>Status</th>
               <th class="actions"><span class="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody>
-            @for (a of accounts(); track a.id) {
-              <tr [class.is-busy]="busyId() === a.id">
+            @for (r of rows(); track r.user.id) {
+              <tr [class.is-busy]="busyId() === r.account.id || deleting().has(r.user.id)" [class.is-selected]="selectedUser()?.id === r.user.id" (click)="openDetail(r.account, r.user)">
                 <td>
-                  <div class="adm__who">
-                    <span class="adm__who-name">
-                      {{ a.owner?.fullName ?? a.name }}
-                      @if (a.owner?.isPlatformAdmin) { <span class="adm__chip">Admin</span> }
+                  <div class="ac__who">
+                    <span class="ac__avatar">{{ initials(r.user.fullName, r.user.email) }}</span>
+                    <span class="ac__who-text">
+                      <span class="ac__who-name">
+                        {{ r.user.fullName }}
+                        @if (r.account.users.length > 1) {
+                          <span class="ac__tag" [title]="'Shares the “' + r.account.name + '” workspace with ' + (r.account.users.length - 1) + ' other(s)'">Shared · {{ r.account.users.length }} people</span>
+                        }
+                      </span>
+                      <span class="ac__who-email">{{ r.user.email }}</span>
                     </span>
-                    <span class="adm__who-email">{{ a.owner?.email ?? '—' }}@if (a.users.length > 1) { · {{ a.users.length }} users }</span>
                   </div>
                 </td>
-                <td class="nowrap">{{ a.createdAt | date: 'd MMM y' }}</td>
-                <td class="num">{{ a.layerCount }}</td>
-                <td class="storage">
-                  @if (editingQuota() === a.id) {
-                    <span class="adm__quota-edit">
-                      <input type="number" min="1" placeholder="Unlimited" [value]="quotaDraft" (input)="quotaDraft = $any($event.target).value"
-                             (keydown.enter)="saveQuota(a)" (keydown.escape)="editingQuota.set(null)" aria-label="Storage limit in MB" />
-                      <span class="adm__muted">MB</span>
-                      <button pButton type="button" size="small" icon="pi pi-check" aria-label="Save limit" (click)="saveQuota(a)"></button>
-                      <button pButton type="button" size="small" [text]="true" icon="pi pi-times" aria-label="Cancel" (click)="editingQuota.set(null)"></button>
-                    </span>
-                  } @else {
-                    <button type="button" class="adm__usage" (click)="startQuota(a)" title="Change storage limit">
-                      <span>{{ size(a.usedBytes) }} <span class="adm__muted">/ {{ a.quotaMb ? (a.quotaMb | number) + ' MB' : 'unlimited' }}</span></span>
-                      @if (a.quotaMb) {
-                        <span class="adm__bar"><span [class]="tone(a)" [style.width.%]="pct(a)"></span></span>
-                      }
-                    </button>
-                  }
+                <td class="nowrap muted hide-sm">{{ r.user.createdAt | date: 'd MMM y' }}</td>
+                <td class="num hide-sm">{{ r.account.layerCount }}</td>
+                <td>
+                  <div class="ac__usage">
+                    <span class="ac__usage-text">{{ size(r.account.usedBytes) }} <span class="muted">/ {{ r.account.quotaMb ? (r.account.quotaMb | number) + ' MB' : '∞' }}</span></span>
+                    <span class="ac__meter"><span [attr.data-tone]="r.account.quotaMb ? tone(r.account) : 'none'" [style.width.%]="r.account.quotaMb ? pct(r.account) : 0"></span></span>
+                  </div>
                 </td>
                 <td>
-                  @if (a.owner?.status === 'DISABLED') {
-                    <span class="adm__badge is-bad">Disabled</span>
-                  } @else if (a.workspaceStatus === 'PROVISIONING_FAILED') {
-                    <span class="adm__badge is-warn">Workspace failed</span>
+                  @if (deleting().has(r.user.id)) {
+                    <span class="ac__pill" data-tone="warn"><i class="ac__spin"></i>Deleting…</span>
+                  } @else if (r.user.status === 'DISABLED') {
+                    <span class="ac__pill" data-tone="bad"><i></i>Disabled</span>
+                  } @else if (r.account.workspaceStatus === 'PROVISIONING_FAILED') {
+                    <span class="ac__pill" data-tone="warn"><i></i>Workspace issue</span>
                   } @else {
-                    <span class="adm__badge is-ok">Active</span>
+                    <span class="ac__pill" data-tone="ok"><i></i>Active</span>
                   }
                 </td>
                 <td class="actions">
-                  <button type="button" class="adm__icon-btn" title="Activity" aria-label="Show activity" (click)="showAccountActivity(a)"><i class="pi pi-history"></i></button>
-                  <button type="button" class="adm__icon-btn" title="Set storage limit" aria-label="Set storage limit" (click)="startQuota(a)"><i class="pi pi-database"></i></button>
-                  @if (a.owner && !a.owner.isPlatformAdmin) {
-                    <button type="button" class="adm__icon-btn" [title]="a.owner.status === 'ACTIVE' ? 'Disable' : 'Enable'" [attr.aria-label]="a.owner.status === 'ACTIVE' ? 'Disable account' : 'Enable account'" (click)="toggleStatus(a)">
-                      <i class="pi" [class.pi-ban]="a.owner.status === 'ACTIVE'" [class.pi-check-circle]="a.owner.status !== 'ACTIVE'"></i>
-                    </button>
-                    <button type="button" class="adm__icon-btn is-danger" title="Delete" aria-label="Delete account" (click)="deleteAccount(a)"><i class="pi pi-trash"></i></button>
-                  }
+                  <div class="ac__row-menu">
+                    <button type="button" class="ac__icon-btn" aria-label="Actions" (click)="toggleRowMenu(r.user.id, $event)"><i class="pi pi-ellipsis-h"></i></button>
+                    @if (rowMenu() === r.user.id) {
+                      <div class="ac__menu" [class.ac__menu--up]="rowMenuUp()" role="menu" (click)="$event.stopPropagation()">
+                        <button type="button" role="menuitem" (click)="openDetail(r.account, r.user)"><i class="pi pi-id-card"></i> Details & storage limit</button>
+                        <button type="button" role="menuitem" (click)="showAccountActivity(r.account, r.user)"><i class="pi pi-history"></i> Activity</button>
+                        <button type="button" role="menuitem" (click)="toggleStatus(r.account, r.user)">
+                          <i class="pi" [class.pi-lock]="r.user.status === 'ACTIVE'" [class.pi-lock-open]="r.user.status !== 'ACTIVE'"></i>
+                          {{ r.user.status === 'ACTIVE' ? 'Disable' : 'Enable' }}
+                        </button>
+                        <button type="button" role="menuitem" class="is-danger" (click)="deleteAccount(r.account, r.user)"><i class="pi pi-trash"></i> Delete</button>
+                      </div>
+                    }
+                  </div>
                 </td>
               </tr>
             } @empty {
-              <tr><td colspan="6" class="adm__empty">{{ accountsLoading() ? 'Loading…' : 'No accounts found.' }}</td></tr>
+              <tr><td colspan="6" class="ac__empty">{{ accountsLoading() ? 'Loading…' : 'No one matches.' }}</td></tr>
             }
           </tbody>
         </table>
       </div>
 
       @if (accountPages() > 1) {
-        <div class="adm__pager">
-          <button pButton type="button" size="small" [text]="true" icon="pi pi-chevron-left" [disabled]="accountsPage() <= 1" (click)="accountsGo(accountsPage() - 1)" aria-label="Previous page"></button>
-          <span class="adm__muted">Page {{ accountsPage() }} of {{ accountPages() }}</span>
-          <button pButton type="button" size="small" [text]="true" icon="pi pi-chevron-right" [disabled]="accountsPage() >= accountPages()" (click)="accountsGo(accountsPage() + 1)" aria-label="Next page"></button>
+        <div class="ac__pager">
+          <button type="button" class="ac__icon-btn" [disabled]="accountsPage() <= 1" (click)="accountsGo(accountsPage() - 1)" aria-label="Previous page"><i class="pi pi-chevron-left"></i></button>
+          <span class="muted">Page {{ accountsPage() }} of {{ accountPages() }}</span>
+          <button type="button" class="ac__icon-btn" [disabled]="accountsPage() >= accountPages()" (click)="accountsGo(accountsPage() + 1)" aria-label="Next page"><i class="pi pi-chevron-right"></i></button>
         </div>
       }
     }
 
-    <!-- ============ audit log ============ -->
-    @if (tab() === 'audit') {
-      <div class="adm__toolbar">
-        <span class="adm__search">
+    <!-- ---------- activity ---------- -->
+    @if (view() === 'activity') {
+      <header class="ac__head">
+        <div>
+          <h1 class="ac__title">Activity</h1>
+          <p class="ac__sub">Everything that happened on the platform, newest first.</p>
+        </div>
+      </header>
+
+      <div class="ac__toolbar">
+        <span class="ac__search">
           <i class="pi pi-search" aria-hidden="true"></i>
           <input type="search" placeholder="Search email or action" [value]="auditQuery()" (input)="searchAudit($any($event.target).value)" aria-label="Search activity" />
         </span>
-        <select class="adm__select" [value]="auditAction()" (change)="filterAudit($any($event.target).value)" aria-label="Filter by action">
-          <option value="">All actions</option>
+        <select class="ac__select" [value]="auditAction()" (change)="filterAudit($any($event.target).value)" aria-label="Filter by type">
+          <option value="">All types</option>
           @for (o of actionOptions; track o.value) { <option [value]="o.value">{{ o.label }}</option> }
         </select>
-        <span class="adm__muted">{{ auditTotal() | number }} event{{ auditTotal() === 1 ? '' : 's' }}</span>
+        <span class="muted">{{ auditTotal() | number }} event{{ auditTotal() === 1 ? '' : 's' }}</span>
       </div>
 
-      <div class="adm__table-wrap">
-        <table class="adm__table">
-          <thead>
-            <tr><th>When</th><th>Action</th><th>By</th><th>Details</th><th>IP</th></tr>
-          </thead>
-          <tbody>
-            @for (e of audit(); track e.id) {
-              <tr class="adm__audit-row" (click)="expandedAudit.set(expandedAudit() === e.id ? null : e.id)">
-                <td class="nowrap">{{ e.createdAt | date: 'd MMM y, HH:mm' }}</td>
-                <td><span class="adm__badge" [class]="'adm__badge ' + actionTone(e.action)">{{ actionLabel(e.action) }}</span></td>
-                <td class="adm__ellipsis" [title]="e.actorEmail ?? ''">{{ e.actorEmail ?? '—' }}</td>
-                <td class="adm__ellipsis adm__muted" [title]="summary(e)">{{ summary(e) || '—' }}</td>
-                <td class="nowrap mono">{{ e.ip ?? '—' }}</td>
-              </tr>
+      <div class="ac__card ac__card--flush">
+        <ul class="ac__log">
+          @for (e of audit(); track e.id) {
+            <li class="ac__log-row" (click)="expandedAudit.set(expandedAudit() === e.id ? null : e.id)">
+              <span class="ac__ev-icon" [attr.data-tone]="meta(e.action).tone"><i class="pi {{ meta(e.action).icon }}"></i></span>
+              <span class="ac__log-main">
+                <span class="ac__log-title">{{ meta(e.action).label }}</span>
+                <span class="ac__log-meta">
+                  {{ e.actorEmail ?? 'system' }}@if (summary(e)) { · {{ summary(e) }} }@if (e.ip) { · {{ e.ip.replace('::ffff:', '') }} }
+                </span>
+              </span>
+              <span class="ac__log-time">{{ e.createdAt | date: 'd MMM y, HH:mm' }}</span>
               @if (expandedAudit() === e.id) {
-                <tr class="adm__audit-detail"><td colspan="5"><pre>{{ e | json }}</pre></td></tr>
+                <pre class="ac__log-json">{{ e | json }}</pre>
               }
-            } @empty {
-              <tr><td colspan="5" class="adm__empty">{{ auditLoading() ? 'Loading…' : 'No activity yet.' }}</td></tr>
-            }
-          </tbody>
-        </table>
+            </li>
+          } @empty {
+            <li class="ac__empty">{{ auditLoading() ? 'Loading…' : 'No activity matches.' }}</li>
+          }
+        </ul>
       </div>
 
       @if (auditPages() > 1) {
-        <div class="adm__pager">
-          <button pButton type="button" size="small" [text]="true" icon="pi pi-chevron-left" [disabled]="auditPage() <= 1" (click)="auditGo(auditPage() - 1)" aria-label="Previous page"></button>
-          <span class="adm__muted">Page {{ auditPage() }} of {{ auditPages() }}</span>
-          <button pButton type="button" size="small" [text]="true" icon="pi pi-chevron-right" [disabled]="auditPage() >= auditPages()" (click)="auditGo(auditPage() + 1)" aria-label="Next page"></button>
+        <div class="ac__pager">
+          <button type="button" class="ac__icon-btn" [disabled]="auditPage() <= 1" (click)="auditGo(auditPage() - 1)" aria-label="Previous page"><i class="pi pi-chevron-left"></i></button>
+          <span class="muted">Page {{ auditPage() }} of {{ auditPages() }}</span>
+          <button type="button" class="ac__icon-btn" [disabled]="auditPage() >= auditPages()" (click)="auditGo(auditPage() + 1)" aria-label="Next page"><i class="pi pi-chevron-right"></i></button>
         </div>
       }
     }
+  </main>
+
+  <!-- ================= account detail panel ================= -->
+  @if (selected(); as a) {
+    <div class="ac__drawer-backdrop" (click)="closeDetail()" aria-hidden="true"></div>
+    <aside class="ac__drawer" role="dialog" aria-modal="true" aria-label="Account details">
+      <header class="ac__drawer-head">
+        <span class="ac__avatar ac__avatar--lg">{{ initials(selectedUser()?.fullName ?? a.name, selectedUser()?.email) }}</span>
+        <span class="ac__drawer-who">
+          <span class="ac__drawer-name">{{ selectedUser()?.fullName ?? a.name }}</span>
+          <span class="ac__drawer-email">{{ selectedUser()?.email }}@if (a.users.length > 1) { · shares “{{ a.name }}” }</span>
+        </span>
+        <button type="button" class="ac__icon-btn" aria-label="Close" (click)="closeDetail()"><i class="pi pi-times"></i></button>
+      </header>
+
+      <div class="ac__drawer-body">
+        <dl class="ac__facts">
+          <div><dt>{{ a.users.length > 1 ? 'Shared workspace' : 'Workspace' }}</dt><dd>{{ a.name }}</dd></div>
+          <div><dt>Status</dt><dd>
+            @if (selectedUser()?.status === 'DISABLED') { <span class="ac__pill" data-tone="bad"><i></i>Disabled</span> }
+            @else { <span class="ac__pill" data-tone="ok"><i></i>Active</span> }
+          </dd></div>
+          <div><dt>Created</dt><dd>{{ a.createdAt | date: 'd MMM y, HH:mm' }}</dd></div>
+          <div><dt>Layers</dt><dd>{{ a.layerCount }}</dd></div>
+          <div><dt>People</dt><dd>{{ a.users.length }}</dd></div>
+        </dl>
+
+        <section class="ac__section">
+          <h3>Storage</h3>
+          <div class="ac__storage">
+            <span><strong>{{ size(a.usedBytes) }}</strong> used of {{ a.quotaMb ? (a.quotaMb | number) + ' MB' : 'unlimited' }}</span>
+            @if (a.quotaMb) { <span class="muted">{{ pct(a) | number: '1.0-0' }}%</span> }
+          </div>
+          <span class="ac__meter ac__meter--lg"><span [attr.data-tone]="a.quotaMb ? tone(a) : 'none'" [style.width.%]="a.quotaMb ? pct(a) : 0"></span></span>
+          <label class="ac__field">
+            <span>Storage limit (MB)</span>
+            <span class="ac__field-row">
+              <input type="number" min="1" placeholder="Unlimited" [value]="quotaDraft" (input)="quotaDraft = $any($event.target).value" (keydown.enter)="saveQuota(a)" />
+              <button pButton type="button" size="small" label="Save" [loading]="busyId() === a.id" (click)="saveQuota(a)"></button>
+            </span>
+            <span class="muted">Leave empty for unlimited. Uploads that would pass the limit are refused.</span>
+          </label>
+        </section>
+
+        @if (a.users.length > 1) {
+          <section class="ac__section">
+            <h3>Users</h3>
+            <ul class="ac__users">
+              @for (u of a.users; track u.id) {
+                <li><span class="ac__avatar ac__avatar--sm">{{ initials(u.fullName, u.email) }}</span><span>{{ u.fullName }} <span class="muted">· {{ u.email }}</span></span></li>
+              }
+            </ul>
+          </section>
+        }
+
+        <section class="ac__section">
+          <h3>Recent activity</h3>
+          <ul class="ac__feed ac__feed--compact">
+            @for (e of selectedActivity(); track e.id) {
+              <li class="ac__feed-row">
+                <span class="ac__ev-icon" [attr.data-tone]="meta(e.action).tone"><i class="pi {{ meta(e.action).icon }}"></i></span>
+                <span class="ac__feed-text">
+                  <span class="ac__feed-title">{{ meta(e.action).label }}</span>
+                  @if (summary(e)) { <span class="ac__feed-meta">{{ summary(e) }}</span> }
+                </span>
+                <span class="ac__feed-time">{{ e.createdAt | date: 'd MMM, HH:mm' }}</span>
+              </li>
+            } @empty {
+              <li class="ac__empty">No recorded activity.</li>
+            }
+          </ul>
+        </section>
+      </div>
+
+      <footer class="ac__drawer-foot">
+        <button pButton type="button" size="small" [outlined]="true" [severity]="selectedUser()?.status === 'ACTIVE' ? 'secondary' : 'success'"
+                [icon]="selectedUser()?.status === 'ACTIVE' ? 'pi pi-lock' : 'pi pi-lock-open'" [label]="selectedUser()?.status === 'ACTIVE' ? 'Disable' : 'Enable'"
+                (click)="toggleStatus(a, selectedUser())"></button>
+        <button pButton type="button" size="small" severity="danger" [outlined]="true" icon="pi pi-trash"
+                [label]="a.users.length > 1 ? 'Remove this person' : 'Delete account'" (click)="deleteAccount(a, selectedUser())"></button>
+      </footer>
+    </aside>
+  }
+
+  <!-- ================= action progress / result ================= -->
+  <div class="ac__ops" aria-live="polite">
+    @for (o of ops(); track o.id) {
+      <div class="ac__op" [attr.data-state]="o.state" role="status" [attr.aria-busy]="o.state === 'running'">
+        <span class="ac__op-icon" [attr.data-state]="o.state">
+          @if (o.state === 'running') { <i class="pi pi-spin pi-spinner"></i> }
+          @else if (o.state === 'done') { <i class="pi pi-check"></i> }
+          @else { <i class="pi pi-times"></i> }
+        </span>
+        <div class="ac__op-body">
+          <p class="ac__op-title">{{ o.title }}</p>
+          <p class="ac__op-detail">{{ o.detail }}</p>
+          @if (o.lines?.length) {
+            <ul class="ac__op-lines">
+              @for (l of o.lines; track l) { <li><i class="pi pi-check"></i>{{ l }}</li> }
+            </ul>
+          }
+        </div>
+        @if (o.state !== 'running') {
+          <button type="button" class="ac__op-close" aria-label="Dismiss" (click)="dismissOp(o.id)"><i class="pi pi-times"></i></button>
+        }
+      </div>
+    }
   </div>
-</main>
+</div>

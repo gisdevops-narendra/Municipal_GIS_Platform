@@ -155,7 +155,28 @@ export class AccountService {
    * Removes an account — used by self-deletion and by platform admins.
    * Single-user workspace → everything goes; shared → only this user.
    */
+  /** Users whose deletion is running right now (survives page reloads,
+   *  so the admin console can keep showing "Deleting…"). */
+  private readonly deletingNow = new Set<string>();
+
+  isDeleting(userId: string): boolean {
+    return this.deletingNow.has(userId);
+  }
+
   async removeAccount(
+    user: { id: string; keycloakUserId: string; email: string; municipalityId: string; status: AppUser['status'] },
+    actor: { by: 'self' | 'admin'; actorUserId: string; actorEmail: string; ip?: string },
+  ): Promise<void> {
+    if (this.deletingNow.has(user.id)) throw new ConflictException('This account is already being deleted.');
+    this.deletingNow.add(user.id);
+    try {
+      await this.removeAccountNow(user, actor);
+    } finally {
+      this.deletingNow.delete(user.id);
+    }
+  }
+
+  private async removeAccountNow(
     user: { id: string; keycloakUserId: string; email: string; municipalityId: string; status: AppUser['status'] },
     actor: { by: 'self' | 'admin'; actorUserId: string; actorEmail: string; ip?: string },
   ): Promise<void> {
@@ -225,7 +246,43 @@ export class AccountService {
       .deleteTenantFiles(municipalityId)
       .catch((e: Error) => this.logger.warn(`Delete tenant files: ${e.message}`));
 
-    // 3. Every remaining database row of the tenant. Tables are found from
+    // 2b. Data tables still referenced by the account's layers, uploads or
+    //     version snapshots — normally dropped by deleteLayer/discard above,
+    //     but those give up when GeoServer is slow or down. Drop them here
+    //     so the account's data is gone regardless.
+    if (workspace) {
+      const tables = await this.prisma.$queryRaw<{ name: string }[]>`
+        SELECT postgis_table AS name FROM gis_layers WHERE gis_workspace_id = ${workspace.id} AND postgis_table IS NOT NULL
+        UNION SELECT postgis_table FROM gis_layer_uploads WHERE gis_workspace_id = ${workspace.id} AND postgis_table IS NOT NULL
+        UNION SELECT s.postgis_table FROM gis_layer_snapshots s JOIN gis_layers l ON l.id = s.layer_id
+               WHERE l.gis_workspace_id = ${workspace.id} AND s.postgis_table IS NOT NULL`;
+      for (const { name } of tables) {
+        // Only app-generated layer tables (layer_<hex>), never shared ones.
+        if (!/^layer_[0-9a-f]{32}$/.test(name)) continue;
+        await this.prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS "${name}"`).catch((e: Error) =>
+          this.logger.warn(`Drop table ${name}: ${e.message}`),
+        );
+      }
+    }
+
+    // 3a. Rows that point at the workspace but carry no account column
+    //     (e.g. the gis_demo_* layer tables) — found from the foreign keys
+    //     on gis_workspaces, so new tables are covered automatically.
+    if (workspace) {
+      const refs = await this.prisma.$queryRaw<{ table: string; column: string }[]>`
+        SELECT c.conrelid::regclass::text AS table, a.attname AS column
+          FROM pg_constraint c
+          JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+         WHERE c.contype = 'f' AND c.confrelid = 'gis_workspaces'::regclass`;
+      for (const ref of refs) {
+        await this.prisma.$executeRawUnsafe(
+          `DELETE FROM ${ref.table.split('.').map((p) => `"${p.replace(/"/g, '')}"`).join('.')} WHERE "${ref.column.replace(/"/g, '')}" = $1`,
+          workspace.id,
+        );
+      }
+    }
+
+    // 3b. Every remaining database row of the tenant. Tables are found from
     //    the schema (any `municipality_id` column) so new features are
     //    covered automatically; a few passes resolve foreign-key order.
     const tables = await this.prisma.$queryRaw<{ table_name: string }[]>`

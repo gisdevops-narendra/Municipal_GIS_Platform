@@ -78,7 +78,7 @@ export class AdminService {
           quotaMb: m.storageQuotaMb,
           usedBytes: usage.bytes,
           layerCount: usage.layerCount,
-          users: m.users.map((u) => ({ ...u, isPlatformAdmin: isPlatformAdmin(u) })),
+          users: m.users.map((u) => ({ ...u, isPlatformAdmin: isPlatformAdmin(u), deleting: this.accounts.isDeleting(u.id) })),
           owner: owner ? { ...owner, isPlatformAdmin: isPlatformAdmin(owner) } : null,
         };
       }),

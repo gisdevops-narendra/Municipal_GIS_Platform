@@ -19,6 +19,8 @@ export interface AdminUser {
   status: 'ACTIVE' | 'DISABLED';
   isPlatformAdmin: boolean;
   createdAt: string;
+  /** A delete for this person is running on the server. */
+  deleting?: boolean;
 }
 
 export interface AdminAccount {
