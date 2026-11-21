@@ -10,6 +10,7 @@ import type { Request } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { KeycloakJwtPayload } from '../strategies/keycloak-jwt.strategy';
 import type { AppUser } from '../types/app-user.type';
+import { isPlatformAdmin } from '../platform-admin.util';
 
 export interface RequestWithAppUser extends Request {
   user: KeycloakJwtPayload;
@@ -53,6 +54,15 @@ export class AppUserGuard implements CanActivate {
 
     if (user.status !== 'ACTIVE') {
       throw new ForbiddenException('This account has been deactivated.');
+    }
+
+    // Admin accounts are for platform administration only — no map
+    // workspace, so every map / GIS endpoint is off limits to them.
+    const path = (request as { originalUrl?: string; url?: string }).originalUrl ?? request.url ?? '';
+    if (/^\/api\/gis(\/|\?|$)/.test(path) && isPlatformAdmin(user)) {
+      throw new ForbiddenException(
+        'Admin accounts manage the platform and have no map workspace. Sign in with a regular account to use the map.',
+      );
     }
 
     request.appUser = {

@@ -52,7 +52,7 @@ export class LoginComponent implements OnInit {
 
   ngOnInit(): void {
     if (this.auth.isAuthenticated()) {
-      this.router.navigateByUrl('/gis');
+      this.router.navigateByUrl('/start');
       return;
     }
     // Go straight to Keycloak's sign-in page: this page's own email field
@@ -63,7 +63,7 @@ export class LoginComponent implements OnInit {
     if (!this.signinInterrupted) {
       this.redirecting = true;
       Promise.resolve()
-        .then(() => this.auth.login({ redirectUri: window.location.origin + '/gis' }))
+        .then(() => this.auth.login({ redirectUri: window.location.origin + '/start' }))
         .catch((err) => {
           console.error('Keycloak login failed to start', err);
           this.redirecting = false;
@@ -73,7 +73,7 @@ export class LoginComponent implements OnInit {
   }
 
   /** Redirects to the Keycloak-hosted login page. Keycloak returns the
-   *  browser to /dashboard on success. */
+   *  browser to /start, which sends admins to /admin and others to /gis. */
   onSubmit(): void {
     if (this.form.invalid) {
       this.form.markAllAsTouched();
@@ -89,7 +89,7 @@ export class LoginComponent implements OnInit {
     Promise.resolve()
       .then(() =>
         this.auth.login({
-          redirectUri: window.location.origin + '/gis',
+          redirectUri: window.location.origin + '/start',
           loginHint: this.email.value || undefined
         })
       )

@@ -1,5 +1,6 @@
-import { Component, ElementRef, HostListener, computed, inject, viewChild, effect } from '@angular/core';
+import { Component, ElementRef, HostListener, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { SettingsDialogService } from '../../core/services/settings-dialog.service';
+import { CurrentUserService } from '../../core/services/current-user.service';
 import { SETTINGS_SECTIONS, SETTINGS_TABS, SettingsSectionMeta } from '../../core/settings/settings-sections';
 
 import { ProfileSectionComponent } from './sections/profile-section.component';
@@ -31,6 +32,8 @@ import { DeleteAccountSectionComponent } from './sections/delete-account-section
  * right. Each tab stacks one or more of the existing section components
  * (see SETTINGS_TABS), so no setting was dropped. Changes save as you go.
  */
+const ADMIN_HIDDEN_TABS = new Set(['map', 'assistant', 'privacy']);
+
 @Component({
   selector: 'app-settings-dialog',
   standalone: true,
@@ -63,9 +66,13 @@ import { DeleteAccountSectionComponent } from './sections/delete-account-section
 })
 export class SettingsDialogComponent {
   readonly dialog = inject(SettingsDialogService);
-  readonly tabs = SETTINGS_TABS;
+  /** Admin accounts have no map workspace: no Map / AI Assistant / data tabs. */
+  private readonly isAdmin = signal(false);
+  readonly tabs = computed(() =>
+    this.isAdmin() ? SETTINGS_TABS.filter((t) => !ADMIN_HIDDEN_TABS.has(t.id)) : SETTINGS_TABS,
+  );
 
-  readonly activeTab = computed(() => this.tabs.find((t) => t.id === this.dialog.tab()) ?? this.tabs[0]);
+  readonly activeTab = computed(() => this.tabs().find((t) => t.id === this.dialog.tab()) ?? this.tabs()[0]);
   readonly activeSections = computed<SettingsSectionMeta[]>(() =>
     this.activeTab()
       .sections.map((id) => SETTINGS_SECTIONS.find((s) => s.id === id))
@@ -76,6 +83,9 @@ export class SettingsDialogComponent {
   private readonly closeBtn = viewChild<ElementRef<HTMLButtonElement>>('closeBtn');
 
   constructor() {
+    inject(CurrentUserService)
+      .getMe()
+      .subscribe({ next: (me) => this.isAdmin.set(!!me.isPlatformAdmin), error: () => undefined });
     // New tab → start at the top of its content.
     effect(() => {
       this.dialog.tab();

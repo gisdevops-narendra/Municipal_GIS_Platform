@@ -3,7 +3,10 @@
 :host {
   position: fixed;
   inset: 0;
-  z-index: 1100; /* above map panels and toolbars, below toasts */
+  /* Above the map panels and toolbars (< 100), but below PrimeNG's own
+     overlays (dropdown lists, date pickers, toasts, confirm dialogs start
+     at 1000), so a dropdown opened inside Settings shows on top of it. */
+  z-index: 999;
   display: grid;
   place-items: center;
   padding: 24px;

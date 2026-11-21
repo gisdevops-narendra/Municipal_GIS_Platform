@@ -1,6 +1,6 @@
 import { Routes } from '@angular/router';
 import { authGuard } from './core/guards/auth.guard';
-import { platformAdminGuard } from './core/guards/platform-admin.guard';
+import { notPlatformAdminGuard, platformAdminGuard, startPageGuard } from './core/guards/platform-admin.guard';
 
 export const routes: Routes = [
   {
@@ -43,7 +43,7 @@ export const routes: Routes = [
   },
   {
     path: 'gis',
-    canActivate: [authGuard],
+    canActivate: [authGuard, notPlatformAdminGuard],
     data: { reuse: true },
     loadComponent: () =>
       import('./features/gis/gis-workspace.component').then((m) => m.GisWorkspaceComponent),
@@ -51,9 +51,15 @@ export const routes: Routes = [
   },
   {
     path: 'collect',
-    canActivate: [authGuard],
+    canActivate: [authGuard, notPlatformAdminGuard],
     loadComponent: () => import('./features/collect/collect.component').then((m) => m.CollectComponent),
     title: 'Field Collection — Municipal GIS Platform'
+  },
+  {
+    // After sign-in: admins → /admin, everyone else → /gis.
+    path: 'start',
+    canActivate: [authGuard, startPageGuard],
+    children: []
   },
   {
     // Platform administrators only (also enforced on every /api/admin call).

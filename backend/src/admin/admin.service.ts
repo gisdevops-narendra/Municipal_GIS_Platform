@@ -22,12 +22,14 @@ export class AdminService {
   ) {}
 
   async stats() {
+    // Customer accounts only — admin-only accounts are not counted.
+    const customer: Prisma.MunicipalityWhereInput = { users: { some: { isPlatformAdmin: false } } };
     const [accounts, users, disabled, layers, newWeek, failedUploads] = await Promise.all([
-      this.prisma.municipality.count(),
-      this.prisma.user.count(),
-      this.prisma.user.count({ where: { status: 'DISABLED' } }),
+      this.prisma.municipality.count({ where: customer }),
+      this.prisma.user.count({ where: { isPlatformAdmin: false } }),
+      this.prisma.user.count({ where: { status: 'DISABLED', isPlatformAdmin: false } }),
       this.prisma.gISLayer.count(),
-      this.prisma.municipality.count({ where: { createdAt: { gte: new Date(Date.now() - 7 * DAY) } } }),
+      this.prisma.municipality.count({ where: { ...customer, createdAt: { gte: new Date(Date.now() - 7 * DAY) } } }),
       this.prisma.auditLog.count({ where: { action: 'upload.failed', createdAt: { gte: new Date(Date.now() - 7 * DAY) } } }),
     ]);
     return { accounts, users, disabledUsers: disabled, layers, newAccountsLast7Days: newWeek, failedUploadsLast7Days: failedUploads };
@@ -37,15 +39,17 @@ export class AdminService {
     const pageSize = query.pageSize ?? 25;
     const page = query.page ?? 1;
     const q = query.q?.trim();
+    // Admin-only accounts (platform administration) are not customer accounts.
     const where: Prisma.MunicipalityWhereInput = q
       ? {
+          users: { some: { isPlatformAdmin: false } },
           OR: [
             { name: { contains: q, mode: 'insensitive' } },
             { officialEmail: { contains: q, mode: 'insensitive' } },
             { users: { some: { email: { contains: q, mode: 'insensitive' } } } },
           ],
         }
-      : {};
+      : { users: { some: { isPlatformAdmin: false } } };
     const [rows, total] = await Promise.all([
       this.prisma.municipality.findMany({
         where,

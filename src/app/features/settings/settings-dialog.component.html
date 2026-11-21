@@ -4,7 +4,7 @@
   <aside class="sd__nav">
     <h2 id="sd-title" class="sd__title">Settings</h2>
     <nav class="sd__tabs" role="tablist" aria-label="Settings">
-      @for (tab of tabs; track tab.id) {
+      @for (tab of tabs(); track tab.id) {
         <button
           type="button"
           role="tab"

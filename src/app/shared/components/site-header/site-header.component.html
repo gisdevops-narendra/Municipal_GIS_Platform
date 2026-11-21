@@ -43,7 +43,11 @@
     @if (showActions) {
       <div class="site-header__account">
         @if (isAuthenticated()) {
-          <a routerLink="/gis" pButton class="p-button-sm site-header__open-map" icon="pi pi-map" label="Open Map" aria-label="Open Map"></a>
+          @if (isPlatformAdmin()) {
+            <a routerLink="/admin" pButton class="p-button-sm site-header__open-map" icon="pi pi-shield" label="Admin" aria-label="Admin"></a>
+          } @else {
+            <a routerLink="/gis" pButton class="p-button-sm site-header__open-map" icon="pi pi-map" label="Open Map" aria-label="Open Map"></a>
+          }
           <ng-container [ngTemplateOutlet]="accountMenu" />
         } @else {
           <a routerLink="/login" pButton class="p-button-text p-button-sm" label="Login"></a>

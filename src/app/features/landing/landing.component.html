@@ -12,7 +12,7 @@
         </p>
         <div class="hero__actions">
           @if (isAuthenticated()) {
-            <a routerLink="/gis" pButton icon="pi pi-map" label="Open Map" class="p-button-lg"></a>
+            <a routerLink="/start" pButton icon="pi pi-arrow-right" iconPos="right" label="Open" class="p-button-lg"></a>
           } @else {
             <a routerLink="/register" pButton label="Create Account" class="p-button-lg"></a>
             <a routerLink="/login" pButton label="Login" class="p-button-lg p-button-outlined"></a>
