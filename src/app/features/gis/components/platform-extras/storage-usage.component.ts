@@ -7,19 +7,16 @@ import { environment } from '../../../../../environments/environment';
 import { NotificationService } from '../../../../core/services/notification.service';
 
 interface StorageOverview {
-  canEditLimits: boolean;
   municipalityQuotaMb: number | null;
   totalBytes: number;
   breakdown: { tableBytes: number; fileBytes: number; tileBytes: number; attachmentBytes: number };
-  shared: { bytes: number; layerCount: number } | null;
-  departments: { id: string; name: string; quotaMb: number | null; bytes: number; layerCount: number }[];
-  largestLayers: { id: string; name: string; departmentId: string | null; layerType: string; totalBytes: number }[];
+  largestLayers: { id: string; name: string; layerType: string; totalBytes: number }[];
   measuredAt: string;
 }
 
 const MB = 1024 * 1024;
 
-/** Storage: how much space GIS data uses per department, and limits. */
+/** Storage: how much space your GIS data uses, against your account's limit (read-only — limits are set by platform admins). */
 @Component({
   selector: 'app-storage-usage',
   standalone: true,
@@ -29,12 +26,14 @@ const MB = 1024 * 1024;
     <div class="px">
       @if (data(); as d) {
         <div class="px__card">
-          <span class="px__label">{{ d.canEditLimits ? 'Municipality total' : 'Your department' }}</span>
-          @if (d.canEditLimits) {
-            <span class="px__item-title" style="font-size: 18px">{{ size(d.totalBytes) }}@if (d.municipalityQuotaMb) { <span class="px__item-sub"> of {{ d.municipalityQuotaMb | number }} MB</span> }</span>
-            @if (d.municipalityQuotaMb) {
-              <div class="bar"><div [style.width.%]="pct(d.totalBytes, d.municipalityQuotaMb)" [style.background]="tone(d.totalBytes, d.municipalityQuotaMb)"></div></div>
-            }
+          <span class="px__label">Your storage</span>
+          <span class="px__item-title" style="font-size: 18px">
+            {{ size(d.totalBytes) }}
+            <span class="px__item-sub"> of {{ d.municipalityQuotaMb ? (d.municipalityQuotaMb | number) + ' MB' : 'unlimited' }}</span>
+          </span>
+          @if (d.municipalityQuotaMb) {
+            <div class="bar"><div [style.width.%]="pct(d.totalBytes, d.municipalityQuotaMb)" [style.background]="tone(d.totalBytes, d.municipalityQuotaMb)"></div></div>
+            <span class="px__item-sub" style="margin-top: 4px">{{ pct(d.totalBytes, d.municipalityQuotaMb) | number: '1.0-0' }}% used</span>
           }
           <dl class="px__kv" style="margin-top: 6px">
             <dt>Layer tables</dt><dd>{{ size(d.breakdown.tableBytes) }}</dd>
@@ -43,46 +42,7 @@ const MB = 1024 * 1024;
             <dt>Attachments</dt><dd>{{ size(d.breakdown.attachmentBytes) }}</dd>
           </dl>
         </div>
-
-        <div class="px__section">
-          <h4>By department</h4>
-          <div class="px__list" style="max-height: none">
-            @for (dep of d.departments; track dep.id) {
-              <div class="px__item" style="flex-wrap: wrap">
-                <div class="px__item-main">
-                  <span class="px__item-title">{{ dep.name }}</span>
-                  <span class="px__item-sub">{{ size(dep.bytes) }} · {{ dep.layerCount }} layer{{ dep.layerCount === 1 ? '' : 's' }}@if (dep.quotaMb) { · limit {{ dep.quotaMb | number }} MB }</span>
-                </div>
-                @if (d.canEditLimits) {
-                  <input class="px__input" style="width: 92px; flex: none" type="number" min="1" placeholder="No limit"
-                         [ngModel]="limits[dep.id]" (ngModelChange)="limits[dep.id] = $event" [attr.aria-label]="'Limit in MB for ' + dep.name" title="Limit in MB" />
-                }
-                @if (dep.quotaMb) {
-                  <div class="bar" style="flex-basis: 100%"><div [style.width.%]="pct(dep.bytes, dep.quotaMb)" [style.background]="tone(dep.bytes, dep.quotaMb)"></div></div>
-                }
-              </div>
-            } @empty {
-              <p class="px__hint px__hint--center">No departments.</p>
-            }
-            @if (d.shared) {
-              <div class="px__item">
-                <div class="px__item-main">
-                  <span class="px__item-title">Shared (municipality-owned)</span>
-                  <span class="px__item-sub">{{ size(d.shared.bytes) }} · {{ d.shared.layerCount }} layers</span>
-                </div>
-              </div>
-            }
-          </div>
-        </div>
-
-        @if (d.canEditLimits) {
-          <label class="px__field">
-            <span class="px__label">Municipality limit (MB)</span>
-            <input class="px__input" type="number" min="1" placeholder="No limit" [ngModel]="muniLimit" (ngModelChange)="muniLimit = $event" />
-          </label>
-          <button pButton type="button" class="p-button-sm px__btn-block" icon="pi pi-check" label="Save limits" [loading]="saving()" (click)="save()"></button>
-          <p class="px__hint">When a limit is reached, new uploads and new layers for it are refused. Existing data is never removed.</p>
-        }
+        <p class="px__hint">When the limit is reached, new uploads are refused until you delete layers you no longer need. Contact the platform administrator if you need more space.</p>
 
         <div class="px__section">
           <h4>Largest layers</h4>
@@ -121,10 +81,7 @@ export class StorageUsageComponent {
 
   readonly data = signal<StorageOverview | null>(null);
   readonly loading = signal(false);
-  readonly saving = signal(false);
   readonly error = signal<string | null>(null);
-  limits: Record<string, number | null> = {};
-  muniLimit: number | null = null;
 
   constructor() {
     this.load();
@@ -160,29 +117,6 @@ export class StorageUsageComponent {
   private apply(d: StorageOverview): void {
     this.data.set(d);
     this.loading.set(false);
-    this.muniLimit = d.municipalityQuotaMb;
-    this.limits = Object.fromEntries(d.departments.map((dep) => [dep.id, dep.quotaMb]));
   }
 
-  save(): void {
-    const clean = (v: unknown) => (v === '' || v === null || v === undefined ? null : Math.round(Number(v)));
-    this.saving.set(true);
-    this.http
-      .put<StorageOverview>(`${environment.apiUrl}/gis/storage/limits`, {
-        municipalityQuotaMb: clean(this.muniLimit),
-        departments: Object.entries(this.limits).map(([id, v]) => ({ id, quotaMb: clean(v) }))
-      })
-      .subscribe({
-        next: (d) => {
-          this.saving.set(false);
-          this.apply(d);
-          this.notify.success('Storage limits saved.');
-        },
-        error: (e) => {
-          this.saving.set(false);
-          const m = e?.error?.message;
-          this.notify.error(Array.isArray(m) ? m.join(', ') : m ?? 'Could not save the limits.');
-        }
-      });
-  }
 }

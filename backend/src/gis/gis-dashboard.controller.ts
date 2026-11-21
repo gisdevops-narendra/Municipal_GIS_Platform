@@ -18,18 +18,6 @@ import { GisDashboardService } from './gis-dashboard.service';
 export class GisDashboardController {
   constructor(private readonly gisDashboardService: GisDashboardService) {}
 
-  @RequireMunicipalityManager()
-  @Get('summary')
-  getSummary(@CurrentAppUser() appUser: AppUser) {
-    return this.gisDashboardService.getSummary(appUser);
-  }
-
-  @RequireMunicipalityManager()
-  @Get('departments')
-  getDepartmentSummary(@CurrentAppUser() appUser: AppUser) {
-    return this.gisDashboardService.getDepartmentSummary(appUser);
-  }
-
   @RequireMunicipalityMember()
   @Get('search')
   search(

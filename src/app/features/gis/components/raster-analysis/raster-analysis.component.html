@@ -1065,20 +1065,10 @@
         </ul>
         <div class="ra__table-wrap">
           <table class="ra__table">
-            <thead><tr><th>Department</th><th>Size</th></tr></thead>
-            <tbody>
-              @for (d of st.perDepartment; track d.department) {
-                <tr><td>{{ d.department }}</td><td>{{ bytes(d.bytes) }}</td></tr>
-              }
-            </tbody>
-          </table>
-        </div>
-        <div class="ra__table-wrap">
-          <table class="ra__table">
             <thead><tr><th>Largest results</th><th>Type</th><th>Size</th></tr></thead>
             <tbody>
               @for (l of st.layers.slice(0, 30); track $index) {
-                <tr [class.ra__row-link]="l.layerId" (click)="showLayer(l.layerId)"><td [title]="l.department">{{ l.name }}</td><td style="text-align: left">{{ l.kind }}</td><td>{{ bytes(l.bytes) }}</td></tr>
+                <tr [class.ra__row-link]="l.layerId" (click)="showLayer(l.layerId)"><td [title]="l.name">{{ l.name }}</td><td style="text-align: left">{{ l.kind }}</td><td>{{ bytes(l.bytes) }}</td></tr>
               }
             </tbody>
           </table>

@@ -42,8 +42,4 @@ export class SaveSelectionDto extends SelectionDto {
   @MaxLength(120)
   name!: string;
 
-  /** Owner only: publish the result as this department's layer. */
-  @IsOptional()
-  @IsUUID()
-  departmentId?: string;
 }

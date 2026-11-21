@@ -6,8 +6,6 @@ export interface RasterJobContext {
   setStage(stage: string, cancellable?: boolean): void;
   /** Known progress (0–100); `ceiling` is how far it may creep meanwhile. */
   setProgress(percent: number, ceiling?: number): void;
-  /** Owner's choice of department for the layers the job creates. */
-  outputDepartmentId?: string;
   /** Names of the input layers, collected as they are resolved. */
   sources: string[];
   /** Provenance text for the new layer's description. */

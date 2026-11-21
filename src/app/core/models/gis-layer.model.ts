@@ -54,8 +54,6 @@ export interface GisLayer {
    *  DEPARTMENT (operational data belonging to one department). Drives the
    *  layer panel's "Municipal GIS" / "Department Layers" grouping. */
   ownershipType: GisLayerOwnershipType;
-  departmentId: string | null;
-  departmentName: string | null;
   /** Bumped every time an uploaded layer is replaced by a newer version
    *  (Task 7) — 1 for every Task 6 demo layer. */
   version: number;

@@ -174,6 +174,13 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     blurb: 'What is stored, where it lives and how it is used.',
   },
   {
+    id: 'delete-account',
+    label: 'Delete account',
+    icon: 'pi pi-trash',
+    group: 'about',
+    blurb: 'Permanently delete your account and all of your GIS data.',
+  },
+  {
     id: 'reset',
     label: 'Reset Settings',
     icon: 'pi pi-refresh',
@@ -207,7 +214,7 @@ export const SETTINGS_TABS: SettingsTab[] = [
   },
   { id: 'assistant', label: 'AI Assistant', icon: 'pi pi-sparkles', sections: ['assistant'] },
   { id: 'notifications', label: 'Notifications', icon: 'pi pi-bell', sections: ['notifications', 'session', 'shortcuts'] },
-  { id: 'privacy', label: 'Data & privacy', icon: 'pi pi-shield', sections: ['privacy', 'reset'] },
+  { id: 'privacy', label: 'Data & privacy', icon: 'pi pi-shield', sections: ['privacy', 'reset', 'delete-account'] },
   { id: 'about', label: 'About', icon: 'pi pi-info-circle', sections: ['system-status', 'about', 'help'] },
 ];
 

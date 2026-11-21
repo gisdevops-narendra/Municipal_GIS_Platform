@@ -56,3 +56,28 @@
     gap: 0;
   }
 }
+
+.terms {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 4px 0 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-ink-700);
+  cursor: pointer;
+
+  a {
+    color: var(--color-primary-700);
+    font-weight: 500;
+  }
+}
+
+/* Honeypot: off-screen, not display:none (some bots skip hidden inputs). */
+.hp {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}

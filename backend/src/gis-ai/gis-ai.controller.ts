@@ -16,7 +16,6 @@ import {
   GisFeedbackDto,
   GisIconTermsDto,
   GisNarrateDto,
-  GisPinDto,
   GisSaveLayerDto,
 } from './dto/chat.dto';
 import type { AiGisOperation } from './ai-plan.types';
@@ -201,13 +200,6 @@ export class GisAiController {
   @Post('save-layer')
   saveLayer(@CurrentAppUser() appUser: AppUser, @Body() dto: GisSaveLayerDto) {
     return this.gisAi.saveAsLayer(appUser, dto);
-  }
-
-  /** An answer as a Dashboard tile. */
-  @RequireAiAssistant()
-  @Post('pin')
-  pin(@CurrentAppUser() appUser: AppUser, @Body() dto: GisPinDto) {
-    return this.gisAi.pin(appUser, dto);
   }
 
   @RequireAiAssistant()

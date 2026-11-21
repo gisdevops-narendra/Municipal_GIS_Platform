@@ -124,14 +124,10 @@ export class RasterWorkspaceService {
     const tmp = await this.listFiles(path.join(dir, 'tmp'));
     const layers = await this.prisma.gISLayer.findMany({
       where: { gisWorkspace: { municipalityId: appUser.municipalityId }, rasterAnalysis: true },
-      select: { id: true, name: true, layerType: true, postgisTable: true, departmentId: true, createdAt: true },
+      select: { id: true, name: true, layerType: true, postgisTable: true, createdAt: true },
     });
-    const departments = new Map(
-      (await this.prisma.department.findMany({ where: { municipalityId: appUser.municipalityId }, select: { id: true, name: true } }))
-        .map((d) => [d.id, d.name]),
-    );
     const byId = new Map(layers.map((l) => [l.id, l]));
-    const rows: { layerId: string | null; name: string; department: string; kind: string; bytes: number; createdAt: Date | null }[] = [];
+    const rows: { layerId: string | null; name: string; kind: string; bytes: number; createdAt: Date | null }[] = [];
     let orphanBytes = 0;
     for (const f of files) {
       const layer = byId.get(path.basename(f.name, '.tif'));
@@ -140,7 +136,7 @@ export class RasterWorkspaceService {
         continue;
       }
       rows.push({
-        layerId: layer.id, name: layer.name, department: departments.get(layer.departmentId ?? '') ?? 'Municipality-wide',
+        layerId: layer.id, name: layer.name,
         kind: 'Raster', bytes: f.size, createdAt: layer.createdAt,
       });
     }
@@ -148,19 +144,15 @@ export class RasterWorkspaceService {
       const [size] = await this.prisma.$queryRaw<{ bytes: bigint }[]>`
         SELECT pg_total_relation_size(quote_ident(${l.postgisTable})::regclass) AS bytes`.catch(() => [{ bytes: 0n }]);
       rows.push({
-        layerId: l.id, name: l.name, department: departments.get(l.departmentId ?? '') ?? 'Municipality-wide',
+        layerId: l.id, name: l.name,
         kind: 'Vector table', bytes: Number(size?.bytes ?? 0), createdAt: l.createdAt,
       });
     }
     rows.sort((a, b) => b.bytes - a.bytes);
-    const perDepartment = [...rows.reduce((m, r) => m.set(r.department, (m.get(r.department) ?? 0) + r.bytes), new Map<string, number>())]
-      .map(([department, bytes]) => ({ department, bytes }))
-      .sort((a, b) => b.bytes - a.bytes);
     return {
       totalBytes: rows.reduce((a, r) => a + r.bytes, 0),
       tempBytes: tmp.reduce((a, f) => a + f.size, 0),
       orphanBytes,
-      perDepartment,
       layers: rows.slice(0, 200),
     };
   }
@@ -195,37 +187,7 @@ export class RasterWorkspaceService {
     return { removed, freedBytes: freed };
   }
 
-  // ----- Dashboard Pins -----
 
-  listPins(appUser: AppUser) {
-    return this.prisma.rasterPin.findMany({
-      where: { municipalityId: appUser.municipalityId },
-      orderBy: { createdAt: 'desc' },
-      take: 24,
-    });
-  }
-
-  createPin(appUser: AppUser, dto: { title: string; value: string; detail?: string; layerId?: string }) {
-    return this.prisma.rasterPin.create({
-      data: {
-        municipalityId: appUser.municipalityId,
-        createdById: appUser.id,
-        title: dto.title.trim(),
-        value: dto.value.trim(),
-        detail: dto.detail?.trim() || null,
-        layerId: dto.layerId ?? null,
-      },
-    });
-  }
-
-  async deletePin(appUser: AppUser, id: string): Promise<void> {
-    const pin = await this.prisma.rasterPin.findUnique({ where: { id } });
-    if (!pin || pin.municipalityId !== appUser.municipalityId) throw new NotFoundException('Pin not found.');
-    if (pin.createdById !== appUser.id && appUser.systemRole !== 'MUNICIPALITY_OWNER') {
-      throw new ForbiddenException('Only its creator or the owner can remove this pin.');
-    }
-    await this.prisma.rasterPin.delete({ where: { id } });
-  }
 
   // ----- helpers -----
 

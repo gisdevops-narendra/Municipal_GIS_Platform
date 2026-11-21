@@ -33,7 +33,6 @@ import { StyleService } from './style.service';
 import { LayerReportService } from './layer-report.service';
 import { LayerReportDto } from './dto/layer-report.dto';
 import { ExportSelectionDto } from './dto/selection.dto';
-import { SetLayerPermissionDto } from './dto/set-layer-permission.dto';
 import { LayerStyleSpecDto, PasteSldDto } from './dto/layer-style.dto';
 import type { ClassificationMethod } from './dto/layer-style.dto';
 import type { GroupMeasure } from './field-stats.service';
@@ -155,13 +154,6 @@ export class GisLayersController {
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(body);
-  }
-
-  /** Task 8 §7. Gated by MANAGE, enforced in the service. */
-  @RequireMunicipalityMember()
-  @Get('layers/:id/permissions')
-  getPermissions(@CurrentAppUser() appUser: AppUser, @Param('id') id: string) {
-    return this.gisLayersService.getPermissionMatrix(appUser, id);
   }
 
   /** Renames a layer (display name only). Owner-only, re-checked in the service. */
@@ -502,24 +494,5 @@ export class GisLayersController {
   ): Promise<{ success: true }> {
     await this.gisLayersService.removeLayerStyle(appUser, id);
     return { success: true };
-  }
-
-  /** Task 8 §7. One checkbox toggle per call. Gated by MANAGE and the
-   *  self-grant guard, both enforced in the service. */
-  @RequireMunicipalityMember()
-  @Put('layers/:id/permissions')
-  setPermission(
-    @CurrentAppUser() appUser: AppUser,
-    @Param('id') id: string,
-    @Body() dto: SetLayerPermissionDto,
-  ) {
-    return this.gisLayersService.setPermission(
-      appUser,
-      id,
-      dto.departmentId,
-      dto.role,
-      dto.permission,
-      dto.granted,
-    );
   }
 }

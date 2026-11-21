@@ -1,4 +1,7 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
+import type { Request } from 'express';
+import { clientIp } from '../common/client-ip';
+import { RateLimit } from '../common/rate-limit.guard';
 import { KeycloakJwtGuard } from '../auth/guards/keycloak-jwt.guard';
 import { AppUserGuard } from '../auth/guards/app-user.guard';
 import { CurrentKeycloakUser } from '../auth/decorators/current-keycloak-user.decorator';
@@ -14,8 +17,9 @@ export class MunicipalitiesController {
    *  and the account's private GIS workspace — the browser never supplies
    *  a keycloak_user_id or a role. */
   @Post('register')
-  register(@Body() dto: RegisterAccountDto) {
-    return this.municipalitiesService.registerAccount(dto);
+  @RateLimit({ name: 'signup', perIp: 10, global: 50, windowMs: 60 * 60 * 1000 })
+  register(@Body() dto: RegisterAccountDto, @Req() req: Request) {
+    return this.municipalitiesService.registerAccount(dto, clientIp(req));
   }
 
   /**

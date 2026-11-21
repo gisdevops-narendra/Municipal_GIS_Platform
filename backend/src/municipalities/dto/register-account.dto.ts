@@ -1,4 +1,5 @@
 import {
+  Equals,
   IsEmail,
   IsOptional,
   IsString,
@@ -30,9 +31,24 @@ export class RegisterAccountDto {
   })
   mobileNumber?: string;
 
+  /** Must be true: the user accepted the Terms of Service and Privacy
+   *  Policy (version TERMS_VERSION) on the sign-up form. */
+  @Equals(true, { message: 'You must accept the Terms of Service and Privacy Policy.' })
+  acceptTerms!: boolean;
+
+  /** Honeypot: a hidden form field people never see. Bots that fill in
+   *  every field set it — such sign-ups are rejected. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  website?: string;
+
   /** Forwarded once to Keycloak; never stored in our database. */
   @IsString()
   @MinLength(8)
   @MaxLength(128)
   password!: string;
 }
+
+/** Bump when the Terms of Service / Privacy Policy text changes. */
+export const TERMS_VERSION = '2026-11-21';

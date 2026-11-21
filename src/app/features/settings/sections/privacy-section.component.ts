@@ -34,8 +34,8 @@ import { Component } from '@angular/core';
       <h3>Clearing your data</h3>
       <p>
         “Reset Settings” removes every preference on this screen from both the database
-        and this browser. To remove your account entirely, contact the platform
-        administrator.
+        and this browser. To remove your account and all of your data, use
+        “Delete account” below.
       </p>
     </div>
   `,

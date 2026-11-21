@@ -138,27 +138,6 @@ export class GisSaveLayerDto {
   name!: string;
 }
 
-/** `POST /gis/ai/pin` — an answer as a Dashboard tile. */
-export class GisPinDto {
-  @IsString()
-  @MinLength(1)
-  @MaxLength(200)
-  title!: string;
-
-  @IsString()
-  @MinLength(1)
-  @MaxLength(120)
-  value!: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(1000)
-  detail?: string;
-
-  @IsOptional()
-  @IsString()
-  layerId?: string;
-}
 
 /** `PATCH /gis/ai/conversations/:id` — pin / unpin a chat. */
 export class GisConversationPatchDto {

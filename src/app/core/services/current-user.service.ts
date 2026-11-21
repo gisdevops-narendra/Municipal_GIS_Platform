@@ -35,4 +35,16 @@ export class CurrentUserService {
       .patch<CurrentUser>(`${environment.apiUrl}/me`, request)
       .pipe(tap((user) => this.updated.set(user)));
   }
+
+  /** Permanently deletes the signed-in account (and, for a single-user
+   *  workspace, all its GIS data). Confirmed by the current password. */
+  deleteAccount(password: string): Observable<void> {
+    return this.http.post<void>(`${environment.apiUrl}/me/delete`, { password });
+  }
+
+  /** Changes the sign-in email (confirmed by the password). The new
+   *  address is verified at the next sign-in; all sessions end. */
+  changeEmail(email: string, password: string): Observable<{ email: string }> {
+    return this.http.post<{ email: string }>(`${environment.apiUrl}/me/email`, { email, password });
+  }
 }

@@ -1,5 +1,6 @@
 import { Routes } from '@angular/router';
 import { authGuard } from './core/guards/auth.guard';
+import { platformAdminGuard } from './core/guards/platform-admin.guard';
 
 export const routes: Routes = [
   {
@@ -12,6 +13,18 @@ export const routes: Routes = [
     path: 'share/:token',
     loadComponent: () => import('./features/share/public-map.component').then((m) => m.PublicMapComponent),
     title: 'Shared map — Municipal GIS Platform'
+  },
+  {
+    path: 'terms',
+    data: { doc: 'terms' },
+    loadComponent: () => import('./features/legal/legal-page.component').then((m) => m.LegalPageComponent),
+    title: 'Terms of Service — Municipal GIS Platform'
+  },
+  {
+    path: 'privacy',
+    data: { doc: 'privacy' },
+    loadComponent: () => import('./features/legal/legal-page.component').then((m) => m.LegalPageComponent),
+    title: 'Privacy Policy — Municipal GIS Platform'
   },
   {
     path: 'login',
@@ -41,6 +54,13 @@ export const routes: Routes = [
     canActivate: [authGuard],
     loadComponent: () => import('./features/collect/collect.component').then((m) => m.CollectComponent),
     title: 'Field Collection — Municipal GIS Platform'
+  },
+  {
+    // Platform administrators only (also enforced on every /api/admin call).
+    path: 'admin',
+    canActivate: [authGuard, platformAdminGuard],
+    loadComponent: () => import('./features/admin/admin.component').then((m) => m.AdminComponent),
+    title: 'Admin — Municipal GIS Platform'
   },
   {
     // Opens the Settings window over the map (old links keep working).

@@ -36,9 +36,6 @@ export class RasterUploadDto {
   @Length(0, 500)
   description?: string;
 
-  @IsOptional()
-  @IsUUID()
-  departmentId?: string;
 }
 
 export class PointDto {
@@ -1215,21 +1212,3 @@ export class RunWorkflowDto {
   inputLayerId?: string;
 }
 
-export class CreatePinDto {
-  @IsString()
-  @Length(1, 120)
-  title!: string;
-
-  @IsString()
-  @Length(1, 80)
-  value!: string;
-
-  @IsOptional()
-  @IsString()
-  @Length(0, 300)
-  detail?: string;
-
-  @IsOptional()
-  @IsUUID()
-  layerId?: string;
-}

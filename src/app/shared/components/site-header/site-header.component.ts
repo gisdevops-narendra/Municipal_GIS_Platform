@@ -99,6 +99,8 @@ export class SiteHeaderComponent {
     return me?.email ?? this.user()?.email ?? '';
   });
 
+  readonly isPlatformAdmin = computed(() => !!this.me()?.isPlatformAdmin);
+
   readonly initials = computed(() => {
     const source = this.displayName().replace(/@.*/, '').trim();
     const parts = source.split(/[\s._-]+/).filter(Boolean);

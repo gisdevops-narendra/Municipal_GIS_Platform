@@ -29,7 +29,6 @@ import type {
   GisExplainDto,
   GisExportDto,
   GisNarrateDto,
-  GisPinDto,
   GisIconTermsDto,
   GisSaveLayerDto,
 } from './dto/chat.dto';
@@ -841,19 +840,6 @@ export class GisAiService {
     });
   }
 
-  /** An answer as a Dashboard tile (the Dashboard's pins). */
-  async pin(appUser: AppUser, dto: GisPinDto) {
-    return this.prisma.rasterPin.create({
-      data: {
-        municipalityId: appUser.municipalityId,
-        createdById: appUser.id,
-        title: dto.title,
-        value: dto.value,
-        detail: dto.detail,
-        layerId: dto.layerId,
-      },
-    });
-  }
 
   async setConversationPinned(appUser: AppUser, id: string, pinned: boolean) {
     const { count } = await this.prisma.aiConversation.updateMany({

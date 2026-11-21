@@ -49,9 +49,11 @@ kcadm config credentials \
 # keys — kcadm silently ignores the dotted form when the map starts empty.
 kcadm update "realms/$REALM" \
   -s resetPasswordAllowed=true \
+  -s verifyEmail=true \
+  -s registrationEmailAsUsername=true \
   -s 'smtpServer={"host":"mailpit","port":"1025","from":"no-reply@municipal-gis.local","fromDisplayName":"Municipal GIS Platform","ssl":"false","starttls":"false","auth":"false"}'
 
-echo "   applied: resetPasswordAllowed=true + SMTP -> mailpit:1025"
+echo "   applied: resetPasswordAllowed=true + verifyEmail=true + email-as-username + SMTP -> mailpit:1025"
 
 # Realm Frontend URL: the public address Keycloak puts in its login links
 # and token issuer. Empty (the default) = use whatever address the browser

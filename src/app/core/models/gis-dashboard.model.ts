@@ -1,27 +1,8 @@
-/** Shape of GET /api/gis/dashboard/summary — municipality-scoped counts
- *  only, server-side permission-filtered (Task 9 §1/§13). */
-export interface GisDashboardSummary {
-  totalLayers: number;
-  publishedLayers: number;
-  draftLayers: number;
-  departments: number;
-  dataSources: number;
-}
-
-/** Shape of one entry from GET /api/gis/dashboard/departments — a
- *  department plus how many GIS layers the caller may VIEW in it. */
-export interface GisDepartmentSummary {
-  departmentId: string;
-  departmentName: string;
-  layerCount: number;
-}
-
 export interface GisSearchLayerMatch {
   id: string;
   name: string;
   code: string;
   ownershipType: 'CANONICAL' | 'DEPARTMENT';
-  departmentName: string | null;
   /** `semantic`: related by meaning ("drainage" → Storm Water Lines), not
    *  by name — found through the AI assistant's index. */
   match?: 'name' | 'semantic';

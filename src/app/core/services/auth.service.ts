@@ -114,6 +114,35 @@ export class AuthService {
     );
   }
 
+  /** The result of a Keycloak account action we started (change password
+   *  / email), captured from the callback URL in main.ts. Read once. */
+  takeActionResult(): { status: string; action: string } | null {
+    try {
+      const status = sessionStorage.getItem('kc_action_status');
+      const action = sessionStorage.getItem('kc_action') ?? '';
+      sessionStorage.removeItem('kc_action_status');
+      sessionStorage.removeItem('kc_action');
+      return status ? { status, action } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Sends the signed-in user to Keycloak's own "Update password" page
+   *  (Keycloak re-checks who they are if their sign-in is old), then back
+   *  to Settings → General. */
+  changePassword(): Promise<void> {
+    try {
+      sessionStorage.setItem('kc_action', 'UPDATE_PASSWORD');
+    } catch {
+      /* ignore */
+    }
+    return this.keycloak.login({
+      action: 'UPDATE_PASSWORD',
+      redirectUri: window.location.origin + '/settings?section=profile',
+    });
+  }
+
   /** Redirects through Keycloak's logout endpoint, clearing the Keycloak
    *  session, then returns the browser to the application. */
   logout(redirectUri: string = window.location.origin + '/'): Promise<void> {

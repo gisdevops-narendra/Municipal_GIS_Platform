@@ -106,7 +106,6 @@ export class RasterJobsService implements OnModuleInit, OnModuleDestroy {
     appUser: AppUser,
     tool: string,
     body: unknown,
-    outputDepartmentId?: string,
     onFinish?: (job: ReturnType<RasterJobsService['view']>) => void,
     resumeId?: string,
     clientTool?: string,
@@ -148,11 +147,11 @@ export class RasterJobsService implements OnModuleInit, OnModuleDestroy {
       abort: new AbortController(),
       body,
       onFinish,
-      start: () => void this.execute(job, () => def.run(this.tools, appUser, dto as never), body, outputDepartmentId),
+      start: () => void this.execute(job, () => def.run(this.tools, appUser, dto as never), body),
     };
     this.jobs.set(job.id, job);
     this.queue.push(job);
-    job.persisted = this.persist(job, outputDepartmentId);
+    job.persisted = this.persist(job);
     this.drain();
     return this.view(job);
   }
@@ -310,7 +309,6 @@ export class RasterJobsService implements OnModuleInit, OnModuleDestroy {
     job: RasterJob,
     run: () => Promise<unknown>,
     body?: unknown,
-    outputDepartmentId?: string,
   ): Promise<void> {
     const context: RasterJobContext = {
       signal: job.abort.signal,
@@ -325,7 +323,6 @@ export class RasterJobsService implements OnModuleInit, OnModuleDestroy {
         job.ceiling = ceiling ?? null;
         this.save(job);
       },
-      outputDepartmentId,
       sources: [],
       describe: () => provenance(job.tool, body, context.sources),
     };
@@ -408,7 +405,7 @@ export class RasterJobsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Saved as soon as it is queued, so a restart can resume it. */
-  private async persist(job: RasterJob, outputDepartmentId?: string): Promise<void> {
+  private async persist(job: RasterJob): Promise<void> {
     await this.prisma.rasterJobHistory
       .create({
         data: {
@@ -421,7 +418,6 @@ export class RasterJobsService implements OnModuleInit, OnModuleDestroy {
           stage: job.stage,
           progress: 0,
           clientTool: job.clientTool,
-          outputDepartmentId: outputDepartmentId ?? null,
           createdAt: job.createdAt,
         },
       })
@@ -472,11 +468,11 @@ export class RasterJobsService implements OnModuleInit, OnModuleDestroy {
       }
       const appUser: AppUser = {
         id: user.id, keycloakUserId: user.keycloakUserId, municipalityId: user.municipalityId,
-        departmentId: user.departmentId, systemRole: user.systemRole, status: user.status,
+        systemRole: user.systemRole, status: user.status,
       };
       try {
         await this.prisma.rasterJobHistory.delete({ where: { id: row.id } });
-        await this.start(appUser, row.tool, row.body, row.outputDepartmentId ?? undefined, undefined, row.id, row.clientTool ?? undefined);
+        await this.start(appUser, row.tool, row.body, undefined, row.id, row.clientTool ?? undefined);
         this.logger.log(`Resumed raster job ${row.id} (${row.tool}) after restart`);
       } catch (e) {
         this.logger.warn(`Could not resume raster job ${row.id}: ${(e as Error).message}`);

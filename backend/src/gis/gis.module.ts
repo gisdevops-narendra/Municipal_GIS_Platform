@@ -126,6 +126,9 @@ import { AirStationsService } from './air-stations.service';
   ],
   exports: [
     GisWorkspaceService,
+    GisUploadsService,
+    StorageService,
+    StorageUsageService,
     GisLayersService,
     GisAuthorizationService,
     GeoServerService,

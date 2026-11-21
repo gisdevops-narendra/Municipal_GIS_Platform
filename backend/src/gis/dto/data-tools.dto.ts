@@ -321,9 +321,6 @@ export class ReprojectLayerDto {
   @MaxLength(120)
   outputName?: string;
 
-  @IsOptional()
-  @IsUUID()
-  departmentId?: string;
 }
 
 /** POST /api/gis/layers/:id/define-crs — the coordinates are right but the

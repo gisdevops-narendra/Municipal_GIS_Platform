@@ -4,6 +4,8 @@
   "sslRequired": "external",
   "registrationAllowed": false,
   "resetPasswordAllowed": true,
+  "verifyEmail": true,
+  "registrationEmailAsUsername": true,
   "loginWithEmailAllowed": true,
   "smtpServer": {
     "host": "mailpit",

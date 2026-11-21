@@ -52,7 +52,7 @@ async function main() {
   });
   const user: AppUser = {
     id: owner.id, keycloakUserId: owner.keycloakUserId, municipalityId: owner.municipalityId,
-    departmentId: owner.departmentId, systemRole: owner.systemRole, status: owner.status,
+    systemRole: owner.systemRole, status: owner.status,
   };
   const layer = async (name: string) =>
     (await prisma.gISLayer.findFirstOrThrow({ where: { name, gisWorkspace: { municipalityId: user.municipalityId } } })).id;
@@ -289,11 +289,6 @@ async function main() {
   await check('Workspace', 'Storage summary', async () => {
     const s = await workspace.storage(user);
     return `${(s.totalBytes / 1e6).toFixed(1)} MB in ${s.layers.length} results`;
-  });
-  await check('Workspace', 'Dashboard pin create/delete', async () => {
-    const p = await workspace.createPin(user, { title: 'E2E pin', value: '42' });
-    await workspace.deletePin(user, p.id);
-    return 'ok';
   });
   await check('Workspace', 'Monitor create/pause/delete', async () => {
     const m = await monitors.create(user, { name: 'E2E monitor', kind: 'green-cover', frequency: 'monthly', params: { zonesLayerId: ids.ward, filterField: 'wardno', filterValue: '10' } });

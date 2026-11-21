@@ -259,6 +259,11 @@ services:
       # Task 7 GIS uploads — see docs/backend.md "GIS Uploads" / "File
       # storage". Configurable, never hard-coded in application code.
       GIS_UPLOAD_STORAGE_DIR: /app/storage/uploads
+      # Storage limit for each new account in MB (0 = unlimited).
+      DEFAULT_ACCOUNT_STORAGE_MB: ${DEFAULT_ACCOUNT_STORAGE_MB:-2048}
+      # Comma-separated emails that are platform admins (in addition to
+      # users flagged with backend/scripts/set-platform-admin.ts).
+      PLATFORM_ADMIN_EMAILS: ${PLATFORM_ADMIN_EMAILS:-}
       GIS_UPLOAD_MAX_FILE_SIZE_MB: ${GIS_UPLOAD_MAX_FILE_SIZE_MB:-3072}
       GIS_RASTER_MAX_FILE_SIZE_MB: ${GIS_RASTER_MAX_FILE_SIZE_MB:-8192}
       GIS_UPLOAD_MAX_EXTRACTED_ZIP_SIZE_MB: ${GIS_UPLOAD_MAX_EXTRACTED_ZIP_SIZE_MB:-102400}

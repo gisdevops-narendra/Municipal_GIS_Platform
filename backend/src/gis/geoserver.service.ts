@@ -734,6 +734,20 @@ export class GeoServerService {
     return response.text();
   }
 
+  /** Deletes a GeoServer workspace and everything in it (stores, layers,
+   *  styles). Idempotent — an already-absent workspace is success. Used
+   *  when an account is deleted. */
+  async deleteWorkspace(workspace: string): Promise<void> {
+    const response = await this.request(
+      `/rest/workspaces/${encodeURIComponent(workspace)}?recurse=true`,
+      { method: 'DELETE' },
+      60000,
+    );
+    if (!response.ok && response.status !== 404) {
+      throw await this.toError('deleting workspace', response);
+    }
+  }
+
   /** Idempotent — an already-absent style is success. */
   async deleteStyle(workspace: string, name: string): Promise<void> {
     const response = await this.request(

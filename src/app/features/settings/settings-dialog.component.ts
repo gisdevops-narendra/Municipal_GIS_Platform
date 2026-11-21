@@ -23,6 +23,7 @@ import { AboutSectionComponent } from './sections/about-section.component';
 import { HelpSectionComponent } from './sections/help-section.component';
 import { PrivacySectionComponent } from './sections/privacy-section.component';
 import { ResetSectionComponent } from './sections/reset-section.component';
+import { DeleteAccountSectionComponent } from './sections/delete-account-section.component';
 
 /**
  * Settings window — a dialog over the current page (Claude / ChatGPT style):
@@ -55,6 +56,7 @@ import { ResetSectionComponent } from './sections/reset-section.component';
     HelpSectionComponent,
     PrivacySectionComponent,
     ResetSectionComponent,
+    DeleteAccountSectionComponent,
   ],
   templateUrl: './settings-dialog.component.html',
   styleUrl: './settings-dialog.component.scss',

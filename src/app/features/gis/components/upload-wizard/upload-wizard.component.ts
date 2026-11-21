@@ -437,8 +437,6 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
       visibleByDefault: true,
       displayOrder: 1,
       ownershipType: 'DEPARTMENT',
-      departmentId: null,
-      departmentName: null,
       version: 1,
       bbox: preview.bbox
     };

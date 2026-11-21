@@ -22,6 +22,7 @@ describe('SettingsService', () => {
   it('get returns {} when the user has no row yet', async () => {
     userSetting.findUnique.mockResolvedValue(null);
     await expect(service.get('u1')).resolves.toEqual({
+      municipalityDefaults: {},
       settings: {},
       updatedAt: null,
     });

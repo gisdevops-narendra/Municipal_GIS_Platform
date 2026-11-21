@@ -33,8 +33,7 @@ export class ApiKeyOrJwtGuard implements CanActivate {
         id: user.id,
         keycloakUserId: user.keycloakUserId,
         municipalityId: user.municipalityId,
-        departmentId: user.departmentId,
-        // Roles were removed: every account owns its workspace.
+          // Roles were removed: every account owns its workspace.
         systemRole: 'MUNICIPALITY_OWNER',
         status: user.status,
       };

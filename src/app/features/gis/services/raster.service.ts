@@ -225,17 +225,7 @@ export interface RasterStorage {
   totalBytes: number;
   tempBytes: number;
   orphanBytes: number;
-  perDepartment: { department: string; bytes: number }[];
-  layers: { layerId: string | null; name: string; department: string; kind: string; bytes: number; createdAt: string | null }[];
-}
-
-export interface RasterPin {
-  id: string;
-  title: string;
-  value: string;
-  detail: string | null;
-  layerId: string | null;
-  createdAt: string;
+  layers: { layerId: string | null; name: string; kind: string; bytes: number; createdAt: string | null }[];
 }
 
 /** A tool that published its output as a new layer. */
@@ -282,11 +272,10 @@ export class RasterService {
   private readonly baseUrl = `${environment.apiUrl}/gis/raster`;
 
   /** Emits HttpEvents so the panel can show upload progress. */
-  upload(file: File, name: string, departmentId: string | null, description?: string): Observable<HttpEvent<GisLayer>> {
+  upload(file: File, name: string, description?: string): Observable<HttpEvent<GisLayer>> {
     const form = new FormData();
     form.append('file', file);
     form.append('name', name);
-    if (departmentId) form.append('departmentId', departmentId);
     if (description) form.append('description', description);
     return this.http.post<GisLayer>(`${this.baseUrl}/upload`, form, { reportProgress: true, observe: 'events' });
   }
@@ -362,10 +351,9 @@ export class RasterService {
   }
 
   /** Background job for a layer-producing tool (same body as `run`). */
-  /** `departmentId`: the owner's choice of department for the output. */
   /** `ui`: the panel tool starting it, so a reloaded panel can reattach. */
-  startJob<T = LayerResult>(tool: string, body: Record<string, unknown>, departmentId?: string | null, ui?: string): Observable<RasterJob<T>> {
-    const params: Record<string, string> = { ...(departmentId ? { departmentId } : {}), ...(ui ? { ui } : {}) };
+  startJob<T = LayerResult>(tool: string, body: Record<string, unknown>, ui?: string): Observable<RasterJob<T>> {
+    const params: Record<string, string> = ui ? { ui } : {};
     return this.http.post<RasterJob<T>>(`${this.baseUrl}/jobs/${tool}`, body, { params });
   }
 
@@ -395,18 +383,6 @@ export class RasterService {
 
   cleanupStorage(): Observable<{ removed: number; freedBytes: number }> {
     return this.http.post<{ removed: number; freedBytes: number }>(`${this.baseUrl}/storage/cleanup`, {});
-  }
-
-  pins(): Observable<RasterPin[]> {
-    return this.http.get<RasterPin[]>(`${this.baseUrl}/pins`);
-  }
-
-  createPin(body: { title: string; value: string; detail?: string; layerId?: string }): Observable<RasterPin> {
-    return this.http.post<RasterPin>(`${this.baseUrl}/pins`, body);
-  }
-
-  deletePin(id: string): Observable<void> {
-    return this.http.delete<void>(`${this.baseUrl}/pins/${id}`);
   }
 
   monitors(): Observable<RasterMonitor[]> {

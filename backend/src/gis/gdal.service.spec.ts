@@ -67,6 +67,7 @@ describe('GdalService', () => {
         driverShortName: 'GeoJSON',
         layerName: 'test',
         geometryType: 'Point',
+        hasCrs: true,
         featureCount: 3,
         fields: [{ name: 'name', type: 'String' }],
         epsgCode: 4326,

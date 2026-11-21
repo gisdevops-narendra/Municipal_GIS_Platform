@@ -9,7 +9,6 @@ const OWNER: AppUser = {
   id: 'owner-1',
   keycloakUserId: 'kc-owner',
   municipalityId: 'muni-a',
-  departmentId: null,
   systemRole: 'MUNICIPALITY_OWNER',
   status: 'ACTIVE',
 };

@@ -16,12 +16,6 @@ import { LegendSwatchComponent } from '../layer-legend/legend-swatch.component';
 import { LayerLegendComponent } from '../layer-legend/layer-legend.component';
 import { RenderFormatInfo, formatInfo, formatsFor, recommendedFormat } from '../../services/render-formats';
 
-export interface LayerPanelDepartmentGroup {
-  departmentId: string;
-  departmentName: string;
-  layers: GisLayer[];
-}
-
 /**
  * Displays the toggleable layer list (Task 6 §12), grouped into
  * "Canonical Layers" (CANONICAL — the Task 6 demo layers plus anything the

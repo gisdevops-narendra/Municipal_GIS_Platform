@@ -31,11 +31,6 @@ enum UserStatus {
   DISABLED
 }
 
-enum DepartmentStatus {
-  ACTIVE
-  INACTIVE
-}
-
 /// PROVISIONING: DB row created, GeoServer workspace/datastore not yet
 /// confirmed. ACTIVE: GeoServer workspace + PostGIS datastore confirmed
 /// present. PROVISIONING_FAILED: GeoServer was unreachable or rejected the
@@ -138,18 +133,6 @@ enum SystemRole {
   DEPARTMENT_USER
 }
 
-/// Task 8 layer-level permissions. Deliberately does NOT include a
-/// FEATURE_EDIT-style permission — there is no feature editing anywhere
-/// in this platform yet.
-enum GisPermission {
-  VIEW
-  UPLOAD
-  APPROVE
-  PUBLISH
-  EXPORT
-  MANAGE
-}
-
 enum GisFeatureAction {
   INSERT
   UPDATE
@@ -177,7 +160,6 @@ model Municipality {
   updatedAt     DateTime           @updatedAt @map("updated_at")
 
   users        User[]
-  departments  Department[]
   gisWorkspace GISWorkspace?
   uploads      GISLayerUpload[]
   shareLinks   GISShareLink[]
@@ -262,9 +244,6 @@ model GISLayer {
   createdAt          DateTime         @default(now()) @map("created_at")
   updatedAt          DateTime         @updatedAt @map("updated_at")
 
-  /// Task 7. Null + ownershipType=CANONICAL for the Task 6 demo layers and
-  /// any municipality-wide layer. Required when ownershipType=DEPARTMENT.
-  departmentId   String?               @map("department_id")
   ownershipType  GisLayerOwnershipType @default(CANONICAL) @map("ownership_type")
   /// Task 7. Physical PostGIS table backing an uploaded layer, e.g.
   /// "layer_a1b2c3d4e5f6..." — application-generated, never derived from
@@ -306,9 +285,7 @@ model GISLayer {
   fieldRules     Json?                 @map("field_rules")
 
   gisWorkspace GISWorkspace         @relation(fields: [gisWorkspaceId], references: [id])
-  department   Department?          @relation(fields: [departmentId], references: [id])
   uploads      GISLayerUpload[]
-  permissions  GISLayerPermission[]
   history      GISFeatureHistory[]
   attachments  GISFeatureAttachment[]
   snapshots    GISLayerSnapshot[]
@@ -317,48 +294,8 @@ model GISLayer {
   // per-municipality uniqueness pattern) — not globally, since every
   // municipality independently gets its own MUNICIPAL_BOUNDARY/WARDS/ROADS.
   @@unique([gisWorkspaceId, code])
-  @@index([departmentId])
   @@map("gis_layers")
   wellReadings GISWellReading[]
-}
-
-/// Task 8. Grants one (role, department) pair a permission on one layer.
-/// This is deliberately how BOTH "default access" and "cross-department
-/// access" (Task 8 §4/§5) are represented — there is no separate concept
-/// of a default: a DEPARTMENT layer's owning department's Head/User
-/// permissions are seeded here as ordinary rows the moment the layer is
-/// first published (see GisAuthorizationService.ensureDefaultPermissions),
-/// which is exactly what makes them editable/revocable by the Owner
-/// (§4: "these are defaults only... Owner must be able to configure
-/// permissions"). A cross-department grant (§5, e.g. "Roads User may VIEW
-/// Water Pipeline") is just another row with `departmentId` set to the
-/// *grantee* department, which may differ from the layer's own owning
-/// department.
-///
-/// `role` intentionally reuses SystemRole rather than introducing a
-/// separate Role entity — this platform has no Role table, only the
-/// SystemRole enum on User, and Task 8 explicitly says to reuse what
-/// exists rather than build new RBAC infrastructure. MUNICIPALITY_OWNER
-/// is never actually stored here: the Owner's access is unconditional and
-/// enforced in code (GisAuthorizationService), never via a row — see
-/// docs/backend.md "GIS Layer Permissions".
-model GISLayerPermission {
-  id           String        @id @default(uuid())
-  gisLayerId   String        @map("gis_layer_id")
-  departmentId String        @map("department_id")
-  role         SystemRole
-  permission   GisPermission
-  createdAt    DateTime      @default(now()) @map("created_at")
-  updatedAt    DateTime      @updatedAt @map("updated_at")
-
-  gisLayer   GISLayer   @relation(fields: [gisLayerId], references: [id], onDelete: Cascade)
-  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
-
-  // Prevents duplicate layer + role(+department) + permission combinations
-  // — Task 8 §3.
-  @@unique([gisLayerId, departmentId, role, permission])
-  @@index([departmentId])
-  @@map("gis_layer_permissions")
 }
 
 /// Task 7. One row per uploaded file, tracking it through
@@ -397,7 +334,6 @@ model GISLayerUpload {
   /// to GISLayer.routingEnabled on publish if the data is LINE geometry.
   routingEnabled Boolean @default(false) @map("routing_enabled")
   description   String?
-  departmentId  String?               @map("department_id")
   ownershipType GisLayerOwnershipType @default(DEPARTMENT) @map("ownership_type")
 
   /// CRS detected from the source file (or the user-supplied override for
@@ -448,43 +384,10 @@ model GISLayerUpload {
 
   municipality Municipality @relation(fields: [municipalityId], references: [id])
   gisWorkspace GISWorkspace @relation(fields: [gisWorkspaceId], references: [id])
-  department   Department?  @relation(fields: [departmentId], references: [id])
   layer        GISLayer?    @relation(fields: [layerId], references: [id])
 
   @@index([municipalityId, status])
-  @@index([departmentId])
   @@map("gis_layer_uploads")
-}
-
-model Department {
-  id             String           @id @default(uuid())
-  municipalityId String           @map("municipality_id")
-  name           String
-  code           String
-  description    String?
-  status         DepartmentStatus @default(ACTIVE)
-  /// Storage limit for this department's GIS data, in MB (null = none).
-  storageQuotaMb Int?             @map("storage_quota_mb")
-  /// User.id of the MUNICIPALITY_OWNER who created this department. Plain
-  /// audit field, not a Prisma relation — see docs/backend.md "Audit" for
-  /// why a full audit log is deferred.
-  createdById    String?          @map("created_by")
-  createdAt      DateTime         @default(now()) @map("created_at")
-  updatedAt      DateTime         @updatedAt @map("updated_at")
-
-  municipality Municipality            @relation(fields: [municipalityId], references: [id])
-  users        User[]
-  layers       GISLayer[]
-  uploads      GISLayerUpload[]
-  permissions  GISLayerPermission[]
-  moduleGrants DepartmentModuleGrant[]
-
-  // Enforced at the database level, not just in application code: a
-  // department name/code must be unique within its municipality, but the
-  // same name/code may be reused across different municipalities.
-  @@unique([municipalityId, name])
-  @@unique([municipalityId, code])
-  @@map("departments")
 }
 
 model User {
@@ -494,11 +397,11 @@ model User {
   email          String     @unique
   mobileNumber   String     @map("mobile_number")
   municipalityId String     @map("municipality_id")
-  /// Nullable: the MUNICIPALITY_OWNER created during registration belongs
-  /// to no department. MUNICIPALITY_USER accounts are normally assigned
-  /// one at creation time.
-  departmentId   String?    @map("department_id")
   systemRole     SystemRole @default(MUNICIPALITY_OWNER) @map("system_role")
+  /// Platform administrator: sees all accounts, the audit log, and sets
+  /// account storage limits / disables accounts. Granted with
+  /// scripts/set-platform-admin.ts (or PLATFORM_ADMIN_EMAILS).
+  isPlatformAdmin Boolean   @default(false) @map("is_platform_admin")
   status         UserStatus @default(ACTIVE)
   /// User.id of the MUNICIPALITY_OWNER who created this user (self-registered
   /// owners have no creator). Plain audit field, not a Prisma relation.
@@ -507,9 +410,7 @@ model User {
   updatedAt      DateTime   @updatedAt @map("updated_at")
 
   municipality Municipality      @relation(fields: [municipalityId], references: [id])
-  department   Department?       @relation(fields: [departmentId], references: [id])
   setting      UserSetting?
-  moduleGrants UserModuleGrant[]
 
   @@map("users")
 }
@@ -537,95 +438,6 @@ model MunicipalitySetting {
   updatedAt      DateTime @updatedAt @map("updated_at")
 
   @@map("municipality_settings")
-}
-
-/// Module Access (hierarchical feature-module RBAC). Global reference
-/// catalog of every application module/tool (Pan, Measure, Basemap,
-/// Export to CSV, ...), shared across every municipality — not
-/// tenant-scoped, the same way an enum wouldn't be. Bulk-seeded once (see
-/// prisma/seed-modules.ts) from the client-supplied module list; a
-/// Municipality Owner can also add further rows one at a time via
-/// POST /api/module-access/catalog (ModuleAccessService.createModule) —
-/// `id` is `@default(autoincrement())` precisely so that path never has
-/// to pick an id itself. The seed script keeps using its own explicit
-/// ids (upsert by id), which is safe: the autoincrement sequence is
-/// seeded to start after the highest id already in use (see the
-/// `module_autoincrement` migration).
-///
-/// `parentId`/`nodePath` encode the hierarchy (`nodePath` is the
-/// authoritative source — dot-separated ancestor chain, e.g. "226.227"
-/// for "Export to csv" under "Export Data"; ModuleAccessService walks it
-/// rather than recursing through `parentId`, since a handful of seed rows
-/// have a `parentId` with no corresponding row — e.g. id 33's parent 0 —
-/// while `nodePath` stays reliable). `parentId` is therefore a plain
-/// field, not a Prisma relation, mirroring this schema's existing
-/// plain-audit-field convention (see GISLayer.sourceUploadId) — a
-/// dangling parent must never block reading the module itself.
-///
-/// `defaultModule: true` means every user gets it regardless of any
-/// grant (Pan/Zoom/Basemap/Measure/...) — ModuleAccessService always
-/// includes these (and their ancestors) in every resolved module set.
-model Module {
-  id              Int      @id @default(autoincrement()) @map("module_id")
-  name            String   @map("module_name")
-  isActive        Boolean  @default(true) @map("isactive")
-  parentId        Int?     @map("module_parent_id")
-  nodePath        String?  @map("node_path")
-  subModule       String?  @map("sub_module")
-  defaultModule   Boolean? @map("default_module")
-  displayPriority Int?     @map("display_priority")
-  type            String?
-
-  departmentGrants DepartmentModuleGrant[]
-  userGrants       UserModuleGrant[]
-
-  @@map("modules")
-}
-
-/// Municipality Owner → Department module grants (Task: hierarchical
-/// module assignment). What a Department (and therefore its Head) has
-/// access to beyond the always-on default modules. Explicit rows only —
-/// ancestor modules implied by `Module.nodePath` are resolved at read
-/// time (ModuleAccessService.resolveModuleIds), never materialized here,
-/// so a later edit to the hierarchy never leaves stale ancestor rows
-/// behind.
-model DepartmentModuleGrant {
-  id           String   @id @default(uuid())
-  departmentId String   @map("department_id")
-  moduleId     Int      @map("module_id")
-  /// User.id of the MUNICIPALITY_OWNER who granted this — plain audit
-  /// field, not a relation, matching Department.createdById.
-  grantedById  String?  @map("granted_by")
-  createdAt    DateTime @default(now()) @map("created_at")
-
-  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
-  module     Module     @relation(fields: [moduleId], references: [id], onDelete: Cascade)
-
-  @@unique([departmentId, moduleId])
-  @@map("department_module_grants")
-}
-
-/// Department Head → Department User module grants. Deliberately a
-/// separate table from DepartmentModuleGrant rather than a shared
-/// "grant" table with a polymorphic target — a User's grants are
-/// validated against (must be a subset of) their own department's
-/// resolved module set on every write, which is a fundamentally
-/// different rule than what governs a Department's own grants (see
-/// ModuleAccessService.setUserGrants) and is clearer as its own model.
-model UserModuleGrant {
-  id          String   @id @default(uuid())
-  userId      String   @map("user_id")
-  moduleId    Int      @map("module_id")
-  /// User.id of whoever granted this (the Owner or the user's own
-  /// Department Head) — plain audit field, not a relation.
-  grantedById String?  @map("granted_by")
-  createdAt   DateTime @default(now()) @map("created_at")
-
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  module Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, moduleId])
-  @@map("user_module_grants")
 }
 
 /// Raster Analysis → Automatic Monitoring: a Green Cover or Encroachment
@@ -684,8 +496,6 @@ model RasterJobHistory {
   summary        String?
   layerId        String?   @map("layer_id")
   layerName      String?   @map("layer_name")
-  /// Owner's chosen output department — needed to resume after a restart.
-  outputDepartmentId String? @map("output_department_id")
   createdAt      DateTime  @map("created_at")
   /// Null while the job is queued / running.
   finishedAt     DateTime? @map("finished_at")
@@ -706,21 +516,6 @@ model RasterJobHistory {
 
   @@index([userId, createdAt])
   @@map("raster_job_history")
-}
-
-/// Raster Analysis → Dashboard Pins: a result number shown on the Dashboard.
-model RasterPin {
-  id             String   @id @default(uuid())
-  municipalityId String   @map("municipality_id")
-  createdById    String   @map("created_by")
-  title          String
-  value          String
-  detail         String?
-  layerId        String?  @map("layer_id")
-  createdAt      DateTime @default(now()) @map("created_at")
-
-  @@index([municipalityId])
-  @@map("raster_pins")
 }
 
 /// Feature Editing audit trail: one row per insert / update / delete made
@@ -956,4 +751,28 @@ model GISAqiSnapshot {
   @@id([station, hour])
   @@index([city, hour])
   @@map("gis_aqi_snapshots")
+}
+
+/// Platform audit trail: who did what, when (sign-ups, account changes,
+/// layer publish/delete, admin actions). Keyed by `account_id` — NOT
+/// `municipality_id` — on purpose: account deletion purges every
+/// `municipality_id` table, but the trail (including the deletion itself)
+/// must survive. Read by platform admins only.
+model AuditLog {
+  id          String   @id @default(uuid())
+  createdAt   DateTime @default(now()) @map("created_at")
+  actorUserId String?  @map("actor_user_id")
+  actorEmail  String?  @map("actor_email")
+  /// The account (tenant) the action concerns.
+  accountId   String?  @map("account_id")
+  action      String
+  targetType  String?  @map("target_type")
+  targetId    String?  @map("target_id")
+  details     Json?
+  ip          String?
+
+  @@index([createdAt])
+  @@index([accountId, createdAt])
+  @@index([action])
+  @@map("audit_logs")
 }

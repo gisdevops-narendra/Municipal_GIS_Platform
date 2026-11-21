@@ -32,7 +32,6 @@ export class CatalogService {
     if (!workspace) return [];
     const all = await this.prisma.gISLayer.findMany({
       where: { gisWorkspaceId: workspace.id },
-      include: { department: { select: { name: true } } },
       orderBy: { name: 'asc' },
     });
     const layers = await this.gisAuth.filterViewable(appUser, all);
@@ -61,7 +60,6 @@ export class CatalogService {
       layerType: l.layerType,
       geometryType: l.geometryType,
       status: l.status,
-      department: l.department?.name ?? null,
       ownershipType: l.ownershipType,
       featureCount: l.postgisTable ? rows.get(l.postgisTable) ?? null : null,
       bbox:

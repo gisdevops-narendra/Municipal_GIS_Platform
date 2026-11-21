@@ -6,26 +6,11 @@ import { AiClientService } from '../gis-ai/ai-client.service';
 import { FuzzySearchService } from './fuzzy-search.service';
 import type { AppUser } from '../auth/types/app-user.type';
 
-export interface DashboardSummary {
-  totalLayers: number;
-  publishedLayers: number;
-  draftLayers: number;
-  departments: number;
-  dataSources: number;
-}
-
-export interface DepartmentSummaryEntry {
-  departmentId: string;
-  departmentName: string;
-  layerCount: number;
-}
-
 export interface SearchLayerMatch {
   id: string;
   name: string;
   code: string;
   ownershipType: string;
-  departmentName: string | null;
   /** `name`: the query is in the layer name/code. `semantic`: the layer is
    *  about the query by meaning ("drainage" → storm_water_lines), found
    *  through the AI service's embedding index. */
@@ -71,7 +56,7 @@ const MAX_LAYER_MATCHES = 15;
 
 /**
  * Task 9: view/analysis endpoints only — dashboard summary counts,
- * per-department layer counts, and a lightweight cross-layer search.
+ * a lightweight cross-layer search for the map.
  * Every number and every row here is scoped through the same
  * GisAuthorizationService used everywhere else (Task 9 §13: "Dashboard
  * must only show authorized information"), and every query is scoped by
@@ -94,142 +79,7 @@ export class GisDashboardService {
     private readonly fuzzySearch: FuzzySearchService,
   ) {}
 
-  /**
-   * publishedLayers: layers the caller may VIEW (a layer only ever exists
-   * as a GISLayer row once it has actually been published — Task 7).
-   * draftLayers: the caller's own visible in-flight uploads (DRAFT/
-   * IN_REVIEW/APPROVED — not yet published, not failed/rejected), using
-   * the exact same visibility rule as GET /api/gis/uploads (own upload,
-   * own department, or Owner sees all). totalLayers is the sum, matching
-   * the worked example in Task 9 §1 (24 = 18 + 6). dataSources counts
-   * every upload that successfully produced at least a validated draft —
-   * i.e. every distinct file that has actually contributed GIS data,
-   * published or not.
-   */
-  async getSummary(appUser: AppUser): Promise<DashboardSummary> {
-    const workspace = await this.prisma.gISWorkspace.findUnique({
-      where: { municipalityId: appUser.municipalityId },
-      select: { id: true },
-    });
-    if (!workspace) {
-      return {
-        totalLayers: 0,
-        publishedLayers: 0,
-        draftLayers: 0,
-        departments: 0,
-        dataSources: 0,
-      };
-    }
 
-    const allLayers = await this.prisma.gISLayer.findMany({
-      where: { gisWorkspaceId: workspace.id, status: 'ACTIVE' },
-      select: { id: true, ownershipType: true, departmentId: true },
-    });
-    const viewableLayers = await this.gisAuth.filterViewable(
-      appUser,
-      allLayers,
-    );
-
-    const uploadVisibilityWhere =
-      appUser.systemRole === 'MUNICIPALITY_OWNER'
-        ? { municipalityId: appUser.municipalityId }
-        : {
-            municipalityId: appUser.municipalityId,
-            OR: [
-              { uploadedById: appUser.id },
-              ...(appUser.departmentId
-                ? [{ departmentId: appUser.departmentId }]
-                : []),
-            ],
-          };
-
-    const [draftLayers, dataSources, departments] = await Promise.all([
-      this.prisma.gISLayerUpload.count({
-        where: {
-          ...uploadVisibilityWhere,
-          status: { in: ['DRAFT', 'IN_REVIEW', 'APPROVED'] },
-        },
-      }),
-      this.prisma.gISLayerUpload.count({
-        where: {
-          ...uploadVisibilityWhere,
-          status: { notIn: ['UPLOAD_PENDING', 'VALIDATING', 'FAILED'] },
-        },
-      }),
-      this.prisma.department.count({
-        where: this.visibleDepartmentsWhere(appUser),
-      }),
-    ]);
-
-    return {
-      totalLayers: viewableLayers.length + draftLayers,
-      publishedLayers: viewableLayers.length,
-      draftLayers,
-      departments,
-      dataSources,
-    };
-  }
-
-  /** Task 9 §2: every active department the caller may see, with a
-   *  VIEW-authorized layer count each (0 for a department the caller has
-   *  no visible layers in). MUNICIPALITY_OWNER sees every department;
-   *  a DEPARTMENT_HEAD/DEPARTMENT_USER only ever sees their own — same
-   *  department-scoped visibility as GET /api/departments, since these
-   *  rows carry other departments' names, which a non-Owner must never
-   *  see (see DepartmentsService.list). */
-  async getDepartmentSummary(
-    appUser: AppUser,
-  ): Promise<DepartmentSummaryEntry[]> {
-    if (
-      appUser.systemRole !== 'MUNICIPALITY_OWNER' &&
-      !appUser.departmentId
-    ) {
-      return [];
-    }
-
-    const departments = await this.prisma.department.findMany({
-      where: this.visibleDepartmentsWhere(appUser),
-      select: { id: true, name: true },
-      orderBy: { name: 'asc' },
-    });
-
-    const workspace = await this.prisma.gISWorkspace.findUnique({
-      where: { municipalityId: appUser.municipalityId },
-      select: { id: true },
-    });
-    if (!workspace) {
-      return departments.map((d) => ({
-        departmentId: d.id,
-        departmentName: d.name,
-        layerCount: 0,
-      }));
-    }
-
-    const departmentLayers = await this.prisma.gISLayer.findMany({
-      where: {
-        gisWorkspaceId: workspace.id,
-        status: 'ACTIVE',
-        ownershipType: 'DEPARTMENT',
-        departmentId: { in: departments.map((d) => d.id) },
-      },
-      select: { id: true, ownershipType: true, departmentId: true },
-    });
-    const viewable = await this.gisAuth.filterViewable(
-      appUser,
-      departmentLayers,
-    );
-    const countsByDepartment = new Map<string, number>();
-    for (const layer of viewable) {
-      const key = layer.departmentId!;
-      countsByDepartment.set(key, (countsByDepartment.get(key) ?? 0) + 1);
-    }
-
-    return departments.map((d) => ({
-      departmentId: d.id,
-      departmentName: d.name,
-      layerCount: countsByDepartment.get(d.id) ?? 0,
-    }));
-  }
 
   /**
    * Task 9 §5: a deliberately simple search — layer name/code matching is
@@ -258,7 +108,6 @@ export class GisDashboardService {
 
     const allLayers = await this.prisma.gISLayer.findMany({
       where: { gisWorkspaceId: workspace.id, status: 'ACTIVE' },
-      include: { department: { select: { id: true, name: true } } },
       orderBy: { displayOrder: 'asc' },
     });
     const viewable = await this.gisAuth.filterViewable(appUser, allLayers);
@@ -272,7 +121,6 @@ export class GisDashboardService {
       name: l.name,
       code: l.code,
       ownershipType: l.ownershipType,
-      departmentName: l.department?.name ?? null,
       match,
       ...(matchedField !== undefined && { matchedField }),
     });
@@ -319,19 +167,6 @@ export class GisDashboardService {
       ...featureResults.flat(),
     ].slice(0, MAX_FEATURE_MATCHES_RETURNED);
     return { layers: layerMatches, features };
-  }
-
-  /** Active departments the caller may see — all of them for the Owner,
-   *  only their own for anyone else (same rule as DepartmentsService.list);
-   *  `in: []` matches nothing for a non-Owner with no department. */
-  private visibleDepartmentsWhere(appUser: AppUser) {
-    return {
-      municipalityId: appUser.municipalityId,
-      status: 'ACTIVE' as const,
-      ...(appUser.systemRole !== 'MUNICIPALITY_OWNER' && {
-        id: appUser.departmentId ?? { in: [] },
-      }),
-    };
   }
 
   /** A layer's text attributes (cached briefly; failures are not cached). */

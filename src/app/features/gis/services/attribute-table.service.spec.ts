@@ -18,8 +18,6 @@ const LAYER: GisLayer = {
   visibleByDefault: true,
   displayOrder: 0,
   ownershipType: 'CANONICAL',
-  departmentId: null,
-  departmentName: null,
   version: 1,
   bbox: null
 };

@@ -1016,7 +1016,7 @@ export class DataToolsService {
       throw new ForbiddenException('You do not have permission to copy features out of this layer.');
     }
     const name = dto.outputName?.trim() || `${source.layer.name} (${target.code})`;
-    const output = await this.raster.prepareVectorOutput(appUser, name, dto.departmentId);
+    const output = await this.raster.prepareVectorOutput(appUser, name);
     const cols = (await this.vectorTools.columns(source.table)).map((c) => `a.${q(c.name)}`);
     const typmod = await this.geomTypmod(source.table, target.srid);
     await this.prisma

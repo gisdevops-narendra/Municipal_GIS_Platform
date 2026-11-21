@@ -166,20 +166,6 @@ export class UpdateLayerMetadataDto {
   notes?: string;
 }
 
-export class StorageLimitsDto {
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(10_000_000)
-  municipalityQuotaMb?: number | null;
-
-  @IsOptional()
-  @IsArray()
-  @ArrayMaxSize(500)
-  @IsObject({ each: true })
-  departments?: { id: string; quotaMb: number | null }[];
-}
-
 /** POST /gis/osm-import — OpenStreetMap features in a box as a new layer. */
 export class OsmImportDto {
   @IsString()
@@ -209,9 +195,6 @@ export class OsmImportDto {
   @IsNumber({}, { each: true })
   bbox!: number[];
 
-  @IsOptional()
-  @IsUUID()
-  departmentId?: string;
 }
 
 // ----- Groundwater -----

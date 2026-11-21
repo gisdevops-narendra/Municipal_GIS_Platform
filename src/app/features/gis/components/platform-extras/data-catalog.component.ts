@@ -26,7 +26,6 @@ interface CatalogEntry {
   layerType: 'VECTOR' | 'RASTER';
   geometryType: 'POINT' | 'LINE' | 'POLYGON' | null;
   status: string;
-  department: string | null;
   ownershipType: string;
   featureCount: number | null;
   bbox: [number, number, number, number] | null;
@@ -65,7 +64,7 @@ const FREQUENCIES = [
 
         <div>
           <div class="px__item-title" style="font-size: 15px; white-space: normal">{{ e.name }}</div>
-          <span class="px__item-sub">{{ typeLabel(e) }}@if (e.department) { · {{ e.department }} }</span>
+          <span class="px__item-sub">{{ typeLabel(e) }}</span>
         </div>
 
         @if (!editing()) {
@@ -213,7 +212,7 @@ export class DataCatalogComponent {
       if (type === 'RASTER' ? e.layerType !== 'RASTER' : type && e.geometryType !== type) return false;
       if (!q) return true;
       const m = e.metadata;
-      return [e.name, e.description, e.code, e.department, m.source, m.licence, m.contact, m.notes, ...(m.keywords ?? [])]
+      return [e.name, e.description, e.code, m.source, m.licence, m.contact, m.notes, ...(m.keywords ?? [])]
         .filter(Boolean)
         .some((t) => String(t).toLowerCase().includes(q));
     });

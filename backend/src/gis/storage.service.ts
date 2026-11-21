@@ -353,6 +353,12 @@ export class StorageService {
     ]);
   }
 
+  /** Removes every file stored for one account's workspace (account
+   *  deletion). Best-effort, idempotent. */
+  async deleteTenantFiles(municipalityId: string): Promise<void> {
+    await fsp.rm(this.tenantPath(municipalityId), { recursive: true, force: true });
+  }
+
   private tenantPath(municipalityId: string, ...segments: string[]): string {
     // municipalityId is always a server-derived UUID (AppUser.municipalityId
     // from the JWT-resolved user) — never client input — but validated

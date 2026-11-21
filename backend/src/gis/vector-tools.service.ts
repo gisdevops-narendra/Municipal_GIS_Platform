@@ -301,7 +301,7 @@ export class VectorToolsService {
       throw new BadRequestException('The clip / erase layer must be a polygon layer.');
     }
 
-    const output = await this.raster.prepareVectorOutput(appUser, dto.outputName, dto.departmentId);
+    const output = await this.raster.prepareVectorOutput(appUser, dto.outputName);
     const srid = this.workspaceSrid(output.workspace.defaultCrs);
     const { select, geometryType, description } = await this.buildGeoprocessSql(dto, a, b, srid);
 
@@ -349,7 +349,7 @@ export class VectorToolsService {
     ).length;
     if (!keys) throw new BadRequestException('This layer has no feature key, so a selection cannot be saved from it.');
 
-    const output = await this.raster.prepareVectorOutput(appUser, dto.name, dto.departmentId);
+    const output = await this.raster.prepareVectorOutput(appUser, dto.name);
     const srid = this.workspaceSrid(output.workspace.defaultCrs);
     const ga = await this.geomIn('a', a.table, srid);
     const cols = this.outputColumns(await this.columns(a.table), 'a', '', new Set(['geom', 'ogc_fid']));

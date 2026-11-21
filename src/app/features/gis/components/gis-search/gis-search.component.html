@@ -41,7 +41,7 @@
                     <span class="gis-search__related" [title]="match.matchedField ? 'Related by meaning, via its field ' + match.matchedField : 'Related by meaning'">Related</span>
                   }
                 </span>
-                <span class="gis-search__result-meta">{{ match.departmentName ?? 'Canonical' }}</span>
+                <span class="gis-search__result-meta">{{ match.match === 'semantic' ? 'Related' : 'Layer' }}</span>
               </button>
             }
           </div>

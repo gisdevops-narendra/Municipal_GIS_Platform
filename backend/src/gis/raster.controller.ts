@@ -18,7 +18,6 @@ import { RasterToolsService } from './raster-tools.service';
 import {
   ChangeDetectionDto,
   CreateMonitorDto,
-  CreatePinDto,
   CreateWorkflowDto,
   RunWorkflowDto,
   MonitorActiveDto,
@@ -147,26 +146,6 @@ export class RasterController {
     return this.workspace.cleanup(appUser);
   }
 
-  /** Dashboard pins are read by every member (the Dashboard shows them). */
-  @RequireRasterModule(ANY_RASTER_MODULE)
-  @Get('pins')
-  listPins(@CurrentAppUser() appUser: AppUser) {
-    return this.workspace.listPins(appUser);
-  }
-
-  @RequireRasterModule([RASTER_MODULES.dashboardPins])
-  @Post('pins')
-  createPin(@CurrentAppUser() appUser: AppUser, @Body() dto: CreatePinDto) {
-    return this.workspace.createPin(appUser, dto);
-  }
-
-  @RequireRasterModule([RASTER_MODULES.dashboardPins])
-  @Delete('pins/:id')
-  @HttpCode(204)
-  async deletePin(@CurrentAppUser() appUser: AppUser, @Param('id', ParseUUIDPipe) id: string) {
-    await this.workspace.deletePin(appUser, id);
-  }
-
   // ----- Automatic Monitoring -----
 
   @RequireRasterModule([RASTER_MODULES.monitoring])
@@ -218,12 +197,11 @@ export class RasterController {
     @CurrentAppUser() appUser: AppUser,
     @Param('tool') tool: string,
     @Body() body: Record<string, unknown>,
-    @Query('departmentId', new ParseUUIDPipe({ optional: true })) departmentId?: string,
     /** The panel tool that started it, for reattaching after a reload. */
     @Query('ui') clientTool?: string,
   ) {
     const ui = clientTool && /^[a-z0-9-]{1,40}$/.test(clientTool) ? clientTool : 'panel';
-    return this.jobs.start(appUser, tool, body, departmentId, undefined, undefined, ui);
+    return this.jobs.start(appUser, tool, body, undefined, undefined, ui);
   }
 
   @RequireRasterModule(ANY_RASTER_MODULE)

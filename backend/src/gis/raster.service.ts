@@ -148,7 +148,7 @@ export class RasterService {
   async upload(
     appUser: AppUser,
     file: { path: string; size: number; originalname: string } | undefined,
-    dto: { name: string; description?: string; departmentId?: string },
+    dto: { name: string; description?: string },
   ) {
     if (!file?.path || !file.size) {
       if (file?.path) await fsp.rm(file.path, { force: true });
@@ -156,11 +156,7 @@ export class RasterService {
     }
     const source = file.path;
     try {
-      await this.storageUsage?.assertCanStore(
-        appUser.municipalityId,
-        appUser.systemRole === 'MUNICIPALITY_OWNER' ? dto.departmentId : appUser.departmentId,
-        file.size,
-      );
+      await this.storageUsage?.assertCanStore(appUser.municipalityId, file.size);
       if (!RASTER_EXTENSIONS.test(file.originalname)) {
         throw new BadRequestException('Only GeoTIFF rasters (.tif / .tiff) are supported.');
       }
@@ -179,7 +175,6 @@ export class RasterService {
       return await this.createRasterLayer(appUser, {
         name: dto.name,
         description: dto.description,
-        departmentId: dto.departmentId,
         sourcePath: input,
       });
     } finally {
@@ -411,12 +406,11 @@ export class RasterService {
       name: string;
       sourcePath: string;
       description?: string;
-      departmentId?: string;
       style?: RasterStyleSpec;
     },
   ) {
     const job = rasterJobContext.getStore();
-    const owner = this.outputOwnership(appUser, params.departmentId ?? job?.outputDepartmentId);
+    const owner = this.outputOwnership(appUser);
     const { workspace, code } = await this.newLayerCode(appUser, params.name);
     job?.setStage('Optimising and publishing the layer', false);
     const id = randomUUID();
@@ -450,7 +444,6 @@ export class RasterService {
           rasterAnalysis: true,
           geoserverWorkspace: workspace.geoserverWorkspace,
           geoserverLayer,
-          departmentId: owner.departmentId,
           ownershipType: owner.ownershipType,
           version: 1,
           visibleByDefault: true,
@@ -462,9 +455,6 @@ export class RasterService {
           createdById: appUser.id,
         },
       });
-      if (owner.ownershipType === 'DEPARTMENT' && owner.departmentId) {
-        await this.gisAuth.ensureDefaultPermissions(layer.id, owner.departmentId);
-      }
       const style = params.style ?? (await this.defaultStyle(file));
       await this.writeStyle(layer, style).catch((error: Error) =>
         this.logger.warn(`Raster ${layer.id} published without its style: ${error.message}`),
@@ -506,7 +496,7 @@ export class RasterService {
     params: { name: string; sourcePath: string; geometryType: GisGeometryType; description?: string },
   ) {
     const job = rasterJobContext.getStore();
-    const output = await this.prepareVectorOutput(appUser, params.name, job?.outputDepartmentId);
+    const output = await this.prepareVectorOutput(appUser, params.name);
     job?.setStage('Importing and publishing the layer', false);
     await this.gdal.importToPostgis({
       sourcePath: params.sourcePath,
@@ -530,9 +520,9 @@ export class RasterService {
 
   /** Ownership check + a free layer code + a fresh table name for a new
    *  vector layer — call before writing the table (Geoprocessing too). */
-  async prepareVectorOutput(appUser: AppUser, name: string, departmentId?: string) {
-    const owner = this.outputOwnership(appUser, departmentId);
-    await this.storageUsage?.assertCanStore(appUser.municipalityId, owner.departmentId);
+  async prepareVectorOutput(appUser: AppUser, name: string) {
+    const owner = this.outputOwnership(appUser);
+    await this.storageUsage?.assertCanStore(appUser.municipalityId);
     const { workspace, code } = await this.newLayerCode(appUser, name);
     return { owner, workspace, code, table: generateLayerTableName() };
   }
@@ -576,7 +566,6 @@ export class RasterService {
           geoserverWorkspace: workspace.geoserverWorkspace,
           geoserverLayer,
           geometryType: params.geometryType,
-          departmentId: owner.departmentId,
           ownershipType: owner.ownershipType,
           postgisTable: table,
           version: 1,
@@ -589,9 +578,6 @@ export class RasterService {
           createdById: appUser.id,
         },
       });
-      if (owner.ownershipType === 'DEPARTMENT' && owner.departmentId) {
-        await this.gisAuth.ensureDefaultPermissions(layer.id, owner.departmentId);
-      }
       return this.gisLayers.getById(appUser, layer.id);
     } catch (error) {
       await this.prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS "${table}"`).catch(() => undefined);
@@ -651,24 +637,12 @@ export class RasterService {
     };
   }
 
-  /** Who owns a new layer: the owner may pick a department (or none =
-   *  municipality-wide); everyone else writes into their own department and
-   *  needs its UPLOAD permission. */
-  private outputOwnership(appUser: AppUser, departmentId?: string) {
-    if (appUser.systemRole === 'MUNICIPALITY_OWNER') {
-      return departmentId
-        ? { ownershipType: 'DEPARTMENT' as const, departmentId }
-        : { ownershipType: 'CANONICAL' as const, departmentId: null };
-    }
-    const own = appUser.departmentId;
-    if (
-      !own ||
-      (departmentId && departmentId !== own) ||
-      !this.gisAuth.getDefaultPermissions(appUser, 'DEPARTMENT', own).has('UPLOAD')
-    ) {
+  /** New layers always belong to the caller's own account. */
+  private outputOwnership(appUser: AppUser) {
+    if (!this.gisAuth.getDefaultPermissions(appUser).has('UPLOAD')) {
       throw new ForbiddenException('You do not have permission to create GIS layers.');
     }
-    return { ownershipType: 'DEPARTMENT' as const, departmentId: own };
+    return { ownershipType: 'CANONICAL' as const };
   }
 
   private async newLayerCode(appUser: AppUser, name: string) {

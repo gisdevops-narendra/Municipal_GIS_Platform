@@ -13,12 +13,12 @@ import { NetworkService } from './network.service';
 import { IntegrationsService } from './integrations.service';
 import { StorageUsageService } from './storage-usage.service';
 import { UploadSchemaService } from './upload-schema.service';
+import { AuditService } from '../audit/audit.service';
 import type { ApplyUploadSchemaDto } from './dto/upload-schema.dto';
 import * as path from 'path';
 import {
   GISLayerUpload,
   GisGeometryType,
-  GisPermission,
   GisUploadStatus,
   Prisma,
 } from '@prisma/client';
@@ -32,7 +32,7 @@ import {
   UploadTooLargeError,
 } from './storage.service';
 import { GeoServerService, PostgisConnectionParams } from './geoserver.service';
-import { GisAuthorizationService } from './gis-authorization.service';
+import { GisAuthorizationService, type GisPermission } from './gis-authorization.service';
 import { StyleService, type UploadedIcon } from './style.service';
 import { FieldStatsService } from './field-stats.service';
 import { CreateUploadDto } from './dto/create-upload.dto';
@@ -121,6 +121,7 @@ export class GisUploadsService {
     @Optional() private readonly network?: NetworkService,
     @Optional() private readonly crs?: CrsService,
     @Optional() private readonly gisLayers?: GisLayersService,
+    @Optional() private readonly audit?: AuditService,
   ) {}
 
   async create(
@@ -128,9 +129,8 @@ export class GisUploadsService {
     dto: CreateUploadDto,
     file: Express.Multer.File,
   ) {
-    // No departments: every upload is an account-wide layer.
+    // Every upload is an account-wide layer.
     dto.ownershipType = 'CANONICAL';
-    dto.departmentId = undefined;
     const workspace = await this.prisma.gISWorkspace.findUnique({
       where: { municipalityId: appUser.municipalityId },
     });
@@ -140,22 +140,7 @@ export class GisUploadsService {
       );
     }
 
-    await this.storageUsage?.assertCanStore(
-      appUser.municipalityId,
-      dto.departmentId ?? (appUser.systemRole === 'MUNICIPALITY_OWNER' ? null : appUser.departmentId),
-      file.size,
-    );
-
-    if (dto.departmentId) {
-      const department = await this.prisma.department.findFirst({
-        where: { id: dto.departmentId, municipalityId: appUser.municipalityId },
-      });
-      if (!department) {
-        // Never confirms whether the id exists in another municipality —
-        // see Task 7 §41.
-        throw new NotFoundException('Department not found.');
-      }
-    }
+    await this.storageUsage?.assertCanStore(appUser.municipalityId, file.size);
 
     const layerCode = deriveLayerCode(dto.layerName);
     await this.assertCanUpload(appUser, dto, workspace.id, layerCode);
@@ -191,7 +176,6 @@ export class GisUploadsService {
         layerName: dto.layerName.trim(),
         layerCode,
         description: dto.description?.trim() || null,
-        departmentId: null,
         ownershipType: 'CANONICAL',
         routingEnabled: dto.routingEnabled === true,
         sourceCrs: dto.sourceCrs ?? null,
@@ -255,18 +239,7 @@ export class GisUploadsService {
   }
 
   async list(appUser: AppUser, page: number, pageSize: number) {
-    const where: Prisma.GISLayerUploadWhereInput =
-      appUser.systemRole === 'MUNICIPALITY_OWNER'
-        ? { municipalityId: appUser.municipalityId }
-        : {
-            municipalityId: appUser.municipalityId,
-            OR: [
-              { uploadedById: appUser.id },
-              ...(appUser.departmentId
-                ? [{ departmentId: appUser.departmentId }]
-                : []),
-            ],
-          };
+    const where: Prisma.GISLayerUploadWhereInput = { municipalityId: appUser.municipalityId };
 
     const [total, uploads] = await this.prisma.$transaction([
       this.prisma.gISLayerUpload.count({ where }),
@@ -275,7 +248,6 @@ export class GisUploadsService {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: { department: { select: { id: true, name: true } } },
       }),
     ]);
 
@@ -712,7 +684,6 @@ export class GisUploadsService {
                 geoserverWorkspace: workspace.geoserverWorkspace,
                 geoserverLayer: geoserverLayerName,
                 geometryType: upload.geometryType,
-                departmentId: upload.departmentId,
                 ownershipType: upload.ownershipType,
                 routingEnabled,
                 postgisTable: upload.postgisTable!,
@@ -746,22 +717,15 @@ export class GisUploadsService {
         layerName: savedLayer.name,
         replaced: !!existingLayer,
       });
+      this.audit?.record({
+        action: existingLayer ? 'layer.updated' : 'layer.published',
+        actorUserId: appUser.id,
+        accountId: appUser.municipalityId,
+        targetType: 'layer',
+        targetId: savedLayer.id,
+        details: { name: savedLayer.name, file: upload.originalFilename, features: upload.featureCount },
+      });
 
-      // Task 8: a brand-new DEPARTMENT layer's owning department gets its
-      // §4 default permissions seeded as real, editable rows the moment
-      // it first exists — see GisAuthorizationService.ensureDefaultPermissions.
-      // Not needed when replacing an existing layer (already has rows,
-      // possibly customized by the Owner since — never overwritten here).
-      if (
-        !existingLayer &&
-        upload.ownershipType === 'DEPARTMENT' &&
-        upload.departmentId
-      ) {
-        await this.gisAuth.ensureDefaultPermissions(
-          savedLayer.id,
-          upload.departmentId,
-        );
-      }
 
       // GIS Layer Styling: carry the style the user configured in the
       // wizard's Preview step onto the real layer. Best-effort — a style
@@ -1003,6 +967,14 @@ export class GisUploadsService {
           validationSummary: summary as unknown as Prisma.InputJsonValue,
         },
       });
+      this.audit?.record({
+        action: 'upload.failed',
+        actorUserId: upload.uploadedById,
+        accountId: upload.municipalityId,
+        targetType: 'upload',
+        targetId: upload.id,
+        details: { file: upload.originalFilename, error: message.slice(0, 300) },
+      });
     }
   }
 
@@ -1165,69 +1137,22 @@ export class GisUploadsService {
     if (existingLayer) {
       return this.gisAuth.getPermissions(appUser, existingLayer);
     }
-    return this.gisAuth.getDefaultPermissions(
-      appUser,
-      upload.ownershipType,
-      upload.departmentId,
-    );
+    return this.gisAuth.getDefaultPermissions(appUser);
   }
 
+  /** Uploading into the caller's own account (an existing layer code
+   *  replaces that layer with a new version). */
   private async assertCanUpload(
     appUser: AppUser,
-    dto: CreateUploadDto,
+    _dto: CreateUploadDto,
     gisWorkspaceId: string,
     layerCode: string,
   ): Promise<void> {
-    if (dto.ownershipType === 'CANONICAL') {
-      if (appUser.systemRole !== 'MUNICIPALITY_OWNER') {
-        throw new ForbiddenException(
-          'Only the municipality owner may create canonical layers.',
-        );
-      }
-      if (dto.departmentId) {
-        throw new BadRequestException(
-          'Canonical layers must not have a department.',
-        );
-      }
-      return;
-    }
-
-    if (!dto.departmentId) {
-      throw new BadRequestException(
-        'departmentId is required for department layers.',
-      );
-    }
-    if (appUser.systemRole === 'MUNICIPALITY_OWNER') {
-      return;
-    }
-
     const existingLayer = await this.prisma.gISLayer.findUnique({
       where: { gisWorkspaceId_code: { gisWorkspaceId, code: layerCode } },
     });
-
-    if (existingLayer) {
-      const canUpload = await this.gisAuth.canUpload(appUser, existingLayer);
-      if (!canUpload) {
-        throw new ForbiddenException(
-          'You do not have permission to upload to this layer.',
-        );
-      }
-      return;
-    }
-
-    if (appUser.departmentId !== dto.departmentId) {
-      throw new ForbiddenException(
-        'You may only upload to your own department.',
-      );
-    }
-    if (
-      !this.gisAuth
-        .getDefaultPermissions(appUser, 'DEPARTMENT', dto.departmentId)
-        .has('UPLOAD')
-    ) {
-      throw new ForbiddenException(
-        'You do not have permission to upload GIS data.',
-      );
+    if (!(await this.gisAuth.canUpload(appUser, existingLayer ?? undefined))) {
+      throw new ForbiddenException('You do not have permission to upload GIS data.');
     }
   }
 
@@ -1250,13 +1175,6 @@ export class GisUploadsService {
       where: { id: uploadId, municipalityId: appUser.municipalityId },
     });
     if (!upload) {
-      throw new NotFoundException('Upload not found.');
-    }
-    if (
-      appUser.systemRole !== 'MUNICIPALITY_OWNER' &&
-      upload.uploadedById !== appUser.id &&
-      upload.departmentId !== appUser.departmentId
-    ) {
       throw new NotFoundException('Upload not found.');
     }
     return upload;
@@ -1398,9 +1316,7 @@ export class GisUploadsService {
   }
 
   private toResponse(
-    upload: GISLayerUpload & {
-      department?: { id: string; name: string } | null;
-    },
+    upload: GISLayerUpload,
   ) {
     return {
       id: upload.id,
@@ -1413,8 +1329,6 @@ export class GisUploadsService {
         code: upload.layerCode,
         description: upload.description,
         ownershipType: upload.ownershipType,
-        departmentId: upload.departmentId,
-        departmentName: upload.department?.name ?? null,
         routingEnabled: upload.routingEnabled,
       },
       validation: {

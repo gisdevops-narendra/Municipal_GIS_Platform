@@ -750,7 +750,7 @@ export class GisWorkspaceComponent {
       error: () => this.geoserverReachable.set(false)
     });
 
-    // The workspace is kept alive across navigation, so `?layer=` / `?department=`
+    // The workspace is kept alive across navigation, so `?layer=`
     // deep links (from the dashboard) arrive on re-navigation, not just at
     // construction — react to every change, not a one-shot snapshot read.
     this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe(() => this.tryApplyDeepLink());
@@ -1435,9 +1435,8 @@ export class GisWorkspaceComponent {
 
     const params = this.route.snapshot.queryParamMap;
     const layerId = params.get('layer');
-    const departmentId = params.get('department');
 
-    const key = `${layerId ?? ''}|${departmentId ?? ''}`;
+    const key = layerId ?? '';
     if (key === this.lastDeepLinkKey) {
       return;
     }
@@ -1458,14 +1457,6 @@ export class GisWorkspaceComponent {
         this.highlightLayerId.set(layer.id);
       }
       return;
-    }
-
-    if (departmentId) {
-      const matches = this.layers().filter((candidate) => candidate.departmentId === departmentId);
-      for (const layer of matches) {
-        this.mapService.setLayerVisibility(layer.id, true);
-      }
-      this.mapService.zoomToLayers(matches);
     }
   }
 

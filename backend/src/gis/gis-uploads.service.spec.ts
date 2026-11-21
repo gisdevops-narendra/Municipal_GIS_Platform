@@ -15,33 +15,16 @@ const OWNER: AppUser = {
   id: 'owner-1',
   keycloakUserId: 'kc-owner',
   municipalityId: 'muni-a',
-  departmentId: null,
   systemRole: 'MUNICIPALITY_OWNER',
   status: 'ACTIVE',
 };
 
-const STAFF_ELECTRICAL: AppUser = {
-  id: 'staff-1',
-  keycloakUserId: 'kc-staff',
-  municipalityId: 'muni-a',
-  departmentId: 'dept-electrical',
-  systemRole: 'DEPARTMENT_USER',
-  status: 'ACTIVE',
-};
-
-const STAFF_OTHER_DEPT: AppUser = {
-  id: 'staff-2',
-  keycloakUserId: 'kc-staff-2',
-  municipalityId: 'muni-a',
-  departmentId: 'dept-water',
-  systemRole: 'DEPARTMENT_USER',
-  status: 'ACTIVE',
-};
+/** A disabled account: may not upload (canUpload → false). */
+const DISABLED: AppUser = { ...OWNER, id: 'owner-2', status: 'DISABLED' };
 
 function buildService() {
   const prisma = {
     gISWorkspace: { findUnique: jest.fn(), findUniqueOrThrow: jest.fn() },
-    department: { findFirst: jest.fn() },
     gISLayerUpload: {
       create: jest.fn(),
       update: jest.fn(),
@@ -78,7 +61,6 @@ function buildService() {
     canUpload: jest.fn().mockResolvedValue(true),
     getPermissions: jest.fn().mockResolvedValue(new Set(ALL_PERMISSIONS)),
     getDefaultPermissions: jest.fn().mockReturnValue(new Set(ALL_PERMISSIONS)),
-    ensureDefaultPermissions: jest.fn().mockResolvedValue(undefined),
   };
 
   const service = new GisUploadsService(
@@ -97,8 +79,9 @@ function buildService() {
 
 describe('GisUploadsService — authorization', () => {
   describe('create() upload rules', () => {
-    it('rejects a MUNICIPALITY_USER creating a CANONICAL layer', async () => {
-      const { service, prisma } = buildService();
+    it('rejects an upload from an account without upload permission', async () => {
+      const { service, prisma, gisAuth } = buildService();
+      gisAuth.canUpload.mockResolvedValue(false);
       prisma.gISWorkspace.findUnique.mockResolvedValue({
         id: 'ws-a',
         status: 'ACTIVE',
@@ -107,7 +90,7 @@ describe('GisUploadsService — authorization', () => {
 
       await expect(
         service.create(
-          STAFF_ELECTRICAL,
+          DISABLED,
           { layerName: 'Boundary', ownershipType: 'CANONICAL' } as never,
           {
             originalname: 'a.geojson',
@@ -152,7 +135,6 @@ describe('GisUploadsService — authorization', () => {
         ),
       ).resolves.toBeDefined();
 
-      expect(prisma.department.findFirst).not.toHaveBeenCalled();
     });
 
     it('rejects CSV X/Y columns with no sourceCrs before ever touching GDAL', async () => {
@@ -197,54 +179,14 @@ describe('GisUploadsService — authorization', () => {
       );
     });
 
-    it("404s for a same-municipality upload outside the caller's own uploads/department (non-owner)", async () => {
+    it("shows any upload of the caller's own account, whoever uploaded it", async () => {
       const { service, prisma } = buildService();
       prisma.gISLayerUpload.findFirst.mockResolvedValue({
         id: 'up-1',
         uploadedById: 'someone-else',
-        departmentId: 'dept-water',
-      });
-
-      await expect(
-        service.getById('up-1', STAFF_ELECTRICAL),
-      ).rejects.toBeInstanceOf(NotFoundException);
-    });
-
-    it("allows a MUNICIPALITY_USER to view another department member's upload in their own department", async () => {
-      const { service, prisma } = buildService();
-      prisma.gISLayerUpload.findFirst.mockResolvedValue({
-        id: 'up-1',
-        uploadedById: 'someone-else',
-        departmentId: 'dept-electrical',
-      });
-
-      await expect(
-        service.getById('up-1', STAFF_ELECTRICAL),
-      ).resolves.toBeDefined();
-    });
-
-    it('the owner may view any upload in the municipality regardless of department', async () => {
-      const { service, prisma } = buildService();
-      prisma.gISLayerUpload.findFirst.mockResolvedValue({
-        id: 'up-1',
-        uploadedById: 'someone-else',
-        departmentId: 'dept-water',
       });
 
       await expect(service.getById('up-1', OWNER)).resolves.toBeDefined();
-    });
-
-    it('a MUNICIPALITY_USER from a different department cannot view it', async () => {
-      const { service, prisma } = buildService();
-      prisma.gISLayerUpload.findFirst.mockResolvedValue({
-        id: 'up-1',
-        uploadedById: 'someone-else',
-        departmentId: 'dept-electrical',
-      });
-
-      await expect(
-        service.getById('up-1', STAFF_OTHER_DEPT),
-      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 
@@ -255,7 +197,6 @@ describe('GisUploadsService — authorization', () => {
         id: 'up-2',
         municipalityId: 'muni-a',
         uploadedById: OWNER.id,
-        departmentId: null,
         status: 'APPROVED',
         postgisTable: 'layer_a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1',
         layerCode: 'ROADS',
@@ -320,7 +261,6 @@ describe('GisUploadsService — authorization', () => {
         id: 'up-3',
         municipalityId: 'muni-a',
         uploadedById: OWNER.id,
-        departmentId: null,
         status: 'APPROVED',
         postgisTable: 'layer_a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1',
         layerCode: 'ROADS',
@@ -366,7 +306,6 @@ describe('GisUploadsService — authorization', () => {
         id: 'up-4',
         municipalityId: 'muni-a',
         uploadedById: OWNER.id,
-        departmentId: null,
         status: 'APPROVED',
         postgisTable: 'layer_a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1',
         layerCode: 'ROADS',

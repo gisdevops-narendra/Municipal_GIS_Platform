@@ -7,8 +7,9 @@ import {
   Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { GISLayer, GISWorkspace, GisPermission, Prisma } from '@prisma/client';
+import { GISLayer, GISWorkspace, Prisma } from '@prisma/client';
 import { UploadSchemaService } from './upload-schema.service';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiClientService } from '../gis-ai/ai-client.service';
 import { GeoServerService } from './geoserver.service';
@@ -29,9 +30,6 @@ import { CrsService } from './crs.service';
 import { TileArchiveService, type ArchiveSource } from './tile-archive.service';
 import { RENDER_MODES_BY_TYPE, type RenderMode } from './dto/render-mode.dto';
 
-type LayerWithDepartment = GISLayer & {
-  department?: { id: string; name: string } | null;
-};
 
 /** Download formats for GET /api/gis/layers/:id/export. GeoJSON keeps its
  *  own code path; the rest are GeoServer WFS `outputFormat`s. KML is
@@ -141,6 +139,7 @@ export class GisLayersService {
     @Optional() private readonly ai?: AiClientService,
     @Optional() private readonly crs?: CrsService,
     @Optional() private readonly uploadSchema?: UploadSchemaService,
+    @Optional() private readonly audit?: AuditService,
     @Optional() private readonly tileArchive?: TileArchiveService,
   ) {
     // A raster archive holds the styled rendering: restyle -> rebuild.
@@ -265,7 +264,6 @@ export class GisLayersService {
     const layers = await this.prisma.gISLayer.findMany({
       where: { gisWorkspaceId: workspace.id, status: 'ACTIVE' },
       orderBy: { displayOrder: 'asc' },
-      include: { department: { select: { id: true, name: true } } },
     });
 
     const viewable = await this.gisAuth.filterViewable(appUser, layers);
@@ -402,97 +400,7 @@ export class GisLayersService {
     }
   }
 
-  /** Task 8 §7: every department that currently has at least one grant on
-   *  this layer, plus the full department list (for granting a
-   *  department that has none yet) — gated by MANAGE ("Layer
-   *  administration"), same as setPermission. */
-  async getPermissionMatrix(appUser: AppUser, layerId: string) {
-    const layer = await this.findLayerInMunicipality(
-      appUser.municipalityId,
-      layerId,
-    );
-    if (!(await this.gisAuth.canManage(appUser, layer))) {
-      throw new ForbiddenException(
-        'You do not have permission to manage this layer.',
-      );
-    }
 
-    const [grants, departments] = await Promise.all([
-      this.gisAuth.listGrants(layer.id),
-      this.prisma.department.findMany({
-        where: { municipalityId: appUser.municipalityId, status: 'ACTIVE' },
-        select: { id: true, name: true },
-        orderBy: { name: 'asc' },
-      }),
-    ]);
-
-    const byDepartment = new Map<
-      string,
-      {
-        departmentId: string;
-        departmentName: string;
-        grants: Record<string, GisPermission[]>;
-      }
-    >();
-    for (const grant of grants) {
-      const entry = byDepartment.get(grant.departmentId) ?? {
-        departmentId: grant.departmentId,
-        departmentName: grant.department.name,
-        grants: { DEPARTMENT_HEAD: [], DEPARTMENT_USER: [] },
-      };
-      entry.grants[grant.role] = [
-        ...(entry.grants[grant.role] ?? []),
-        grant.permission,
-      ];
-      byDepartment.set(grant.departmentId, entry);
-    }
-
-    return {
-      layer: this.toResponse(layer, appUser.municipalityId),
-      departments,
-      grants: [...byDepartment.values()],
-    };
-  }
-
-  /** Owner-only in practice (default permissions never give MANAGE to
-   *  anyone else — see GisAuthorizationService), enforced by canManage
-   *  here, with GisAuthorizationService.setGrant additionally refusing to
-   *  let an actor change the row governing their own (role, department)
-   *  pair (§7: "never allow a user to grant themselves permissions"). */
-  async setPermission(
-    appUser: AppUser,
-    layerId: string,
-    departmentId: string,
-    role: 'DEPARTMENT_HEAD' | 'DEPARTMENT_USER',
-    permission: GisPermission,
-    granted: boolean,
-  ) {
-    const layer = await this.findLayerInMunicipality(
-      appUser.municipalityId,
-      layerId,
-    );
-    if (!(await this.gisAuth.canManage(appUser, layer))) {
-      throw new ForbiddenException(
-        'You do not have permission to manage this layer.',
-      );
-    }
-    const department = await this.prisma.department.findFirst({
-      where: { id: departmentId, municipalityId: appUser.municipalityId },
-      select: { id: true },
-    });
-    if (!department) {
-      throw new NotFoundException('Department not found.');
-    }
-    await this.gisAuth.setGrant(
-      appUser,
-      layer.id,
-      departmentId,
-      role,
-      permission,
-      granted,
-    );
-    return this.getPermissionMatrix(appUser, layerId);
-  }
 
   /**
    * Hard-deletes a layer and everything that only exists because of it:
@@ -661,6 +569,14 @@ export class GisLayersService {
       appUser.municipalityId,
       layerId,
     );
+    this.audit?.record({
+      action: 'layer.deleted',
+      actorUserId: appUser.id,
+      accountId: appUser.municipalityId,
+      targetType: 'layer',
+      targetId: layer.id,
+      details: { name: layer.name },
+    });
 
     // Read the upload history now: deleting the GISLayer row nulls
     // gis_layer_uploads.layer_id via the FK, so this must happen first.
@@ -791,7 +707,6 @@ export class GisLayersService {
     }
     const layer = await this.prisma.gISLayer.findFirst({
       where: { id: layerId, gisWorkspaceId: workspace.id, status: 'ACTIVE' },
-      include: { department: { select: { id: true, name: true } } },
     });
     if (!layer) {
       throw new NotFoundException('Layer not found.');
@@ -799,7 +714,7 @@ export class GisLayersService {
     return layer;
   }
 
-  private toResponse(layer: LayerWithDepartment, municipalityId: string) {
+  private toResponse(layer: GISLayer, municipalityId: string) {
     return {
       id: layer.id,
       name: layer.name,
@@ -812,8 +727,6 @@ export class GisLayersService {
       visibleByDefault: layer.visibleByDefault,
       displayOrder: layer.displayOrder,
       ownershipType: layer.ownershipType,
-      departmentId: layer.departmentId,
-      departmentName: layer.department?.name ?? null,
       version: layer.version,
       styleName: layer.styleName,
       hasCustomStyle: !!layer.styleName,

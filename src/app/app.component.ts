@@ -10,6 +10,7 @@ import { SessionService } from './core/services/session.service';
 import { ShortcutService } from './core/services/shortcut.service';
 import { ThemeService } from './core/theme/theme.service';
 import { SettingsDialogService } from './core/services/settings-dialog.service';
+import { NotificationService } from './core/services/notification.service';
 import { SettingsDialogComponent } from './features/settings/settings-dialog.component';
 
 /**
@@ -44,6 +45,17 @@ export class AppComponent {
   constructor() {
     this.session.start();
     this.shortcuts.start();
+
+    // Back from Keycloak's change-password page (result kept by main.ts).
+    const notify = inject(NotificationService);
+    const result = this.auth.takeActionResult();
+    if (result?.action === 'UPDATE_PASSWORD') {
+      // The toast host is deferred — let it mount first.
+      setTimeout(() => {
+        if (result.status === 'success') notify.success('Your password has been changed.');
+        else if (result.status === 'error') notify.error('Your password could not be changed. Please try again.');
+      }, 1500);
+    }
 
     effect(() => {
       if (this.auth.isAuthenticated()) {

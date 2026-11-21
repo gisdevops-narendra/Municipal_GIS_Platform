@@ -154,7 +154,7 @@ export class OsmImportService {
     const tagColumns = [...new Map(preset.columns.filter((t) => TAG_KEY.test(t)).map((t) => [columnOf(t), t])).entries()].filter(
       ([col]) => !['osm_id', 'osm_type', 'tags', 'geom', 'ogc_fid'].includes(col),
     );
-    const output = await this.raster.prepareVectorOutput(appUser, dto.name, dto.departmentId);
+    const output = await this.raster.prepareVectorOutput(appUser, dto.name);
     const table = output.table;
     const multi = { POINT: 'MultiPoint', LINE: 'MultiLineString', POLYGON: 'MultiPolygon' }[dto.geometryType];
     const dim = { POINT: 1, LINE: 2, POLYGON: 3 }[dto.geometryType];

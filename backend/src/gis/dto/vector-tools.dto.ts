@@ -118,10 +118,6 @@ export class GeoprocessDto {
   @MaxLength(120)
   outputName!: string;
 
-  /** Owner only: publish the result as this department's layer. */
-  @IsOptional()
-  @IsUUID()
-  departmentId?: string;
 
   /** buffer: metres. */
   @IsOptional()

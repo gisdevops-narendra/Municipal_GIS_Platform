@@ -4,7 +4,6 @@ import {
   IsIn,
   IsOptional,
   IsString,
-  IsUUID,
   Matches,
   MaxLength,
   MinLength,
@@ -30,9 +29,6 @@ export class CreateUploadDto {
   @MaxLength(500)
   description?: string;
 
-  @IsOptional()
-  @IsUUID()
-  departmentId?: string;
 
   /** Departments were removed — every layer belongs to the account's
    *  workspace. Accepted for old clients, always stored as CANONICAL. */

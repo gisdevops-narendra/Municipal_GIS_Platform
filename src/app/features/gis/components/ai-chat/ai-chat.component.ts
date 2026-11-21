@@ -674,29 +674,6 @@ export class AiChatComponent {
     });
   }
 
-  pinToDashboard(index: number): void {
-    const msg = this.messages()[index];
-    const question = this.messages()[index - 1]?.content ?? 'AI answer';
-    const r = msg?.response;
-    if (!r || this.busyIndex() !== null) return;
-    const value = r.result
-      ? `${this.num(r.result.matched)} ${r.result.matched === 1 ? 'feature' : 'features'}`
-      : (r.answer ?? this.mainText(msg)).slice(0, 120);
-    this.busyIndex.set(index);
-    this.aiService
-      .pinToDashboard({ title: question.slice(0, 200), value, detail: this.mainText(msg).slice(0, 1000), layerId: r.result?.layerId })
-      .subscribe({
-        next: () => {
-          this.busyIndex.set(null);
-          this.notify.success('Pinned to the Dashboard.');
-        },
-        error: () => {
-          this.busyIndex.set(null);
-          this.notify.error('Could not pin this answer.');
-        },
-      });
-  }
-
   /** Bar width (%) of an aggregate row relative to the largest value. */
   barWidth(response: GisChatResponse, value: number | null): number {
     const max = Math.max(0, ...(response.aggregate?.rows ?? []).map((r) => r.value ?? 0));

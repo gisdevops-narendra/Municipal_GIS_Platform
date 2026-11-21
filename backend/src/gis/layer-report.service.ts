@@ -102,12 +102,6 @@ export class LayerReportService {
       generatedAt,
       details: [
         ['Layer', layer.name],
-        [
-          'Ownership',
-          layer.ownershipType === 'CANONICAL'
-            ? 'Municipality-wide (canonical)'
-            : `Department — ${layer.department?.name ?? '—'}`,
-        ],
         ['Geometry', layer.geometryType ?? '—'],
         ['Scope', scope.label],
         [

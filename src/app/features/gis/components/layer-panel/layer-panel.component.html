@@ -1,7 +1,7 @@
 <div class="layer-panel">
 
   <!-- One row template for every group, so they cannot drift apart. -->
-  <ng-template #row let-layer let-showDepartment="showDepartment">
+  <ng-template #row let-layer>
     <li class="layer-panel__item" [class.layer-panel__item--highlight]="layer.id === highlightLayerId">
       <button
         type="button"
@@ -44,9 +44,6 @@
       } @else {
         <label [for]="'layer-' + layer.id" class="layer-panel__label" [title]="layer.description || layer.name">
           {{ layer.name }}
-          @if (showDepartment && layer.departmentName) {
-            <span class="layer-panel__tag">{{ layer.departmentName }}</span>
-          }
         </label>
       }
       <!-- Zoom stays one click away; everything else lives in the More menu. -->
@@ -144,7 +141,7 @@
         <h3 class="layer-panel__group-title">Drawn Layers</h3>
         <ul class="layer-panel__list">
           @for (layer of drawnLayers; track layer.id) {
-            <ng-container *ngTemplateOutlet="row; context: { $implicit: layer, showDepartment: true }" />
+            <ng-container *ngTemplateOutlet="row; context: { $implicit: layer }" />
           }
         </ul>
       </div>
@@ -155,7 +152,7 @@
         <h3 class="layer-panel__group-title">AI Assistant</h3>
         <ul class="layer-panel__list">
           @for (layer of aiLayers; track layer.id) {
-            <ng-container *ngTemplateOutlet="row; context: { $implicit: layer, showDepartment: true }" />
+            <ng-container *ngTemplateOutlet="row; context: { $implicit: layer }" />
           }
         </ul>
       </div>
@@ -166,7 +163,7 @@
         <h3 class="layer-panel__group-title">Raster Analysis</h3>
         <ul class="layer-panel__list">
           @for (layer of rasterAnalysisLayers; track layer.id) {
-            <ng-container *ngTemplateOutlet="row; context: { $implicit: layer, showDepartment: true }" />
+            <ng-container *ngTemplateOutlet="row; context: { $implicit: layer }" />
           }
         </ul>
       </div>

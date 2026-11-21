@@ -146,7 +146,6 @@ export class RasterMonitorService implements OnModuleInit, OnModuleDestroy {
       id: user.id,
       keycloakUserId: user.keycloakUserId,
       municipalityId: user.municipalityId,
-      departmentId: user.departmentId,
       systemRole: user.systemRole,
       status: user.status,
     };
@@ -156,7 +155,7 @@ export class RasterMonitorService implements OnModuleInit, OnModuleDestroy {
       data: { lastStatus: 'running', lastRunAt: now, nextRunAt: next },
     });
     try {
-      await this.jobs.start(appUser, kind, this.body(kind, monitor.params as Record<string, unknown>, now), undefined, (job) =>
+      await this.jobs.start(appUser, kind, this.body(kind, monitor.params as Record<string, unknown>, now), (job) =>
         void this.finished(monitor, job.status, job.result, job.error),
       );
     } catch (error) {

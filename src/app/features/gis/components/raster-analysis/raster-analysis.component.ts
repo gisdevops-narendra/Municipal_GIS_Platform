@@ -111,7 +111,7 @@ export const RASTER_TOOLS: ToolDef[] = [
   { id: 'workflows', label: 'Saved Workflows', group: 'Workspace', section: 'Automation', moduleId: 991, icon: 'pi pi-sitemap', description: 'Chain tools you ran (e.g. DEM → Fill Sinks → Streams) and re-run them in one click.' },
   { id: 'history', label: 'Job History', group: 'Workspace', section: 'Automation', moduleId: 992, icon: 'pi pi-history', description: 'Every past run with its settings — open the result or run it again.' },
   { id: 'timeslider', label: 'Time Slider', group: 'Workspace', section: 'Viewing', moduleId: 993, icon: 'pi pi-play', description: 'Animate a series of rasters (e.g. NDVI by month, built-up by year).' },
-  { id: 'storage', label: 'Storage Manager', group: 'Workspace', section: 'Admin', moduleId: 994, icon: 'pi pi-server', description: 'Disk used by raster results per department; clean temporary files.' },
+  { id: 'storage', label: 'Storage Manager', group: 'Workspace', section: 'Admin', moduleId: 994, icon: 'pi pi-server', description: 'Disk used by raster results; clean temporary files.' },
   { id: 'swipe', label: 'Swipe / Compare', group: 'Imagery Analysis', section: 'Compare', moduleId: 951, icon: 'pi pi-arrows-h', description: 'Slide between two layers to compare them.' },
   { id: 'change', label: 'Change Detection', group: 'Imagery Analysis', section: 'Compare', moduleId: 953, icon: 'pi pi-sync', description: 'Difference between two dates of a continuous raster.' },
   { id: 'changematrix', label: 'Land-cover Change Matrix', group: 'Imagery Analysis', section: 'Compare', moduleId: 959, icon: 'pi pi-table', description: 'From → to areas between two classified rasters (e.g. cropland → built-up).' },
@@ -350,7 +350,6 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
   // ----- tool parameters -----
   uploadFile: File | null = null;
   uploadName = '';
-  uploadDepartmentId: string | null = null;
 
   styleMode: 'ramp' | 'rgb' | 'values' = 'ramp';
   styleClasses: { value: number; color: string; label: string }[] = [];
@@ -538,7 +537,6 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
   readonly sliderIndex = signal(0);
   readonly playing = signal(false);
   private playTimer: ReturnType<typeof setInterval> | null = null;
-  readonly pinnedLabels = signal<Set<string>>(new Set());
 
   // terrain / imagery extras
   ruggedKind: 'roughness' | 'TRI' | 'TPI' = 'TRI';
@@ -561,7 +559,6 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
   classCount = 6;
 
   // usability: output department, reclass breaks, calculator, compare, 3D
-  outputDepartmentId: string | null = null;
   breakMethod: 'equal' | 'quantile' | 'jenks' = 'jenks';
   breakCount = 5;
   readonly recipes = CALC_RECIPES;
@@ -1342,21 +1339,6 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
       () => this.message.set(kind === 'link' ? `Link to "${layer.name}" copied — it opens the map on this layer (sign-in required).` : 'Image URL copied (PNG of the whole layer).'),
       () => this.message.set(text)
     );
-  }
-
-  /** Dashboard Pins: show this result number on the Dashboard. */
-  pinFact(f: { label: string; value: string }): void {
-    const toolLabel = RASTER_TOOLS.find((t) => t.id === this.tool())?.label ?? 'Raster Analysis';
-    const layer = this.layersSignal().find((l) => l.id === this.layerId() || l.id === this.vectorLayerId());
-    this.api
-      .createPin({ title: `${toolLabel} · ${f.label}`.slice(0, 120), value: f.value.slice(0, 80), detail: layer ? `${layer.name} · ${new Date().toLocaleDateString()}` : new Date().toLocaleDateString(), layerId: layer?.id })
-      .subscribe({
-        next: () => {
-          this.pinnedLabels.update((s) => new Set(s).add(f.label));
-          this.message.set(`Pinned "${f.label}" to the Dashboard.`);
-        },
-        error: (e: HttpErrorResponse) => this.fail(e)
-      });
   }
 
   // workflows
@@ -2199,7 +2181,7 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
     if (!this.uploadName.trim()) return this.error.set('Enter a layer name.');
     this.running.set(true);
     this.uploadProgress.set(0);
-    this.api.upload(this.uploadFile, this.uploadName.trim(), this.uploadDepartmentId).subscribe({
+    this.api.upload(this.uploadFile, this.uploadName.trim()).subscribe({
       next: (event) => {
         if (event.type === HttpEventType.UploadProgress) {
           this.uploadProgress.set(event.total ? Math.round((event.loaded * 100) / event.total) : null);
@@ -2601,7 +2583,7 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
     this.jobSub?.unsubscribe();
     this.running.set(true);
     this.trackJob(
-      this.api.startJob(tool, body, this.isOwner ? this.outputDepartmentId : null, ui),
+      this.api.startJob(tool, body, ui),
       this.recordingHandler(tool, body, this.jobResultHandler(tool, ui, body))
     );
   }

@@ -118,11 +118,6 @@ export class GisAiService {
     return this.http.post<{ id: string; name: string }>(`${this.baseUrl}/save-layer`, { operation, name });
   }
 
-  /** An answer as a Dashboard tile. */
-  pinToDashboard(tile: { title: string; value: string; detail?: string; layerId?: string }): Observable<unknown> {
-    return this.http.post(`${this.baseUrl}/pin`, tile);
-  }
-
   /** "Delete all my chats". */
   deleteAllConversations(): Observable<{ deleted: number }> {
     return this.http.delete<{ deleted: number }>(`${this.baseUrl}/conversations`);

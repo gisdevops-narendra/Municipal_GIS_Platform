@@ -84,9 +84,14 @@ export class KeycloakAdminService {
           firstName,
           lastName,
           enabled: true,
-          emailVerified: true,
+          // Self sign-up: the address must be proven before first login —
+          // Keycloak emails a link and blocks sign-in until it is clicked.
+          emailVerified: false,
           attributes: { mobileNumber: [input.mobileNumber] },
-          requiredActions: credential.temporary ? ['UPDATE_PASSWORD'] : [],
+          requiredActions: [
+            'VERIFY_EMAIL',
+            ...(credential.temporary ? ['UPDATE_PASSWORD'] : []),
+          ],
           credentials: [credential],
         }),
       },
@@ -165,6 +170,83 @@ export class KeycloakAdminService {
         error as Error,
       );
     }
+  }
+
+  /** Changes a user's email (and username, which is the email). The new
+   *  address starts unverified: Keycloak asks for verification at the next
+   *  sign-in. Throws ConflictException if another account already uses it. */
+  async updateEmail(keycloakUserId: string, email: string): Promise<void> {
+    const token = await this.getAdminAccessToken();
+    const url = `${this.keycloakUrl}/admin/realms/${this.realm}/users/${keycloakUserId}`;
+    const current = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!current.ok) {
+      throw new BadGatewayException('Unable to reach the identity provider. Please try again.');
+    }
+    const user = (await current.json()) as { requiredActions?: string[] };
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      // The realm uses "email as username", so the username follows.
+      body: JSON.stringify({
+        email,
+        emailVerified: false,
+        requiredActions: [...new Set([...(user.requiredActions ?? []), 'VERIFY_EMAIL'])],
+      }),
+    });
+    if (response.status === 409) {
+      throw new ConflictException('An account with this email already exists.');
+    }
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      this.logger.error(`Keycloak email update failed (${response.status}): ${body}`);
+      throw new BadGatewayException('Could not change the email. Please try again.');
+    }
+  }
+
+  /** Enables or disables sign-in for a user (platform admin action). */
+  async setEnabled(keycloakUserId: string, enabled: boolean): Promise<void> {
+    const token = await this.getAdminAccessToken();
+    const response = await fetch(
+      `${this.keycloakUrl}/admin/realms/${this.realm}/users/${keycloakUserId}`,
+      {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      },
+    );
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      this.logger.error(`Keycloak enable/disable failed (${response.status}): ${body}`);
+      throw new BadGatewayException('Could not update the sign-in. Please try again.');
+    }
+  }
+
+  /** True when `password` is the user's current Keycloak password. Uses
+   *  the realm's built-in public `admin-cli` client (direct grant) — the
+   *  token it returns is discarded. Used to confirm sensitive account
+   *  actions (delete account, change email). */
+  async verifyPassword(username: string, password: string): Promise<boolean> {
+    const response = await fetch(
+      `${this.keycloakUrl}/realms/${this.realm}/protocol/openid-connect/token`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'password',
+          client_id: 'admin-cli',
+          username,
+          password,
+          scope: 'openid',
+        }),
+      },
+    );
+    if (response.ok) return true;
+    if (response.status === 400 || response.status === 401) return false;
+    const body = await response.text().catch(() => '');
+    this.logger.error(`Password check failed (${response.status}): ${body}`);
+    throw new BadGatewayException(
+      'Unable to reach the identity provider. Please try again.',
+    );
   }
 
   private async getAdminAccessToken(): Promise<string> {

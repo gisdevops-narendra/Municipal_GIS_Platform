@@ -10,6 +10,10 @@ export interface RegisterAccountRequest {
   email: string;
   password: string;
   mobileNumber?: string;
+  /** Terms of Service / Privacy Policy accepted on the form. */
+  acceptTerms: boolean;
+  /** Honeypot — always empty for people. */
+  website?: string;
 }
 
 export interface RegisterAccountResponse {

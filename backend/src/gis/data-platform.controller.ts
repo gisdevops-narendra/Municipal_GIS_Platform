@@ -7,7 +7,7 @@ import {
 import { CurrentAppUser } from '../auth/decorators/current-app-user.decorator';
 import type { AppUser } from '../auth/types/app-user.type';
 import { CatalogService } from './catalog.service';
-import { OsmImportDto, StorageLimitsDto, UpdateLayerMetadataDto } from './dto/platform-extras.dto';
+import { OsmImportDto, UpdateLayerMetadataDto } from './dto/platform-extras.dto';
 import { OsmImportService } from './osm-import.service';
 import { StorageUsageService } from './storage-usage.service';
 
@@ -37,12 +37,6 @@ export class DataPlatformController {
   @Get('storage')
   storageOverview(@CurrentAppUser() appUser: AppUser) {
     return this.storage.overview(appUser);
-  }
-
-  @RequireMunicipalityOwner()
-  @Put('storage/limits')
-  setStorageLimits(@CurrentAppUser() appUser: AppUser, @Body() dto: StorageLimitsDto) {
-    return this.storage.setLimits(appUser, dto);
   }
 
   @RequireMunicipalityMember()

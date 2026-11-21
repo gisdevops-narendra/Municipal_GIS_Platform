@@ -50,7 +50,7 @@ async function main() {
   });
   const user: AppUser = {
     id: owner.id, keycloakUserId: owner.keycloakUserId, municipalityId: owner.municipalityId,
-    departmentId: owner.departmentId, systemRole: owner.systemRole, status: owner.status,
+    systemRole: owner.systemRole, status: owner.status,
   };
 
   const catalog = await catalogService.buildForUser(user);

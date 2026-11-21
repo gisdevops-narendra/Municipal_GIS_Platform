@@ -54,7 +54,7 @@ async function main() {
   const owner = await prisma.user.findFirstOrThrow({ where: { systemRole: 'MUNICIPALITY_OWNER' } });
   const user: AppUser = {
     id: owner.id, keycloakUserId: owner.keycloakUserId, municipalityId: owner.municipalityId,
-    departmentId: owner.departmentId, systemRole: owner.systemRole, status: owner.status,
+    systemRole: owner.systemRole, status: owner.status,
   };
 
   async function check(group: string, name: string, run: () => Promise<string>) {

@@ -11,7 +11,6 @@ const OWNER: AppUser = {
   id: 'owner-1',
   keycloakUserId: 'kc-owner',
   municipalityId: 'muni-a',
-  departmentId: null,
   systemRole: 'MUNICIPALITY_OWNER',
   status: 'ACTIVE',
 };
@@ -223,7 +222,6 @@ describe('GisLayersService', () => {
               geoserverLayer: 'x',
               geometryType: 'POLYGON',
               ownershipType: 'CANONICAL',
-              departmentId: null,
               version: 1,
               visibleByDefault: true,
               displayOrder: 1,
@@ -283,7 +281,6 @@ describe('GisLayersService', () => {
       const caller = {
         ...OWNER,
         systemRole: 'DEPARTMENT_USER' as const,
-        departmentId: 'dept-roads',
       };
       prisma.gISWorkspace.findUnique.mockResolvedValue({
         id: 'ws-a',
@@ -308,7 +305,6 @@ describe('GisLayersService', () => {
       prisma.gISLayer.findFirst.mockResolvedValue({
         id: 'layer-1',
         ownershipType: 'DEPARTMENT',
-        departmentId: 'dept-water',
       });
       gisAuth.canView.mockResolvedValue(false);
 
@@ -327,7 +323,6 @@ describe('GisLayersService', () => {
         geoserverWorkspace: 'somnath_municipality',
         geoserverLayer: 'roads',
         ownershipType: 'DEPARTMENT',
-        departmentId: 'dept-roads',
       });
       gisAuth.canExport.mockResolvedValue(false);
 
@@ -345,7 +340,6 @@ describe('GisLayersService', () => {
         geoserverWorkspace: 'somnath_municipality',
         geoserverLayer: 'roads',
         ownershipType: 'DEPARTMENT',
-        departmentId: 'dept-roads',
       });
       gisAuth.canExport.mockResolvedValue(true);
       geoServer.getFeaturesAsGeoJson.mockResolvedValue(
@@ -357,6 +351,7 @@ describe('GisLayersService', () => {
       expect(geoServer.getFeaturesAsGeoJson).toHaveBeenCalledWith(
         'somnath_municipality',
         'roads',
+        { cqlFilter: undefined, featureIds: undefined, srsName: undefined },
       );
       expect(result.filename).toBe('roads.geojson');
       expect(result.contentType).toBe('application/geo+json');
@@ -370,7 +365,6 @@ describe('GisLayersService', () => {
         geoserverWorkspace: 'somnath_municipality',
         geoserverLayer: 'roads',
         ownershipType: 'DEPARTMENT',
-        departmentId: 'dept-roads',
       });
       gisAuth.canExport.mockResolvedValue(true);
       const zip = Buffer.from('PK');
@@ -407,7 +401,6 @@ describe('GisLayersService', () => {
         geoserverWorkspace: 'somnath_municipality',
         geoserverLayer: 'roads',
         ownershipType: 'DEPARTMENT',
-        departmentId: 'dept-roads',
       });
       gisAuth.canExport.mockResolvedValue(false);
 
@@ -444,7 +437,6 @@ describe('GisLayersService', () => {
       geoserverWorkspace: 'somnath_municipality',
       geoserverLayer: 'drainage',
       ownershipType: 'DEPARTMENT',
-      departmentId: 'dept-water',
       postgisTable: `layer_${'a'.repeat(32)}`,
     };
 
@@ -535,7 +527,6 @@ describe('GisLayersService', () => {
       prisma.gISLayer.findFirst.mockResolvedValue({
         ...uploadedLayer,
         ownershipType: 'CANONICAL',
-        departmentId: null,
         postgisTable: null,
       });
 

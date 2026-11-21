@@ -4,6 +4,7 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
+import { CheckboxModule } from 'primeng/checkbox';
 import { PasswordModule } from 'primeng/password';
 import { SiteHeaderComponent } from '../../../shared/components/site-header/site-header.component';
 import { SiteFooterComponent } from '../../../shared/components/site-footer/site-footer.component';
@@ -16,7 +17,7 @@ import { AuthService } from '../../../core/services/auth.service';
 @Component({
   selector: 'app-register',
   standalone: true,
-  imports: [ReactiveFormsModule, RouterLink, ButtonModule, InputTextModule, PasswordModule, SiteHeaderComponent, SiteFooterComponent],
+  imports: [ReactiveFormsModule, RouterLink, ButtonModule, InputTextModule, CheckboxModule, PasswordModule, SiteHeaderComponent, SiteFooterComponent],
   templateUrl: './register.component.html',
   styleUrl: './register.component.scss'
 })
@@ -33,7 +34,10 @@ export class RegisterComponent {
       fullName: ['', [Validators.required, Validators.minLength(2)]],
       email: ['', [Validators.required, Validators.email]],
       password: ['', [Validators.required, CustomValidators.passwordStrength()]],
-      confirmPassword: ['', [Validators.required]]
+      confirmPassword: ['', [Validators.required]],
+      acceptTerms: [false, [Validators.requiredTrue]],
+      /** Honeypot — hidden from people; bots fill it in. */
+      website: ['']
     },
     { validators: CustomValidators.passwordsMatch('password', 'confirmPassword') }
   );
@@ -51,10 +55,10 @@ export class RegisterComponent {
       this.form.markAllAsTouched();
       return;
     }
-    const { fullName, email, password } = this.form.getRawValue();
+    const { fullName, email, password, website } = this.form.getRawValue();
     this.submitting.set(true);
     this.errorMessage.set(null);
-    this.account.register({ fullName: fullName.trim(), email: email.trim(), password }).subscribe({
+    this.account.register({ fullName: fullName.trim(), email: email.trim(), password, acceptTerms: true, website: website || undefined }).subscribe({
       next: () => {
         void this.auth.login({ redirectUri: window.location.origin + '/gis', loginHint: email.trim() });
       },
@@ -70,6 +74,9 @@ export class RegisterComponent {
       return 'An account with this email already exists. Try signing in instead.';
     }
     const message = error.error?.message;
+    if (error.status === 429) {
+      return message ? String(message) : 'Too many sign-up attempts. Please try again later.';
+    }
     if (error.status === 400 && message) {
       return Array.isArray(message) ? message.join(' ') : String(message);
     }
