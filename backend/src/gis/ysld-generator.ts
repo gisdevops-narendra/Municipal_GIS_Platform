@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { substituteFont } from './map-fonts.util';
 import type {
   LabelSpecDto,
   LayerStyleSpecDto,
@@ -278,7 +279,7 @@ export class YsldGenerator {
       '- text:',
       `    label: \${${this.q(l.field)}}`,
       `    fill-color: ${this.quote(l.color)}`,
-      `    font-family: ${this.quote(l.font)}`,
+      `    font-family: ${this.quote(substituteFont(l.font))}`,
       `    font-size: ${l.size}`,
     ];
     if (l.haloWidth > 0) {

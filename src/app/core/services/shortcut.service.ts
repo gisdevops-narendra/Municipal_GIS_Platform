@@ -1,6 +1,7 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { SettingsService } from './settings.service';
+import { SettingsDialogService } from './settings-dialog.service';
 import { ThemeService } from '../theme/theme.service';
 
 export interface Shortcut {
@@ -22,6 +23,7 @@ export interface Shortcut {
 @Injectable({ providedIn: 'root' })
 export class ShortcutService {
   private readonly router = inject(Router);
+  private readonly settingsDialog = inject(SettingsDialogService);
   private readonly settings = inject(SettingsService);
   private readonly theme = inject(ThemeService);
 
@@ -41,7 +43,7 @@ export class ShortcutService {
 
     this.register(
       { id: 'help', keys: '?', label: 'Show keyboard shortcuts', group: 'General', run: () => this.helpOpen.set(true) },
-      { id: 'goto-settings', keys: 'g s', label: 'Open Settings', group: 'Navigation', run: () => this.router.navigate(['/settings']) },
+      { id: 'goto-settings', keys: 'g s', label: 'Open Settings', group: 'Navigation', run: () => this.settingsDialog.open() },
       { id: 'goto-gis', keys: 'g m', label: 'Open Municipal GIS', group: 'Navigation', run: () => this.router.navigate(['/gis']) },
       { id: 'goto-layers', keys: 'g l', label: 'Open GIS Layers', group: 'Navigation', run: () => this.router.navigate(['/gis/layers']) },
       {

@@ -183,3 +183,36 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
 ];
 
 export const DEFAULT_SECTION_ID = 'profile';
+
+/**
+ * Tabs of the Settings window. Each tab stacks one or more of the sections
+ * above (every section is kept — they are only grouped into fewer tabs).
+ */
+export interface SettingsTab {
+  id: string;
+  label: string;
+  icon: string;
+  sections: string[];
+}
+
+export const SETTINGS_TABS: SettingsTab[] = [
+  { id: 'general', label: 'General', icon: 'pi pi-user', sections: ['profile'] },
+  { id: 'appearance', label: 'Appearance', icon: 'pi pi-palette', sections: ['appearance', 'accessibility'] },
+  { id: 'regional', label: 'Language & region', icon: 'pi pi-globe', sections: ['language', 'datetime', 'numbers'] },
+  {
+    id: 'map',
+    label: 'Map',
+    icon: 'pi pi-map',
+    sections: ['map-units', 'coordinates', 'basemap', 'default-view', 'layer-visibility', 'map-performance'],
+  },
+  { id: 'assistant', label: 'AI Assistant', icon: 'pi pi-sparkles', sections: ['assistant'] },
+  { id: 'notifications', label: 'Notifications', icon: 'pi pi-bell', sections: ['notifications', 'session', 'shortcuts'] },
+  { id: 'privacy', label: 'Data & privacy', icon: 'pi pi-shield', sections: ['privacy', 'reset'] },
+  { id: 'about', label: 'About', icon: 'pi pi-info-circle', sections: ['system-status', 'about', 'help'] },
+];
+
+/** Tab id for a tab id or an (old, linkable) section id. */
+export function tabForSection(id: string): string {
+  if (SETTINGS_TABS.some((t) => t.id === id)) return id;
+  return SETTINGS_TABS.find((t) => t.sections.includes(id))?.id ?? SETTINGS_TABS[0].id;
+}

@@ -35,8 +35,8 @@ import { FormsModule } from '@angular/forms';
         display: flex;
         align-items: flex-start;
         justify-content: space-between;
-        gap: 24px;
-        padding: 14px 0;
+        gap: 20px;
+        padding: 13px 0;
         border-bottom: 1px solid var(--color-line);
         cursor: pointer;
       }

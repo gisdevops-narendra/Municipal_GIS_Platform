@@ -495,8 +495,8 @@
   &:hover { color: var(--p-text-color, inherit); }
 
   &.is-active {
-    color: var(--p-primary-color, #2563eb);
-    border-bottom-color: var(--p-primary-color, #2563eb);
+    color: var(--color-primary-700);
+    border-bottom-color: var(--color-primary-600);
   }
 }
 
@@ -507,8 +507,8 @@
   letter-spacing: 0.03em;
   padding: 0.05rem 0.35rem;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--p-primary-color, #2563eb) 15%, transparent);
-  color: var(--p-primary-color, #2563eb);
+  background: color-mix(in srgb, var(--color-primary-600) 15%, transparent);
+  color: var(--color-primary-700);
 }
 
 :host ::ng-deep .se__sld-note {

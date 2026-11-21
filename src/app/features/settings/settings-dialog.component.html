@@ -1,0 +1,64 @@
+<div class="sd-backdrop" (click)="dialog.close()" aria-hidden="true"></div>
+
+<div class="sd" role="dialog" aria-modal="true" aria-labelledby="sd-title">
+  <aside class="sd__nav">
+    <h2 id="sd-title" class="sd__title">Settings</h2>
+    <nav class="sd__tabs" role="tablist" aria-label="Settings">
+      @for (tab of tabs; track tab.id) {
+        <button
+          type="button"
+          role="tab"
+          class="sd__tab"
+          [class.is-active]="activeTab().id === tab.id"
+          [attr.aria-selected]="activeTab().id === tab.id"
+          (click)="select(tab.id)"
+        >
+          <i [class]="tab.icon" aria-hidden="true"></i>
+          <span>{{ tab.label }}</span>
+        </button>
+      }
+    </nav>
+  </aside>
+
+  <section class="sd__main" role="tabpanel" [attr.aria-label]="activeTab().label">
+    <header class="sd__head">
+      <h3 class="sd__heading">{{ activeTab().label }}</h3>
+      <button #closeBtn type="button" class="sd__close" aria-label="Close settings" (click)="dialog.close()">
+        <i class="pi pi-times" aria-hidden="true"></i>
+      </button>
+    </header>
+
+    <div #body class="sd__body">
+      @for (section of activeSections(); track section.id) {
+        <div class="sd__section">
+          @if (activeSections().length > 1) {
+            <h4 class="sd__section-title">{{ section.label }}</h4>
+          }
+          @switch (section.id) {
+            @case ('profile') { <app-profile-section /> }
+            @case ('appearance') { <app-appearance-section /> }
+            @case ('accessibility') { <app-accessibility-section /> }
+            @case ('language') { <app-language-section /> }
+            @case ('datetime') { <app-datetime-section /> }
+            @case ('numbers') { <app-numbers-section /> }
+            @case ('map-units') { <app-map-units-section /> }
+            @case ('coordinates') { <app-coordinates-section /> }
+            @case ('basemap') { <app-basemap-section /> }
+            @case ('default-view') { <app-default-view-section /> }
+            @case ('layer-visibility') { <app-layer-visibility-section /> }
+            @case ('map-performance') { <app-map-performance-section /> }
+            @case ('assistant') { <app-assistant-section /> }
+            @case ('notifications') { <app-notifications-section /> }
+            @case ('session') { <app-session-section /> }
+            @case ('shortcuts') { <app-shortcuts-section /> }
+            @case ('system-status') { <app-system-status-section /> }
+            @case ('about') { <app-about-section /> }
+            @case ('help') { <app-help-section /> }
+            @case ('privacy') { <app-privacy-section /> }
+            @case ('reset') { <app-reset-section /> }
+          }
+        </div>
+      }
+    </div>
+  </section>
+</div>

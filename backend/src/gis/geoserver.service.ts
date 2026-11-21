@@ -1,4 +1,5 @@
 import { createReadStream } from 'fs';
+import { substituteSldFonts } from './map-fonts.util';
 import { stat } from 'fs/promises';
 import { Readable } from 'stream';
 import {
@@ -660,7 +661,9 @@ export class GeoServerService {
    * (1.0 or 1.1 / SE). GeoServer validates it; a 400 comes back as a
    * BadRequestException with its parser message.
    */
-  async putSldStyle(workspace: string, name: string, sld: string): Promise<void> {
+  async putSldStyle(workspace: string, name: string, sldIn: string): Promise<void> {
+    // Fonts the server doesn't have (Arial…) would fall back to serif.
+    const sld = substituteSldFonts(sldIn);
     const v11 = /version\s*=\s*["']1\.1/.test(sld.slice(0, 2000));
     const contentType = v11 ? 'application/vnd.ogc.se+xml' : 'application/vnd.ogc.sld+xml';
     if (!(await this.styleExists(workspace, name))) {

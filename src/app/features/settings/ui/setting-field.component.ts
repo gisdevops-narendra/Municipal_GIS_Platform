@@ -30,8 +30,8 @@ import { Component, input } from '@angular/core';
         display: flex;
         align-items: flex-start;
         justify-content: space-between;
-        gap: 24px;
-        padding: 16px 0;
+        gap: 20px;
+        padding: 14px 0;
         border-bottom: 1px solid var(--color-line);
       }
       :host:last-of-type .sf {
@@ -39,12 +39,15 @@ import { Component, input } from '@angular/core';
       }
       .sf__meta {
         display: flex;
+        flex: 1 1 auto;
         flex-direction: column;
         gap: 3px;
+        min-width: 0;
         max-width: 26rem;
       }
       .sf__label {
         font-size: 13.5px;
+        line-height: 1.35;
         font-weight: 600;
         color: var(--color-ink-900);
       }
@@ -59,8 +62,8 @@ import { Component, input } from '@angular/core';
         flex-direction: column;
         align-items: flex-end;
         gap: 6px;
-        min-width: 15rem;
-        max-width: 22rem;
+        min-width: 12rem;
+        max-width: 20rem;
       }
       .sf--stack,
       .sf--stack .sf__control {

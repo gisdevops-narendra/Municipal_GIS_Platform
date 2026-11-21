@@ -7,6 +7,7 @@ import { CurrentUserService } from '../../../core/services/current-user.service'
 import { CurrentUser } from '../../../core/models/current-user.model';
 import { ThemeService } from '../../../core/theme/theme.service';
 import { SettingsService } from '../../../core/services/settings.service';
+import { SettingsDialogService } from '../../../core/services/settings-dialog.service';
 
 /** Primary menu: Create Account → Login → Upload → View on map. */
 const NAV: NavItem[] = [
@@ -39,6 +40,7 @@ export class SiteHeaderComponent {
   readonly accountOpen = signal(false);
   private readonly theme = inject(ThemeService);
   private readonly settings = inject(SettingsService);
+  readonly settingsDialog = inject(SettingsDialogService);
   readonly isDark = computed(() => {
     this.settings.theme();
     return this.theme.resolvedTheme() === 'dark';

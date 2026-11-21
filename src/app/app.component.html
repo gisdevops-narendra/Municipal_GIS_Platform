@@ -1,5 +1,12 @@
 <router-outlet />
 
+<!-- Settings window (Claude / ChatGPT style) — loaded on first open. -->
+@if (settingsDialog.isOpen()) {
+  @defer {
+    <app-settings-dialog />
+  }
+}
+
 <!-- Notification host — kept off the initial bundle. `on immediate` loads
      the PrimeNG toast/dialog chunk right after first render; every screen
      that can raise a notification is itself lazy-loaded and larger, so the

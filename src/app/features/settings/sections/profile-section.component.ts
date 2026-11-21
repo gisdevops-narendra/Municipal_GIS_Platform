@@ -7,6 +7,7 @@ import { MessageModule } from 'primeng/message';
 import { CurrentUserService } from '../../../core/services/current-user.service';
 import { NotificationService } from '../../../core/services/notification.service';
 import { CurrentUser } from '../../../core/models/current-user.model';
+import { SettingFieldComponent } from '../ui/setting-field.component';
 
 /**
  * Settings → Profile & Account. Editable: full name and mobile number
@@ -16,41 +17,34 @@ import { CurrentUser } from '../../../core/models/current-user.model';
 @Component({
   selector: 'app-profile-section',
   standalone: true,
-  imports: [ReactiveFormsModule, ButtonModule, InputTextModule, MessageModule],
+  imports: [ReactiveFormsModule, ButtonModule, InputTextModule, MessageModule, SettingFieldComponent],
   template: `
     @if (loadError()) {
       <p-message severity="error" [text]="loadError()!" />
     } @else if (!me()) {
       <p class="muted">Loading your profile…</p>
     } @else {
-      <form class="form" [formGroup]="form" (ngSubmit)="save()">
-        <label class="field">
-          <span class="field__label">Full name</span>
-          <input pInputText formControlName="fullName" autocomplete="name" />
+      <form [formGroup]="form" (ngSubmit)="save()">
+        <app-setting-field label="Full name" hint="Shown in the app and on the maps you print.">
+          <input pInputText class="input" formControlName="fullName" autocomplete="name" />
           @if (form.controls.fullName.touched && form.controls.fullName.invalid) {
             <span class="field__error">Enter your name (2–150 characters).</span>
           }
-        </label>
+        </app-setting-field>
 
-        <label class="field">
-          <span class="field__label">Mobile number</span>
-          <input pInputText formControlName="mobileNumber" autocomplete="tel" />
+        <app-setting-field label="Mobile number" hint="Optional.">
+          <input pInputText class="input" formControlName="mobileNumber" autocomplete="tel" placeholder="Not set" />
           @if (form.controls.mobileNumber.touched && form.controls.mobileNumber.invalid) {
             <span class="field__error">Enter a valid phone number (7–20 digits).</span>
           }
-        </label>
+        </app-setting-field>
 
-        <div class="readonly">
-          <div><span>Email</span><strong>{{ me()!.email }}</strong></div>
-        </div>
+        <app-setting-field label="Email" hint="Used to sign in. It can't be changed here.">
+          <span class="value">{{ me()!.email }}</span>
+        </app-setting-field>
 
         <div class="actions">
-          <button
-            pButton
-            type="submit"
-            label="Save changes"
-            [disabled]="form.pristine || saving()"
-          ></button>
+          <button pButton type="submit" label="Save changes" size="small" [disabled]="form.pristine || saving()"></button>
         </div>
       </form>
     }
@@ -60,6 +54,27 @@ import { CurrentUser } from '../../../core/models/current-user.model';
       .muted {
         font-size: 13px;
         color: var(--color-ink-500);
+      }
+      .input {
+        width: 100%;
+        height: 34px;
+        font-size: 13.5px;
+      }
+      .actions {
+        display: flex;
+        justify-content: flex-end;
+        padding-top: 16px;
+      }
+      .field__error {
+        font-size: 12px;
+        color: var(--p-red-500, #dc2626);
+      }
+      .value {
+        padding-top: 2px;
+        font-size: 13.5px;
+        color: var(--color-ink-700);
+        word-break: break-all;
+        text-align: right;
       }
       .form {
         display: flex;

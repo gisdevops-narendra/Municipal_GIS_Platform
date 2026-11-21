@@ -143,14 +143,14 @@
   }
 
   &:hover {
-    border-color: var(--color-primary, #2563eb);
+    border-color: var(--color-primary-600);
     color: var(--color-ink-900);
   }
 }
 
 .bo__chip--busy {
-  border-color: var(--color-primary, #2563eb);
-  color: var(--color-primary, #2563eb);
+  border-color: var(--color-primary-600);
+  color: var(--color-primary-700);
 }
 
 .bo__chip--ghost {
@@ -454,7 +454,7 @@
 
   &:focus {
     outline: none;
-    border-color: var(--color-primary, #0f766e);
+    border-color: var(--color-primary-600);
   }
 }
 

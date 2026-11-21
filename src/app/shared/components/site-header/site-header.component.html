@@ -81,7 +81,7 @@
           {{ isDark() ? 'Light theme' : 'Dark theme' }}
           <kbd class="site-header__kbd">[</kbd>
         </button>
-        <a routerLink="/settings" role="menuitem" class="site-header__user-item" (click)="accountOpen.set(false)">
+        <a role="menuitem" class="site-header__user-item" href="/settings" (click)="$event.preventDefault(); accountOpen.set(false); settingsDialog.open()">
           <i class="pi pi-cog" aria-hidden="true"></i> Settings
         </a>
         <button type="button" role="menuitem" class="site-header__user-item" (click)="logout()">

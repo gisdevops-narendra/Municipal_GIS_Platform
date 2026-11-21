@@ -9,6 +9,8 @@ import { SettingsService } from './core/services/settings.service';
 import { SessionService } from './core/services/session.service';
 import { ShortcutService } from './core/services/shortcut.service';
 import { ThemeService } from './core/theme/theme.service';
+import { SettingsDialogService } from './core/services/settings-dialog.service';
+import { SettingsDialogComponent } from './features/settings/settings-dialog.component';
 
 /**
  * Application shell. Hosts the single `<p-toast>` / `<p-confirmdialog>`
@@ -20,7 +22,7 @@ import { ThemeService } from './core/theme/theme.service';
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Toast, ConfirmDialog, Dialog],
+  imports: [RouterOutlet, Toast, ConfirmDialog, Dialog, SettingsDialogComponent],
   templateUrl: './app.component.html',
   styleUrl: './app.component.scss'
 })
@@ -30,6 +32,7 @@ export class AppComponent {
   private readonly session = inject(SessionService);
   private readonly routeReuse = inject(AppRouteReuseStrategy);
   readonly shortcuts = inject(ShortcutService);
+  readonly settingsDialog = inject(SettingsDialogService);
   // Injected for its constructor side-effect (starts the appearance effect).
   private readonly theme = inject(ThemeService);
 

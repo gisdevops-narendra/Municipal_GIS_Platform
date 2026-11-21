@@ -43,9 +43,9 @@ export const routes: Routes = [
     title: 'Field Collection — Municipal GIS Platform'
   },
   {
+    // Opens the Settings window over the map (old links keep working).
     path: 'settings',
     canActivate: [authGuard],
-    data: { reuse: true },
     loadComponent: () =>
       import('./features/settings/settings.component').then((m) => m.SettingsComponent),
     title: 'Settings — Municipal GIS Platform'

@@ -71,7 +71,7 @@
   cursor: pointer;
 
   &:hover:not(:disabled) {
-    border-color: var(--color-primary, #2563eb);
+    border-color: var(--color-primary-600);
   }
 
   &:disabled {
@@ -272,7 +272,7 @@
   font-size: 0.75rem;
   cursor: pointer;
   &--active {
-    border-color: var(--p-primary-color, #128077);
-    color: var(--p-primary-color, #128077);
+    border-color: var(--color-primary-600);
+    color: var(--color-primary-700);
   }
 }
