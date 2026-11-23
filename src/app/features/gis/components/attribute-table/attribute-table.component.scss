@@ -596,3 +596,14 @@
     max-height: 60dvh;
   }
 }
+
+/* Toolbar toggle with a visible text label ("In view"). */
+.attr-table__btn--label {
+  width: auto;
+  gap: 5px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}

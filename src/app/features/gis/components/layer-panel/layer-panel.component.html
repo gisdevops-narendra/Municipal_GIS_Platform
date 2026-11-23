@@ -2,7 +2,7 @@
 
   <!-- One row template for every group, so they cannot drift apart. -->
   <ng-template #row let-layer>
-    <li class="layer-panel__item" [class.layer-panel__item--highlight]="layer.id === highlightLayerId">
+    <div class="layer-panel__item" [class.layer-panel__item--highlight]="layer.id === highlightLayerId">
       <button
         type="button"
         class="layer-panel__expand"
@@ -115,22 +115,45 @@
           }
         </div>
       }
-    </li>
+    </div>
   </ng-template>
+
+  @if (layers.length > 5) {
+    <label class="layer-panel__filter">
+      <i class="pi pi-search" aria-hidden="true"></i>
+      <input type="search" placeholder="Filter layers…" aria-label="Filter layers" [value]="layerQuery()"
+             (input)="layerQuery.set($any($event.target).value)" (keydown.escape)="layerQuery.set('')" />
+      @if (layerQuery()) {
+        <button type="button" class="layer-panel__filter-clear" aria-label="Clear filter" (click)="layerQuery.set('')">
+          <i class="pi pi-times" aria-hidden="true"></i>
+        </button>
+      }
+    </label>
+  }
 
   <div class="layer-panel__scroll">
     @if (layers.length === 0) {
       <p class="layer-panel__empty">
         No layers are available to you yet. Published layers you have access to will appear here.
       </p>
+    } @else if (layerQuery().trim() && shownLayers.length === 0) {
+      <p class="layer-panel__empty">No layer matches “{{ layerQuery().trim() }}”.</p>
     }
 
     @if (canonicalLayers.length > 0) {
       <div class="layer-panel__group">
-        <h3 class="layer-panel__group-title">Uploaded Layers</h3>
-        <ul class="layer-panel__list">
+        <div class="layer-panel__group-head">
+          <h3 class="layer-panel__group-title">Uploaded Layers</h3>
+          <button type="button" class="layer-panel__group-toggle" (click)="toggleGroup(canonicalLayers)">
+            {{ anyVisible(canonicalLayers) ? 'Hide all' : 'Show all' }}
+          </button>
+        </div>
+        <ul class="layer-panel__list" cdkDropList [cdkDropListDisabled]="!!layerQuery().trim()"
+            (cdkDropListDropped)="onLayerDrop($event, canonicalLayers)">
           @for (layer of canonicalLayers; track layer.id) {
-            <ng-container *ngTemplateOutlet="row; context: { $implicit: layer }" />
+            <li class="layer-panel__drag" cdkDrag cdkDragLockAxis="y" [cdkDragData]="layer.id">
+              <ng-container *ngTemplateOutlet="row; context: { $implicit: layer }" />
+            </li>
           }
         </ul>
       </div>
@@ -138,10 +161,18 @@
 
     @if (drawnLayers.length > 0) {
       <div class="layer-panel__group">
-        <h3 class="layer-panel__group-title">Drawn Layers</h3>
-        <ul class="layer-panel__list">
+        <div class="layer-panel__group-head">
+          <h3 class="layer-panel__group-title">Drawn Layers</h3>
+          <button type="button" class="layer-panel__group-toggle" (click)="toggleGroup(drawnLayers)">
+            {{ anyVisible(drawnLayers) ? 'Hide all' : 'Show all' }}
+          </button>
+        </div>
+        <ul class="layer-panel__list" cdkDropList [cdkDropListDisabled]="!!layerQuery().trim()"
+            (cdkDropListDropped)="onLayerDrop($event, drawnLayers)">
           @for (layer of drawnLayers; track layer.id) {
-            <ng-container *ngTemplateOutlet="row; context: { $implicit: layer }" />
+            <li class="layer-panel__drag" cdkDrag cdkDragLockAxis="y" [cdkDragData]="layer.id">
+              <ng-container *ngTemplateOutlet="row; context: { $implicit: layer }" />
+            </li>
           }
         </ul>
       </div>
@@ -149,10 +180,18 @@
 
     @if (aiLayers.length > 0) {
       <div class="layer-panel__group">
-        <h3 class="layer-panel__group-title">AI Assistant</h3>
-        <ul class="layer-panel__list">
+        <div class="layer-panel__group-head">
+          <h3 class="layer-panel__group-title">AI Assistant</h3>
+          <button type="button" class="layer-panel__group-toggle" (click)="toggleGroup(aiLayers)">
+            {{ anyVisible(aiLayers) ? 'Hide all' : 'Show all' }}
+          </button>
+        </div>
+        <ul class="layer-panel__list" cdkDropList [cdkDropListDisabled]="!!layerQuery().trim()"
+            (cdkDropListDropped)="onLayerDrop($event, aiLayers)">
           @for (layer of aiLayers; track layer.id) {
-            <ng-container *ngTemplateOutlet="row; context: { $implicit: layer }" />
+            <li class="layer-panel__drag" cdkDrag cdkDragLockAxis="y" [cdkDragData]="layer.id">
+              <ng-container *ngTemplateOutlet="row; context: { $implicit: layer }" />
+            </li>
           }
         </ul>
       </div>
@@ -160,10 +199,18 @@
 
     @if (rasterAnalysisLayers.length > 0) {
       <div class="layer-panel__group">
-        <h3 class="layer-panel__group-title">Raster Analysis</h3>
-        <ul class="layer-panel__list">
+        <div class="layer-panel__group-head">
+          <h3 class="layer-panel__group-title">Raster Analysis</h3>
+          <button type="button" class="layer-panel__group-toggle" (click)="toggleGroup(rasterAnalysisLayers)">
+            {{ anyVisible(rasterAnalysisLayers) ? 'Hide all' : 'Show all' }}
+          </button>
+        </div>
+        <ul class="layer-panel__list" cdkDropList [cdkDropListDisabled]="!!layerQuery().trim()"
+            (cdkDropListDropped)="onLayerDrop($event, rasterAnalysisLayers)">
           @for (layer of rasterAnalysisLayers; track layer.id) {
-            <ng-container *ngTemplateOutlet="row; context: { $implicit: layer }" />
+            <li class="layer-panel__drag" cdkDrag cdkDragLockAxis="y" [cdkDragData]="layer.id">
+              <ng-container *ngTemplateOutlet="row; context: { $implicit: layer }" />
+            </li>
           }
         </ul>
       </div>

@@ -45,6 +45,31 @@
           (click)="zoomOut()"
         ></button>
       }
+      @if (!mapService.is3d()) {
+        <button
+          pButton
+          type="button"
+          icon="pi pi-th-large"
+          class="p-button-text map-controls__btn"
+          [class.map-controls__btn--active]="mapService.graticuleShown()"
+          [attr.aria-label]="mapService.graticuleShown() ? 'Hide coordinate grid' : 'Show coordinate grid'"
+          [pTooltip]="mapService.graticuleShown() ? 'Hide coordinate grid' : 'Coordinate grid (lat / long)'"
+          tooltipPosition="left"
+          (click)="mapService.toggleGraticule()"
+        ></button>
+        <button
+          pButton
+          type="button"
+          [icon]="locating() ? 'pi pi-spin pi-spinner' : 'pi pi-map-marker'"
+          class="p-button-text map-controls__btn"
+          [class.map-controls__btn--active]="mapService.myLocationShown()"
+          [attr.aria-label]="mapService.myLocationShown() ? 'Hide my location' : 'Show my location'"
+          [pTooltip]="mapService.myLocationShown() ? 'Hide my location' : 'My location'"
+          tooltipPosition="left"
+          [disabled]="locating()"
+          (click)="toggleMyLocation()"
+        ></button>
+      }
       @if (showResetView()) {
         <button
           pButton

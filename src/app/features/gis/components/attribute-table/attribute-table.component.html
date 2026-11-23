@@ -38,6 +38,16 @@
         </span>
       }
 
+      @if (inViewOnly()) {
+        <span class="attr-table__filter-chip">
+          <i class="pi pi-map" aria-hidden="true"></i>
+          <span class="attr-table__filter-label">In map view</span>
+          <button type="button" aria-label="Show records outside the map view too" (click)="toggleInView()">
+            <i class="pi pi-times" aria-hidden="true"></i>
+          </button>
+        </span>
+      }
+
       @if (showSelectedOnly()) {
         <span class="attr-table__filter-chip">
           <i class="pi pi-list-check" aria-hidden="true"></i>
@@ -127,6 +137,15 @@
           [pTooltip]="showSelectedOnly() ? 'Show all records' : 'Show selected records only'" tooltipPosition="top"
           (click)="toggleShowSelected()"
         ><i class="pi pi-list-check" aria-hidden="true"></i></button>
+
+        <button
+          type="button"
+          class="attr-table__btn attr-table__btn--label"
+          [class.is-active]="inViewOnly()"
+          [attr.aria-pressed]="inViewOnly()"
+          [pTooltip]="inViewOnly() ? 'Showing records in the map view — click to show all' : 'Show only records in the current map view'" tooltipPosition="top"
+          (click)="toggleInView()"
+        ><i class="pi pi-map" aria-hidden="true"></i><span>In view</span></button>
 
         <button
           type="button"

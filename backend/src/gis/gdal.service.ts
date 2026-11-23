@@ -37,6 +37,18 @@ export interface InspectOptions {
    *  column selection (X_POSSIBLE_NAMES, Y_POSSIBLE_NAMES,
    *  KEEP_GEOM_COLUMNS=NO). */
   openOptions?: string[];
+  /** Source layer to read (multi-layer files: KML, GPX, GeoPackage…);
+   *  omitted = the first layer. */
+  layer?: string;
+  /** OGR SQL attribute filter, e.g. "OGR_GEOMETRY LIKE '%POINT'". */
+  where?: string;
+}
+
+/** One layer of a (possibly multi-layer) vector file. */
+export interface GdalLayerSummary {
+  name: string;
+  geometryType: string | null;
+  featureCount: number;
 }
 
 export interface ImportToPostgisParams {
@@ -54,6 +66,11 @@ export interface ImportToPostgisParams {
   sourceCrsOverride?: string;
   openOptions?: string[];
   connection: PostgisConnectionParams;
+  /** Source layer / attribute filter — see InspectOptions. */
+  layer?: string;
+  where?: string;
+  /** Drop Z/M (KML, GPX and DXF carry heights the platform doesn't use). */
+  forceXY?: boolean;
 }
 
 /**
@@ -76,11 +93,12 @@ export class GdalService {
     filePath: string,
     options: InspectOptions = {},
   ): Promise<GdalInspectResult> {
-    const args = ['-json', '-al', '-so'];
+    const args = ['-json', '-so'];
+    if (!options.layer) args.push('-al');
     for (const oo of options.openOptions ?? []) {
       args.push('-oo', oo);
     }
-    args.push(filePath);
+    args.push(filePath, ...this.sourceSelection(options.layer, options.where));
 
     // A multi-GB GeoJSON is scanned end to end to count its features.
     const stdout = await this.run('ogrinfo', args, 15 * 60_000);
@@ -129,6 +147,39 @@ export class GdalService {
       epsgCode,
       hasCrs: !!(geomField?.coordinateSystem?.wkt || geomField?.coordinateSystem?.projjson),
     };
+  }
+
+  /** Layer / filter arguments placed after the source. A filter runs in
+   *  GDAL's own SQL dialect: OGR_GEOMETRY is unknown to SQL-backed formats
+   *  (GeoPackage, SQLite) when passed as a plain -where. */
+  private sourceSelection(layer?: string, where?: string): string[] {
+    if (!where) return layer ? [layer] : [];
+    const from = layer ? `"${layer.replace(/"/g, '""')}"` : '';
+    if (!from) return ['-where', where];
+    return ['-dialect', 'OGRSQL', '-sql', `SELECT * FROM ${from} WHERE ${where}`];
+  }
+
+  /** Every layer in a vector file with its geometry type and size. */
+  async listLayers(filePath: string): Promise<GdalLayerSummary[]> {
+    const stdout = await this.run('ogrinfo', ['-json', '-so', '-al', filePath], 15 * 60_000);
+    let parsed: { layers?: { name: string; featureCount?: number; geometryFields?: { type?: string }[] }[] };
+    try {
+      parsed = JSON.parse(stdout);
+    } catch {
+      throw new GdalError('GDAL did not return a readable result for this file.');
+    }
+    return (parsed.layers ?? []).map((l) => ({
+      name: l.name,
+      geometryType: l.geometryFields?.[0]?.type ?? null,
+      featureCount: l.featureCount ?? 0,
+    }));
+  }
+
+  /** Converts the first sheet of a spreadsheet (.xlsx) to a CSV file. */
+  async spreadsheetToCsv(sourcePath: string, outPath: string): Promise<void> {
+    // FORCE: the first row is always the header — AUTO misses it when every
+    // cell is text (common in exported sheets), naming columns Field1….
+    await this.run('ogr2ogr', ['-f', 'CSV', outPath, sourcePath, '-oo', 'HEADERS=FORCE'], 15 * 60_000);
   }
 
   /** The EPSG code best matching the CRS a file declares without one
@@ -203,6 +254,8 @@ export class GdalService {
     for (const oo of params.openOptions ?? []) {
       args.push('-oo', oo);
     }
+    if (params.forceXY) args.push('-dim', 'XY');
+    args.push(...this.sourceSelection(params.layer, params.where));
 
     // National datasets (e.g. every village in India) take many minutes.
     const minutes = Number(process.env.GIS_IMPORT_TIMEOUT_MINUTES) || 120;

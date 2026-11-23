@@ -254,6 +254,42 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
         this.first.set(0);
         this.load();
       });
+    // "In map view": reload (debounced) after every pan / zoom while on.
+    let viewTimer: ReturnType<typeof setTimeout> | undefined;
+    effect(() => {
+      this.mapService.viewRevision();
+      if (!this.inViewOnly()) return;
+      clearTimeout(viewTimer);
+      viewTimer = setTimeout(() => untracked(() => {
+        this.first.set(0);
+        this.load();
+      }), 400);
+    });
+  }
+
+  /** Lists only the features inside the visible map area (remembered). */
+  readonly inViewOnly = signal(readInView());
+
+  toggleInView(): void {
+    this.inViewOnly.update((on) => !on);
+    try {
+      localStorage.setItem(IN_VIEW_KEY, this.inViewOnly() ? '1' : '0');
+    } catch {
+      /* storage unavailable — the choice just isn't remembered */
+    }
+    this.first.set(0);
+    this.load();
+  }
+
+  /** Locked query filter AND (when "In map view" is on) the map extent. */
+  private tableBaseFilter(layerId: string): string | null {
+    const base = this.baseFilter();
+    const query = base?.layerId === layerId ? base.cql : null;
+    const extent = this.inViewOnly() ? this.mapService.getViewExtent4326() : null;
+    if (!extent) return query;
+    const geom = this.service.getGeometryField(layerId) || 'geom';
+    const bbox = `BBOX("${geom}", ${extent.map((n) => n.toFixed(7)).join(', ')}, 'EPSG:4326')`;
+    return query ? `(${query}) AND ${bbox}` : bbox;
   }
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -406,11 +442,10 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
       search: this.search()
     };
 
-    const base = this.baseFilter();
     const onlySelected = this.showSelectedOnly() && this.selectedIds().size > 0;
     this.service
       .fetchPage(layer, query, {
-        baseFilter: base?.layerId === layer.id ? base.cql : null,
+        baseFilter: this.tableBaseFilter(layer.id),
         featureIds: onlySelected ? [...this.selectedIds()] : null
       })
       .subscribe({
@@ -604,8 +639,7 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
   switchSelection(): void {
     const layer = this.activeLayer();
     if (!layer || this.switching()) return;
-    const base = this.baseFilter();
-    const cql = this.service.recordFilter(layer.id, this.search(), base?.layerId === layer.id ? base.cql : null);
+    const cql = this.service.recordFilter(layer.id, this.search(), this.tableBaseFilter(layer.id));
     const current = this.selectedIds();
     this.switching.set(true);
     this.selectNote.set(null);
@@ -972,5 +1006,15 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
       return 'Could not reach the GIS server. Check that GeoServer is running.';
     }
     return `The GIS server returned an error (${err.status}). The layer may not be published for feature access.`;
+  }
+}
+
+const IN_VIEW_KEY = 'gis.attrTable.inView';
+
+function readInView(): boolean {
+  try {
+    return localStorage.getItem(IN_VIEW_KEY) === '1';
+  } catch {
+    return false;
   }
 }

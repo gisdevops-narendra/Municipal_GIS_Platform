@@ -38,7 +38,7 @@
           #fileInput
           type="file"
           hidden
-          accept=".zip,.geojson,.json,.csv"
+          accept=".zip,.geojson,.json,.csv,.xlsx,.kml,.kmz,.gpx,.gpkg,.dxf"
           (change)="onFileInput($event)"
         />
         @if (selectedFile(); as file) {
@@ -76,7 +76,11 @@
             <span class="upload-wizard__formats">
               <span class="upload-wizard__format">Shapefile .zip</span>
               <span class="upload-wizard__format">GeoJSON</span>
-              <span class="upload-wizard__format">CSV with coordinates</span>
+              <span class="upload-wizard__format">CSV / Excel with coordinates</span>
+              <span class="upload-wizard__format">KML / KMZ</span>
+              <span class="upload-wizard__format">GPX</span>
+              <span class="upload-wizard__format">GeoPackage</span>
+              <span class="upload-wizard__format">DXF</span>
             </span>
           </button>
         }

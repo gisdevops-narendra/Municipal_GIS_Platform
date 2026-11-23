@@ -3,6 +3,7 @@ import { AuthService } from '../../../core/services/auth.service';
 import OlMap from 'ol/Map';
 import View from 'ol/View';
 import Feature from 'ol/Feature';
+import Graticule from 'ol/layer/Graticule';
 import Point from 'ol/geom/Point';
 import TileLayer from 'ol/layer/Tile';
 import LayerGroup from 'ol/layer/Group';
@@ -38,7 +39,7 @@ import PointerInteraction from 'ol/interaction/Pointer';
 import KeyboardPan from 'ol/interaction/KeyboardPan';
 import Overlay from 'ol/Overlay';
 import LineString from 'ol/geom/LineString';
-import Polygon, { fromCircle } from 'ol/geom/Polygon';
+import Polygon, { circular, fromCircle } from 'ol/geom/Polygon';
 import CircleGeom from 'ol/geom/Circle';
 import { Fill, Stroke, Style, Circle as CircleStyle, Text as TextStyle } from 'ol/style';
 import { getArea, getLength } from 'ol/sphere';
@@ -83,6 +84,8 @@ export interface MeasureResult {
   radiusM?: number;
   /** per-segment lengths for a line or a polygon ring */
   segmentsM: number[];
+  /** line vertices as [lon, lat] (for bearings); lines only */
+  lonLats?: [number, number][];
 }
 
 /** Generic fallback view (roughly India) used only when no layer on this
@@ -783,6 +786,10 @@ export class MapService {
     this.editPickKey = null;
     this.measureLayer = null;
     this.gotoLayer = null;
+    this.myLocationLayer = null;
+    this.myLocationShown.set(false);
+    this.graticule = null;
+    this.graticuleShown.set(false);
     this.sketchLayer = null;
     this.resetNavHistory();
     this.featurePopupOverlay = null;
@@ -1745,7 +1752,8 @@ export class MapService {
       return {
         type,
         lengthM: getLength(line, { projection }),
-        segmentsM: this.segmentLengths(coords, projection)
+        segmentsM: this.segmentLengths(coords, projection),
+        lonLats: coords.map((c) => toLonLat(c, projection) as [number, number])
       };
     }
     if (type === 'Polygon') {
@@ -2574,6 +2582,77 @@ export class MapService {
     this.gotoLayer?.getSource()?.clear();
   }
 
+  // ----- coordinate grid (lat / long graticule) -----
+  private graticule: Graticule | null = null;
+  readonly graticuleShown = signal(false);
+
+  /** Shows / hides a labelled latitude–longitude grid over the map. */
+  toggleGraticule(): void {
+    if (!this.map) return;
+    if (!this.graticule) {
+      this.graticule = new Graticule({
+        strokeStyle: new Stroke({ color: 'rgba(40, 40, 40, 0.55)', width: 1, lineDash: [3, 4] }),
+        showLabels: true,
+        lonLabelStyle: new TextStyle({
+          font: '11px sans-serif',
+          textBaseline: 'bottom',
+          fill: new Fill({ color: '#1f2937' }),
+          stroke: new Stroke({ color: 'rgba(255, 255, 255, 0.9)', width: 3 })
+        }),
+        latLabelStyle: new TextStyle({
+          font: '11px sans-serif',
+          textAlign: 'end',
+          fill: new Fill({ color: '#1f2937' }),
+          stroke: new Stroke({ color: 'rgba(255, 255, 255, 0.9)', width: 3 })
+        }),
+        wrapX: false,
+        zIndex: 9000,
+        properties: { gotoOverlay: true }
+      });
+    }
+    const show = !this.graticuleShown();
+    if (show) this.map.addLayer(this.graticule);
+    else this.map.removeLayer(this.graticule);
+    this.graticuleShown.set(show);
+  }
+
+  // ----- my location (device GPS) -----
+  private myLocationLayer: VectorLayer<VectorSource> | null = null;
+  readonly myLocationShown = signal(false);
+
+  /** Blue dot at the device position with its accuracy circle; zooms to it. */
+  showMyLocation(lon: number, lat: number, accuracyM: number): void {
+    const view = this.map?.getView();
+    if (!view) return;
+    const proj = view.getProjection();
+    if (!this.myLocationLayer) {
+      this.myLocationLayer = new VectorLayer({
+        source: new VectorSource(),
+        zIndex: 10002,
+        properties: { gotoOverlay: true },
+        style: (feature) =>
+          feature.getGeometry()?.getType() === 'Point'
+            ? new Style({
+                image: new CircleStyle({ radius: 7, fill: new Fill({ color: '#1a73e8' }), stroke: new Stroke({ color: '#ffffff', width: 2.5 }) })
+              })
+            : new Style({ fill: new Fill({ color: 'rgba(26, 115, 232, 0.12)' }), stroke: new Stroke({ color: 'rgba(26, 115, 232, 0.5)', width: 1 }) })
+      });
+      this.map?.addLayer(this.myLocationLayer);
+    }
+    const source = this.myLocationLayer.getSource() as VectorSource;
+    source.clear();
+    const centre = transform([lon, lat], LAYER_PROJECTION, proj);
+    const ring = circular([lon, lat], Math.max(accuracyM, 1), 64).transform(LAYER_PROJECTION, proj);
+    source.addFeatures([new Feature(ring), new Feature(new Point(centre))]);
+    view.fit(ring.getExtent(), { maxZoom: 17, padding: [60, 60, 60, 60], duration: 400 });
+    this.myLocationShown.set(true);
+  }
+
+  clearMyLocation(): void {
+    this.myLocationLayer?.getSource()?.clear();
+    this.myLocationShown.set(false);
+  }
+
   private ensureGotoSource(): VectorSource {
     if (!this.gotoLayer) {
       const accent = '#b5722a';
@@ -3055,6 +3134,19 @@ export class MapService {
     const to =
       where === 'top' ? 0 : where === 'bottom' ? order.length : where === 'up' ? Math.max(0, from - 1) : Math.min(order.length, from + 1);
     order.splice(to, 0, layerId);
+    this.layerOrder.set(order);
+    this.writeLayerOrder(order);
+    this.applyZIndexes();
+  }
+
+  /** Drag-and-drop in the Layers panel: puts `layerId` just above
+   *  (`after` = false) or just below `targetId` in the drawing order. */
+  moveLayerTo(layerId: string, targetId: string, after: boolean): void {
+    if (layerId === targetId) return;
+    const order = this.layerOrder().filter((id) => id !== layerId);
+    const at = order.indexOf(targetId);
+    if (at < 0) return;
+    order.splice(after ? at + 1 : at, 0, layerId);
     this.layerOrder.set(order);
     this.writeLayerOrder(order);
     this.applyZIndexes();

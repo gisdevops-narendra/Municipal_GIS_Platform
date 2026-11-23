@@ -100,6 +100,13 @@ enum GisUploadFileFormat {
   SHAPEFILE_ZIP
   GEOJSON
   CSV
+  KML
+  KMZ
+  GPX
+  GEOPACKAGE
+  /// Excel sheet with coordinate columns — converted to CSV, then read like one.
+  XLSX
+  DXF
 }
 
 /// The upload/draft/review/publish lifecycle (Task 7 §14). A row only ever

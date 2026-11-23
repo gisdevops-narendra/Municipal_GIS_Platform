@@ -2,6 +2,7 @@ import { Component, EventEmitter, Input, Output, ViewChild, effect, inject, sign
 import { MenuItem } from 'primeng/api';
 import { Menu, MenuModule } from 'primeng/menu';
 import { NgTemplateOutlet } from '@angular/common';
+import { CdkDrag, CdkDragDrop, CdkDropList } from '@angular/cdk/drag-drop';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { CheckboxModule, CheckboxChangeEvent } from 'primeng/checkbox';
@@ -38,7 +39,7 @@ import { RenderFormatInfo, formatInfo, formatsFor, recommendedFormat } from '../
 @Component({
   selector: 'app-layer-panel',
   standalone: true,
-  imports: [NgTemplateOutlet, LegendSwatchComponent, LayerLegendComponent, FormsModule, ButtonModule, CheckboxModule, DialogModule, MenuModule, SelectModule, TooltipModule],
+  imports: [NgTemplateOutlet, CdkDropList, CdkDrag, LegendSwatchComponent, LayerLegendComponent, FormsModule, ButtonModule, CheckboxModule, DialogModule, MenuModule, SelectModule, TooltipModule],
   templateUrl: './layer-panel.component.html',
   styleUrl: './layer-panel.component.scss'
 })
@@ -207,22 +208,50 @@ export class LayerPanelComponent {
   /** Every uploaded layer in one list — departments were removed, so old
    *  DEPARTMENT-ownership layers are listed here too. */
   get canonicalLayers(): GisLayer[] {
-    return this.layers.filter((layer) => !layer.rasterAnalysis && !layer.drawnLayer && !layer.aiGenerated);
+    return this.shownLayers.filter((layer) => !layer.rasterAnalysis && !layer.drawnLayer && !layer.aiGenerated);
   }
 
   /** Layers created from scratch in Draw & Mark, whoever owns them. */
   get drawnLayers(): GisLayer[] {
-    return this.layers.filter((layer) => layer.drawnLayer && !layer.rasterAnalysis);
+    return this.shownLayers.filter((layer) => layer.drawnLayer && !layer.rasterAnalysis);
   }
 
   /** Layers saved from AI Assistant answers, whoever owns them. */
   get aiLayers(): GisLayer[] {
-    return this.layers.filter((layer) => layer.aiGenerated && !layer.rasterAnalysis && !layer.drawnLayer);
+    return this.shownLayers.filter((layer) => layer.aiGenerated && !layer.rasterAnalysis && !layer.drawnLayer);
   }
 
   /** Raster Analysis uploads, downloads and results, whoever owns them. */
   get rasterAnalysisLayers(): GisLayer[] {
-    return this.layers.filter((layer) => layer.rasterAnalysis);
+    return this.shownLayers.filter((layer) => layer.rasterAnalysis);
+  }
+
+  /** Drag-and-drop within a section: moves the layer above / below the row
+   *  it was dropped on, in the map's drawing order. */
+  onLayerDrop(event: CdkDragDrop<unknown>, list: GisLayer[]): void {
+    const { previousIndex, currentIndex } = event;
+    if (previousIndex === currentIndex || !list[currentIndex]) return;
+    this.mapService.moveLayerTo(event.item.data as string, list[currentIndex].id, currentIndex > previousIndex);
+  }
+
+  /** Text typed in the panel's "Filter layers" box. */
+  readonly layerQuery = signal('');
+
+  /** Layers matching the filter box (name, code or description; every word). */
+  get shownLayers(): GisLayer[] {
+    const words = this.layerQuery().trim().toLowerCase().split(/\s+/).filter(Boolean);
+    // Listed in drawing order (top of the list = drawn on top).
+    const order = this.mapService.layerOrder();
+    const rank = (id: string) => {
+      const i = order.indexOf(id);
+      return i < 0 ? Number.MAX_SAFE_INTEGER : i;
+    };
+    const sorted = [...this.layers].sort((a, b) => rank(a.id) - rank(b.id));
+    if (!words.length) return sorted;
+    return sorted.filter((layer) => {
+      const text = `${layer.name} ${layer.code ?? ''} ${layer.description ?? ''}`.toLowerCase();
+      return words.every((w) => text.includes(w));
+    });
   }
 
   /** Layers whose full legend is expanded under the row. */
@@ -287,6 +316,19 @@ export class LayerPanelComponent {
 
   onToggle(layerId: string, event: CheckboxChangeEvent): void {
     this.mapService.setLayerVisibility(layerId, !!event.checked);
+  }
+
+  anyVisible(list: GisLayer[]): boolean {
+    return list.some((layer) => this.isVisible(layer.id));
+  }
+
+  /** Section header button: hides every layer of the section when any is
+   *  on, otherwise shows them all (only the rows the filter box shows). */
+  toggleGroup(list: GisLayer[]): void {
+    const show = !this.anyVisible(list);
+    for (const layer of list) {
+      if (this.isVisible(layer.id) !== show) this.mapService.setLayerVisibility(layer.id, show);
+    }
   }
 
   /** Parsed JSON legends by layer id: undefined = not loaded, null = none. */

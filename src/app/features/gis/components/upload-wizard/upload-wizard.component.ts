@@ -28,7 +28,7 @@ type WizardStep = 'FILE_INFO' | 'VALIDATION' | 'COLUMNS' | 'PREVIEW';
 const CRS_PATTERN = /^EPSG:\d{4,6}$/;
 
 const STEP_ORDER: WizardStep[] = ['FILE_INFO', 'VALIDATION', 'COLUMNS', 'PREVIEW'];
-const ACCEPTED_EXTENSIONS = ['zip', 'geojson', 'json', 'csv'];
+const ACCEPTED_EXTENSIONS = ['zip', 'geojson', 'json', 'csv', 'xlsx', 'kml', 'kmz', 'gpx', 'gpkg', 'dxf'];
 
 /**
  * Upload wizard (Task 7 §22). Deliberately three visible steps, not six:
@@ -193,7 +193,8 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
   }
 
   get isCsv(): boolean {
-    return this.source() === 'FILE' && (this.selectedFile()?.name ?? '').toLowerCase().endsWith('.csv');
+    // Excel sheets are read like a CSV (coordinate columns).
+    return this.source() === 'FILE' && /\.(csv|xlsx)$/.test((this.selectedFile()?.name ?? '').toLowerCase());
   }
 
   onFileInput(event: Event): void {
@@ -227,9 +228,17 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
 
   fileKind(file: File): string {
     const ext = this.fileExt(file);
-    if (ext === 'ZIP') return 'Shapefile (ZIP)';
-    if (ext === 'CSV') return 'CSV table';
-    return 'GeoJSON';
+    const kinds: Record<string, string> = {
+      ZIP: 'Shapefile (ZIP)',
+      CSV: 'CSV table',
+      XLSX: 'Excel sheet',
+      KML: 'KML (Google Earth)',
+      KMZ: 'KMZ (Google Earth)',
+      GPX: 'GPX (GPS)',
+      GPKG: 'GeoPackage',
+      DXF: 'AutoCAD DXF'
+    };
+    return kinds[ext] ?? 'GeoJSON';
   }
 
   formatSize(bytes: number): string {
@@ -244,11 +253,23 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
     const show = (value: { state: 'reading' | 'found' | 'custom' | 'missing'; text: string }) =>
       token === this.sourceToken && this.sourceProjection.set(value);
     show({ state: 'reading', text: 'Reading…' });
-    const csv = file.name.toLowerCase().endsWith('.csv');
+    const lower = file.name.toLowerCase();
+    const csv = /\.(csv|xlsx)$/.test(lower);
     readSourceCrs(file)
       .then((hint) => {
         if (hint.kind === 'none') {
-          show({ state: 'missing', text: file.name.toLowerCase().endsWith('.zip') ? 'Not found — the ZIP has no .prj file' : 'Not recognised' });
+          show(
+            lower.endsWith('.gpkg')
+              ? { state: 'custom', text: 'Read from the GeoPackage when importing' }
+              : {
+                  state: 'missing',
+                  text: lower.endsWith('.zip')
+                    ? 'Not found — the ZIP has no .prj file'
+                    : lower.endsWith('.dxf')
+                      ? 'Not stored in DXF files — choose the Source CRS'
+                      : 'Not recognised'
+                }
+          );
         } else if (hint.kind === 'epsg') {
           this.crsService.get(hint.code).subscribe({
             next: (crs) => show({ state: 'found', text: (crs ? crsLabel(crs) : hint.code) + (csv ? ' (latitude / longitude columns)' : '') }),
@@ -270,7 +291,7 @@ export class UploadWizardComponent implements OnInit, OnDestroy {
     if (!file) return;
     const ext = (file.name.split('.').pop() ?? '').toLowerCase();
     if (!ACCEPTED_EXTENSIONS.includes(ext)) {
-      this.submitError.set('Unsupported file type. Upload a Shapefile ZIP, GeoJSON, or CSV file.');
+      this.submitError.set('Unsupported file type. Upload a Shapefile ZIP, GeoJSON, CSV, Excel (.xlsx), KML/KMZ, GPX, GeoPackage or DXF file.');
       return;
     }
     this.selectedFile.set(file);

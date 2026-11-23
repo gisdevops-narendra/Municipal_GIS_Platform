@@ -207,6 +207,7 @@ const SUB_TOOLS: SubTool[] = [
   sub('measure', 'distance', 'Measure Distance', 'pi pi-arrows-h', 'Measure · length of a line', 'length ruler'),
   sub('measure', 'area', 'Measure Area', 'pi pi-stop', 'Measure · area and perimeter', 'perimeter polygon'),
   sub('measure', 'radius', 'Radius / Circle', 'pi pi-circle', 'Measure · circle from a centre and radius'),
+  sub('measure', 'bearing', 'Bearing / Direction', 'pi pi-compass', 'Measure · bearing and back bearing between points', 'azimuth angle direction compass heading'),
   sub('sketch', 'create', 'Create Features', 'pi pi-plus-circle', 'Draw & Mark · add features to a layer', 'digitize digitise add edit new feature'),
   sub('sketch', 'modify', 'Modify Features', 'pi pi-pencil', 'Draw & Mark · reshape, move or delete features', 'edit reshape move delete vertex'),
   sub('sketch', 'sketch', 'Sketches', 'pi pi-pencil', 'Draw & Mark · draw shapes, markers and text on the map', 'draw marker annotation'),

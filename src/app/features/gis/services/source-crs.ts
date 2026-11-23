@@ -14,7 +14,8 @@ const GEOJSON_SCAN_BYTES = 256 * 1024;
 
 export async function readSourceCrs(file: File): Promise<SourceCrsHint> {
   const name = file.name.toLowerCase();
-  if (name.endsWith('.csv')) return { kind: 'epsg', code: 'EPSG:4326' };
+  // CSV / Excel lat-lon columns, and KML / KMZ / GPX are WGS84 by definition.
+  if (/\.(csv|xlsx|kml|kmz|gpx)$/.test(name)) return { kind: 'epsg', code: 'EPSG:4326' };
   if (name.endsWith('.geojson') || name.endsWith('.json')) {
     const head = await file.slice(0, GEOJSON_SCAN_BYTES).text();
     const crs = /"crs"\s*:\s*\{[^}]*?"name"\s*:\s*"([^"]+)"/.exec(head)?.[1];

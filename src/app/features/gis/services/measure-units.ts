@@ -8,7 +8,24 @@
  * `ol/sphere` — this module only converts and labels them.
  */
 
-export type MeasureKind = 'distance' | 'area' | 'radius';
+export type MeasureKind = 'distance' | 'area' | 'radius' | 'bearing';
+
+/** Initial great-circle bearing from A to B, degrees clockwise from true
+ *  north (0–360). Inputs are [lon, lat] in degrees. */
+export function bearingDeg(a: [number, number], b: [number, number]): number {
+  const rad = Math.PI / 180;
+  const [l1, p1] = [a[0] * rad, a[1] * rad];
+  const [l2, p2] = [b[0] * rad, b[1] * rad];
+  const y = Math.sin(l2 - l1) * Math.cos(p2);
+  const x = Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(l2 - l1);
+  return (Math.atan2(y, x) / rad + 360) % 360;
+}
+
+/** "47.3° NE" — degrees with the nearest of 16 compass points. */
+export function formatBearing(deg: number): string {
+  const points = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+  return `${deg.toFixed(1)}° ${points[Math.round(deg / 22.5) % 16]}`;
+}
 
 export type LengthUnit = 'm' | 'km' | 'ft' | 'mi';
 export type AreaUnit = 'm2' | 'ha' | 'km2' | 'ft2' | 'ac';

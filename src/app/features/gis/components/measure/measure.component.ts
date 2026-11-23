@@ -11,8 +11,11 @@ import {
   LengthUnit,
   MeasureKind,
   formatArea,
-  formatLength
+  formatLength,
+  bearingDeg,
+  formatBearing
 } from '../../services/measure-units';
+import { getDistance } from 'ol/sphere';
 
 interface ResultRow {
   label: string;
@@ -72,7 +75,8 @@ export class MeasureComponent implements OnDestroy {
   readonly kinds: { value: MeasureKind; label: string }[] = [
     { value: 'distance', label: 'Distance' },
     { value: 'area', label: 'Area' },
-    { value: 'radius', label: 'Radius / Circle' }
+    { value: 'radius', label: 'Radius / Circle' },
+    { value: 'bearing', label: 'Bearing' }
   ];
   readonly lengthUnits = LENGTH_UNITS;
   readonly areaUnits = AREA_UNITS;
@@ -105,15 +109,34 @@ export class MeasureComponent implements OnDestroy {
         { label: 'Area', value: result.areaM2 != null ? area(result.areaM2) : '—' }
       ];
     }
+    const pts = result.lonLats ?? [];
+    if (this.kind() === 'bearing' && pts.length >= 2) {
+      const first = pts[0];
+      const last = pts[pts.length - 1];
+      const fwd = bearingDeg(first, last);
+      const back = bearingDeg(last, first);
+      const straight = getDistance(first, last);
+      const rows: ResultRow[] = [
+        { label: 'Bearing', value: formatBearing(fwd) },
+        { label: 'Back bearing', value: formatBearing(back) },
+        { label: 'Straight distance', value: len(straight) }
+      ];
+      if (pts.length > 2) rows.push({ label: 'Path distance', value: len(result.lengthM) });
+      return rows;
+    }
     return [{ label: 'Total distance', value: len(result.lengthM) }];
   });
 
   readonly segments = computed(() => {
     const result = this.result();
     if (!result || result.type === 'Circle' || result.segmentsM.length < 2) return [];
+    const pts = result.lonLats ?? [];
+    const withBearing = this.kind() === 'bearing' && pts.length === result.segmentsM.length + 1;
     return result.segmentsM.map((metres, index) => ({
       index: index + 1,
-      value: formatLength(metres, this.lengthUnit())
+      value:
+        formatLength(metres, this.lengthUnit()) +
+        (withBearing ? ` · ${formatBearing(bearingDeg(pts[index], pts[index + 1]))}` : '')
     }));
   });
 
@@ -169,6 +192,8 @@ export class MeasureComponent implements OnDestroy {
         return 'Click to add polygon points, double-click to finish.';
       case 'radius':
         return 'Click the centre, then click again to set the radius.';
+      case 'bearing':
+        return 'Click the start point, then the target — double-click to finish.';
       default:
         return 'Click to add points, double-click to finish.';
     }

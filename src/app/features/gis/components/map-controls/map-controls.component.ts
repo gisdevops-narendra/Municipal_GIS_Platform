@@ -202,6 +202,16 @@ export class MapControlsComponent {
     let x = parseCoordinate(this.xInput());
     let y = parseCoordinate(this.yInput());
 
+    // Degrees-minutes-seconds (22°18'30"N, 22 18 30 N, 22°18.5'N …).
+    if (option.geographic) {
+      const geo = parseGeographicInput(this.xInput(), this.yInput());
+      if (geo) {
+        [x, y] = geo;
+        this.xInput.set(x.toFixed(6));
+        this.yInput.set(y.toFixed(6));
+      }
+    }
+
     const pair = this.xInput().trim().split(/[\s,;]+/).filter(Boolean);
     if (Number.isNaN(y) && pair.length === 2) {
       // "20.89, 70.40" pasted into one box: geographic pastes are usually
@@ -213,7 +223,11 @@ export class MapControlsComponent {
     }
 
     if (!Number.isFinite(x) || !Number.isFinite(y)) {
-      this.gotoError.set(`Enter both ${option.axes[0]} and ${option.axes[1]} as numbers.`);
+      this.gotoError.set(
+        option.geographic
+          ? `Enter ${option.axes[0]} and ${option.axes[1]} as decimals (73.18) or degrees-minutes-seconds (73°10'45"E).`
+          : `Enter both ${option.axes[0]} and ${option.axes[1]} as numbers.`
+      );
       return;
     }
     if (option.geographic && (Math.abs(x) > 180 || Math.abs(y) > 90)) {
@@ -238,6 +252,38 @@ export class MapControlsComponent {
     });
   }
 
+  // ----- my location -----
+  readonly locating = signal(false);
+
+  /** Zooms to the device's GPS position; a second click hides it. */
+  toggleMyLocation(): void {
+    if (this.mapService.myLocationShown()) {
+      this.mapService.clearMyLocation();
+      return;
+    }
+    if (!('geolocation' in navigator) || !window.isSecureContext) {
+      this.notify.error('Location needs the app opened over https (or on localhost).', 'My location');
+      return;
+    }
+    this.locating.set(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        this.locating.set(false);
+        this.mapService.showMyLocation(pos.coords.longitude, pos.coords.latitude, pos.coords.accuracy);
+      },
+      (err) => {
+        this.locating.set(false);
+        this.notify.error(
+          err.code === err.PERMISSION_DENIED
+            ? 'Location permission was denied — allow it in the browser to use this.'
+            : 'Could not get your location.',
+          'My location'
+        );
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 }
+    );
+  }
+
   clearGoTo(): void {
     this.mapService.clearGoToMarker();
     this.gotoResult.set(null);
@@ -249,4 +295,48 @@ function parseCoordinate(value: string): number {
   const trimmed = value.trim();
   if (!trimmed || /[\s;]/.test(trimmed) || trimmed.split(',').length > 2) return Number.NaN;
   return Number(trimmed.replace(',', '.'));
+}
+
+/** One DMS / decimal-minutes / hemisphere-letter coordinate:
+ *  22°18'30"N · 22 18 30 N · N22°18'30.5" · 22°18.5'N · -22°18'30" · 22.3083 N.
+ *  Returns decimal degrees and the axis its N/S/E/W letter names (if any). */
+export function parseDms(value: string): { deg: number; axis: 'lat' | 'lon' | null } | null {
+  let text = value.trim().toUpperCase().replace(/[′’‘`]/g, "'").replace(/[″“”]|''/g, '"').replace(/,/g, '.');
+  if (!text) return null;
+  const hemi = /[NSEW]/.exec(text)?.[0] ?? null;
+  if ((text.match(/[NSEW]/g) ?? []).length > 1) return null;
+  text = text.replace(/[NSEW]/, ' ').trim();
+  const negative = text.startsWith('-');
+  const parts = text.replace(/^[-+]/, '').split(/[°'"\s]+/).filter(Boolean);
+  if (!parts.length || parts.length > 3 || !parts.every((p) => /^\d+(\.\d+)?$/.test(p))) return null;
+  const [d, m = 0, s = 0] = parts.map(Number);
+  if (m >= 60 || s >= 60) return null;
+  let deg = d + m / 60 + s / 3600;
+  if (negative || hemi === 'S' || hemi === 'W') deg = -deg;
+  return { deg, axis: hemi === 'N' || hemi === 'S' ? 'lat' : hemi === 'E' || hemi === 'W' ? 'lon' : null };
+}
+
+/** Geographic Go-To input in DMS form, as [lon, lat] — from the two boxes, or
+ *  a "22°18'30"N 73°10'45"E" pair pasted into the first box. N/S/E/W letters
+ *  decide which value is the latitude, whichever box it was typed in. Null
+ *  when the input is plain decimals (handled by the number parser). */
+function parseGeographicInput(xText: string, yText: string): [number, number] | null {
+  const isDms = (t: string) => /[°'"NSEW]|\d\s+\d/i.test(t.trim());
+  let first = xText.trim();
+  let second = yText.trim();
+  if (!isDms(first) && !isDms(second)) return null;
+  if (!second) {
+    // A pasted pair: split after the first hemisphere letter, or on a comma / semicolon.
+    const split =
+      /^([NSEW].*?)\s*[,;]?\s*([NSEW].+)$/i.exec(first) ?? // N22°18'30" E73°10'45"
+      /^(.*?[NSEW])\s*[,;]?\s*(.+)$/i.exec(first) ?? // 22°18'30"N 73°10'45"E
+      /^(.*?)\s*[;,]\s*(.+)$/.exec(first);
+    if (!split) return null;
+    [first, second] = [split[1], split[2]];
+  }
+  const a = parseDms(first);
+  const b = parseDms(second);
+  if (!a || !b) return null;
+  if (a.axis === 'lat' || b.axis === 'lon') return [b.deg, a.deg];
+  return [a.deg, b.deg];
 }

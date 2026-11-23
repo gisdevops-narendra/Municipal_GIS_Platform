@@ -19,9 +19,11 @@ import * as path from 'path';
 import {
   GISLayerUpload,
   GisGeometryType,
+  GisUploadFileFormat,
   GisUploadStatus,
   Prisma,
 } from '@prisma/client';
+import { promises as fsp } from 'fs';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AppUser } from '../auth/types/app-user.type';
 import { GdalError, GdalService } from './gdal.service';
@@ -148,10 +150,10 @@ export class GisUploadsService {
     const fileFormat = this.detectFileFormat(file.originalname);
     if (!fileFormat) {
       throw new BadRequestException(
-        'Unsupported file type. Upload a Shapefile ZIP, GeoJSON, or CSV file.',
+        'Unsupported file type. Upload a Shapefile ZIP, GeoJSON, CSV, Excel (.xlsx), KML/KMZ, GPX, GeoPackage or DXF file.',
       );
     }
-    if (fileFormat === 'CSV' && (dto.xField || dto.yField) && !dto.sourceCrs) {
+    if ((fileFormat === 'CSV' || fileFormat === 'XLSX') && (dto.xField || dto.yField) && !dto.sourceCrs) {
       throw new BadRequestException(
         'sourceCrs is required when specifying X/Y columns — it is never assumed to be WGS84.',
       );
@@ -836,8 +838,20 @@ export class GisUploadsService {
 
       let sourcePath = rawPath;
       let openOptions: string[] | undefined;
+      let layer: string | undefined;
+      let where: string | undefined;
+      const forceXY = ['KML', 'KMZ', 'GPX', 'DXF'].includes(upload.fileFormat);
 
-      if (upload.fileFormat === 'SHAPEFILE_ZIP') {
+      if (upload.fileFormat === 'XLSX') {
+        // A spreadsheet is read exactly like a CSV once converted.
+        const dir = this.storage.temporaryDir(upload.municipalityId, upload.id);
+        await fsp.mkdir(dir, { recursive: true });
+        sourcePath = path.join(dir, 'sheet.csv');
+        await this.gdal.spreadsheetToCsv(rawPath, sourcePath);
+        openOptions = await this.buildCsvOpenOptions(sourcePath, upload, csvOverrides, warnings);
+      } else if (['KML', 'KMZ', 'GPX', 'GEOPACKAGE', 'DXF'].includes(upload.fileFormat)) {
+        ({ layer, where } = await this.pickSourceLayer(rawPath, warnings));
+      } else if (upload.fileFormat === 'SHAPEFILE_ZIP') {
         const extracted = await this.storage.extractZipSafely(
           rawPath,
           upload.municipalityId,
@@ -853,7 +867,7 @@ export class GisUploadsService {
         );
       }
 
-      const inspected = await this.gdal.inspect(sourcePath, { openOptions });
+      const inspected = await this.gdal.inspect(sourcePath, { openOptions, layer, where });
 
       const geometryType = mapGeometryType(inspected.geometryType);
       if (!geometryType) {
@@ -883,6 +897,9 @@ export class GisUploadsService {
         sourceCrsOverride: sourceCrs,
         openOptions,
         connection,
+        layer,
+        where,
+        forceXY,
       });
 
       await ensureFeatId(this.prisma, tableName);
@@ -937,7 +954,7 @@ export class GisUploadsService {
         },
       });
 
-      if (upload.fileFormat === 'SHAPEFILE_ZIP') {
+      if (upload.fileFormat === 'SHAPEFILE_ZIP' || upload.fileFormat === 'XLSX') {
         await this.storage.cleanupTemporary(upload.municipalityId, upload.id);
       }
     } catch (error) {
@@ -1067,7 +1084,7 @@ export class GisUploadsService {
     sourcePath: string,
   ): Promise<string | null> {
     if (upload.sourceCrs) return upload.sourceCrs;
-    if (upload.fileFormat === 'CSV') return 'EPSG:4326';
+    if (upload.fileFormat === 'CSV' || upload.fileFormat === 'XLSX') return 'EPSG:4326';
     if (inspected.epsgCode) return `EPSG:${inspected.epsgCode}`;
     if (!inspected.hasCrs) return null;
     const matched = await this.gdal.identifyEpsg(sourcePath);
@@ -1097,14 +1114,72 @@ export class GisUploadsService {
     return path.join(dir, shp);
   }
 
-  private detectFileFormat(
-    originalFilename: string,
-  ): 'SHAPEFILE_ZIP' | 'GEOJSON' | 'CSV' | null {
+  private detectFileFormat(originalFilename: string): GisUploadFileFormat | null {
     const ext = path.extname(originalFilename).toLowerCase();
     if (ext === '.zip') return 'SHAPEFILE_ZIP';
     if (ext === '.geojson' || ext === '.json') return 'GEOJSON';
     if (ext === '.csv') return 'CSV';
+    if (ext === '.kml') return 'KML';
+    if (ext === '.kmz') return 'KMZ';
+    if (ext === '.gpx') return 'GPX';
+    if (ext === '.gpkg') return 'GEOPACKAGE';
+    if (ext === '.xlsx') return 'XLSX';
+    if (ext === '.dxf') return 'DXF';
     return null;
+  }
+
+  /**
+   * Multi-layer files (KML folders, GPX waypoints/routes/tracks, GeoPackage
+   * tables, DXF entities): imports the largest layer with geometry, and —
+   * when that layer mixes points, lines and polygons (KML, DXF) — only its
+   * most common geometry kind. Anything skipped is reported as a warning.
+   */
+  private async pickSourceLayer(
+    filePath: string,
+    warnings: string[],
+  ): Promise<{ layer: string; where?: string }> {
+    const all = await this.gdal.listLayers(filePath);
+    const usable = all.filter((l) => l.geometryType && l.geometryType !== 'None' && l.featureCount > 0);
+    // GPX also exposes every vertex of its tracks/routes as point layers.
+    const preferred = usable.filter((l) => !/^(track|route)_points$/i.test(l.name));
+    const pool = preferred.length ? preferred : usable;
+    if (!pool.length) throw new GdalError('The uploaded file contains no features with a location.');
+    // Largest layer; on a tie prefer lines/polygons (a GPS track over its waypoints).
+    const isPoint = (l: { geometryType: string | null }) => /point/i.test(l.geometryType ?? '');
+    const chosen = pool.reduce((a, b) =>
+      b.featureCount > a.featureCount || (b.featureCount === a.featureCount && isPoint(a) && !isPoint(b)) ? b : a,
+    );
+    const skipped = pool.filter((l) => l !== chosen);
+    if (skipped.length) {
+      warnings.push(
+        `The file has ${pool.length} layers — imported "${chosen.name}" (${chosen.featureCount} features). ` +
+          `Not imported: ${skipped.map((l) => `"${l.name}" (${l.featureCount})`).join(', ')}.`,
+      );
+    }
+    if (mapGeometryType(chosen.geometryType)) return { layer: chosen.name };
+
+    // Mixed geometry: count each kind and keep the most common one.
+    const kinds = [
+      { kind: 'points', where: "OGR_GEOMETRY LIKE '%POINT'" },
+      { kind: 'lines', where: "OGR_GEOMETRY LIKE '%LINESTRING'" },
+      { kind: 'polygons', where: "OGR_GEOMETRY LIKE '%POLYGON'" },
+    ];
+    const counted = await Promise.all(
+      kinds.map(async (k) => ({
+        ...k,
+        count: (await this.gdal.inspect(filePath, { layer: chosen.name, where: k.where }).catch(() => null))?.featureCount ?? 0,
+      })),
+    );
+    const best = counted.reduce((a, b) => (b.count > a.count ? b : a));
+    if (!best.count) throw new GdalError('The uploaded file has no point, line or polygon features.');
+    const others = counted.filter((k) => k !== best && k.count > 0);
+    if (others.length) {
+      warnings.push(
+        `"${chosen.name}" mixes geometry types — imported its ${best.count} ${best.kind}; ` +
+          `skipped ${others.map((k) => `${k.count} ${k.kind}`).join(', ')}. Upload those separately if needed.`,
+      );
+    }
+    return { layer: chosen.name, where: best.where };
   }
 
   /**
