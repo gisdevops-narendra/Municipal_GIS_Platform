@@ -24,6 +24,8 @@ import { NetworkController } from './network.controller';
 import { NetworkService } from './network.service';
 import { PlaceSearchService } from './place-search.service';
 import { RasterController } from './raster.controller';
+import { GeoreferenceController } from './georeference.controller';
+import { GeoreferenceService } from './georeference.service';
 import { RasterService } from './raster.service';
 import { RasterToolsService } from './raster-tools.service';
 import { RasterJobsService } from './raster-jobs.service';
@@ -74,6 +76,7 @@ import { AirStationsService } from './air-stations.service';
     PrintController,
     NetworkController,
     RasterController,
+    GeoreferenceController,
     VectorToolsController,
     DataToolsController,
     CrsController,
@@ -104,6 +107,7 @@ import { AirStationsService } from './air-stations.service';
     PlaceSearchService,
     RasterService,
     RasterToolsService,
+    GeoreferenceService,
     RasterJobsService,
     RasterMonitorService,
     RasterMailService,

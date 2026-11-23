@@ -1,3 +1,5 @@
+import { GeoreferenceService } from './georeference.service';
+import type { GeoreferenceRunDto } from './dto/georeference.dto';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { mkdir, readFile } from 'fs/promises';
 import { dirname } from 'path';
@@ -141,7 +143,15 @@ function streamHierarchyStyle(maxOrder: number) {
 
 @Injectable()
 export class RasterToolsService {
-  constructor(private readonly rasters: RasterService) {}
+  constructor(
+    private readonly rasters: RasterService,
+    private readonly georef: GeoreferenceService,
+  ) {}
+
+  /** Georeferencer: full-resolution warp of a scanned map (see GeoreferenceService). */
+  georeference(appUser: AppUser, dto: GeoreferenceRunDto) {
+    return this.georef.georeference(appUser, dto);
+  }
 
   // ----- Terrain Analysis -----
 

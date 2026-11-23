@@ -1,0 +1,204 @@
+<div class="gr" role="dialog" aria-label="Georeferencer">
+  <!-- ===== toolbar ===== -->
+  <header class="gr__bar">
+    <span class="gr__title"><i class="pi pi-map" aria-hidden="true"></i> Georeferencer</span>
+    <span class="gr__name" [title]="session()?.originalName ?? ''">{{ session()?.name }}</span>
+
+    <span class="gr__sep"></span>
+
+    <button type="button" class="gr__btn" [class.is-active]="addMode()" (click)="addMode.set(!addMode())"
+            title="Add point: click the image, then the same place on the map">
+      <i class="pi pi-plus-circle" aria-hidden="true"></i> Add point
+    </button>
+    <button type="button" class="gr__btn" (click)="importPoints()" title="Load GCPs from a QGIS .points file">
+      <i class="pi pi-upload" aria-hidden="true"></i> Load GCPs
+    </button>
+    <button type="button" class="gr__btn" [disabled]="!gcps().length" (click)="exportPoints()" title="Save GCPs as a QGIS .points file">
+      <i class="pi pi-download" aria-hidden="true"></i> Save GCPs
+    </button>
+    <input #pointsFile type="file" accept=".points,.txt,.csv" hidden (change)="onPointsFile($event)" />
+
+    <span class="gr__sep"></span>
+
+    <label class="gr__field">
+      <span>Transformation</span>
+      <select [ngModel]="transform()" (ngModelChange)="setTransform($event)">
+        @for (t of transforms; track t.value) { <option [value]="t.value">{{ t.label }}</option> }
+      </select>
+    </label>
+    <label class="gr__field">
+      <span>Resampling</span>
+      <select [ngModel]="resampling()" (ngModelChange)="setResampling($event)">
+        @for (r of resamplings; track r.value) { <option [value]="r.value">{{ r.label }}</option> }
+      </select>
+    </label>
+    <div class="gr__field gr__field--crs">
+      <span>Target CRS</span>
+      <app-crs-picker size="small" [ngModel]="targetCrs() || null" (ngModelChange)="setTargetCrs($event)" placeholder="e.g. 32643 or UTM" />
+    </div>
+
+    <span class="gr__spacer"></span>
+    <span class="gr__save" [class.is-dirty]="saveState() !== 'saved'">
+      {{ saveState() === 'saved' ? 'All changes saved' : saveState() === 'saving' ? 'Saving…' : 'Unsaved' }}
+    </span>
+    <button type="button" class="gr__btn gr__btn--ghost" (click)="close()" title="Close (Esc)">
+      <i class="pi pi-times" aria-hidden="true"></i>
+    </button>
+  </header>
+  <p class="gr__hint">{{ transformHint() }} <span>Needs ≥ {{ minGcps() }} GCPs — you have {{ enabledCount() }} enabled.</span></p>
+  @if (crsSuggestion(); as sug) {
+    <div class="gr__suggest">
+      <i class="pi pi-lightbulb" aria-hidden="true"></i>
+      This scan looks like it was drawn in <b>{{ sug.code }}</b>: the GCPs fit it with an error of
+      <b>{{ sug.px.toFixed(2) }} px</b> instead of {{ sug.currentPx.toFixed(2) }} px in {{ targetCrs() }}.
+      <button type="button" class="gr__btn gr__btn--primary" (click)="useSuggestedCrs()">Use {{ sug.code }}</button>
+      <button type="button" class="gr__link" (click)="crsSuggestion.set(null)">Dismiss</button>
+    </div>
+  }
+
+  @if (session(); as s) {
+    @if (s.status === 'processing') {
+      <div class="gr__status"><i class="pi pi-spin pi-spinner" aria-hidden="true"></i> {{ s.stage ?? 'Preparing the image…' }}</div>
+    } @else if (s.status === 'failed') {
+      <div class="gr__status gr__status--error"><i class="pi pi-exclamation-triangle" aria-hidden="true"></i> {{ s.error }}</div>
+    }
+  }
+
+  <!-- ===== the two canvases ===== -->
+  <div class="gr__panes">
+    <section class="gr__pane">
+      <div class="gr__pane-head">
+        <span>Scanned image</span>
+        <span class="gr__pane-note">{{ session()?.width }} × {{ session()?.height }} px · drag a point to move it</span>
+      </div>
+      <div #imageMap class="gr__map gr__map--image" [class.is-adding]="addMode()"></div>
+    </section>
+    <section class="gr__pane">
+      <div class="gr__pane-head">
+        <span>Reference map</span>
+        <select class="gr__mini" [ngModel]="basemap()" (ngModelChange)="basemap.set($event)" aria-label="Reference basemap">
+          @for (b of basemaps; track b.id) { <option [value]="b.id">{{ b.label }}</option> }
+        </select>
+        @if (preview()) {
+          <label class="gr__opacity">
+            Preview
+            <input type="range" min="0" max="1" step="0.05" [ngModel]="previewOpacity()" (ngModelChange)="previewOpacity.set(+$event)" />
+          </label>
+          <button type="button" class="gr__link" (click)="clearPreview()">Hide preview</button>
+        }
+      </div>
+      <div #refMap class="gr__map" [class.is-picking]="!!pending()"></div>
+    </section>
+  </div>
+
+  <!-- ===== pending point: pick on the map or type ===== -->
+  @if (pending(); as p) {
+    <div class="gr__pending">
+      <span class="gr__pending-src"><b>New point</b> at pixel {{ fmt(p.px, 1) }}, {{ fmt(p.py, 1) }} — click the same place on the reference map, or type its coordinates:</span>
+      <select [(ngModel)]="coordMode" aria-label="How to enter the coordinates">
+        <option value="dms">Degrees · minutes · seconds</option>
+        <option value="dd">Decimal degrees</option>
+        <option value="target" [disabled]="!targetCrs()">X / Y in {{ targetCrs() || 'target CRS' }}</option>
+      </select>
+      @if (coordMode === 'dms') {
+        <span class="gr__dms">
+          <b>Longitude</b>
+          <input type="text" inputmode="decimal" class="gr__dms-d" [(ngModel)]="lonD" placeholder="deg" aria-label="Longitude degrees" (keydown.enter)="addTyped()" /><span class="gr__unit">°</span>
+          <input type="text" inputmode="decimal" class="gr__dms-m" [(ngModel)]="lonM" placeholder="min" aria-label="Longitude minutes" (keydown.enter)="addTyped()" /><span class="gr__unit">′</span>
+          <input type="text" inputmode="decimal" class="gr__dms-m" [(ngModel)]="lonS" placeholder="sec" aria-label="Longitude seconds" (keydown.enter)="addTyped()" /><span class="gr__unit">″</span>
+          <select [(ngModel)]="lonH" aria-label="East or West">
+            <option value="E">E (East)</option>
+            <option value="W">W (West)</option>
+          </select>
+        </span>
+        <span class="gr__dms">
+          <b>Latitude</b>
+          <input type="text" inputmode="decimal" class="gr__dms-d" [(ngModel)]="latD" placeholder="deg" aria-label="Latitude degrees" (keydown.enter)="addTyped()" /><span class="gr__unit">°</span>
+          <input type="text" inputmode="decimal" class="gr__dms-m" [(ngModel)]="latM" placeholder="min" aria-label="Latitude minutes" (keydown.enter)="addTyped()" /><span class="gr__unit">′</span>
+          <input type="text" inputmode="decimal" class="gr__dms-m" [(ngModel)]="latS" placeholder="sec" aria-label="Latitude seconds" (keydown.enter)="addTyped()" /><span class="gr__unit">″</span>
+          <select [(ngModel)]="latH" aria-label="North or South">
+            <option value="N">N (North)</option>
+            <option value="S">S (South)</option>
+          </select>
+        </span>
+      } @else {
+        <input type="text" [(ngModel)]="coordX" [placeholder]="coordMode === 'dd' ? 'Longitude, e.g. 70.5' : 'X / Easting'" aria-label="X or longitude" (keydown.enter)="addTyped()" />
+        <input type="text" [(ngModel)]="coordY" [placeholder]="coordMode === 'dd' ? 'Latitude, e.g. 21.5' : 'Y / Northing'" aria-label="Y or latitude" (keydown.enter)="addTyped()" />
+      }
+      <button type="button" class="gr__btn gr__btn--primary" (click)="addTyped()">Add</button>
+      <button type="button" class="gr__btn gr__btn--ghost" (click)="cancelPending()">Cancel</button>
+      @if (coordError) { <span class="gr__error">{{ coordError }}</span> }
+    </div>
+  }
+
+  <!-- ===== GCP table ===== -->
+  <section class="gr__table-wrap">
+    <div class="gr__table-head">
+      <span><b>GCP table</b> · {{ gcps().length }} points</span>
+      @if (fit(); as f) {
+        <span class="gr__rmse">
+          @if (transform() === 'tps') {
+            Thin plate spline fits every GCP exactly (no residuals).
+          } @else {
+            RMSE <b>{{ fmt(f.rmse) }} {{ units() }}</b> ({{ (f.rmse / f.pixelSize).toFixed(2) }} px) · pixel ≈ {{ fmt(f.pixelSize) }} {{ units() }}
+          }
+        </span>
+      } @else if (gcps().length) {
+        <span class="gr__rmse gr__rmse--muted">{{ targetCrs() ? 'Add more GCPs to compute residuals' : 'Choose a target CRS' }}</span>
+      }
+      <span class="gr__spacer"></span>
+      @if (gcps().length) { <button type="button" class="gr__link" (click)="removeAll()">Delete all</button> }
+    </div>
+    <div class="gr__table-scroll">
+      <table class="gr__table">
+        <thead>
+          <tr>
+            <th>#</th><th>On</th><th>Source X (px)</th><th>Source Y (px)</th><th>Longitude</th><th>Latitude</th>
+            <th>dX ({{ units() }})</th><th>dY ({{ units() }})</th><th>Residual (px)</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (g of gcps(); track g.id; let i = $index) {
+            @let r = residual(g);
+            @let rp = residualPx(g);
+            <tr [class.is-selected]="g.id === selectedId()" [class.is-off]="!g.enabled" (click)="select(g.id)">
+              <td>{{ i + 1 }}</td>
+              <td><input type="checkbox" [checked]="g.enabled" (click)="$event.stopPropagation()" (change)="updateGcp(g.id, { enabled: $any($event.target).checked })" [attr.aria-label]="'Use GCP ' + (i + 1)" /></td>
+              <td><input class="gr__num" [value]="fmt(g.px, 2)" (change)="setCoord(g, 'px', $any($event.target).value)" /></td>
+              <td><input class="gr__num" [value]="fmt(g.py, 2)" (change)="setCoord(g, 'py', $any($event.target).value)" /></td>
+              <td><input class="gr__num" [value]="fmt(g.lon, 7)" (change)="setCoord(g, 'lon', $any($event.target).value)" /></td>
+              <td><input class="gr__num" [value]="fmt(g.lat, 7)" (change)="setCoord(g, 'lat', $any($event.target).value)" /></td>
+              <td>{{ r ? fmt(r.dx) : '—' }}</td>
+              <td>{{ r ? fmt(r.dy) : '—' }}</td>
+              <td [class.gr__bad]="rp !== null && rp > warnPx">{{ rp !== null ? rp.toFixed(2) : '—' }}</td>
+              <td><button type="button" class="gr__icon" (click)="$event.stopPropagation(); removeGcp(g.id)" [attr.aria-label]="'Delete GCP ' + (i + 1)"><i class="pi pi-trash"></i></button></td>
+            </tr>
+          } @empty {
+            <tr><td colspan="10" class="gr__empty">
+              No GCPs yet. Zoom in on the scanned map, click a known point (a grid / graticule intersection or a sheet corner),
+              then click the same place on the reference map — or type its coordinates. Use at least 4 well-spread points;
+              for a toposheet the four corners plus a few graticule crossings work best.
+            </td></tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===== run ===== -->
+  <footer class="gr__foot">
+    <button type="button" class="gr__btn" [disabled]="!canRun() || previewing()" (click)="runPreview()">
+      <i class="pi" [class.pi-eye]="!previewing()" [class.pi-spinner]="previewing()" [class.pi-spin]="previewing()" aria-hidden="true"></i>
+      {{ previewing() ? 'Making preview…' : 'Preview on map' }}
+    </button>
+    <label class="gr__field gr__field--grow">
+      <span>Output layer name</span>
+      <input type="text" maxlength="80" [ngModel]="outputName()" (ngModelChange)="outputName.set($event)" />
+    </label>
+    @if (running()) { <span class="gr__stage"><i class="pi pi-spin pi-spinner" aria-hidden="true"></i> {{ jobStage() }}</span> }
+    @if (session()?.outputs?.length) { <span class="gr__done">{{ session()!.outputs.length }} published from this scan</span> }
+    <button type="button" class="gr__btn gr__btn--primary" [disabled]="!canRun() || running() || !outputName().trim()" (click)="start()">
+      <i class="pi pi-play" aria-hidden="true"></i> Start georeferencing
+    </button>
+  </footer>
+</div>

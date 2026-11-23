@@ -85,6 +85,11 @@
 
 <div class="bo ra__form">
   @if (!showResults()) {
+  <!-- ============ GEOREFERENCER ============ -->
+  @if (tool() === 'georef') {
+    <app-georef-panel (layerCreated)="layerCreated.emit($event)" />
+  }
+
   <!-- ============ UPLOAD ============ -->
   @if (tool() === 'upload') {
     <label class="bo__field">
@@ -1829,7 +1834,7 @@
       <button pButton type="button" label="Run again" icon="pi pi-refresh" class="p-button-sm bo__run" [disabled]="running()" (click)="run()"></button>
       <button pButton type="button" label="Change settings" icon="pi pi-sliders-h" class="p-button-sm p-button-text" (click)="showResults.set(false)"></button>
     </div>
-  } @else if (tool() !== 'swipe' && !['workflows', 'history', 'timeslider', 'storage'].includes(tool())) {
+  } @else if (tool() !== 'swipe' && !['workflows', 'history', 'timeslider', 'storage', 'georef'].includes(tool())) {
     <div class="bo__controls">
       <button
         pButton

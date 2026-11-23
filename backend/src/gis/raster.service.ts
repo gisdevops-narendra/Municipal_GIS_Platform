@@ -395,6 +395,11 @@ export class RasterService {
     return path.join(this.storageRoot, municipalityId, 'rasters', 'tmp', `${randomUUID()}${extension}`);
   }
 
+  /** Where the Georeferencer keeps its sessions for a municipality. */
+  georefRoot(municipalityId: string): string {
+    return path.join(this.storageRoot, municipalityId, 'georef');
+  }
+
   async removeTemp(...files: string[]): Promise<void> {
     await Promise.all(files.map((f) => fsp.rm(f, { force: true })));
   }

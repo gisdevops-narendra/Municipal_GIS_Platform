@@ -14,6 +14,7 @@ import { GisAiService } from '../../services/gis-ai.service';
 import { SettingsService } from '../../../../core/services/settings.service';
 import { environment } from '../../../../../environments/environment';
 import { CrsPickerComponent } from '../crs-picker/crs-picker.component';
+import { GeorefPanelComponent } from '../georeferencer/georef-panel.component';
 import { Terrain3dComponent, TerrainMesh } from './terrain-3d.component';
 import {
   GeoJsonGeometry,
@@ -45,7 +46,8 @@ export type RasterToolId =
   | 'suitability' | 'encroach' | 'greencover' | 'monitor' | 'floodrisk' | 'exposure' | 'report'
   | 'extract' | 'leastcost' | 'hotspot' | 'airquality' | 'water' | 'curvature' | 'fillnodata' | 'heights'
   | 'workflows' | 'history' | 'timeslider' | 'storage'
-  | 'streams' | 'view3d' | 'swipe' | 'change' | 'changematrix' | 'series' | 'ndvi' | 'indices' | 'heat' | 'lst' | 'classify' | 'supervised';
+  | 'streams' | 'view3d' | 'swipe' | 'change' | 'changematrix' | 'series' | 'ndvi' | 'indices' | 'heat' | 'lst' | 'classify' | 'supervised'
+  | 'georef';
 
 interface ToolDef {
   id: RasterToolId;
@@ -63,6 +65,7 @@ interface ToolDef {
 /** Raster Analysis (69) and its sub-modules, in catalog order. */
 export const RASTER_TOOLS: ToolDef[] = [
   { id: 'upload', label: 'Raster Upload & Publish', group: 'Raster Data', section: 'Get Data', moduleId: 911, icon: 'pi pi-upload', description: 'Publish a GeoTIFF (DEM, satellite or drone image) as a map layer.' },
+  { id: 'georef', label: 'Georeferencer', group: 'Raster Data', section: 'Get Data', moduleId: 911, icon: 'pi pi-map', description: 'Place a scanned map, plan or toposheet (image or PDF) on the map with ground control points — like QGIS.' },
   { id: 'online', label: 'Download from Online Sources', group: 'Raster Data', section: 'Get Data', moduleId: 919, icon: 'pi pi-cloud-download', description: 'Free elevation (Copernicus DEM), land cover (ESA WorldCover) Sentinel-2 / Landsat, 1 m EarthView or drone imagery (OpenAerialMap) for any area.' },
   { id: 'style', label: 'Raster Styling', group: 'Raster Data', section: 'Inspect & Export', moduleId: 912, icon: 'pi pi-palette', description: 'Colour a raster with a ramp, stretch and opacity.' },
   { id: 'identify', label: 'Pixel Identify', group: 'Raster Data', section: 'Inspect & Export', moduleId: 913, icon: 'pi pi-info-circle', description: 'Click the map to read pixel values from every band.' },
@@ -138,7 +141,7 @@ const OPTIONAL_OUTPUT: RasterToolId[] = ['encroach', 'greencover', 'exposure'];
 /** Tools whose main input is a vector layer instead of a raster. */
 const VECTOR_TOOLS: RasterToolId[] = ['rasterize', 'idw', 'heatmap', 'proximity', 'extract', 'hotspot'];
 /** Tools that pick their own rasters (no single "input raster" picker). */
-const NO_RASTER_INPUT: RasterToolId[] = ['upload', 'online', 'series', 'heat', 'suitability', 'encroach', 'greencover', 'monitor', 'report', 'airquality', 'water', 'workflows', 'history', 'timeslider', 'storage', 'calc', 'swipe', 'mosaic', ...VECTOR_TOOLS];
+const NO_RASTER_INPUT: RasterToolId[] = ['upload', 'georef', 'online', 'series', 'heat', 'suitability', 'encroach', 'greencover', 'monitor', 'report', 'airquality', 'water', 'workflows', 'history', 'timeslider', 'storage', 'calc', 'swipe', 'mosaic', ...VECTOR_TOOLS];
 
 type Slot = 'a' | 'b' | 'line' | 'polygon' | 'observer' | 'training';
 
@@ -194,7 +197,7 @@ const GROUP_META: Record<string, { short: string; icon: string }> = {
 @Component({
   selector: 'app-raster-analysis',
   standalone: true,
-  imports: [FormsModule, NgTemplateOutlet, DatePipe, ButtonModule, SelectModule, MultiSelectModule, Terrain3dComponent, CrsPickerComponent],
+  imports: [FormsModule, NgTemplateOutlet, DatePipe, ButtonModule, SelectModule, MultiSelectModule, Terrain3dComponent, CrsPickerComponent, GeorefPanelComponent],
   templateUrl: './raster-analysis.component.html',
   styleUrls: ['../buffer-overlay/buffer-overlay.component.scss', './raster-analysis.component.scss']
 })

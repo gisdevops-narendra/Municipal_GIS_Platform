@@ -1,3 +1,4 @@
+import { GeoreferenceRunDto } from './dto/georeference.dto';
 import type { AppUser } from '../auth/types/app-user.type';
 import type { RasterToolsService } from './raster-tools.service';
 import {
@@ -172,6 +173,7 @@ export const RASTER_JOB_TOOLS: Record<string, RasterToolDef> = {
   hotspot: { dto: HotspotDto, modules: [RASTER_MODULES.hotspot], run: (t, u, d: HotspotDto) => t.hotspot(u, d) },
   'air-quality': { dto: AirQualityDto, modules: [RASTER_MODULES.airQuality], run: (t, u, d: AirQualityDto) => t.airQuality(u, d) },
   'fill-nodata': { dto: FillNoDataDto, modules: [RASTER_MODULES.fillNoData], run: (t, u, d: FillNoDataDto) => t.fillNoData(u, d) },
+  georeference: { dto: GeoreferenceRunDto, modules: [RASTER_MODULES.upload], run: (t, u, d: GeoreferenceRunDto) => t.georeference(u, d) },
   'object-heights': { dto: ObjectHeightsDto, modules: [RASTER_MODULES.objectHeights], run: (t, u, d: ObjectHeightsDto) => t.objectHeights(u, d) },
   suitability: { dto: SuitabilityDto, modules: [RASTER_MODULES.suitability], run: (t, u, d: SuitabilityDto) => t.suitability(u, d) },
   encroachment: { dto: EncroachmentDto, modules: [RASTER_MODULES.encroachment], run: (t, u, d: EncroachmentDto) => t.encroachment(u, d) },
