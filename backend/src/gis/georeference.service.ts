@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import { promises as fsp } from 'fs';
 import * as path from 'path';
 import { promisify } from 'util';
+import AdmZip from 'adm-zip';
 import type { AppUser } from '../auth/types/app-user.type';
 import { RasterService } from './raster.service';
 import { rasterJobContext } from './raster-job-context';
@@ -233,6 +234,48 @@ export class GeoreferenceService {
     ]);
 
     await this.update(municipalityId, meta.id, { status: 'ready', stage: null });
+  }
+
+  // ----- map view → georeferenced image -----
+
+  /** The browser's rendered map view (PNG) made into a georeferenced file:
+   *  a GeoTIFF, or a ZIP of PNG + world file (.pgw) + .prj. `bbox` is the
+   *  view extent in `crs`. `file.path` is always removed. */
+  async exportView(
+    file: { path: string; size: number } | undefined,
+    bbox: [number, number, number, number],
+    crs: string,
+    format: 'tif' | 'png',
+    name: string,
+  ): Promise<{ filename: string; body: Buffer; contentType: string }> {
+    if (!file?.path || !file.size) throw new BadRequestException('No map image received.');
+    const work = `${file.path}-export`;
+    try {
+      const info = await this.info(file.path);
+      const [w, h] = info.size;
+      const [minX, minY, maxX, maxY] = bbox;
+      const safe = name.replace(/[^\w.-]+/g, '_').slice(0, 60) || 'map_view';
+      if (format === 'tif') {
+        await this.run('gdal_translate', [
+          '-q', '-a_ullr', String(minX), String(maxY), String(maxX), String(minY), '-a_srs', crs,
+          '-co', 'COMPRESS=DEFLATE', '-co', 'TILED=YES', file.path, `${work}.tif`,
+        ], 120_000);
+        return { filename: `${safe}.tif`, body: await fsp.readFile(`${work}.tif`), contentType: 'image/tiff' };
+      }
+      // World file: pixel size X, rotation, rotation, −pixel size Y, then the
+      // centre of the top-left pixel.
+      const sx = (maxX - minX) / w;
+      const sy = (maxY - minY) / h;
+      const pgw = [sx, 0, 0, -sy, minX + sx / 2, maxY - sy / 2].map((v) => v.toFixed(10)).join('\n') + '\n';
+      const prj = (await this.run('gdalsrsinfo', ['-o', 'wkt_esri', crs], 60_000).catch(() => '')).replace(/\s*\n\s*/g, '');
+      const zip = new AdmZip();
+      zip.addFile(`${safe}.png`, await fsp.readFile(file.path));
+      zip.addFile(`${safe}.pgw`, Buffer.from(pgw));
+      if (prj.trim()) zip.addFile(`${safe}.prj`, Buffer.from(prj.trim() + '\n'));
+      return { filename: `${safe}.zip`, body: zip.toBuffer(), contentType: 'application/zip' };
+    } finally {
+      await Promise.all([file.path, `${work}.tif`, `${file.path}.aux.xml`].map((f) => fsp.rm(f, { force: true })));
+    }
   }
 
   // ----- transformation -----

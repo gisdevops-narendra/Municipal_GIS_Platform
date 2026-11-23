@@ -37,6 +37,18 @@ export class GisLayersService {
     return this.http.get<GisLayer[]>(this.baseUrl);
   }
 
+  /** Feature count of each vector layer (exact, or an estimate for very
+   *  large tables). Layers the user can't view are left out. */
+  featureCounts(ids: string[]): Observable<Record<string, { count: number; estimate: boolean }>> {
+    return this.http.post<Record<string, { count: number; estimate: boolean }>>(`${this.baseUrl}/feature-counts`, { ids });
+  }
+
+  /** CRS, geometry, extent, count, fields, size, dates and source of a
+   *  vector layer (Layers panel → Properties). */
+  properties(id: string): Observable<LayerProperties> {
+    return this.http.get<LayerProperties>(`${this.baseUrl}/${id}/properties`);
+  }
+
   getById(id: string): Observable<GisLayer> {
     return this.http.get<GisLayer>(`${this.baseUrl}/${id}`);
   }
@@ -134,4 +146,25 @@ export class GisLayersService {
   delete(id: string): Observable<{ success: true }> {
     return this.http.delete<{ success: true }>(`${this.baseUrl}/${id}`);
   }
+}
+
+export interface LayerProperties {
+  id: string;
+  name: string;
+  code: string;
+  description: string | null;
+  geometryType: string | null;
+  srid: number;
+  crs: string;
+  crsName: string | null;
+  featureCount: number;
+  countEstimated: boolean;
+  bbox: [number, number, number, number] | null;
+  fields: { name: string; type: string }[];
+  sizeBytes: number;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string | null;
+  source: { file: string; format: string; uploadedAt: string; sourceCrs: string | null } | null;
 }

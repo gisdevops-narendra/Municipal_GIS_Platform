@@ -170,6 +170,7 @@ model Municipality {
   gisWorkspace GISWorkspace?
   uploads      GISLayerUpload[]
   shareLinks   GISShareLink[]
+  savedMaps    GISSavedMap[]
   apiKeys      ApiKey[]
   webhooks     Webhook[]
 
@@ -663,6 +664,25 @@ model AiFieldMetadata {
 /// view: { layerIds: string[], external: ExternalLayerSpec[], basemap,
 /// center: [lon, lat], zoom }. Layer ids were checked viewable by the
 /// creator when the link was made. Anyone with the token can open it.
+/// A named map state (view, basemap, visible layers, order, opacity) a
+/// user can reopen; `shared` makes it visible to the whole municipality.
+model GISSavedMap {
+  id             String   @id @default(uuid())
+  municipalityId String   @map("municipality_id")
+  createdById    String   @map("created_by")
+  name           String
+  description    String?
+  state          Json
+  shared         Boolean  @default(false)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  municipality Municipality @relation(fields: [municipalityId], references: [id], onDelete: Cascade)
+
+  @@index([municipalityId])
+  @@map("gis_saved_maps")
+}
+
 model GISShareLink {
   id             String    @id @default(uuid())
   token          String    @unique

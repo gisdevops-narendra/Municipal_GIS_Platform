@@ -320,7 +320,7 @@ export function parseDms(value: string): { deg: number; axis: 'lat' | 'lon' | nu
  *  a "22°18'30"N 73°10'45"E" pair pasted into the first box. N/S/E/W letters
  *  decide which value is the latitude, whichever box it was typed in. Null
  *  when the input is plain decimals (handled by the number parser). */
-function parseGeographicInput(xText: string, yText: string): [number, number] | null {
+export function parseGeographicInput(xText: string, yText: string): [number, number] | null {
   const isDms = (t: string) => /[°'"NSEW]|\d\s+\d/i.test(t.trim());
   let first = xText.trim();
   let second = yText.trim();

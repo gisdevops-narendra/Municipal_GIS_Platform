@@ -36,6 +36,85 @@ export class LayerRecordsService {
     private readonly gisLayers: GisLayersService,
   ) {}
 
+  /** Rows in a layer table: exact for small tables (bounded by a short
+   *  timeout), the planner's estimate for big ones. */
+  private async countRows(table: string, from: string): Promise<{ count: number; estimate: boolean }> {
+    const [est] = await this.prisma.$queryRawUnsafe<{ n: number }[]>(
+      `SELECT GREATEST(reltuples, 0)::float8 AS n FROM pg_class WHERE relname = $1 AND relkind = 'r'`,
+      table,
+    );
+    const estimate = Math.round(est?.n ?? 0);
+    const filtered = from !== `"${table}"`;
+    if (estimate > 200_000 && !filtered) return { count: estimate, estimate: true };
+    try {
+      const [row] = await this.prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = 4000`);
+        return tx.$queryRawUnsafe<{ n: bigint }[]>(`SELECT count(*) AS n FROM ${from} t`);
+      });
+      return { count: Number(row.n), estimate: false };
+    } catch {
+      return { count: estimate, estimate: true };
+    }
+  }
+
+  /** Feature count per vector layer id (layers the user can't view, or
+   *  without PostGIS data, are left out). */
+  async featureCounts(appUser: AppUser, ids: string[]) {
+    const out: Record<string, { count: number; estimate: boolean }> = {};
+    for (const id of [...new Set(ids)].slice(0, 300)) {
+      try {
+        const { table, from } = await this.gisLayers.vectorSource(appUser, id, 'view');
+        out[id] = await this.countRows(table, from);
+      } catch {
+        /* not a viewable vector layer */
+      }
+    }
+    return out;
+  }
+
+  /** Layer properties: CRS, geometry type, extent, feature count, fields,
+   *  storage size, dates and the source upload. */
+  async properties(appUser: AppUser, layerId: string) {
+    const { layer, table, from } = await this.gisLayers.vectorSource(appUser, layerId, 'view');
+    const info = await this.tableInfo(table);
+    const [[crs], [geom], [size], counted, creator, upload] = await Promise.all([
+      this.prisma.$queryRawUnsafe<{ name: string | null; auth: string | null }[]>(
+        `SELECT split_part(split_part(srtext, '"', 2), '"', 1) AS name, auth_name || ':' || auth_srid AS auth FROM spatial_ref_sys WHERE srid = $1`,
+        info.srid,
+      ).then((r) => (r.length ? r : [{ name: null, auth: null }])),
+      this.prisma.$queryRawUnsafe<{ type: string | null }[]>(
+        `SELECT type FROM geometry_columns WHERE f_table_schema = current_schema() AND f_table_name = $1 LIMIT 1`,
+        table,
+      ).then((r) => (r.length ? r : [{ type: null }])),
+      this.prisma.$queryRawUnsafe<{ bytes: bigint }[]>(`SELECT pg_total_relation_size($1::regclass) AS bytes`, `"${table}"`),
+      this.countRows(table, from),
+      layer.createdById ? this.prisma.user.findUnique({ where: { id: layer.createdById }, select: { fullName: true, email: true } }).catch(() => null) : null,
+      this.prisma.gISLayerUpload
+        .findFirst({ where: { postgisTable: table }, orderBy: { createdAt: 'desc' }, select: { originalFilename: true, fileFormat: true, createdAt: true, sourceCrs: true } })
+        .catch(() => null),
+    ]);
+    return {
+      id: layer.id,
+      name: layer.name,
+      code: layer.code,
+      description: layer.description,
+      geometryType: geom.type,
+      srid: info.srid,
+      crs: crs.auth ?? `EPSG:${info.srid}`,
+      crsName: crs.name,
+      featureCount: counted.count,
+      countEstimated: counted.estimate,
+      bbox: layer.bboxMinX === null ? null : [layer.bboxMinX, layer.bboxMinY, layer.bboxMaxX, layer.bboxMaxY],
+      fields: [...info.columns.entries()].filter(([n]) => n !== 'gis_workspace_id').map(([name, c]) => ({ name, type: c.type })),
+      sizeBytes: Number(size?.bytes ?? 0),
+      version: layer.version,
+      createdAt: layer.createdAt,
+      updatedAt: layer.updatedAt,
+      createdBy: creator ? creator.fullName || creator.email : null,
+      source: upload ? { file: upload.originalFilename, format: upload.fileFormat, uploadedAt: upload.createdAt, sourceCrs: upload.sourceCrs } : null,
+    };
+  }
+
   /** Shortest ground distance (metres, on the ellipsoid) between two
    *  features of a layer, plus the shortest connecting line (EPSG:4326). */
   async distance(appUser: AppUser, layerId: string, a: number, b: number) {

@@ -42,7 +42,7 @@ import LineString from 'ol/geom/LineString';
 import Polygon, { circular, fromCircle } from 'ol/geom/Polygon';
 import CircleGeom from 'ol/geom/Circle';
 import { Fill, Stroke, Style, Circle as CircleStyle, Text as TextStyle } from 'ol/style';
-import { getArea, getLength } from 'ol/sphere';
+import { getArea, getDistance, getLength } from 'ol/sphere';
 import { defaults as defaultControls } from 'ol/control';
 import ScaleLine from 'ol/control/ScaleLine';
 import MousePosition from 'ol/control/MousePosition';
@@ -116,6 +116,25 @@ export interface FeatureInfoFeature {
   id?: string;
   /** GeoJSON geometry of the identified feature (map projection) */
   geometry?: Record<string, unknown> | null;
+}
+
+/** Map state stored by a saved map. */
+export interface SavedMapState {
+  center: [number, number];
+  zoom: number;
+  rotation: number;
+  basemap: string;
+  visible: string[];
+  order: string[];
+  opacity: Record<string, number>;
+}
+
+/** A dropped pin with a short note. */
+export interface MapPin {
+  id: string;
+  lonLat: [number, number];
+  note: string;
+  createdAt: string;
 }
 
 export interface FeatureInfoResult {
@@ -219,6 +238,7 @@ export const BASEMAPS: Record<string, { label: string; attribution: string; buil
     build: () =>
       new TileLayer({
         source: new XYZ({
+          crossOrigin: 'anonymous', // CORS mode: lets the map view be exported as an image
           url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
           attributions: 'Esri, Maxar, Earthstar Geographics, and the GIS community',
           maxZoom: 19
@@ -232,6 +252,7 @@ export const BASEMAPS: Record<string, { label: string; attribution: string; buil
     build: () =>
       new TileLayer({
         source: new XYZ({
+          crossOrigin: 'anonymous', // CORS mode: lets the map view be exported as an image
           url: 'https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
           attributions: 'Esri, Maxar, Earthstar Geographics, and the GIS community',
           maxZoom: 20
@@ -246,6 +267,7 @@ export const BASEMAPS: Record<string, { label: string; attribution: string; buil
         layers: [
           new TileLayer({
             source: new XYZ({
+          crossOrigin: 'anonymous', // CORS mode: lets the map view be exported as an image
               url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
               attributions: 'Esri, Maxar, Earthstar Geographics, and the GIS community',
               maxZoom: 19
@@ -253,6 +275,7 @@ export const BASEMAPS: Record<string, { label: string; attribution: string; buil
           }),
           new TileLayer({
             source: new XYZ({
+          crossOrigin: 'anonymous', // CORS mode: lets the map view be exported as an image
               url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
               attributions: 'Esri, HERE, Garmin',
               maxZoom: 19
@@ -260,6 +283,7 @@ export const BASEMAPS: Record<string, { label: string; attribution: string; buil
           }),
           new TileLayer({
             source: new XYZ({
+          crossOrigin: 'anonymous', // CORS mode: lets the map view be exported as an image
               url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
               maxZoom: 19
             })
@@ -273,6 +297,7 @@ export const BASEMAPS: Record<string, { label: string; attribution: string; buil
     build: () =>
       new TileLayer({
         source: new XYZ({
+          crossOrigin: 'anonymous', // CORS mode: lets the map view be exported as an image
           url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
           attributions: 'Esri, HERE, Garmin, FAO, NOAA, USGS',
           maxZoom: 19
@@ -285,6 +310,7 @@ export const BASEMAPS: Record<string, { label: string; attribution: string; buil
     build: () =>
       new TileLayer({
         source: new XYZ({
+          crossOrigin: 'anonymous', // CORS mode: lets the map view be exported as an image
           url: 'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
           attributions: '© OpenStreetMap contributors © CARTO',
           maxZoom: 20
@@ -297,6 +323,7 @@ export const BASEMAPS: Record<string, { label: string; attribution: string; buil
     build: () =>
       new TileLayer({
         source: new XYZ({
+          crossOrigin: 'anonymous', // CORS mode: lets the map view be exported as an image
           url: 'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
           attributions: '© OpenStreetMap contributors © CARTO',
           maxZoom: 20
@@ -309,6 +336,7 @@ export const BASEMAPS: Record<string, { label: string; attribution: string; buil
     build: () =>
       new TileLayer({
         source: new XYZ({
+          crossOrigin: 'anonymous', // CORS mode: lets the map view be exported as an image
           url: 'https://tile.opentopomap.org/{z}/{x}/{y}.png',
           attributions: '© OpenStreetMap contributors, SRTM | © OpenTopoMap (CC-BY-SA)',
           maxZoom: 17
@@ -534,6 +562,7 @@ export class MapService {
     });
     this.resetView();
     this.applyUrlView();
+    this.loadPins();
     this.setPanEnabled(this.panEnabled);
     for (const spec of this.externalLayers()) this.mountExternal(spec);
   }
@@ -598,6 +627,266 @@ export class MapService {
     url.searchParams.set('lon', snap.center[0].toFixed(6));
     url.searchParams.set('z', String(snap.zoom));
     return url.toString();
+  }
+
+  // ----- saved maps: capture / restore the whole map state -----
+
+  /** Everything a saved map restores: view, basemap, which layers are on,
+   *  their drawing order and opacity. */
+  getMapState(): SavedMapState | null {
+    const view = this.map?.getView();
+    const center = view?.getCenter();
+    if (!view || !center) return null;
+    const [lon, lat] = toLonLat(center, view.getProjection());
+    const visibility = this.layerVisibility();
+    return {
+      center: [lon, lat],
+      zoom: view.getZoom() ?? 2,
+      rotation: view.getRotation(),
+      basemap: this.activeBasemap(),
+      visible: Object.keys(visibility).filter((id) => visibility[id]),
+      order: [...this.layerOrder()],
+      opacity: Object.fromEntries(Object.entries(this.layerOpacity()).filter(([, v]) => v !== undefined && v < 1)) as Record<string, number>
+    };
+  }
+
+  /** Re-applies a saved map state (layers that no longer exist are skipped). */
+  applyMapState(state: SavedMapState): void {
+    const view = this.map?.getView();
+    if (!view) return;
+    if (state.basemap && BASEMAPS[state.basemap]) this.setBasemap(state.basemap);
+    const visible = new Set(state.visible ?? []);
+    for (const id of this.managedLayers.keys()) {
+      const on = visible.has(id);
+      if ((this.layerVisibility()[id] ?? false) !== on) this.setLayerVisibility(id, on);
+    }
+    if (state.order?.length) {
+      const known = state.order.filter((id) => this.managedLayers.has(id));
+      const rest = this.layerOrder().filter((id) => !known.includes(id));
+      const order = [...known, ...rest];
+      this.layerOrder.set(order);
+      this.writeLayerOrder(order);
+      this.applyZIndexes();
+    }
+    for (const id of this.managedLayers.keys()) this.setLayerOpacity(id, state.opacity?.[id] ?? 1);
+    if (this.zoomLocked()) this.toggleZoomLock();
+    view.setRotation(state.rotation ?? 0);
+    view.animate({ center: fromLonLat(state.center), zoom: state.zoom, duration: 400 });
+  }
+
+  // ----- rotate to an exact angle -----
+
+  /** Rotates the map so north points `degrees` clockwise from up. */
+  setRotationDegrees(degrees: number): void {
+    const view = this.map?.getView();
+    if (!view || !Number.isFinite(degrees)) return;
+    view.animate({ rotation: (((degrees % 360) + 360) % 360) * (Math.PI / 180), duration: 300 });
+  }
+
+  // ----- dropped pins (with a note) -----
+  readonly pins = signal<MapPin[]>([]);
+  private notePinLayer: VectorLayer<VectorSource> | null = null;
+
+  private pinKey(): string {
+    return `mgp.pins.${this.auth.user()?.id ?? 'anon'}`;
+  }
+
+  /** Pins are kept per user in this browser. */
+  loadPins(): void {
+    try {
+      const list = JSON.parse(localStorage.getItem(this.pinKey()) ?? '[]') as MapPin[];
+      this.pins.set(Array.isArray(list) ? list.filter((p) => Array.isArray(p.lonLat)) : []);
+    } catch {
+      this.pins.set([]);
+    }
+    this.drawPins();
+  }
+
+  private savePins(): void {
+    try {
+      localStorage.setItem(this.pinKey(), JSON.stringify(this.pins().slice(-200)));
+    } catch {
+      /* not remembered */
+    }
+    this.drawPins();
+  }
+
+  addPin(lonLat: [number, number], note: string): void {
+    this.pins.update((list) => [...list, { id: `p${Date.now().toString(36)}`, lonLat, note: note.trim().slice(0, 120), createdAt: new Date().toISOString() }]);
+    this.savePins();
+  }
+
+  removePin(id: string): void {
+    this.pins.update((list) => list.filter((p) => p.id !== id));
+    this.savePins();
+  }
+
+  clearPins(): void {
+    this.pins.set([]);
+    this.savePins();
+  }
+
+  /** The pin drawn under a screen pixel, if any. */
+  pinAtPixel(pixel: [number, number]): MapPin | null {
+    if (!this.map || !this.notePinLayer) return null;
+    const id = this.map.forEachFeatureAtPixel(pixel, (f) => f.get('pinId') as string | undefined, {
+      layerFilter: (l) => l === this.notePinLayer,
+      hitTolerance: 6
+    });
+    return this.pins().find((p) => p.id === id) ?? null;
+  }
+
+  private drawPins(): void {
+    if (!this.map) return;
+    if (!this.notePinLayer) {
+      this.notePinLayer = new VectorLayer({
+        source: new VectorSource(),
+        zIndex: 10004,
+        properties: { gotoOverlay: true },
+        style: (feature) => [
+          new Style({
+            image: new CircleStyle({ radius: 7, fill: new Fill({ color: '#e11d48' }), stroke: new Stroke({ color: '#ffffff', width: 2.5 }) }),
+            text: new TextStyle({
+              text: feature.get('note') || '',
+              offsetY: -16,
+              font: '600 12px sans-serif',
+              fill: new Fill({ color: '#881337' }),
+              stroke: new Stroke({ color: '#ffffff', width: 4 })
+            })
+          })
+        ]
+      });
+      this.map.addLayer(this.notePinLayer);
+    }
+    const source = this.notePinLayer.getSource() as VectorSource;
+    source.clear();
+    const proj = this.map.getView().getProjection();
+    for (const p of this.pins()) {
+      source.addFeature(new Feature({ geometry: new Point(transform(p.lonLat, LAYER_PROJECTION, proj)), pinId: p.id, note: p.note }));
+    }
+  }
+
+  // ----- distance & bearing from a point (right-click) -----
+  readonly measuringFrom = signal(false);
+  private fromLayer: VectorLayer<VectorSource> | null = null;
+  private fromKeys: EventsKey[] = [];
+
+  /** Rubber-band line from `lonLat` to the pointer with distance and
+   *  bearing; a click fixes it, Esc / another start clears it. */
+  startMeasureFrom(lonLat: [number, number]): void {
+    if (!this.map) return;
+    this.stopMeasureFrom(true);
+    const map = this.map;
+    const proj = map.getView().getProjection();
+    const origin = transform(lonLat, LAYER_PROJECTION, proj);
+    if (!this.fromLayer) {
+      this.fromLayer = new VectorLayer({
+        source: new VectorSource(),
+        zIndex: 10005,
+        properties: { gotoOverlay: true },
+        style: (feature) =>
+          feature.getGeometry()?.getType() === 'Point'
+            ? new Style({ image: new CircleStyle({ radius: 5, fill: new Fill({ color: '#7c3aed' }), stroke: new Stroke({ color: '#fff', width: 2 }) }) })
+            : new Style({
+                stroke: new Stroke({ color: '#7c3aed', width: 2.5, lineDash: [6, 5] }),
+                text: new TextStyle({
+                  text: feature.get('label') ?? '',
+                  placement: 'line',
+                  overflow: true,
+                  offsetY: -10,
+                  font: '600 13px sans-serif',
+                  fill: new Fill({ color: '#4c1d95' }),
+                  stroke: new Stroke({ color: '#fff', width: 4 })
+                })
+              })
+      });
+      map.addLayer(this.fromLayer);
+    }
+    const source = this.fromLayer.getSource() as VectorSource;
+    source.clear();
+    source.addFeature(new Feature(new Point(origin)));
+    const line = new Feature(new LineString([origin, origin]));
+    source.addFeature(line);
+    const update = (coordinate: number[]) => {
+      line.getGeometry()!.setCoordinates([origin, coordinate]);
+      const a = lonLat;
+      const b = toLonLat(coordinate, proj) as [number, number];
+      const metres = getDistance(a, b);
+      const rad = Math.PI / 180;
+      const y = Math.sin((b[0] - a[0]) * rad) * Math.cos(b[1] * rad);
+      const x = Math.cos(a[1] * rad) * Math.sin(b[1] * rad) - Math.sin(a[1] * rad) * Math.cos(b[1] * rad) * Math.cos((b[0] - a[0]) * rad);
+      const bearing = ((Math.atan2(y, x) / rad) + 360) % 360;
+      line.set('label', `${metres >= 1000 ? (metres / 1000).toFixed(2) + ' km' : Math.round(metres) + ' m'} · ${bearing.toFixed(1)}°`);
+    };
+    this.measuringFrom.set(true);
+    this.measureModeActive = true; // no identify popups while measuring
+    this.fromKeys = [
+      map.on('pointermove', (e) => update(e.coordinate)),
+      map.on('singleclick', (e) => {
+        update(e.coordinate);
+        source.addFeature(new Feature(new Point(e.coordinate)));
+        this.stopMeasureFrom(false);
+      })
+    ];
+  }
+
+  /** Ends "measure from here"; `clear` also removes the drawn line. */
+  stopMeasureFrom(clear = true): void {
+    this.fromKeys.forEach((k) => unByKey(k));
+    this.fromKeys = [];
+    if (this.measuringFrom()) {
+      this.measuringFrom.set(false);
+      // Let the fixing click finish before identify is allowed again.
+      setTimeout(() => (this.measureModeActive = false), 0);
+    }
+    if (clear) this.fromLayer?.getSource()?.clear();
+  }
+
+  // ----- map view as an image -----
+
+  /** The map exactly as shown (all canvases composited) as a PNG blob, with
+   *  its extent in the map projection. Null when a layer's server refuses
+   *  cross-origin access (the canvas can't be read). */
+  async captureView(): Promise<{ blob: Blob; bbox: [number, number, number, number]; crs: string } | null> {
+    const map = this.map;
+    if (!map) return null;
+    if (map.getView().getRotation() !== 0) throw new Error('Rotate the map back to north first (the image must be north-up).');
+    await new Promise<void>((resolve) => {
+      map.once('rendercomplete', () => resolve());
+      map.renderSync();
+    });
+    const size = map.getSize()!;
+    const ratio = window.devicePixelRatio || 1;
+    const out = document.createElement('canvas');
+    out.width = Math.round(size[0] * ratio);
+    out.height = Math.round(size[1] * ratio);
+    const ctx = out.getContext('2d')!;
+    const viewport = map.getViewport();
+    viewport.querySelectorAll<HTMLCanvasElement>('.ol-layer canvas, canvas.ol-layer').forEach((canvas) => {
+      if (!canvas.width) return;
+      const opacity = (canvas.parentElement as HTMLElement | null)?.style.opacity || canvas.style.opacity;
+      ctx.globalAlpha = opacity === '' ? 1 : Number(opacity);
+      const transform = canvas.style.transform;
+      const m = transform.match(/^matrix\(([^)]*)\)$/);
+      if (m) {
+        const v = m[1].split(',').map(Number);
+        ctx.setTransform(v[0], v[1], v[2], v[3], v[4], v[5]);
+      } else {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+      }
+      ctx.drawImage(canvas, 0, 0);
+    });
+    ctx.globalAlpha = 1;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    let blob: Blob | null;
+    try {
+      blob = await new Promise<Blob | null>((resolve) => out.toBlob(resolve, 'image/png'));
+    } catch {
+      return null; // tainted by a layer without CORS
+    }
+    if (!blob) return null;
+    const e = map.getView().calculateExtent(size);
+    return { blob, bbox: [e[0], e[1], e[2], e[3]], crs: MAP_PROJECTION };
   }
 
   // ----- scale lock -----
@@ -874,6 +1163,10 @@ export class MapService {
     this.gotoLayer = null;
     this.myLocationLayer = null;
     this.rowHoverLayer = null;
+    this.notePinLayer = null;
+    this.fromLayer = null;
+    this.fromKeys = [];
+    this.measuringFrom.set(false);
     this.distanceLayer = null;
     this.myLocationShown.set(false);
     this.zoomLocked.set(false);
@@ -1026,6 +1319,7 @@ export class MapService {
     if (this.selectionWms) this.map.removeLayer(this.selectionWms);
     this.selectionWms = new ImageLayer({
       source: new ImageWMS({
+      crossOrigin: 'anonymous',
         url: `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wms`,
         params,
         projection: MAP_PROJECTION,
@@ -3381,6 +3675,7 @@ export class MapService {
     // or as the last fallback). What normally draws the layer is chosen by
     // its rendering format (render-formats.ts).
     const wms = new ImageWMS({
+      crossOrigin: 'anonymous',
       url: `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wms`,
       params: { LAYERS: qualifiedLayer, TILED: false },
       projection: MAP_PROJECTION,
@@ -3479,6 +3774,7 @@ export class MapService {
       case 'WMS_TILED':
         return new TileLayer({
           source: new TileWMS({
+      crossOrigin: 'anonymous',
             url: `${gs}/gwc/service/wms`,
             params: { LAYERS: name, TILED: true, FORMAT: 'image/png', VERSION: '1.1.1' },
             projection: MAP_PROJECTION,

@@ -10,6 +10,43 @@
     <button type="button" role="menuitem" class="map-ctx__item" (click)="openGoogleStreetView()">
       <i class="pi pi-external-link" aria-hidden="true"></i> Open in Google Street View
     </button>
+    <div class="map-ctx__sep"></div>
+    @if (menu.pin; as pin) {
+      <button type="button" role="menuitem" class="map-ctx__item" (click)="removePin(pin.id)">
+        <i class="pi pi-map-marker" aria-hidden="true"></i> Remove pin{{ pin.note ? ' “' + pin.note + '”' : '' }}
+      </button>
+    } @else if (pinEditing()) {
+      <div class="map-ctx__inline">
+        <input type="text" maxlength="120" placeholder="Note (optional)" [(ngModel)]="pinNote" (keydown.enter)="dropPin()" aria-label="Pin note" />
+        <button type="button" class="map-ctx__go" (click)="dropPin()">Add</button>
+      </div>
+    } @else {
+      <button type="button" role="menuitem" class="map-ctx__item" (click)="pinEditing.set(true)">
+        <i class="pi pi-map-marker" aria-hidden="true"></i> Drop a pin here
+      </button>
+    }
+    @if (mapService.pins().length > 1 || (mapService.pins().length === 1 && !menu.pin)) {
+      <button type="button" role="menuitem" class="map-ctx__item" (click)="clearPins()">
+        <i class="pi pi-eraser" aria-hidden="true"></i> Clear all pins ({{ mapService.pins().length }})
+      </button>
+    }
+    <button type="button" role="menuitem" class="map-ctx__item" (click)="measureFromHere()">
+      <i class="pi pi-arrows-h" aria-hidden="true"></i> Distance &amp; bearing from here
+    </button>
+    <div class="map-ctx__inline">
+      <i class="pi pi-refresh" aria-hidden="true"></i>
+      <span>Rotate</span>
+      <input type="text" inputmode="decimal" class="map-ctx__deg" [(ngModel)]="rotateDeg" (keydown.enter)="applyRotation()" aria-label="Rotation in degrees" />°
+      <button type="button" class="map-ctx__go" (click)="applyRotation()">Apply</button>
+    </div>
+    <div class="map-ctx__sep"></div>
+    <button type="button" role="menuitem" class="map-ctx__item" [disabled]="exporting()" (click)="exportView('tif')">
+      <i class="pi pi-image" aria-hidden="true"></i> Export view as GeoTIFF
+    </button>
+    <button type="button" role="menuitem" class="map-ctx__item" [disabled]="exporting()" (click)="exportView('png')">
+      <i class="pi pi-file-export" aria-hidden="true"></i> Export view as PNG + world file
+    </button>
+    <div class="map-ctx__sep"></div>
     <button type="button" role="menuitem" class="map-ctx__item" (click)="copyViewLink()">
       <i class="pi pi-link" aria-hidden="true"></i> Copy link to this view
     </button>

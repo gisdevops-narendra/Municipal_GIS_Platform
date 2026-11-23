@@ -1,3 +1,4 @@
+import { SavedMapsComponent } from './saved-maps.component';
 import { Component, Input, OnChanges, SimpleChanges, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
@@ -21,7 +22,7 @@ import { Bookmark, BookmarkError } from '../../models/bookmark.model';
 @Component({
   selector: 'app-bookmarks',
   standalone: true,
-  imports: [FormsModule, ButtonModule, InputTextModule, TooltipModule],
+  imports: [FormsModule, ButtonModule, InputTextModule, TooltipModule, SavedMapsComponent],
   templateUrl: './bookmarks.component.html',
   styleUrl: './bookmarks.component.scss'
 })

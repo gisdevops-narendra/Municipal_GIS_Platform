@@ -5,10 +5,11 @@
       pInputText
       type="text"
       class="gis-search__input"
-      placeholder="Search layers, roads, wards…"
+      placeholder="Search layers, roads, wards or a lat, long…"
       [ngModel]="query()"
       (ngModelChange)="onInput($event)"
       (focus)="onFocus()"
+      (keydown.enter)="coordinate() && goToCoordinate()"
       aria-label="Search GIS layers and features"
     />
     @if (query()) {
@@ -25,9 +26,22 @@
 
   @if (open()) {
     <div class="gis-search__results">
+      @if (coordinate(); as c) {
+        <div class="gis-search__group">
+          <span class="gis-search__group-title">Coordinate</span>
+          <button type="button" class="gis-search__result" (click)="goToCoordinate(c)">
+            <span class="gis-search__result-title"><i class="pi pi-map-marker" aria-hidden="true"></i> Go to {{ coordinateLabel(c) }}</span>
+          </button>
+          @if (altCoordinate(); as alt) {
+            <button type="button" class="gis-search__result" (click)="goToCoordinate(alt)">
+              <span class="gis-search__result-title"><i class="pi pi-map-marker" aria-hidden="true"></i> Go to {{ coordinateLabel(alt) }}</span>
+            </button>
+          }
+        </div>
+      }
       @if (loading()) {
         <div class="gis-search__status">Searching…</div>
-      } @else if (!hasResults()) {
+      } @else if (!hasResults() && !coordinate()) {
         <div class="gis-search__status">No layers or features match "{{ query() }}".</div>
       } @else {
         @if (result().layers.length > 0) {

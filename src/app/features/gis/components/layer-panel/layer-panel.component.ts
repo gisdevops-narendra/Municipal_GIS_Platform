@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, ViewChild, effect, inject, signal, untracked } from '@angular/core';
+import { Component, EventEmitter, Input, Output, ViewChild, effect, inject, signal, untracked, OnChanges, SimpleChanges } from '@angular/core';
 import { MenuItem } from 'primeng/api';
 import { Menu, MenuModule } from 'primeng/menu';
 import { NgTemplateOutlet } from '@angular/common';
@@ -11,6 +11,8 @@ import { TooltipModule } from 'primeng/tooltip';
 import { DialogModule } from 'primeng/dialog';
 import { GisLayer, GisRenderMode } from '../../../../core/models/gis-layer.model';
 import { MapService } from '../../services/map.service';
+import { GisLayersService, LayerProperties } from '../../../../core/services/gis-layers.service';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { RasterInfo, RasterService } from '../../services/raster.service';
 import { LegendModel, parseLegend } from '../layer-legend/legend-model';
 import { LegendSwatchComponent } from '../layer-legend/legend-swatch.component';
@@ -39,15 +41,61 @@ import { RenderFormatInfo, formatInfo, formatsFor, recommendedFormat } from '../
 @Component({
   selector: 'app-layer-panel',
   standalone: true,
-  imports: [NgTemplateOutlet, CdkDropList, CdkDrag, LegendSwatchComponent, LayerLegendComponent, FormsModule, ButtonModule, CheckboxModule, DialogModule, MenuModule, SelectModule, TooltipModule],
+  imports: [DatePipe, DecimalPipe, NgTemplateOutlet, CdkDropList, CdkDrag, LegendSwatchComponent, LayerLegendComponent, FormsModule, ButtonModule, CheckboxModule, DialogModule, MenuModule, SelectModule, TooltipModule],
   templateUrl: './layer-panel.component.html',
   styleUrl: './layer-panel.component.scss'
 })
-export class LayerPanelComponent {
+export class LayerPanelComponent implements OnChanges {
   protected readonly mapService = inject(MapService);
   private readonly rasterService = inject(RasterService);
 
   @Input({ required: true }) layers: GisLayer[] = [];
+  private readonly layersApi = inject(GisLayersService);
+
+  // ----- feature counts (shown next to each layer) -----
+  readonly featureCounts = signal<Partial<Record<string, { count: number; estimate: boolean }>>>({});
+  private countedIds = '';
+
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['layers']) this.loadCounts();
+  }
+
+  private loadCounts(): void {
+    const ids = this.layers.filter((l) => l.layerType === 'VECTOR').map((l) => l.id).sort();
+    const key = ids.join(',');
+    if (!ids.length || key === this.countedIds) return;
+    this.countedIds = key;
+    this.layersApi.featureCounts(ids).subscribe({ next: (counts) => this.featureCounts.set(counts), error: () => (this.countedIds = '') });
+  }
+
+  /** "1,234", "~1.2M" (estimate) */
+  countLabel(id: string): string {
+    const c = this.featureCounts()[id];
+    if (!c) return '';
+    const n = c.count;
+    const short = n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : n.toLocaleString();
+    return c.estimate ? `~${short}` : short;
+  }
+
+  // ----- Properties dialog -----
+  readonly propsTarget = signal<GisLayer | null>(null);
+  readonly props = signal<LayerProperties | null>(null);
+  readonly propsError = signal<string | null>(null);
+
+  openProperties(layer: GisLayer): void {
+    this.propsTarget.set(layer);
+    this.props.set(null);
+    this.propsError.set(null);
+    if (layer.layerType !== 'VECTOR') return;
+    this.layersApi.properties(layer.id).subscribe({
+      next: (p) => this.propsTarget()?.id === layer.id && this.props.set(p),
+      error: (err) => this.propsError.set(err?.error?.message ?? 'Could not load the layer properties.')
+    });
+  }
+
+  formatBytes(n: number): string {
+    return n >= 1073741824 ? `${(n / 1073741824).toFixed(2)} GB` : n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
+  }
   /** Task 9 §4: a layer arriving here via a dashboard deep link gets a
    *  brief visual highlight so the user can see what the click landed on. */
   @Input() highlightLayerId: string | null = null;
@@ -152,6 +200,8 @@ export class LayerPanelComponent {
       { label: 'Move up', icon: 'pi pi-angle-up', disabled: isTop, command: move('up') },
       { label: 'Move down', icon: 'pi pi-angle-down', disabled: isBottom, command: move('down') },
       { label: 'Send to back', icon: 'pi pi-angle-double-down', disabled: isBottom, command: move('bottom') },
+      { separator: true },
+      { label: 'Properties', icon: 'pi pi-info-circle', command: () => this.openProperties(layer) },
       ...(layer.rasterAnalysis
         ? [{ separator: true }, { label: 'Analysis report', icon: 'pi pi-chart-bar', command: () => this.openReport.emit(layer) }]
         : []),

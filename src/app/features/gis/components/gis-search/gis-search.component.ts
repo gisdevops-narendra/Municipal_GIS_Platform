@@ -1,4 +1,6 @@
-import { Component, ElementRef, EventEmitter, HostListener, Output, inject, signal } from '@angular/core';
+import { Component, ElementRef, EventEmitter, HostListener, Output, computed, inject, signal } from '@angular/core';
+import { MapService } from '../../services/map.service';
+import { parseGeographicInput } from '../map-controls/map-controls.component';
 import { FormsModule } from '@angular/forms';
 import { InputTextModule } from 'primeng/inputtext';
 import { ButtonModule } from 'primeng/button';
@@ -35,6 +37,43 @@ export class GisSearchComponent {
   @Output() cleared = new EventEmitter<void>();
 
   readonly query = signal('');
+  private readonly mapService = inject(MapService);
+
+  /** A coordinate typed into the box ([lon, lat]), e.g. "22.30, 73.18",
+   *  "73.18 22.30" or "22°18'N 73°10'E". Plain number pairs are read as
+   *  "lat, lon" (as Google Maps writes them) unless the first is > 90. */
+  readonly coordinate = computed<[number, number] | null>(() => {
+    const text = this.query().trim();
+    if (!/\d/.test(text) || /[a-df-mo-rt-vx-z]{2,}/i.test(text)) return null;
+    if (/[°'"′″NSEW]/i.test(text)) {
+      const geo = parseGeographicInput(text, '');
+      return geo && Math.abs(geo[0]) <= 180 && Math.abs(geo[1]) <= 90 ? geo : null;
+    }
+    const parts = text.split(/[\s,;]+/).filter(Boolean);
+    if (parts.length !== 2 || !parts.every((p) => /^[-+]?\d+(\.\d+)?$/.test(p))) return null;
+    const [a, b] = parts.map(Number);
+    const [lon, lat] = Math.abs(a) > 90 && Math.abs(b) <= 90 ? [a, b] : [b, a];
+    return Math.abs(lon) <= 180 && Math.abs(lat) <= 90 ? [lon, lat] : null;
+  });
+
+  /** For a plain pair where both numbers could be a latitude, the other
+   *  reading too (so "73.18 22.30" also offers 22.30 N, 73.18 E). */
+  readonly altCoordinate = computed<[number, number] | null>(() => {
+    const c = this.coordinate();
+    if (!c || /[°'"′″NSEW]/i.test(this.query())) return null;
+    const [lon, lat] = c;
+    return Math.abs(lon) <= 90 && lon !== lat ? [lat, lon] : null;
+  });
+
+  goToCoordinate(c: [number, number] | null = this.coordinate()): void {
+    if (!c) return;
+    this.mapService.goToCoordinate(c[0], c[1], 'EPSG:4326');
+    this.open.set(false);
+  }
+
+  coordinateLabel(c: [number, number]): string {
+    return `${Math.abs(c[1]).toFixed(5)}° ${c[1] < 0 ? 'S' : 'N'}, ${Math.abs(c[0]).toFixed(5)}° ${c[0] < 0 ? 'W' : 'E'}`;
+  }
   readonly loading = signal(false);
   readonly open = signal(false);
   readonly result = signal<GisSearchResult>(EMPTY_RESULT);

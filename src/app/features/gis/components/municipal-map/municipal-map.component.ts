@@ -1,10 +1,14 @@
 import { AfterViewInit, Component, ElementRef, EventEmitter, HostListener, Input, OnChanges, OnDestroy, Output, SimpleChanges, ViewChild, inject, signal } from '@angular/core';
 import { GisLayer } from '../../../../core/models/gis-layer.model';
-import { FeatureInfoResult, MapService } from '../../services/map.service';
+import { FeatureInfoResult, MapPin, MapService } from '../../services/map.service';
 import { FeatureInfoComponent } from '../feature-info/feature-info.component';
 import { StreetViewComponent } from '../platform-extras/street-view.component';
 import { NotificationService } from '../../../../core/services/notification.service';
 import { copyText } from '../../../../shared/copy-text';
+import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
+import { environment } from '../../../../../environments/environment';
+import { FormsModule } from '@angular/forms';
 
 /**
  * OpenLayers map surface only — no layer-panel UI of its own. Owns map
@@ -16,13 +20,14 @@ import { copyText } from '../../../../shared/copy-text';
 @Component({
   selector: 'app-municipal-map',
   standalone: true,
-  imports: [FeatureInfoComponent, StreetViewComponent],
+  imports: [FeatureInfoComponent, StreetViewComponent, FormsModule],
   templateUrl: './municipal-map.component.html',
   styleUrl: './municipal-map.component.scss'
 })
 export class MunicipalMapComponent implements AfterViewInit, OnChanges, OnDestroy {
   protected readonly mapService = inject(MapService);
   private readonly notify = inject(NotificationService);
+  private readonly http = inject(HttpClient);
 
   @Input({ required: true }) layers: GisLayer[] = [];
   /** Optional DOM slots for the scale bar / cursor coordinates — the GIS
@@ -45,7 +50,7 @@ export class MunicipalMapComponent implements AfterViewInit, OnChanges, OnDestro
 
   /** Right-click menu: where it is drawn (px in the map) and the WGS84
    *  point it acts on. */
-  readonly contextMenu = signal<{ x: number; y: number; lonLat: [number, number] } | null>(null);
+  readonly contextMenu = signal<{ x: number; y: number; lonLat: [number, number]; pin: MapPin | null } | null>(null);
   /** Street View card opened from the menu. */
   readonly streetViewAt = signal<[number, number] | null>(null);
 
@@ -78,12 +83,16 @@ export class MunicipalMapComponent implements AfterViewInit, OnChanges, OnDestro
     const lonLat = this.mapService.lonLatAtPixel([x, y]);
     if (!lonLat) return;
     // Keep the menu inside the map.
-    const menuW = 210;
-    const menuH = 96;
+    const menuW = 240;
+    const menuH = Math.min(440, box.height - 8);
+    this.pinEditing.set(false);
+    this.pinNote = '';
+    this.rotateDeg = String(Math.round(((this.mapService.mapRotation() * 180) / Math.PI + 360) % 360));
     this.contextMenu.set({
       x: Math.max(4, Math.min(x, box.width - menuW - 4)),
       y: Math.max(4, Math.min(y, box.height - menuH - 4)),
-      lonLat
+      lonLat,
+      pin: this.mapService.pinAtPixel([x, y])
     });
   }
 
@@ -91,6 +100,79 @@ export class MunicipalMapComponent implements AfterViewInit, OnChanges, OnDestro
     const menu = this.contextMenu();
     this.contextMenu.set(null);
     if (menu) this.streetViewAt.set([...menu.lonLat]);
+  }
+
+  // ----- pins -----
+  readonly pinEditing = signal(false);
+  pinNote = '';
+
+  dropPin(): void {
+    const menu = this.contextMenu();
+    if (!menu) return;
+    this.mapService.addPin(menu.lonLat, this.pinNote);
+    this.contextMenu.set(null);
+  }
+
+  removePin(id: string): void {
+    this.mapService.removePin(id);
+    this.contextMenu.set(null);
+  }
+
+  clearPins(): void {
+    this.mapService.clearPins();
+    this.contextMenu.set(null);
+  }
+
+  // ----- distance & bearing from here -----
+  measureFromHere(): void {
+    const menu = this.contextMenu();
+    this.contextMenu.set(null);
+    if (menu) this.mapService.startMeasureFrom(menu.lonLat);
+  }
+
+  // ----- rotate -----
+  rotateDeg = '0';
+
+  applyRotation(): void {
+    const deg = Number(String(this.rotateDeg).replace(',', '.'));
+    if (!Number.isFinite(deg)) return;
+    this.mapService.setRotationDegrees(deg);
+    this.contextMenu.set(null);
+  }
+
+  // ----- export this view as a georeferenced image -----
+  readonly exporting = signal(false);
+
+  async exportView(format: 'tif' | 'png'): Promise<void> {
+    this.contextMenu.set(null);
+    this.exporting.set(true);
+    try {
+      const shot = await this.mapService.captureView();
+      if (!shot) {
+        this.notify.error('A layer on the map does not allow its image to be exported (no CORS). Turn that layer off and try again, or use Print.', 'Export view');
+        return;
+      }
+      const form = new FormData();
+      form.append('file', shot.blob, 'view.png');
+      form.append('bbox', shot.bbox.join(','));
+      form.append('crs', shot.crs);
+      form.append('format', format);
+      form.append('name', `map_view_${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}`);
+      const res = await firstValueFrom(
+        this.http.post(`${environment.apiUrl}/gis/raster/georef/view-export`, form, { responseType: 'blob', observe: 'response' })
+      );
+      const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? (format === 'tif' ? 'map_view.tif' : 'map_view.zip');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(res.body!);
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      this.notify.success(format === 'tif' ? 'GeoTIFF (Web Mercator, EPSG:3857) downloaded.' : 'PNG + world file (.pgw) + .prj downloaded as a ZIP.', 'Export view');
+    } catch (error) {
+      this.notify.error((error as Error)?.message || 'The view could not be exported.', 'Export view');
+    } finally {
+      this.exporting.set(false);
+    }
   }
 
   copyViewLink(): void {
@@ -133,6 +215,7 @@ export class MunicipalMapComponent implements AfterViewInit, OnChanges, OnDestro
   @HostListener('document:keydown.escape')
   onEscape(): void {
     this.contextMenu.set(null);
+    if (this.mapService.measuringFrom()) this.mapService.stopMeasureFrom(true);
   }
 
   closePopup(): void {

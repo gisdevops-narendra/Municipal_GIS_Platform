@@ -44,6 +44,9 @@
       } @else {
         <label [for]="'layer-' + layer.id" class="layer-panel__label" [title]="layer.description || layer.name">
           {{ layer.name }}
+          @if (countLabel(layer.id); as n) {
+            <span class="layer-panel__count" [title]="(featureCounts()[layer.id]?.estimate ? 'About ' : '') + (featureCounts()[layer.id]?.count | number) + ' features'">{{ n }}</span>
+          }
         </label>
       }
       <!-- Zoom stays one click away; everything else lives in the More menu. -->
@@ -241,6 +244,54 @@
     </div>
   }
   <p-menu #moreMenu [model]="moreItems" [popup]="true" appendTo="body" styleClass="layer-panel__menu" />
+
+  <p-dialog
+    [visible]="!!propsTarget()"
+    (visibleChange)="!$event ? propsTarget.set(null) : null"
+    [modal]="true"
+    [header]="'Properties · ' + (propsTarget()?.name ?? '')"
+    [style]="{ width: '560px' }"
+    [breakpoints]="{ '600px': '95vw' }"
+    appendTo="body"
+  >
+    @if (propsTarget(); as pl) {
+      @if (pl.layerType !== 'VECTOR') {
+        <dl class="props">
+          <dt>Type</dt><dd>Raster</dd>
+          <dt>Code</dt><dd>{{ pl.code }}</dd>
+          @if (pl.bbox; as b) { <dt>Extent (WGS84)</dt><dd>{{ b.minX | number: '1.5-5' }}, {{ b.minY | number: '1.5-5' }} → {{ b.maxX | number: '1.5-5' }}, {{ b.maxY | number: '1.5-5' }}</dd> }
+          @if (pl.description) { <dt>Description</dt><dd>{{ pl.description }}</dd> }
+        </dl>
+        <p class="props__note">Band values, resolution and statistics: Raster Analysis → Statistics &amp; Histogram.</p>
+      } @else if (propsError()) {
+        <p class="props__note">{{ propsError() }}</p>
+      } @else if (props()) {
+        @let p = props()!;
+        <dl class="props">
+          <dt>Code</dt><dd>{{ p.code }}</dd>
+          <dt>Geometry</dt><dd>{{ p.geometryType ?? '—' }}</dd>
+          <dt>Features</dt><dd>{{ p.countEstimated ? 'about ' : '' }}{{ p.featureCount | number }}</dd>
+          <dt>Stored in CRS</dt><dd>{{ p.crs }}{{ p.crsName ? ' · ' + p.crsName : '' }}</dd>
+          @if (p.bbox; as b) { <dt>Extent (WGS84)</dt><dd>{{ b[0] | number: '1.5-5' }}, {{ b[1] | number: '1.5-5' }} → {{ b[2] | number: '1.5-5' }}, {{ b[3] | number: '1.5-5' }}</dd> }
+          <dt>Size on disk</dt><dd>{{ formatBytes(p.sizeBytes) }}</dd>
+          @if (p.source; as src) {
+            <dt>Source file</dt><dd>{{ src.file }} ({{ src.format }}){{ src.sourceCrs ? ' · from ' + src.sourceCrs : '' }}</dd>
+          }
+          <dt>Created</dt><dd>{{ p.createdAt | date: 'd MMM y, HH:mm' }}{{ p.createdBy ? ' by ' + p.createdBy : '' }}</dd>
+          <dt>Last changed</dt><dd>{{ p.updatedAt | date: 'd MMM y, HH:mm' }} · version {{ p.version }}</dd>
+          @if (p.description) { <dt>Description</dt><dd>{{ p.description }}</dd> }
+        </dl>
+        <h4 class="props__head">Fields ({{ p.fields.length }})</h4>
+        <div class="props__fields">
+          @for (f of p.fields; track f.name) {
+            <span class="props__field"><b>{{ f.name }}</b> {{ f.type }}</span>
+          }
+        </div>
+      } @else {
+        <p class="props__note">Loading…</p>
+      }
+    }
+  </p-dialog>
 
   <p-dialog
     [visible]="!!renderTarget()"

@@ -155,7 +155,7 @@ const TOOL_INFO: Record<string, { hint: string; section?: string; keywords?: str
   'osm-import': { hint: 'Download OpenStreetMap features as a layer' },
   catalog: { hint: 'Search all layers with their metadata' },
   'whats-here': { hint: 'Address and areas at any point', section: 'Look up' },
-  bookmarks: { hint: 'Save and jump to map views', section: 'Look up' },
+  bookmarks: { hint: 'Save map views, and whole maps (layers, basemap, order)', section: 'Look up', keywords: 'saved maps project save map share map state' },
   assistant: { hint: 'Ask questions about your data', section: 'Look up' },
   weather: { hint: 'Forecast, radar, air and river levels', section: 'Live data' },
   'air-stations': { hint: 'Live AQI, city ranking and trends', section: 'Live data' },

@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, ParseUUIDPipe, Post, Put, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, ParseIntPipe, ParseUUIDPipe, Post, Put, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { RequireMunicipalityMember } from '../auth/decorators/authorization.decorators';
 import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -42,6 +43,38 @@ export class GeoreferenceController {
     @Body() dto: CreateGeorefSessionDto,
   ) {
     return this.georef.create(appUser, file, dto.dpi);
+  }
+
+  /** Map view → georeferenced image: the PNG the browser rendered plus
+   *  its extent (`bbox` = minX,minY,maxX,maxY in `crs`). */
+  @RequireMunicipalityMember()
+  @Post('view-export')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 200 * 1024 * 1024 },
+      storage: diskStorage({
+        destination: (_req, _file, cb) => {
+          mkdirSync(UPLOAD_TMP_DIR, { recursive: true });
+          cb(null, UPLOAD_TMP_DIR);
+        },
+        filename: (_req, _file, cb) => cb(null, `${randomUUID()}.png`),
+      }),
+    }),
+  )
+  async exportView(
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Body() body: { bbox?: string; crs?: string; format?: string; name?: string },
+    @Res() res: Response,
+  ) {
+    const bbox = (body.bbox ?? '').split(',').map(Number);
+    if (bbox.length !== 4 || !bbox.every(Number.isFinite)) throw new BadRequestException('bbox must be minX,minY,maxX,maxY.');
+    const crs = body.crs ?? 'EPSG:3857';
+    if (!/^EPSG:\d{4,6}$/i.test(crs)) throw new BadRequestException('crs must be an EPSG code.');
+    const format = body.format === 'png' ? 'png' : 'tif';
+    const out = await this.georef.exportView(file, bbox as [number, number, number, number], crs, format, body.name ?? 'map_view');
+    res.setHeader('Content-Type', out.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${out.filename}"`);
+    res.send(out.body);
   }
 
   @RequireRasterModule([RASTER_MODULES.upload])
