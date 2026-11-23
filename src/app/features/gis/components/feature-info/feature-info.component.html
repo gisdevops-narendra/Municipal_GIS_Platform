@@ -48,7 +48,10 @@
                 @for (row of selectedFeatureAttributes; track row.key) {
                   <tr>
                     <th>{{ row.key }}</th>
-                    <td>{{ row.value }}</td>
+                    <td class="feature-info__value" title="Click to copy" (click)="copy(row)">
+                      {{ row.value }}
+                      @if (copied() === row.key) { <span class="feature-info__copied">Copied</span> }
+                    </td>
                   </tr>
                 }
               </tbody>
@@ -57,6 +60,14 @@
         } @else {
           <pre class="feature-info__raw">{{ rawJson() }}</pre>
         }
+
+        <div class="feature-info__actions">
+          @if (hasGeometry) {
+            <button pButton type="button" label="Zoom to" icon="pi pi-search-plus" class="p-button-text p-button-sm" (click)="zoomToFeature()"></button>
+          }
+          <button pButton type="button" [label]="copied() === '*' ? 'Copied' : 'Copy'" [icon]="copied() === '*' ? 'pi pi-check' : 'pi pi-copy'"
+                  class="p-button-text p-button-sm" (click)="copy()"></button>
+        </div>
 
         <button
           pButton

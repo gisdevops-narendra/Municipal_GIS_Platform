@@ -46,6 +46,8 @@ export const LAYER_EXPORT_FORMATS = {
   csv: { outputFormat: 'csv', extension: 'csv' },
   shapefile: { outputFormat: 'SHAPE-ZIP', extension: 'zip' },
   kml: { outputFormat: 'KML', extension: 'kml', srsName: 'EPSG:4326' },
+  // Excel: attributes only (a sheet has no geometry column).
+  xlsx: { outputFormat: 'XLSX', extension: 'xlsx' },
 } as const satisfies Record<
   string,
   { outputFormat: string; extension: string; srsName?: string }
@@ -66,6 +68,8 @@ export const LAYER_EXPORT_FORMAT_MODULE_IDS: Record<LayerExportFormat, number> =
     csv: 227,
     shapefile: 228,
     kml: 230,
+    // Excel is a table export like CSV — gated by the same module.
+    xlsx: 227,
   };
 
 interface DemoLayerDefinition {
@@ -365,7 +369,7 @@ export class GisLayersService {
       // Internal tenant column — not part of the user's data.
       await this.prisma.$executeRawUnsafe(`ALTER TABLE "${staging}" DROP COLUMN IF EXISTS gis_workspace_id`);
 
-      const driver = ({ geojson: 'GeoJSON', csv: 'CSV', shapefile: 'ESRI Shapefile', kml: 'KML' } as const)[format];
+      const driver = ({ geojson: 'GeoJSON', csv: 'CSV', shapefile: 'ESRI Shapefile', kml: 'KML', xlsx: 'XLSX' } as const)[format];
       const out = path.join(dir, format === 'shapefile' ? 'shp' : `${base}.${spec.extension}`);
       await this.gdal.exportTable({
         connection: {
@@ -387,7 +391,12 @@ export class GisLayersService {
         for (const name of await readdir(out)) zip.addLocalFile(path.join(out, name));
         return { filename: `${base}.zip`, body: zip.toBuffer(), contentType: 'application/zip' };
       }
-      const contentType = { geojson: 'application/geo+json', csv: 'text/csv; charset=utf-8', kml: 'application/vnd.google-earth.kml+xml' }[format];
+      const contentType = {
+        geojson: 'application/geo+json',
+        csv: 'text/csv; charset=utf-8',
+        kml: 'application/vnd.google-earth.kml+xml',
+        xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      }[format];
       return { filename: `${base}.${spec.extension}`, body: await readFile(out), contentType };
     } finally {
       await this.prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS "${staging}"`).catch(() => undefined);

@@ -265,7 +265,13 @@
   @if (error(); as message) {
     <p class="ed__note ed__note--error" role="alert"><i class="pi pi-exclamation-circle" aria-hidden="true"></i>{{ message }}</p>
   } @else if (notice()) {
-    <p class="ed__note" role="status"><i class="pi pi-check-circle" aria-hidden="true"></i>{{ notice() }}</p>
+    <p class="ed__note" role="status"><i class="pi pi-check-circle" aria-hidden="true"></i>{{ notice() }}
+      @if (undoable()) {
+        <button type="button" class="ed__undo" [disabled]="busy() !== null" (click)="undoDelete()">
+          <i class="pi pi-undo" aria-hidden="true"></i> Undo
+        </button>
+      }
+    </p>
   }
 
   @if (collectAllowed()) {

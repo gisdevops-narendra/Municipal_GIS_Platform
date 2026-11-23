@@ -323,7 +323,14 @@ export class FeatureEditComponent implements OnDestroy {
     });
   }
 
+  /** The feature as last loaded from the server (for undoing a delete). */
+  private loadedFeature: EditableFeature | null = null;
+  /** The last deleted feature, restorable with "Undo". */
+  readonly undoable = signal<{ layerId: string; feature: EditableFeature } | null>(null);
+
   private load(feature: EditableFeature): void {
+    this.loadedFeature = feature;
+    this.undoable.set(null);
     const values = this.stringify(feature.properties);
     this.mapService.setEditFeature(feature.geometry);
     this.editTool.set('reshape');
@@ -406,12 +413,33 @@ export class FeatureEditComponent implements OnDestroy {
       return;
     }
     this.busy.set('delete');
+    const snapshot = this.loadedFeature?.id === id ? this.loadedFeature : null;
     this.vectorTools.deleteFeature(layerId, id).subscribe({
       next: () => {
         this.mapService.refreshLayerStyle(layerId);
         this.saved.emit();
         this.cancel();
         this.notice.set(`Feature #${id} deleted.`);
+        this.undoable.set(snapshot?.geometry ? { layerId, feature: snapshot } : null);
+      },
+      error: (err: HttpErrorResponse) => this.fail(err)
+    });
+  }
+
+  /** Re-creates the last deleted feature (same shape and attributes; it
+   *  gets a new feature id — ids are never reused). */
+  undoDelete(): void {
+    const undo = this.undoable();
+    if (!undo?.feature.geometry) return;
+    const { feat_id: _id, ...properties } = undo.feature.properties;
+    this.busy.set('save');
+    this.vectorTools.createFeature(undo.layerId, undo.feature.geometry, properties).subscribe({
+      next: (feature) => {
+        this.busy.set(null);
+        this.undoable.set(null);
+        this.mapService.refreshLayerStyle(undo.layerId);
+        this.saved.emit();
+        this.notice.set(`Feature restored as #${feature.id}.`);
       },
       error: (err: HttpErrorResponse) => this.fail(err)
     });

@@ -55,3 +55,14 @@ export class LayerRecordsQueryDto {
   @IsBoolean()
   count?: boolean;
 }
+
+/** Two feature ids (feat_id) of the same layer. */
+export class FeatureDistanceDto {
+  @IsInt()
+  @Min(1)
+  a!: number;
+
+  @IsInt()
+  @Min(1)
+  b!: number;
+}

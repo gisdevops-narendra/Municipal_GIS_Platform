@@ -533,8 +533,94 @@ export class MapService {
       this.scaleDenominator.set(scale === null ? null : Math.round(scale));
     });
     this.resetView();
+    this.applyUrlView();
     this.setPanEnabled(this.panEnabled);
     for (const spec of this.externalLayers()) this.mountExternal(spec);
+  }
+
+  // ----- home view & view links -----
+  private homeKey(): string {
+    return `mgp.homeView.${this.auth.user()?.id ?? 'anon'}`;
+  }
+
+  /** The user's own start / Reset view, if they set one. */
+  private readHome(): { center: [number, number]; zoom: number } | null {
+    try {
+      const v = JSON.parse(localStorage.getItem(this.homeKey()) ?? 'null');
+      return v && Array.isArray(v.center) && Number.isFinite(v.zoom) ? v : null;
+    } catch {
+      return null;
+    }
+  }
+
+  readonly hasHomeView = signal(false);
+
+  /** Saves the current view as this user's home (start and Reset) view. */
+  setHomeView(): boolean {
+    const snap = this.viewSnapshot();
+    if (!snap) return false;
+    try {
+      localStorage.setItem(this.homeKey(), JSON.stringify({ center: snap.center, zoom: snap.zoom }));
+    } catch {
+      return false;
+    }
+    this.hasHomeView.set(true);
+    return true;
+  }
+
+  clearHomeView(): void {
+    try {
+      localStorage.removeItem(this.homeKey());
+    } catch {
+      /* nothing saved */
+    }
+    this.hasHomeView.set(false);
+  }
+
+  /** Opens the map at ?lat=…&lon=…&z=… when the page URL carries them. */
+  private applyUrlView(): void {
+    const params = new URLSearchParams(window.location.search);
+    const lat = Number(params.get('lat'));
+    const lon = Number(params.get('lon'));
+    if (!params.has('lat') || !params.has('lon') || !Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return;
+    const zoom = Number(params.get('z'));
+    const view = this.map?.getView();
+    view?.setCenter(fromLonLat([lon, lat]));
+    if (Number.isFinite(zoom) && params.has('z')) view?.setZoom(Math.min(Math.max(zoom, 1), 22));
+  }
+
+  /** A link that opens the map at the current view. */
+  viewLink(): string | null {
+    const snap = this.viewSnapshot();
+    if (!snap) return null;
+    const url = new URL(window.location.href);
+    url.searchParams.set('lat', snap.center[1].toFixed(6));
+    url.searchParams.set('lon', snap.center[0].toFixed(6));
+    url.searchParams.set('z', String(snap.zoom));
+    return url.toString();
+  }
+
+  // ----- scale lock -----
+  readonly zoomLocked = signal(false);
+  private unlockedZoomRange: [number, number] | null = null;
+
+  /** Keeps the map at its current scale (panning still works). */
+  toggleZoomLock(): void {
+    const view = this.map?.getView();
+    if (!view) return;
+    if (this.zoomLocked()) {
+      const [min, max] = this.unlockedZoomRange ?? [0, 28];
+      view.setMinZoom(min);
+      view.setMaxZoom(max);
+      this.zoomLocked.set(false);
+      return;
+    }
+    const zoom = view.getZoom();
+    if (zoom === undefined) return;
+    this.unlockedZoomRange = [view.getMinZoom(), view.getMaxZoom()];
+    view.setMinZoom(zoom);
+    view.setMaxZoom(zoom);
+    this.zoomLocked.set(true);
   }
 
   // ----- Add Service: outside map services -----
@@ -787,7 +873,10 @@ export class MapService {
     this.measureLayer = null;
     this.gotoLayer = null;
     this.myLocationLayer = null;
+    this.rowHoverLayer = null;
+    this.distanceLayer = null;
     this.myLocationShown.set(false);
+    this.zoomLocked.set(false);
     this.graticule = null;
     this.graticuleShown.set(false);
     this.sketchLayer = null;
@@ -822,7 +911,82 @@ export class MapService {
     this.selectionGeometries.set(kept);
   }
 
+  // ----- layer opacity (Layers panel slider) -----
+  /** Opacity per layer id (0–1); missing = fully opaque. */
+  readonly layerOpacity = signal<Partial<Record<string, number>>>({});
+
+  setLayerOpacity(layerId: string, opacity: number): void {
+    const value = Math.min(1, Math.max(0, opacity));
+    this.managedLayers.get(layerId)?.olLayer.setOpacity(value);
+    this.layerOpacity.update((all) => ({ ...all, [layerId]: value }));
+  }
+
+  // ----- distance between two features -----
+  private distanceLayer: VectorLayer<VectorSource> | null = null;
+
+  /** Draws the shortest line between two features with its length; null clears. */
+  showDistanceLine(line: Record<string, unknown> | null, label = ''): void {
+    if (!this.map) return;
+    if (!this.distanceLayer) {
+      this.distanceLayer = new VectorLayer({
+        source: new VectorSource(),
+        zIndex: 10003,
+        properties: { gotoOverlay: true },
+        style: (feature) =>
+          new Style({
+            stroke: new Stroke({ color: '#d63384', width: 3, lineDash: [8, 6] }),
+            text: new TextStyle({
+              text: feature.get('label') ?? '',
+              font: '600 13px sans-serif',
+              placement: 'line',
+              overflow: true,
+              offsetY: -10,
+              fill: new Fill({ color: '#7a1846' }),
+              stroke: new Stroke({ color: '#ffffff', width: 4 })
+            })
+          })
+      });
+      this.map.addLayer(this.distanceLayer);
+    }
+    const source = this.distanceLayer.getSource() as VectorSource;
+    source.clear();
+    const feature = this.toMapFeature(line);
+    if (!feature) return;
+    feature.set('label', label);
+    source.addFeature(feature);
+    const extent = feature.getGeometry()?.getExtent();
+    if (extent) this.map.getView().fit(extent, { size: this.map.getSize(), padding: [80, 80, 80, 80], maxZoom: 16, duration: 300 });
+  }
+
+  // ----- attribute-table row hover -----
+  private rowHoverLayer: VectorLayer<VectorSource> | null = null;
+
+  /** Outlines one feature (GeoJSON, EPSG:4326) while its table row is
+   *  hovered; null clears it. */
+  setHoverHighlight(geometry: Record<string, unknown> | null): void {
+    if (!this.map) return;
+    if (!this.rowHoverLayer) {
+      const color = '#ff8a00';
+      this.rowHoverLayer = new VectorLayer({
+        source: new VectorSource(),
+        zIndex: 10003,
+        properties: { gotoOverlay: true },
+        style: new Style({
+          stroke: new Stroke({ color, width: 3 }),
+          fill: new Fill({ color: 'rgba(255, 138, 0, 0.18)' }),
+          image: new CircleStyle({ radius: 8, stroke: new Stroke({ color, width: 3 }), fill: new Fill({ color: 'rgba(255, 138, 0, 0.25)' }) })
+        })
+      });
+      this.map.addLayer(this.rowHoverLayer);
+    }
+    const source = this.rowHoverLayer.getSource() as VectorSource;
+    source.clear();
+    const feature = this.toMapFeature(geometry);
+    if (feature) source.addFeature(feature);
+  }
+
   clearSelectionHighlight(): void {
+    this.distanceLayer?.getSource()?.clear();
     this.selectionLayer?.getSource()?.clear();
     this.selectionGeometries.set([]);
     this.setSelectionWms(null, []);
@@ -2416,7 +2580,12 @@ export class MapService {
     }
     const view = this.map?.getView();
     if (!view) return;
-    if (this.initialExtent3857) {
+    const home = this.readHome();
+    this.hasHomeView.set(!!home);
+    if (home && !this.zoomLocked()) {
+      view.setCenter(fromLonLat(home.center));
+      view.setZoom(home.zoom);
+    } else if (this.initialExtent3857) {
       view.fit(this.initialExtent3857, { size: this.map?.getSize(), padding: [24, 24, 24, 24], maxZoom: 18 });
     } else {
       view.setCenter(fromLonLat(FALLBACK_CENTER_4326));

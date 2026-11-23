@@ -129,3 +129,26 @@
     background: var(--color-surface-alt);
   }
 }
+
+/* Zoom to / Copy row under the attributes. */
+.feature-info__actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+/* Click a value to copy it. */
+.feature-info__value {
+  cursor: copy;
+
+  &:hover {
+    background: var(--color-surface-alt);
+  }
+}
+
+.feature-info__copied {
+  margin-left: 6px;
+  color: var(--color-primary-600);
+  font-size: 11px;
+  font-weight: 600;
+}

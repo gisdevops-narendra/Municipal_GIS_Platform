@@ -1,6 +1,6 @@
 /** Download formats of GET /api/gis/layers/:id/export?format=… — must
  *  match the backend's LAYER_EXPORT_FORMATS keys. */
-export type LayerExportFormat = 'geojson' | 'csv' | 'shapefile' | 'kml';
+export type LayerExportFormat = 'geojson' | 'csv' | 'shapefile' | 'kml' | 'xlsx';
 
 export interface LayerExportFormatOption {
   value: LayerExportFormat;
@@ -17,6 +17,8 @@ export const EXPORT_DATA_MODULE_ID = 226;
 export const LAYER_EXPORT_FORMATS: LayerExportFormatOption[] = [
   { value: 'geojson', label: 'GeoJSON', extension: 'geojson', moduleId: 231 },
   { value: 'csv', label: 'CSV', extension: 'csv', moduleId: 227 },
+  // Attributes only — gated by the CSV module (the backend does the same).
+  { value: 'xlsx', label: 'Excel (.xlsx)', extension: 'xlsx', moduleId: 227 },
   { value: 'shapefile', label: 'Shapefile (.zip)', extension: 'zip', moduleId: 228 },
   { value: 'kml', label: 'KML', extension: 'kml', moduleId: 230 }
 ];

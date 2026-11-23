@@ -114,6 +114,16 @@ export class AttributeTableService {
     }).pipe(map((collection) => this.toPage(layer.id, collection)));
   }
 
+  /** Shortest ground distance (m) between two features of a layer and the
+   *  connecting line (GeoJSON, EPSG:4326). Ids are table ids ("layer.12"). */
+  featureDistance(layer: GisLayer, a: string, b: string): Observable<{ metres: number; line: Record<string, unknown> | null }> {
+    const num = (id: string) => Number(id.split('.').pop());
+    return this.http.post<{ metres: number; line: Record<string, unknown> | null }>(
+      `${environment.apiUrl}/gis/layers/${layer.id}/distance`,
+      { a: num(a), b: num(b) }
+    );
+  }
+
   /** The CQL for the records the table currently lists: the locked query
    *  filter AND the free-text search (null = every record). */
   recordFilter(layerId: string, search: string, baseFilter?: string | null): string | null {

@@ -27,8 +27,8 @@ class SelectionDto {
 
 /** POST /api/gis/layers/:id/export — Export selected. */
 export class ExportSelectionDto extends SelectionDto {
-  @IsIn(['geojson', 'csv', 'shapefile', 'kml'])
-  format!: 'geojson' | 'csv' | 'shapefile' | 'kml';
+  @IsIn(['geojson', 'csv', 'shapefile', 'kml', 'xlsx'])
+  format!: 'geojson' | 'csv' | 'shapefile' | 'kml' | 'xlsx';
 
   /** Output CRS (KML is always EPSG:4326); default the layer's own. */
   @IsOptional()

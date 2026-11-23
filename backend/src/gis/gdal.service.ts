@@ -268,7 +268,7 @@ export class GdalService {
   async exportTable(params: {
     connection: PostgisConnectionParams;
     table: string;
-    driver: 'GeoJSON' | 'CSV' | 'KML' | 'ESRI Shapefile';
+    driver: 'GeoJSON' | 'CSV' | 'KML' | 'ESRI Shapefile' | 'XLSX';
     outPath: string;
     layerName: string;
     targetSrs?: string;

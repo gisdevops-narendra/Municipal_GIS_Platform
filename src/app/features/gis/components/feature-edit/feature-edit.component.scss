@@ -500,3 +500,20 @@
     text-decoration: underline;
   }
 }
+
+/* "Undo" after deleting a feature. */
+.ed__undo {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--color-primary-600);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-primary-600);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}

@@ -44,7 +44,7 @@ import { RenderFormatInfo, formatInfo, formatsFor, recommendedFormat } from '../
   styleUrl: './layer-panel.component.scss'
 })
 export class LayerPanelComponent {
-  private readonly mapService = inject(MapService);
+  protected readonly mapService = inject(MapService);
   private readonly rasterService = inject(RasterService);
 
   @Input({ required: true }) layers: GisLayer[] = [];

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { NotFoundException, BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { AppUser } from '../auth/types/app-user.type';
 import { PrismaService } from '../prisma/prisma.service';
@@ -35,6 +35,26 @@ export class LayerRecordsService {
     private readonly prisma: PrismaService,
     private readonly gisLayers: GisLayersService,
   ) {}
+
+  /** Shortest ground distance (metres, on the ellipsoid) between two
+   *  features of a layer, plus the shortest connecting line (EPSG:4326). */
+  async distance(appUser: AppUser, layerId: string, a: number, b: number) {
+    const { from } = await this.gisLayers.vectorSource(appUser, layerId, 'view');
+    const rows = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = 15000`);
+      return tx.$queryRawUnsafe<{ metres: number | null; line: string | null }[]>(
+        `SELECT ST_Distance(ST_Transform(x."${GEOM}", 4326)::geography, ST_Transform(y."${GEOM}", 4326)::geography)::float8 AS metres,
+                ST_AsGeoJSON(ST_Transform(ST_ShortestLine(x."${GEOM}", y."${GEOM}"), 4326), 7) AS line
+           FROM ${from} x, ${from} y
+          WHERE x."${FID}" = $1 AND y."${FID}" = $2`,
+        a,
+        b,
+      );
+    }, { timeout: 20000 });
+    const row = rows[0];
+    if (!row || row.metres === null) throw new NotFoundException('One of the features was not found or has no geometry.');
+    return { metres: row.metres, line: row.line ? (JSON.parse(row.line) as Record<string, unknown>) : null };
+  }
 
   async query(appUser: AppUser, layerId: string, q: LayerRecordsQueryDto) {
     const { layer, table, from } = await this.gisLayers.vectorSource(appUser, layerId, 'view');

@@ -10,6 +10,17 @@
     <button type="button" role="menuitem" class="map-ctx__item" (click)="openGoogleStreetView()">
       <i class="pi pi-external-link" aria-hidden="true"></i> Open in Google Street View
     </button>
+    <button type="button" role="menuitem" class="map-ctx__item" (click)="copyViewLink()">
+      <i class="pi pi-link" aria-hidden="true"></i> Copy link to this view
+    </button>
+    <button type="button" role="menuitem" class="map-ctx__item" (click)="setHomeView()">
+      <i class="pi pi-home" aria-hidden="true"></i> Set this view as my home view
+    </button>
+    @if (mapService.hasHomeView()) {
+      <button type="button" role="menuitem" class="map-ctx__item" (click)="clearHomeView()">
+        <i class="pi pi-times" aria-hidden="true"></i> Clear my home view
+      </button>
+    }
   </div>
 }
 

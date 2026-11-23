@@ -3,6 +3,8 @@ import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { FeatureInfoResult, MapService } from '../../services/map.service';
 import { FeatureInfoComponent } from '../feature-info/feature-info.component';
 import { StreetViewComponent } from '../platform-extras/street-view.component';
+import { NotificationService } from '../../../../core/services/notification.service';
+import { copyText } from '../../../../shared/copy-text';
 
 /**
  * OpenLayers map surface only — no layer-panel UI of its own. Owns map
@@ -19,7 +21,8 @@ import { StreetViewComponent } from '../platform-extras/street-view.component';
   styleUrl: './municipal-map.component.scss'
 })
 export class MunicipalMapComponent implements AfterViewInit, OnChanges, OnDestroy {
-  private readonly mapService = inject(MapService);
+  protected readonly mapService = inject(MapService);
+  private readonly notify = inject(NotificationService);
 
   @Input({ required: true }) layers: GisLayer[] = [];
   /** Optional DOM slots for the scale bar / cursor coordinates — the GIS
@@ -88,6 +91,26 @@ export class MunicipalMapComponent implements AfterViewInit, OnChanges, OnDestro
     const menu = this.contextMenu();
     this.contextMenu.set(null);
     if (menu) this.streetViewAt.set([...menu.lonLat]);
+  }
+
+  copyViewLink(): void {
+    this.contextMenu.set(null);
+    const link = this.mapService.viewLink();
+    if (!link) return;
+    void copyText(link).then((ok) =>
+      ok ? this.notify.success('Anyone with access who opens it lands on this view.', 'Link copied') : this.notify.error('Could not copy the link.')
+    );
+  }
+
+  setHomeView(): void {
+    this.contextMenu.set(null);
+    if (this.mapService.setHomeView()) this.notify.success('The map now opens here, and Reset returns here.', 'Home view saved');
+  }
+
+  clearHomeView(): void {
+    this.contextMenu.set(null);
+    this.mapService.clearHomeView();
+    this.notify.info('Reset goes back to the default view.', 'Home view cleared');
   }
 
   openGoogleStreetView(): void {

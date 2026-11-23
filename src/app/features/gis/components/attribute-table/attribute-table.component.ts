@@ -30,6 +30,7 @@ import { MapService } from '../../services/map.service';
 import { AttributeTableService } from '../../services/attribute-table.service';
 import { VectorToolsService } from '../../services/vector-tools.service';
 import { NotificationService } from '../../../../core/services/notification.service';
+import { copyText } from '../../../../shared/copy-text';
 import { GisLayersService } from '../../../../core/services/gis-layers.service';
 import { LAYER_EXPORT_FORMATS, LayerExportFormatOption } from '../../../../core/models/layer-export.model';
 import { blobErrorMessage, downloadBlob } from '../../../../core/utils/download-blob';
@@ -265,6 +266,101 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
         this.load();
       }), 400);
     });
+  }
+
+  // ----- row hover → outline on the map -----
+  private hoverTimer: ReturnType<typeof setTimeout> | undefined;
+  private hoveredId: string | null = null;
+
+  onRowEnter(row: AttributeRow): void {
+    this.hoveredId = row.featureId;
+    clearTimeout(this.hoverTimer);
+    // Short delay so sweeping the mouse across rows doesn't fetch each one.
+    this.hoverTimer = setTimeout(() => {
+      this.withGeometries([row.featureId], ([geometry]) => {
+        if (this.hoveredId === row.featureId) this.mapService.setHoverHighlight(geometry ?? null);
+      });
+    }, 150);
+  }
+
+  onRowLeave(): void {
+    this.hoveredId = null;
+    clearTimeout(this.hoverTimer);
+    this.mapService.setHoverHighlight(null);
+  }
+
+  // ----- distance between the two selected features -----
+  readonly measuringDistance = signal(false);
+
+  measureDistance(): void {
+    const layer = this.activeLayer();
+    const ids = [...this.selectedIds()];
+    if (!layer || ids.length !== 2) return;
+    this.measuringDistance.set(true);
+    this.service.featureDistance(layer, ids[0], ids[1]).subscribe({
+      next: ({ metres, line }) => {
+        this.measuringDistance.set(false);
+        const text = metres === 0 ? '0 m (they touch or overlap)' : metres >= 1000 ? `${(metres / 1000).toFixed(2)} km` : `${metres.toFixed(1)} m`;
+        this.mapService.showDistanceLine(metres > 0 ? line : null, text);
+        this.notify.success(`Shortest distance: ${text}`, 'Distance between features');
+      },
+      error: () => {
+        this.measuringDistance.set(false);
+        this.notify.error('Could not measure the distance between these features.');
+      }
+    });
+  }
+
+  // ----- copy / print rows -----
+
+  /** Selected rows on this page, or the whole page when nothing is selected. */
+  private outputRows(): AttributeRow[] {
+    const selected = this.selectedIds();
+    const onPage = this.rows().filter((row) => selected.has(row.featureId));
+    return onPage.length ? onPage : this.rows();
+  }
+
+  private cellText(value: unknown): string {
+    if (value === null || value === undefined) return '';
+    return typeof value === 'object' ? JSON.stringify(value) : String(value);
+  }
+
+  /** Copies rows as tab-separated text (pastes straight into Excel). */
+  copyRows(): void {
+    const rows = this.outputRows();
+    if (!rows.length) return;
+    const fields = this.visibleFields();
+    const clean = (v: unknown) => this.cellText(v).replace(/[\t\r\n]+/g, ' ');
+    const text = [fields.map((f) => f.label).join('\t'), ...rows.map((r) => fields.map((f) => clean(r.values[f.name])).join('\t'))].join('\n');
+    void copyText(text).then((ok) =>
+      ok ? this.notify.success(`${rows.length} row${rows.length === 1 ? '' : 's'} copied — paste into Excel or a document.`, 'Copied') : this.notify.error('Could not copy to the clipboard.')
+    );
+  }
+
+  /** Opens a printable list of the rows (browser print dialog). */
+  printRows(): void {
+    const rows = this.outputRows();
+    const layer = this.activeLayer();
+    if (!rows.length || !layer) return;
+    const esc = (v: unknown) => this.cellText(v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+    const fields = this.visibleFields();
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(layer.name)}</title><style>
+      body{font:12px system-ui,sans-serif;margin:16px;color:#111}h1{font-size:16px;margin:0 0 4px}p{margin:0 0 12px;color:#555}
+      table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:4px 6px;text-align:left;vertical-align:top}
+      th{background:#eee}tr{page-break-inside:avoid}</style></head><body>
+      <h1>${esc(layer.name)}</h1><p>${rows.length} record${rows.length === 1 ? '' : 's'} · printed ${esc(new Date().toLocaleString())}</p>
+      <table><thead><tr>${fields.map((f) => `<th>${esc(f.label)}</th>`).join('')}</tr></thead><tbody>
+      ${rows.map((r) => `<tr>${fields.map((f) => `<td>${esc(r.values[f.name])}</td>`).join('')}</tr>`).join('')}
+      </tbody></table></body></html>`;
+    const win = window.open('', '_blank');
+    if (!win) {
+      this.notify.error('Allow pop-ups for this site to print the list.');
+      return;
+    }
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 300);
   }
 
   /** Lists only the features inside the visible map area (remembered). */

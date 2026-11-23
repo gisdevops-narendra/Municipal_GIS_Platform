@@ -76,6 +76,14 @@
       </span>
       @if (isLegendOpen(layer.id)) {
         <div class="layer-panel__legend">
+          @let opacity = mapService.layerOpacity()[layer.id] ?? 1;
+          <label class="layer-panel__opacity">
+            <span>Opacity</span>
+            <input type="range" min="0" max="100" step="5" [value]="opacity * 100"
+                   [attr.aria-label]="'Opacity of ' + layer.name"
+                   (input)="mapService.setLayerOpacity(layer.id, +$any($event.target).value / 100)" />
+            <span class="layer-panel__opacity-value">{{ (opacity * 100).toFixed(0) }}%</span>
+          </label>
           @let info = rasterInfo().get(layer.id);
           @if (info?.styleSpec?.mode === 'rgb' && info?.styleSpec?.bands; as rgb) {
             <span class="layer-panel__legend-title">True / false colour image</span>

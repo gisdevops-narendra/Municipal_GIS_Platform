@@ -1,7 +1,8 @@
-import { Component, Input, OnChanges, SimpleChanges, signal } from '@angular/core';
+import { Component, Input, OnChanges, SimpleChanges, inject, signal } from '@angular/core';
 import { ButtonModule } from 'primeng/button';
 import { MessageModule } from 'primeng/message';
-import { FeatureInfoResult } from '../../services/map.service';
+import { FeatureInfoResult, MapService } from '../../services/map.service';
+import { copyText } from '../../../../shared/copy-text';
 
 /** Internal/plumbing fields never shown to the user — not business data. */
 const HIDDEN_ATTRIBUTE_KEYS = new Set(['gis_workspace_id']);
@@ -33,6 +34,30 @@ export class FeatureInfoComponent implements OnChanges {
    *  polygons or stacked points returns several, not just one. */
   readonly featureIndex = signal(0);
   readonly showRawAttributes = signal(false);
+  private readonly mapService = inject(MapService);
+  /** Short "Copied" feedback: the copied row key, or '*' for all. */
+  readonly copied = signal<string | null>(null);
+  private copiedTimer: ReturnType<typeof setTimeout> | undefined;
+
+  get hasGeometry(): boolean {
+    return !!this.selectedResult?.features[this.featureIndex()]?.geometry;
+  }
+
+  zoomToFeature(): void {
+    const geometry = this.selectedResult?.features[this.featureIndex()]?.geometry;
+    if (geometry) this.mapService.zoomToGeometries([geometry]);
+  }
+
+  /** Copies one value, or (no row) every attribute as "Field: value" lines. */
+  copy(row?: AttributeRow): void {
+    const text = row ? row.value : this.selectedFeatureAttributes.map((r) => `${r.key}: ${r.value}`).join('\n');
+    void copyText(text).then((ok) => {
+      if (!ok) return;
+      this.copied.set(row ? row.key : '*');
+      clearTimeout(this.copiedTimer);
+      this.copiedTimer = setTimeout(() => this.copied.set(null), 1500);
+    });
+  }
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['results']) {

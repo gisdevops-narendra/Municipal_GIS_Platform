@@ -150,6 +150,30 @@
         <button
           type="button"
           class="attr-table__btn"
+          [disabled]="selectedIds().size !== 2 || measuringDistance()"
+          [pTooltip]="selectedIds().size === 2 ? 'Shortest distance between the 2 selected features' : 'Select exactly 2 features to measure the distance between them'" tooltipPosition="top"
+          (click)="measureDistance()"
+        ><i class="pi" [class.pi-arrows-h]="!measuringDistance()" [class.pi-spinner]="measuringDistance()" [class.pi-spin]="measuringDistance()" aria-hidden="true"></i></button>
+
+        <button
+          type="button"
+          class="attr-table__btn"
+          [disabled]="rows().length === 0"
+          [pTooltip]="selectedIds().size ? 'Copy selected rows (paste into Excel)' : 'Copy this page (paste into Excel)'" tooltipPosition="top"
+          (click)="copyRows()"
+        ><i class="pi pi-copy" aria-hidden="true"></i></button>
+
+        <button
+          type="button"
+          class="attr-table__btn"
+          [disabled]="rows().length === 0"
+          [pTooltip]="selectedIds().size ? 'Print selected rows as a list' : 'Print this page as a list'" tooltipPosition="top"
+          (click)="printRows()"
+        ><i class="pi pi-print" aria-hidden="true"></i></button>
+
+        <button
+          type="button"
+          class="attr-table__btn"
           [disabled]="selectedIds().size === 0"
           pTooltip="Clear selection" tooltipPosition="top"
           (click)="clearSelection()"
@@ -280,6 +304,8 @@
             class="attr-table__row"
             [class.attr-table__row--selected]="isSelected(row)"
             (click)="onRowClick(row, $event)"
+            (mouseenter)="onRowEnter(row)"
+            (mouseleave)="onRowLeave()"
           >
             <td class="attr-table__gutter">{{ first() + rowIndex + 1 }}</td>
             @for (field of visibleFields(); track field.name) {

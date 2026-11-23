@@ -1,4 +1,4 @@
-import { Component, Input, OnDestroy, computed, inject, signal } from '@angular/core';
+import { effect, Component, Input, OnDestroy, computed, inject, signal } from '@angular/core';
 import { SettingsService } from '../../../../core/services/settings.service';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
@@ -82,8 +82,18 @@ export class MeasureComponent implements OnDestroy {
   readonly areaUnits = AREA_UNITS;
 
   readonly kind = signal<MeasureKind>('distance');
-  readonly lengthUnit = signal<LengthUnit>(this.imperial ? 'ft' : 'm');
-  readonly areaUnit = signal<AreaUnit>(this.imperial ? 'ac' : 'm2');
+  // Last-used units are remembered per browser.
+  readonly lengthUnit = signal<LengthUnit>(readUnit('gis.measure.lengthUnit', LENGTH_UNITS.map((u) => u.value), this.imperial ? 'ft' : 'm'));
+  readonly areaUnit = signal<AreaUnit>(readUnit('gis.measure.areaUnit', AREA_UNITS.map((u) => u.value), this.imperial ? 'ac' : 'm2'));
+  private readonly saveUnits = effect(() => {
+    const [length, area] = [this.lengthUnit(), this.areaUnit()];
+    try {
+      localStorage.setItem('gis.measure.lengthUnit', length);
+      localStorage.setItem('gis.measure.areaUnit', area);
+    } catch {
+      /* not remembered */
+    }
+  });
   readonly result = signal<MeasureResult | null>(null);
   readonly drawing = signal(false);
 
@@ -197,5 +207,14 @@ export class MeasureComponent implements OnDestroy {
       default:
         return 'Click to add points, double-click to finish.';
     }
+  }
+}
+
+function readUnit<T extends string>(key: string, allowed: T[], fallback: T): T {
+  try {
+    const v = localStorage.getItem(key) as T | null;
+    return v && allowed.includes(v) ? v : fallback;
+  } catch {
+    return fallback;
   }
 }

@@ -49,6 +49,17 @@
         <button
           pButton
           type="button"
+          [icon]="mapService.zoomLocked() ? 'pi pi-lock' : 'pi pi-lock-open'"
+          class="p-button-text map-controls__btn"
+          [class.map-controls__btn--active]="mapService.zoomLocked()"
+          [attr.aria-label]="mapService.zoomLocked() ? 'Unlock map scale' : 'Lock map scale'"
+          [pTooltip]="mapService.zoomLocked() ? 'Scale locked — click to unlock' : 'Lock the map at this scale'"
+          tooltipPosition="left"
+          (click)="mapService.toggleZoomLock()"
+        ></button>
+        <button
+          pButton
+          type="button"
           icon="pi pi-th-large"
           class="p-button-text map-controls__btn"
           [class.map-controls__btn--active]="mapService.graticuleShown()"
