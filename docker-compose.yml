@@ -84,8 +84,11 @@ services:
       # Dev-only default password — change before any real deployment, and
       # never commit a real one. See docs/backend.md "GeoServer".
       GEOSERVER_ADMIN_PASSWORD: ${GEOSERVER_ADMIN_PASSWORD:-geoserver_dev_admin}
+      # 1G ran out of heap (Java heap space) rendering vector tiles of the
+      # big layers (villages, roads) and hung GeoServer until the watchdog
+      # restarted it.
       INITIAL_MEMORY: 512M
-      MAXIMUM_MEMORY: 1G
+      MAXIMUM_MEMORY: ${GEOSERVER_MAX_MEMORY:-2G}
       # Angular (http://localhost:4200) calls GeoServer's anonymous OGC
       # endpoints directly from the browser. The WPS Execute POST sends
       # Content-Type: application/xml, which makes the browser fire a
@@ -106,7 +109,9 @@ services:
       FORCE_DOWNLOAD_STABLE_EXTENSIONS: "true"
       # querylayer safety limits (defaults 1000 features / 10000 coordinates
       # are too small for municipal river / BRTS polygons).
-      ADDITIONAL_JAVA_STARTUP_OPTIONS: "-DQUERY_LAYER_MAX_FEATURES=5000 -DGEOMETRY_COLLECT_MAX_COORDINATES=1000000"
+      # ExitOnOutOfMemoryError: if the heap still runs out, exit at once so
+      # Docker restarts GeoServer in ~30 s instead of it hanging half-dead.
+      ADDITIONAL_JAVA_STARTUP_OPTIONS: "-DQUERY_LAYER_MAX_FEATURES=5000 -DGEOMETRY_COLLECT_MAX_COORDINATES=1000000 -XX:+ExitOnOutOfMemoryError"
     ports:
       # Host port 8080 is commonly taken; GeoServer listens on 8080
       # internally, serving under the /geoserver context path.

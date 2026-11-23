@@ -526,7 +526,7 @@ export class GisWorkspaceComponent {
   onShortcut(event: KeyboardEvent): void {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
       event.preventDefault();
-      this.toolSearchInput()?.nativeElement.focus();
+      this.openToolSearch();
       return;
     }
     // Plain "F" toggles the full-screen map — never while typing.
@@ -579,8 +579,16 @@ export class GisWorkspaceComponent {
     }
   }
 
-  onSearchFocus(): void {
+  /** "Find a tool" icon: opens the tool-search popup with its box focused. */
+  toggleToolSearch(): void {
+    if (this.openMenu() === 'search') this.closeMenu();
+    else this.openToolSearch();
+  }
+
+  openToolSearch(): void {
     this.openMenu.set('search');
+    // The input is rendered with the popup — focus it once it exists.
+    setTimeout(() => this.toolSearchInput()?.nativeElement.focus());
   }
 
   /** Arrow keys move between items of an open dropdown. */

@@ -286,7 +286,18 @@
 }
 
 .gis-ws__dropdown--search {
-  width: 300px;
+  width: 340px;
+
+  /* The tool-search box sits at the top of its popup. */
+  .gis-ws__bar-search-box {
+    display: flex;
+    width: 100%;
+    margin-bottom: 6px;
+  }
+
+  .gis-ws__kbd {
+    display: inline-flex;
+  }
 }
 
 .gis-ws__dropdown-head {

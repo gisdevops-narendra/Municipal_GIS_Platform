@@ -134,15 +134,20 @@
     }
 
     <div class="gis-ws__bar-search" (keydown)="onMenuKeydown($event)">
-      <label class="gis-ws__bar-search-box">
+      <button type="button" class="gis-ws__bar-btn gis-ws__bar-icon" [class.is-active]="openMenu() === 'search'"
+              pTooltip="Find a tool (Ctrl K)" tooltipPosition="bottom" aria-label="Find a tool"
+              [attr.aria-expanded]="openMenu() === 'search'" (click)="toggleToolSearch()">
         <i class="pi pi-search" aria-hidden="true"></i>
-        <input #toolSearch type="search" placeholder="Find a tool…" aria-label="Find a tool" [value]="menuQuery()"
-               (input)="onToolSearch($any($event.target).value)" (focus)="onSearchFocus()"
-               (keydown.enter)="menuResults()[0] && pickTool(menuResults()[0])" />
-        <kbd class="gis-ws__kbd" aria-hidden="true">Ctrl K</kbd>
-      </label>
+      </button>
       @if (openMenu() === 'search') {
         <div class="gis-ws__dropdown gis-ws__dropdown--end gis-ws__dropdown--search" role="menu" aria-label="Tools">
+          <label class="gis-ws__bar-search-box">
+            <i class="pi pi-search" aria-hidden="true"></i>
+            <input #toolSearch type="search" placeholder="Find a tool…" aria-label="Find a tool" [value]="menuQuery()"
+                   (input)="onToolSearch($any($event.target).value)"
+                   (keydown.enter)="menuResults()[0] && pickTool(menuResults()[0])" />
+            <kbd class="gis-ws__kbd" aria-hidden="true">Esc</kbd>
+          </label>
           @if (menuQuery().trim()) {
             @for (tool of menuResults(); track tool.id) {
                     <button type="button" role="menuitem" class="gis-ws__dropdown-item" [class.is-active]="isToolActive(tool)" (click)="pickTool(tool)">

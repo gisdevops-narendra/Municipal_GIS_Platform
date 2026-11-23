@@ -46,6 +46,13 @@ const FUZZY_THRESHOLD = 0.5;
 /** Below this many rows a sequential scan is already fast — no indexes. */
 const INDEX_MIN_ROWS = 20_000;
 const STATEMENT_TIMEOUT_MS = 8000;
+/** On big tables a text column with this few distinct values is a category
+ *  (country, state, road class, surface…): a search word matches millions
+ *  of rows there and timed the whole layer out, so it is not searched. */
+const CATEGORY_MAX_DISTINCT = 200;
+/** Matching rows scored per layer — a common word can match millions. */
+const CANDIDATE_LIMIT = 2000;
+const EXACT_LIMIT = 50;
 const COLUMN_CACHE_MS = 10 * 60 * 1000;
 
 const TABLE_NAME = /^[a-z_][a-z0-9_]{0,62}$/;
@@ -119,12 +126,19 @@ export class FuzzySearchService {
          (SELECT ARRAY[ST_X(p), ST_Y(p)] FROM (SELECT ST_PointOnSurface(${g4326}) AS p) y) AS anchor,`
       : 'NULL::json AS geometry, NULL::float8[] AS anchor,';
 
+    // Score only a bounded candidate set: exact matches first (so they are
+    // never crowded out), then any other matches.
+    const exact = info.columns.map((c) => `${ident(c)} ILIKE $4`).join(' OR ');
+    const table = ident(layer.postgisTable);
     const sql = `
       SELECT to_jsonb(t)${geomOut} AS attrs, ${bbox} AS bbox, ${shape}
              s.scores
-        FROM ${ident(layer.postgisTable)} t,
+        FROM ${table} t,
              LATERAL (SELECT ARRAY[${scores.join(', ')}]::float8[] AS scores) s
-       WHERE ${where}
+       WHERE t.ctid = ANY(ARRAY(
+               (SELECT ctid FROM ${table} WHERE ${exact} LIMIT ${EXACT_LIMIT})
+               UNION
+               (SELECT ctid FROM ${table} WHERE ${where} LIMIT ${CANDIDATE_LIMIT})))
        ORDER BY (SELECT max(x) FROM unnest(s.scores) x) DESC
        LIMIT ${HITS_PER_LAYER}`;
 
@@ -140,7 +154,7 @@ export class FuzzySearchService {
           anchor: number[] | null;
           scores: number[];
         }[]
-      >(sql, q, `${like(q)}%`, `%${like(q)}%`);
+      >(sql, q, `${like(q)}%`, `%${like(q)}%`, like(q));
       // Prisma's own transaction limit (default 5 s) must outlast the
       // statement timeout, or big layers were cut off early and dropped.
     }, { timeout: STATEMENT_TIMEOUT_MS + 2000, maxWait: 5000 });
@@ -182,7 +196,26 @@ export class FuzzySearchService {
           ORDER BY ordinal_position`,
         table,
       );
-      const all = cols.map((c) => c.name);
+      const [size] = await this.prisma.$queryRawUnsafe<{ rows: number }[]>(
+        `SELECT GREATEST(reltuples, 0)::float8 AS rows FROM pg_class WHERE relname = $1 AND relkind = 'r'`,
+        table,
+      );
+      const rows = Number(size?.rows ?? 0);
+      let all = cols.map((c) => c.name);
+      if (rows >= INDEX_MIN_ROWS) {
+        // n_distinct ≥ 0 is an absolute count (0 = all empty); < 0 is a
+        // fraction of the rows, i.e. a high-cardinality name-like column.
+        const stats = await this.prisma.$queryRawUnsafe<{ name: string; nd: number }[]>(
+          `SELECT attname AS name, n_distinct::float8 AS nd FROM pg_stats
+            WHERE schemaname = 'public' AND tablename = $1`,
+          table,
+        );
+        const category = new Set(
+          stats.filter((x) => x.nd >= 0 && x.nd <= CATEGORY_MAX_DISTINCT).map((x) => x.name),
+        );
+        const kept = all.filter((n) => !category.has(n));
+        if (kept.length) all = kept;
+      }
       const useful = all.filter((n) => !NON_SEARCH_COLUMN.test(n));
       const columns = (useful.length ? useful : all)
         .sort((a, b) => Number(!/name/i.test(a)) - Number(!/name/i.test(b)))
@@ -192,11 +225,7 @@ export class FuzzySearchService {
           WHERE f_table_schema = 'public' AND f_table_name = $1 LIMIT 1`,
         table,
       );
-      const [size] = await this.prisma.$queryRawUnsafe<{ rows: number }[]>(
-        `SELECT GREATEST(reltuples, 0)::float8 AS rows FROM pg_class WHERE relname = $1 AND relkind = 'r'`,
-        table,
-      );
-      return { columns, geom: geo?.geom ?? null, srid: Number(geo?.srid ?? 4326), rows: Number(size?.rows ?? 0) };
+      return { columns, geom: geo?.geom ?? null, srid: Number(geo?.srid ?? 4326), rows };
     })();
     info.catch(() => this.tableCache.delete(table));
     this.tableCache.set(table, { at: Date.now(), info });
