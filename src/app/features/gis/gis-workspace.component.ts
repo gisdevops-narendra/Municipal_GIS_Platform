@@ -1510,7 +1510,12 @@ export class GisWorkspaceComponent {
     if (layer) {
       this.mapService.setLayerVisibility(layer.id, true);
       this.highlightLayerId.set(layer.id);
-      const results: FeatureInfoResult[] = [{ layer, features: [{ attributes: match.attributes }] }];
+      // The feature's id (<layer>.<feat_id>) lets an open Attribute Table
+      // select it — otherwise switching the table to this layer clears the
+      // map selection and wipes the highlight just drawn.
+      const featId = match.attributes?.['feat_id'];
+      const id = featId !== undefined && featId !== null ? `${layer.geoserverLayer}.${featId}` : undefined;
+      const results: FeatureInfoResult[] = [{ layer, features: [{ attributes: match.attributes, id }] }];
       // Search only zooms to and highlights the feature — no Identify
       // popup; clicking the feature still opens its info as usual.
       this.featureInfoResults.set(results);

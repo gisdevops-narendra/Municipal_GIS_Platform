@@ -141,7 +141,9 @@ export class FuzzySearchService {
           scores: number[];
         }[]
       >(sql, q, `${like(q)}%`, `%${like(q)}%`);
-    });
+      // Prisma's own transaction limit (default 5 s) must outlast the
+      // statement timeout, or big layers were cut off early and dropped.
+    }, { timeout: STATEMENT_TIMEOUT_MS + 2000, maxWait: 5000 });
 
     return rows.map((row) => {
       let best = 0;
