@@ -1,4 +1,4 @@
-import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { Input, Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
@@ -340,6 +340,11 @@ const NAQI_CATEGORIES: [number, string, string][] = [
   ]
 })
 export class WeatherComponent {
+  /** Open one tab / tool, e.g. picked from the workspace tool search. */
+  @Input() set openSub(value: { parent: string; sub: string } | null) {
+    if (value?.parent === 'weather') this.openTab(value.sub as Tab);
+  }
+
   private readonly map = inject(MapService);
 
   readonly tabs: { id: Tab; label: string; title: string }[] = [

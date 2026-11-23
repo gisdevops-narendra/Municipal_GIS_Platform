@@ -377,7 +377,7 @@
         }
 
         @if (openedLeftTools().has('measure') && layersReady()) {
-          <app-measure
+          <app-measure [openSub]="subRequest()"
             [class.gis-ws__panel--hidden]="leftTool() !== 'measure'"
             [active]="leftTool() === 'measure'"
           />
@@ -404,7 +404,7 @@
         }
 
         @if (openedLeftTools().has('buffer') && layersReady()) {
-          <app-buffer-overlay
+          <app-buffer-overlay [openSub]="subRequest()"
             [class.gis-ws__panel--hidden]="leftTool() !== 'buffer'"
             [active]="leftTool() === 'buffer'"
             [layers]="layers()"
@@ -415,7 +415,7 @@
         }
 
         @if (openedLeftTools().has('geoprocessing') && layersReady()) {
-          <app-geoprocessing
+          <app-geoprocessing [openSub]="subRequest()"
             [allowedModuleIds]="myModuleIds()"
             [class.gis-ws__panel--hidden]="leftTool() !== 'geoprocessing'"
             [layers]="layers()"
@@ -424,7 +424,7 @@
         }
 
         @if (openedLeftTools().has('data') && layersReady()) {
-          <app-data-tools
+          <app-data-tools [openSub]="subRequest()"
             [class.gis-ws__panel--hidden]="leftTool() !== 'data'"
             [layers]="layers()"
             [allowedModuleIds]="myModuleIds()"
@@ -438,6 +438,7 @@
             [active]="leftTool() === 'advanced'"
             [layers]="layers()"
             [allowedModuleIds]="myModuleIds()"
+            [openSub]="subRequest()"
           />
         }
 
@@ -449,6 +450,7 @@
             [allowedModuleIds]="myModuleIds()"
             [isOwner]="isOwner()"
             [styleRequest]="rasterStyleRequest()"
+            [openSub]="subRequest()"
             (layerCreated)="onLayerCreated($event)"
           />
         }
@@ -472,7 +474,7 @@
         }
 
         @if (openedLeftTools().has('sketch') && layersReady()) {
-          <app-sketch
+          <app-sketch [openSub]="subRequest()"
             [class.gis-ws__panel--hidden]="leftTool() !== 'sketch'"
             [active]="leftTool() === 'sketch'"
             [workspaceKey]="workspace()?.code ?? ''"
@@ -500,7 +502,7 @@
         }
 
         @if (openedLeftTools().has('heatmap') && layersReady()) {
-          <app-density-map
+          <app-density-map [openSub]="subRequest()"
             [class.gis-ws__panel--hidden]="leftTool() !== 'heatmap'"
             [layers]="layers()"
           />
@@ -524,11 +526,11 @@
         }
 
         @if (openedLeftTools().has('share') && layersReady()) {
-          <app-share-map [class.gis-ws__panel--hidden]="leftTool() !== 'share'" [layers]="layers()" />
+          <app-share-map [openSub]="subRequest()" [class.gis-ws__panel--hidden]="leftTool() !== 'share'" [layers]="layers()" />
         }
 
         @if (openedLeftTools().has('network-planning') && layersReady()) {
-          <app-network-planning [class.gis-ws__panel--hidden]="leftTool() !== 'network-planning'" [layers]="layers()" />
+          <app-network-planning [openSub]="subRequest()" [class.gis-ws__panel--hidden]="leftTool() !== 'network-planning'" [layers]="layers()" />
         }
 
         @if ((openedLeftTools().has('sensors') || sensorFeedsSaved) && layersReady()) {
@@ -540,7 +542,7 @@
         }
 
         @if (openedLeftTools().has('weather') && layersReady()) {
-          <app-weather [class.gis-ws__panel--hidden]="leftTool() !== 'weather'" />
+          <app-weather [openSub]="subRequest()" [class.gis-ws__panel--hidden]="leftTool() !== 'weather'" />
         }
 
         @if (openedLeftTools().has('osm-import') && layersReady()) {
@@ -568,17 +570,17 @@
         }
 
         @if (openedLeftTools().has('air-stations')) {
-          <app-air-stations [class.gis-ws__panel--hidden]="leftTool() !== 'air-stations'" [layers]="layers()" />
+          <app-air-stations [openSub]="subRequest()" [class.gis-ws__panel--hidden]="leftTool() !== 'air-stations'" [layers]="layers()" />
         }
         @if (openedLeftTools().has('hazards') && layersReady()) {
-          <app-hazards [class.gis-ws__panel--hidden]="leftTool() !== 'hazards'" [layers]="layers()" />
+          <app-hazards [openSub]="subRequest()" [class.gis-ws__panel--hidden]="leftTool() !== 'hazards'" [layers]="layers()" />
         }
         @if (openedLeftTools().has('tourism') && layersReady()) {
-          <app-tourism [class.gis-ws__panel--hidden]="leftTool() !== 'tourism'" [layers]="layers()" [municipalityName]="municipalityName()" (layerCreated)="onLayerCreated($event)" />
+          <app-tourism [openSub]="subRequest()" [class.gis-ws__panel--hidden]="leftTool() !== 'tourism'" [layers]="layers()" [municipalityName]="municipalityName()" (layerCreated)="onLayerCreated($event)" />
         }
 
         @if (openedLeftTools().has('integrations')) {
-          <app-integrations [class.gis-ws__panel--hidden]="leftTool() !== 'integrations'" />
+          <app-integrations [openSub]="subRequest()" [class.gis-ws__panel--hidden]="leftTool() !== 'integrations'" />
         }
 
         <!-- Layer-gated tools before layers have loaded (layers/bookmarks/

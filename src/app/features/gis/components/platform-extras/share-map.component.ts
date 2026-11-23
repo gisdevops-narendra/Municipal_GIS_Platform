@@ -96,6 +96,13 @@ import { PlatformExtrasService, ShareLink } from '../../services/platform-extras
   `
 })
 export class ShareMapComponent {
+  /** Open one tab / tool, e.g. picked from the workspace tool search. */
+  @Input() set openSub(value: { parent: string; sub: string } | null) {
+    if (value?.parent !== 'share') return;
+    if (value.sub === 'links') this.openLinks();
+    else this.tab.set('new');
+  }
+
   private readonly map = inject(MapService);
   private readonly extras = inject(PlatformExtrasService);
   private readonly notify = inject(NotificationService);

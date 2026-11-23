@@ -311,6 +311,11 @@ function km(a: LonLat, b: LonLat): number {
   `
 })
 export class AirStationsComponent {
+  /** Open one tab / tool, e.g. picked from the workspace tool search. */
+  @Input() set openSub(value: { parent: string; sub: string } | null) {
+    if (value?.parent === 'air-stations') this.openTab(value.sub as Tab);
+  }
+
   private readonly http = inject(HttpClient);
   private readonly map = inject(MapService);
   private readonly api = `${environment.apiUrl}/gis/location/air-stations`;

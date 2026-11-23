@@ -8,7 +8,7 @@ import { GisLayer } from '../../../../core/models/gis-layer.model';
 import { GisLayersService } from '../../../../core/services/gis-layers.service';
 import { GeoprocessOperation, VectorToolsService } from '../../services/vector-tools.service';
 
-interface OperationDef {
+export interface OperationDef {
   value: GeoprocessOperation;
   label: string;
   hint: string;
@@ -26,6 +26,38 @@ interface OperationDef {
  * Spatial Join, run in PostGIS and published as a NEW layer (unlike Buffer
  * & Overlay, whose results are temporary map graphics).
  */
+/** Module Access id per operation (none = the Geoprocessing module itself). */
+export const GEOPROCESS_GROUP_MODULE: Partial<Record<GeoprocessOperation, number>> = {
+  symdifference: 1031, merge: 1031, nearest: 1032, selectbylocation: 1032, voronoi: 1032,
+  centroids: 1033, convexhull: 1033, envelope: 1033, simplify: 1033, explode: 1033,
+  polygonstolines: 1033, linestopolygons: 1033, pointsalonglines: 1033, squaregrid: 1034, hexgrid: 1034
+};
+
+export const GEOPROCESS_OPERATIONS: OperationDef[] = [
+  { value: 'intersect', group: 'Overlay', label: 'Intersect', hint: 'Only the overlapping parts, with attributes of both layers.', overlay: 'any' },
+  { value: 'clip', group: 'Overlay', label: 'Clip', hint: 'The input cut to the area of a polygon layer.', overlay: 'polygon' },
+  { value: 'erase', group: 'Overlay', label: 'Erase', hint: 'The input minus the area of a polygon layer.', overlay: 'polygon' },
+  { value: 'symdifference', group: 'Overlay', label: 'Symmetrical Difference', hint: 'The parts covered by only one of the two layers.', overlay: 'any' },
+  { value: 'merge', group: 'Overlay', label: 'Merge', hint: 'Two layers of the same type combined into one (shared fields kept, plus the source layer).', overlay: 'any' },
+  { value: 'buffer', group: 'Proximity', label: 'Buffer', hint: 'A polygon around every feature at a fixed distance.', param: { label: 'Distance (m)', value: 100 } },
+  { value: 'nearest', group: 'Proximity', label: 'Nearest Join', hint: 'Each feature gets the nearest feature of another layer and the distance to it (m).', overlay: 'any' },
+  { value: 'selectbylocation', group: 'Proximity', label: 'Select by Location', hint: 'Features that intersect — or lie within a distance of — another layer.', overlay: 'any', param: { label: 'Within distance (m, 0 = intersecting)', value: 0, min: 0 } },
+  { value: 'voronoi', group: 'Proximity', label: 'Voronoi (Thiessen) Polygons', hint: 'The area closest to each point — e.g. the service area of every facility.', input: 'POINT' },
+  { value: 'centroids', group: 'Geometry', label: 'Centroids', hint: 'A point inside every feature (always within the shape).' },
+  { value: 'convexhull', group: 'Geometry', label: 'Convex Hull', hint: 'The smallest convex polygon enclosing the whole layer.' },
+  { value: 'envelope', group: 'Geometry', label: 'Bounding Boxes', hint: 'A rectangle around every feature.' },
+  { value: 'simplify', group: 'Geometry', label: 'Simplify', hint: 'Fewer vertices within a tolerance; shapes stay valid.', param: { label: 'Tolerance (m)', value: 5 } },
+  { value: 'explode', group: 'Geometry', label: 'Explode Multipart', hint: 'Multi-part features split into single parts.' },
+  { value: 'polygonstolines', group: 'Geometry', label: 'Polygons → Lines', hint: 'The outline of every polygon as a line.', input: 'POLYGON' },
+  { value: 'linestopolygons', group: 'Geometry', label: 'Lines → Polygons', hint: 'Closed lines turned into polygons.', input: 'LINE' },
+  { value: 'pointsalonglines', group: 'Geometry', label: 'Points Along Lines', hint: 'A point at a fixed spacing along every line (e.g. chainage, pole positions).', input: 'LINE', param: { label: 'Spacing (m)', value: 50 } },
+  { value: 'dissolve', group: 'Summarise', label: 'Dissolve', hint: 'Merge features — all of them, or those sharing a field value.' },
+  { value: 'join', group: 'Summarise', label: 'Spatial Join', hint: 'Attach attributes (or a count) of intersecting features of another layer.', overlay: 'any' },
+  { value: 'squaregrid', group: 'Summarise', label: 'Square Grid', hint: 'A grid of square cells over the layer, with the number of features in each.', param: { label: 'Cell size (m)', value: 250 } },
+  { value: 'hexgrid', group: 'Summarise', label: 'Hexagon Grid', hint: 'A grid of hexagons over the layer, with the number of features in each.', param: { label: 'Cell size (m)', value: 250 } }
+];
+
+
 @Component({
   selector: 'app-geoprocessing',
   standalone: true,
@@ -34,6 +66,11 @@ interface OperationDef {
   styleUrl: '../buffer-overlay/buffer-overlay.component.scss'
 })
 export class GeoprocessingComponent {
+  /** Open one tab / tool, e.g. picked from the workspace tool search. */
+  @Input() set openSub(value: { parent: string; sub: string } | null) {
+    if (value?.parent === 'geoprocessing') this.setOperation(value.sub as GeoprocessOperation);
+  }
+
   private readonly vectorTools = inject(VectorToolsService);
   private readonly gisLayers = inject(GisLayersService);
 
@@ -49,35 +86,9 @@ export class GeoprocessingComponent {
     this.allowedSignal.set(value ?? new Set());
   }
   private readonly allowedSignal = signal<ReadonlySet<number>>(new Set());
-  private static readonly GROUP_MODULE: Partial<Record<GeoprocessOperation, number>> = {
-    symdifference: 1031, merge: 1031, nearest: 1032, selectbylocation: 1032, voronoi: 1032,
-    centroids: 1033, convexhull: 1033, envelope: 1033, simplify: 1033, explode: 1033,
-    polygonstolines: 1033, linestopolygons: 1033, pointsalonglines: 1033, squaregrid: 1034, hexgrid: 1034
-  };
+  private static readonly GROUP_MODULE = GEOPROCESS_GROUP_MODULE;
 
-  readonly operations: OperationDef[] = [
-    { value: 'intersect', group: 'Overlay', label: 'Intersect', hint: 'Only the overlapping parts, with attributes of both layers.', overlay: 'any' },
-    { value: 'clip', group: 'Overlay', label: 'Clip', hint: 'The input cut to the area of a polygon layer.', overlay: 'polygon' },
-    { value: 'erase', group: 'Overlay', label: 'Erase', hint: 'The input minus the area of a polygon layer.', overlay: 'polygon' },
-    { value: 'symdifference', group: 'Overlay', label: 'Symmetrical Difference', hint: 'The parts covered by only one of the two layers.', overlay: 'any' },
-    { value: 'merge', group: 'Overlay', label: 'Merge', hint: 'Two layers of the same type combined into one (shared fields kept, plus the source layer).', overlay: 'any' },
-    { value: 'buffer', group: 'Proximity', label: 'Buffer', hint: 'A polygon around every feature at a fixed distance.', param: { label: 'Distance (m)', value: 100 } },
-    { value: 'nearest', group: 'Proximity', label: 'Nearest Join', hint: 'Each feature gets the nearest feature of another layer and the distance to it (m).', overlay: 'any' },
-    { value: 'selectbylocation', group: 'Proximity', label: 'Select by Location', hint: 'Features that intersect — or lie within a distance of — another layer.', overlay: 'any', param: { label: 'Within distance (m, 0 = intersecting)', value: 0, min: 0 } },
-    { value: 'voronoi', group: 'Proximity', label: 'Voronoi (Thiessen) Polygons', hint: 'The area closest to each point — e.g. the service area of every facility.', input: 'POINT' },
-    { value: 'centroids', group: 'Geometry', label: 'Centroids', hint: 'A point inside every feature (always within the shape).' },
-    { value: 'convexhull', group: 'Geometry', label: 'Convex Hull', hint: 'The smallest convex polygon enclosing the whole layer.' },
-    { value: 'envelope', group: 'Geometry', label: 'Bounding Boxes', hint: 'A rectangle around every feature.' },
-    { value: 'simplify', group: 'Geometry', label: 'Simplify', hint: 'Fewer vertices within a tolerance; shapes stay valid.', param: { label: 'Tolerance (m)', value: 5 } },
-    { value: 'explode', group: 'Geometry', label: 'Explode Multipart', hint: 'Multi-part features split into single parts.' },
-    { value: 'polygonstolines', group: 'Geometry', label: 'Polygons → Lines', hint: 'The outline of every polygon as a line.', input: 'POLYGON' },
-    { value: 'linestopolygons', group: 'Geometry', label: 'Lines → Polygons', hint: 'Closed lines turned into polygons.', input: 'LINE' },
-    { value: 'pointsalonglines', group: 'Geometry', label: 'Points Along Lines', hint: 'A point at a fixed spacing along every line (e.g. chainage, pole positions).', input: 'LINE', param: { label: 'Spacing (m)', value: 50 } },
-    { value: 'dissolve', group: 'Summarise', label: 'Dissolve', hint: 'Merge features — all of them, or those sharing a field value.' },
-    { value: 'join', group: 'Summarise', label: 'Spatial Join', hint: 'Attach attributes (or a count) of intersecting features of another layer.', overlay: 'any' },
-    { value: 'squaregrid', group: 'Summarise', label: 'Square Grid', hint: 'A grid of square cells over the layer, with the number of features in each.', param: { label: 'Cell size (m)', value: 250 } },
-    { value: 'hexgrid', group: 'Summarise', label: 'Hexagon Grid', hint: 'A grid of hexagons over the layer, with the number of features in each.', param: { label: 'Cell size (m)', value: 250 } }
-  ];
+  readonly operations = GEOPROCESS_OPERATIONS;
 
   /** The picker, grouped. */
   readonly operationGroups = computed(() => {

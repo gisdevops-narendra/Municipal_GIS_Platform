@@ -261,6 +261,12 @@ export class RasterAnalysisComponent implements OnInit, OnDestroy {
   }
   private styleRequestN = 0;
 
+  /** Open one tool (e.g. picked from the workspace tool search). A new
+   *  object each time, so picking the same tool again still applies. */
+  @Input() set openSub(value: { parent: string; sub: string } | null) {
+    if (value?.parent === 'raster' && this.tools().some((t) => t.id === value.sub)) this.openTool(value.sub as RasterToolId);
+  }
+
   @Output() layerCreated = new EventEmitter<GisLayer>();
 
   readonly ramps = RASTER_RAMPS;

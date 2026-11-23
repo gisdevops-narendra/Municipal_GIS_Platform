@@ -19,7 +19,8 @@ interface PlaceSuggestion {
 }
 const MAX_PLACE_SUGGESTIONS = 8;
 
-type Mode = 'route' | 'nearest' | 'trace' | 'service';
+export type AdvancedMode = 'route' | 'nearest' | 'trace' | 'service';
+type Mode = AdvancedMode;
 /** What the next map click sets: a point, a routing stop (by index), or
  *  something to avoid. */
 type Slot = 'from' | 'to' | number | 'avoidArea' | 'avoidRoad';
@@ -124,6 +125,14 @@ export class AdvancedToolsComponent implements OnDestroy {
     }
   }
   private readonly allowedSignal = signal<ReadonlySet<number>>(new Set());
+
+  /** Tab to switch to (e.g. picked from the tool search). A new object
+   *  each time, so picking the same tab again still applies. */
+  @Input() set openSub(value: { parent: string; sub: string } | null) {
+    if (value?.parent === 'advanced' && value.sub !== this.mode() && this.modes().some((m) => m.value === value.sub)) {
+      this.setMode(value.sub as Mode);
+    }
+  }
 
   /** False while the panel is kept mounted but hidden — cancels a pending pick. */
   @Input() set active(value: boolean) {

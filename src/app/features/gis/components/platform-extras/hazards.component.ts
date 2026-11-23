@@ -158,6 +158,11 @@ function haversineKm(a: LonLat, b: LonLat): number {
   `
 })
 export class HazardsComponent {
+  /** Open one tab / tool, e.g. picked from the workspace tool search. */
+  @Input() set openSub(value: { parent: string; sub: string } | null) {
+    if (value?.parent === 'hazards') this.setTab(value.sub as 'quakes' | 'alerts');
+  }
+
   private readonly http = inject(HttpClient);
   private readonly map = inject(MapService);
   private readonly extras = inject(PlatformExtrasService);

@@ -348,6 +348,11 @@ const emptySource = (mode: 'layer' | 'click' = 'layer'): SiteSourceValue => ({ m
   `
 })
 export class NetworkPlanningComponent {
+  /** Open one tab / tool, e.g. picked from the workspace tool search. */
+  @Input() set openSub(value: { parent: string; sub: string } | null) {
+    if (value?.parent === 'network-planning') this.switchTab(value.sub as 'fleet' | 'matrix' | 'sites');
+  }
+
   private readonly map = inject(MapService);
   private readonly network = inject(NetworkService);
 

@@ -45,8 +45,8 @@ import { QueryBuilderComponent } from './components/query-builder/query-builder.
 import { MeasureComponent } from './components/measure/measure.component';
 import { BookmarksComponent } from './components/bookmarks/bookmarks.component';
 import { BufferOverlayComponent } from './components/buffer-overlay/buffer-overlay.component';
-import { GeoprocessingComponent } from './components/geoprocessing/geoprocessing.component';
-import { DataToolsComponent } from './components/data-tools/data-tools.component';
+import { GeoprocessingComponent, GEOPROCESS_OPERATIONS, GEOPROCESS_GROUP_MODULE } from './components/geoprocessing/geoprocessing.component';
+import { DataToolsComponent, DATA_TOOL_LIST } from './components/data-tools/data-tools.component';
 import { DATA_TOOL_MODULE_IDS } from './services/data-tools.service';
 import { CrsPickerComponent } from './components/crs-picker/crs-picker.component';
 import { EDIT_PANEL_MODULE_ID, GEOPROCESSING_MODULE_ID } from './services/vector-tools.service';
@@ -57,7 +57,7 @@ import {
   NETWORK_TRACING_MODULE_ID,
   SERVICE_AREA_MODULE_ID
 } from './components/advanced-tools/advanced-tools.component';
-import { RasterAnalysisComponent, RASTER_TOOL_MODULE_IDS } from './components/raster-analysis/raster-analysis.component';
+import { RasterAnalysisComponent, RASTER_TOOL_MODULE_IDS, RASTER_TOOLS } from './components/raster-analysis/raster-analysis.component';
 import { AiChatComponent } from './components/ai-chat/ai-chat.component';
 import { PrintLayoutComponent } from './components/print-layout/print-layout.component';
 import { ExportDataComponent } from './components/export-data/export-data.component';
@@ -147,7 +147,8 @@ const GROUP_META: Record<WsToolGroup, { icon: string; hint: string }> = {
 };
 
 /** One-line description and (for big groups) a menu section per tool. */
-const TOOL_INFO: Record<string, { hint: string; section?: string }> = {
+/** `keywords`: extra search terms (sub-features, synonyms) the tool search matches. */
+const TOOL_INFO: Record<string, { hint: string; section?: string; keywords?: string }> = {
   layers: { hint: 'Turn layers on, style and order them' },
   attributes: { hint: 'Browse and edit feature records' },
   'add-service': { hint: 'Add WMS, WMTS, XYZ, ArcGIS or WFS layers' },
@@ -184,6 +185,55 @@ const TOOL_INFO: Record<string, { hint: string; section?: string }> = {
   integrations: { hint: 'API keys and webhooks' },
   workspace: { hint: 'Workspace name, map projection and settings' }
 };
+
+/** Tools and tabs that live inside a panel, listed as their own
+ *  tool-search results; picking one opens the panel on that tool/tab.
+ *  `moduleId` gates the entry itself; the parent panel's access always
+ *  applies too. */
+type SubTool = WsTool & { parent: string; sub: string; hint: string; keywords?: string };
+const sub = (parent: string, subId: string, label: string, icon: string, hint: string, keywords?: string, moduleId?: number): SubTool => ({
+  id: `${parent}:${subId}`, parent, sub: subId, label, icon, group: 'analysis', dock: 'left', available: true, moduleId, hint, keywords
+});
+const SUB_TOOLS: SubTool[] = [
+  sub('advanced', 'route', 'Routing', 'pi pi-directions', 'Advanced Tools · shortest route between stops', 'route directions shortest path navigation', BASIC_ROUTING_MODULE_ID),
+  sub('advanced', 'nearest', 'Nearest Facility', 'pi pi-map-marker', 'Advanced Tools · closest facilities to a point', 'closest facility', NEAREST_FACILITY_MODULE_ID),
+  sub('advanced', 'trace', 'Tracing', 'pi pi-sitemap', 'Advanced Tools · trace connected network lines', 'trace network upstream downstream pipeline', NETWORK_TRACING_MODULE_ID),
+  sub('advanced', 'service', 'Service Area', 'pi pi-bullseye', 'Advanced Tools · area reachable within a distance', 'isochrone drive time reach catchment', SERVICE_AREA_MODULE_ID),
+  ...RASTER_TOOLS.map((t) => sub('raster', t.id, t.label, t.icon, `Raster Analysis · ${t.description}`, `${t.group} ${t.section ?? ''}`, t.moduleId)),
+  ...GEOPROCESS_OPERATIONS.map((o) => sub('geoprocessing', o.value, o.label, 'pi pi-cog', `Geoprocessing · ${o.hint}`, o.group, GEOPROCESS_GROUP_MODULE[o.value])),
+  ...DATA_TOOL_LIST.map((t) => sub('data', t.value, t.label, 'pi pi-wrench', `Data Tools · ${t.group}`, undefined, t.moduleId)),
+  sub('buffer', 'buffer', 'Buffer', 'pi pi-circle', 'Buffer & Overlay · zone around a drawn shape'),
+  sub('buffer', 'overlay', 'Overlay', 'pi pi-clone', 'Buffer & Overlay · intersection, union, difference, clip of two shapes', 'intersect intersection union difference clip'),
+  sub('measure', 'distance', 'Measure Distance', 'pi pi-arrows-h', 'Measure · length of a line', 'length ruler'),
+  sub('measure', 'area', 'Measure Area', 'pi pi-stop', 'Measure · area and perimeter', 'perimeter polygon'),
+  sub('measure', 'radius', 'Radius / Circle', 'pi pi-circle', 'Measure · circle from a centre and radius'),
+  sub('sketch', 'create', 'Create Features', 'pi pi-plus-circle', 'Draw & Mark · add features to a layer', 'digitize digitise add edit new feature'),
+  sub('sketch', 'modify', 'Modify Features', 'pi pi-pencil', 'Draw & Mark · reshape, move or delete features', 'edit reshape move delete vertex'),
+  sub('sketch', 'sketch', 'Sketches', 'pi pi-pencil', 'Draw & Mark · draw shapes, markers and text on the map', 'draw marker annotation'),
+  sub('heatmap', 'heatmap', 'Heatmap', 'pi pi-map', 'Heatmap & Clusters · point density heatmap', 'density hotspot'),
+  sub('heatmap', 'clusters', 'Clusters', 'pi pi-th-large', 'Heatmap & Clusters · group nearby points', 'cluster'),
+  sub('network-planning', 'fleet', 'Fleet Routes', 'pi pi-truck', 'Network Planning · vehicle routes for many stops', 'vehicle vrp fleet'),
+  sub('network-planning', 'matrix', 'Travel Matrix', 'pi pi-table', 'Network Planning · origin–destination travel times', 'od matrix origin destination'),
+  sub('network-planning', 'sites', 'Site Selection', 'pi pi-map-marker', 'Network Planning · best sites for facilities', 'location allocation'),
+  sub('weather', 'forecast', 'Weather Forecast', 'pi pi-cloud', 'Weather · forecast and warnings'),
+  sub('weather', 'layers', 'Weather Radar & Satellite', 'pi pi-globe', 'Weather · radar and satellite on the map', 'rain radar satellite'),
+  sub('weather', 'air', 'Air Quality (Weather)', 'pi pi-cloud', 'Weather · air quality', 'aqi pollution'),
+  sub('weather', 'river', 'River Flow & Flood Outlook', 'pi pi-chart-line', 'Weather · river flow and flood outlook', 'flood discharge'),
+  sub('air-stations', 'stations', 'AQI Stations', 'pi pi-chart-scatter', 'Air Quality Stations · live stations around the map', 'aqi pollution'),
+  sub('air-stations', 'point', 'AQI at a Point', 'pi pi-map-marker', 'Air Quality Stations · estimated AQI at any point', 'aqi pollution'),
+  sub('air-stations', 'cities', 'City AQI Ranking', 'pi pi-list', 'Air Quality Stations · all-India city ranking', 'aqi pollution'),
+  sub('air-stations', 'exposure', 'Pollution Exposure', 'pi pi-users', 'Air Quality Stations · features near polluted stations', 'aqi'),
+  sub('tourism', 'explore', 'Attractions Nearby', 'pi pi-ticket', 'Tourism · attractions around the map', 'poi sightseeing'),
+  sub('tourism', 'trail', 'Plan a Trail', 'pi pi-directions', 'Tourism · plan a walking trail', 'walk hike'),
+  sub('tourism', 'facilities', 'Visitor Facilities', 'pi pi-check-square', 'Tourism · visitor facilities check', 'toilet parking'),
+  sub('tourism', 'guide', 'City Guide', 'pi pi-book', 'Tourism · Wikivoyage city guide', 'wikivoyage'),
+  sub('hazards', 'quakes', 'Earthquakes', 'pi pi-exclamation-triangle', 'Hazard Alerts · recent earthquakes', 'seismic'),
+  sub('hazards', 'alerts', 'Disaster Alerts', 'pi pi-exclamation-circle', 'Hazard Alerts · disaster alerts', 'gdacs cyclone flood'),
+  sub('integrations', 'keys', 'API Keys', 'pi pi-key', 'API & Webhooks · manage API keys', 'token'),
+  sub('integrations', 'hooks', 'Webhooks', 'pi pi-link', 'API & Webhooks · manage webhooks', 'callback'),
+  sub('share', 'new', 'New Share Link', 'pi pi-share-alt', 'Share Map · public link to this view', 'public link'),
+  sub('share', 'links', 'My Share Links', 'pi pi-list', 'Share Map · links you have shared', 'public link')
+];
 
 /** Shown directly on the rail — everything else lives in group menus. */
 const PRIMARY_TOOL_IDS = ['layers', 'attributes'];
@@ -439,7 +489,7 @@ export class GisWorkspaceComponent {
       })
   );
 
-  toolHint = (tool: WsTool) => TOOL_INFO[tool.id]?.hint ?? '';
+  toolHint = (tool: WsTool) => ('parent' in tool ? (tool as SubTool).hint : TOOL_INFO[tool.id]?.hint) ?? '';
 
   /** Last few tools opened, newest first — shown when the search box is focused. */
   readonly recentToolIds = signal<string[]>(this.readRecent());
@@ -552,7 +602,21 @@ export class GisWorkspaceComponent {
   readonly menuResults = computed(() => {
     const q = this.menuQuery().trim().toLowerCase();
     if (!q) return [];
-    return this.visibleToolList().filter((t) => t.label.toLowerCase().includes(q));
+    // Every word must appear in the tool's name, description or keywords;
+    // name matches are listed first.
+    const words = q.split(/\s+/);
+    const visible = this.visibleToolList();
+    const subTools = SUB_TOOLS.filter((t) => visible.some((p) => p.id === t.parent) && this.hasModuleAccess(t));
+    const scored = [...this.visibleToolList(), ...subTools]
+      .map((t) => {
+        const label = t.label.toLowerCase();
+        const info: { hint?: string; keywords?: string } | undefined = 'parent' in t ? (t as SubTool) : TOOL_INFO[t.id];
+        const text = `${label} ${info?.hint ?? ''} ${info?.keywords ?? ''}`.toLowerCase();
+        if (!words.every((w) => text.includes(w))) return null;
+        return { t, rank: label.startsWith(q) ? 0 : label.includes(q) ? 1 : 2 };
+      })
+      .filter((x): x is { t: WsTool; rank: number } => !!x);
+    return scored.sort((a, b) => a.rank - b.rank).map((x) => x.t);
   });
 
   toggleMenu(id: WsToolGroup): void {
@@ -584,8 +648,17 @@ export class GisWorkspaceComponent {
     if (this.openMenu()) this.closeMenu();
   }
 
+  /** Tool / tab inside a panel requested from the tool search; each panel
+   *  reacts only to its own `parent` id. */
+  readonly subRequest = signal<{ parent: string; sub: string } | null>(null);
+
   pickTool(tool: WsTool): void {
-    if (!this.isToolActive(tool)) this.activateTool(tool);
+    const subTool = SUB_TOOLS.find((t) => t.id === tool.id);
+    if (subTool) {
+      const parent = TOOLS.find((t) => t.id === subTool.parent)!;
+      if (!this.isToolActive(parent)) this.activateTool(parent);
+      this.subRequest.set({ parent: subTool.parent, sub: subTool.sub });
+    } else if (!this.isToolActive(tool)) this.activateTool(tool);
     this.closeMenu();
     this.menuQuery.set('');
     this.toolSearchInput()?.nativeElement.blur();
@@ -957,6 +1030,7 @@ export class GisWorkspaceComponent {
   }
 
   isToolActive(tool: WsTool): boolean {
+    if ('parent' in tool) return false;
     if (tool.id === 'layers' && this.layersDock() === 'right') return this.rightOpen();
     return tool.dock === 'left' ? this.leftTool() === tool.id : this.bottomTool() === tool.id;
   }

@@ -22,6 +22,11 @@ import { DensityOptions, MapService } from '../../services/map.service';
   styleUrl: './density-map.component.scss'
 })
 export class DensityMapComponent implements OnDestroy {
+  /** Open one tab / tool, e.g. picked from the workspace tool search. */
+  @Input() set openSub(value: { parent: string; sub: string } | null) {
+    if (value?.parent === 'heatmap') this.setMode(value.sub as DensityOptions['mode']);
+  }
+
   private readonly gisLayersService = inject(GisLayersService);
   private readonly mapService = inject(MapService);
 

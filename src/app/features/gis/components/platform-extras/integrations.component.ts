@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core';
+import { Input, Component, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
@@ -158,6 +158,11 @@ const EVENT_LABELS: Record<string, string> = {
   `
 })
 export class IntegrationsComponent {
+  /** Open one tab / tool, e.g. picked from the workspace tool search. */
+  @Input() set openSub(value: { parent: string; sub: string } | null) {
+    if (value?.parent === 'integrations') this.tab.set(value.sub as 'keys' | 'hooks');
+  }
+
   private readonly extras = inject(PlatformExtrasService);
   private readonly notify = inject(NotificationService);
 

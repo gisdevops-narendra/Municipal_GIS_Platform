@@ -50,6 +50,11 @@ const GEO_PROJ = 'EPSG:4326';
   styleUrl: './buffer-overlay.component.scss'
 })
 export class BufferOverlayComponent implements OnDestroy {
+  /** Open one tab / tool, e.g. picked from the workspace tool search. */
+  @Input() set openSub(value: { parent: string; sub: string } | null) {
+    if (value?.parent === 'buffer') this.setMode(value.sub as Mode);
+  }
+
   private readonly mapService = inject(MapService);
   private readonly wps = inject(WpsService);
   private readonly queryService = inject(QueryService);

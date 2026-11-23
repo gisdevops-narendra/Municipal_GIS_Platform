@@ -440,13 +440,22 @@
 }
 
 .site-header__kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
   margin-left: auto;
   padding: 0 5px;
   border: 1px solid var(--color-line);
+  border-bottom-width: 2px;
   border-radius: 4px;
-  font-family: inherit;
-  font-size: 10px;
-  color: var(--color-ink-500);
+  background: var(--color-surface-alt);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--color-ink-700, var(--color-ink-500));
 }
 
 /* ---------- responsive ---------- */

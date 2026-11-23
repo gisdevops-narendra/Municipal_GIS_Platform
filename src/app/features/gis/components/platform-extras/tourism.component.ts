@@ -288,6 +288,11 @@ function facilityType(tags: Record<string, string>): FacilityType | null {
   `
 })
 export class TourismComponent {
+  /** Open one tab / tool, e.g. picked from the workspace tool search. */
+  @Input() set openSub(value: { parent: string; sub: string } | null) {
+    if (value?.parent === 'tourism') this.openTab(value.sub as Tab);
+  }
+
   private readonly map = inject(MapService);
   private readonly http = inject(HttpClient);
   private readonly network = inject(NetworkService);

@@ -36,6 +36,11 @@ interface ResultRow {
   styleUrl: './measure.component.scss'
 })
 export class MeasureComponent implements OnDestroy {
+  /** Open one tab / tool, e.g. picked from the workspace tool search. */
+  @Input() set openSub(value: { parent: string; sub: string } | null) {
+    if (value?.parent === 'measure') this.onKindChange(value.sub as MeasureKind);
+  }
+
   private readonly mapService = inject(MapService);
   private readonly settings = inject(SettingsService);
   /** Starts in the user's Settings → Map Units; still switchable here. */

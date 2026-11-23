@@ -57,6 +57,11 @@ const MARKER_KIND: KindOption = {
   styleUrl: './sketch.component.scss'
 })
 export class SketchComponent implements OnDestroy {
+  /** Open one tab / tool, e.g. picked from the workspace tool search. */
+  @Input() set openSub(value: { parent: string; sub: string } | null) {
+    if (value?.parent === 'sketch') this.setTab(value.sub as 'create' | 'modify' | 'sketch');
+  }
+
   private readonly mapService = inject(MapService);
   private readonly sketchService = inject(SketchService);
   private readonly notify = inject(NotificationService);

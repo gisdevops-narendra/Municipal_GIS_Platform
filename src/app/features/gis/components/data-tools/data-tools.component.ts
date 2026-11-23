@@ -69,6 +69,29 @@ const CHECK_COLORS: Record<TopologyIssue['check'], string> = {
  * Topology Validation, Field Rules and Versions / Change Detection. Each
  * tab is gated by its own module; layer permissions are enforced server-side.
  */
+/** Every Data Tools tool, in menu order (filtered by Module Access). */
+export const DATA_TOOL_LIST = [
+  { value: 'calc' as Tool, group: 'Fields & values', label: 'Field Calculator', moduleId: FIELD_CALCULATOR_MODULE_ID },
+  { value: 'fields' as Tool, group: 'Fields & values', label: 'Add / Rename / Delete Field', moduleId: 1017 },
+  { value: 'geometry' as Tool, group: 'Fields & values', label: 'Calculate Geometry', moduleId: 1018 },
+  { value: 'replace' as Tool, group: 'Fields & values', label: 'Find & Replace', moduleId: 1019 },
+  { value: 'autonum' as Tool, group: 'Fields & values', label: 'Auto-number IDs', moduleId: 1020 },
+  { value: 'convert' as Tool, group: 'Fields & values', label: 'Change Field Type', moduleId: 1021 },
+  { value: 'standardise' as Tool, group: 'Fields & values', label: 'Standardise Values', moduleId: 1022 },
+  { value: 'validate' as Tool, group: 'Data quality', label: 'Topology Validation', moduleId: TOPOLOGY_MODULE_ID },
+  { value: 'completeness' as Tool, group: 'Data quality', label: 'Completeness Report', moduleId: 1023 },
+  { value: 'duplicates' as Tool, group: 'Data quality', label: 'Find Duplicates', moduleId: 1024 },
+  { value: 'rules' as Tool, group: 'Data quality', label: 'Field Rules', moduleId: FIELD_RULES_MODULE_ID },
+  { value: 'join' as Tool, group: 'Import & combine', label: 'CSV Join', moduleId: TABLE_JOIN_MODULE_ID },
+  { value: 'geocode' as Tool, group: 'Import & combine', label: 'Geocode Addresses', moduleId: GEOCODE_MODULE_ID },
+  { value: 'append' as Tool, group: 'Import & combine', label: 'Append Features', moduleId: 1025 },
+  { value: 'split' as Tool, group: 'Import & combine', label: 'Split Layer by Attribute', moduleId: 1026 },
+  { value: 'projection' as Tool, group: 'Projection', label: 'Projection (Reproject / Define CRS)', moduleId: PROJECTION_MODULE_ID },
+  { value: 'versions' as Tool, group: 'History', label: 'Versions', moduleId: VERSIONS_MODULE_ID },
+  { value: 'changelog' as Tool, group: 'History', label: 'Change Log', moduleId: 1027 }
+];
+
+
 @Component({
   selector: 'app-data-tools',
   standalone: true,
@@ -77,6 +100,11 @@ const CHECK_COLORS: Record<TopologyIssue['check'], string> = {
   styleUrls: ['../buffer-overlay/buffer-overlay.component.scss', './data-tools.component.scss']
 })
 export class DataToolsComponent {
+  /** Open one tab / tool, e.g. picked from the workspace tool search. */
+  @Input() set openSub(value: { parent: string; sub: string } | null) {
+    if (value?.parent === 'data') { if (this.tools().some((t) => t.value === value.sub)) this.tool.set(value.sub as Tool); };
+  }
+
   private readonly notify = inject(NotificationService);
   private readonly api = inject(DataToolsService);
   private readonly mapService = inject(MapService);
@@ -96,26 +124,7 @@ export class DataToolsComponent {
   @Output() readonly layerCreated = new EventEmitter<GisLayer>();
 
   readonly tools = computed(() =>
-    [
-      { value: 'calc' as Tool, group: 'Fields & values', label: 'Field Calculator', moduleId: FIELD_CALCULATOR_MODULE_ID },
-      { value: 'fields' as Tool, group: 'Fields & values', label: 'Add / Rename / Delete Field', moduleId: 1017 },
-      { value: 'geometry' as Tool, group: 'Fields & values', label: 'Calculate Geometry', moduleId: 1018 },
-      { value: 'replace' as Tool, group: 'Fields & values', label: 'Find & Replace', moduleId: 1019 },
-      { value: 'autonum' as Tool, group: 'Fields & values', label: 'Auto-number IDs', moduleId: 1020 },
-      { value: 'convert' as Tool, group: 'Fields & values', label: 'Change Field Type', moduleId: 1021 },
-      { value: 'standardise' as Tool, group: 'Fields & values', label: 'Standardise Values', moduleId: 1022 },
-      { value: 'validate' as Tool, group: 'Data quality', label: 'Topology Validation', moduleId: TOPOLOGY_MODULE_ID },
-      { value: 'completeness' as Tool, group: 'Data quality', label: 'Completeness Report', moduleId: 1023 },
-      { value: 'duplicates' as Tool, group: 'Data quality', label: 'Find Duplicates', moduleId: 1024 },
-      { value: 'rules' as Tool, group: 'Data quality', label: 'Field Rules', moduleId: FIELD_RULES_MODULE_ID },
-      { value: 'join' as Tool, group: 'Import & combine', label: 'CSV Join', moduleId: TABLE_JOIN_MODULE_ID },
-      { value: 'geocode' as Tool, group: 'Import & combine', label: 'Geocode Addresses', moduleId: GEOCODE_MODULE_ID },
-      { value: 'append' as Tool, group: 'Import & combine', label: 'Append Features', moduleId: 1025 },
-      { value: 'split' as Tool, group: 'Import & combine', label: 'Split Layer by Attribute', moduleId: 1026 },
-      { value: 'projection' as Tool, group: 'Projection', label: 'Projection (Reproject / Define CRS)', moduleId: PROJECTION_MODULE_ID },
-      { value: 'versions' as Tool, group: 'History', label: 'Versions', moduleId: VERSIONS_MODULE_ID },
-      { value: 'changelog' as Tool, group: 'History', label: 'Change Log', moduleId: 1027 }
-    ].filter((t) => this.allowedSignal().has(t.moduleId))
+    DATA_TOOL_LIST.filter((t) => this.allowedSignal().has(t.moduleId))
   );
   readonly toolGroups = computed(() =>
     ['Fields & values', 'Data quality', 'Import & combine', 'Projection', 'History']
