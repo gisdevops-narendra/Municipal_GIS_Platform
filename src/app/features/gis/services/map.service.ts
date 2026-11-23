@@ -52,7 +52,8 @@ import type { Coordinate } from 'ol/coordinate';
 import { fromLonLat, get as getProjection, getPointResolution, toLonLat, transform, transformExtent } from 'ol/proj';
 import { createEmpty, extend as extendExtent, intersects as extentsIntersect, isEmpty as isEmptyExtent } from 'ol/extent';
 import type Geometry from 'ol/geom/Geometry';
-import { firstValueFrom, forkJoin, map as rxMap, Observable, of } from 'rxjs';
+import { catchError, firstValueFrom, forkJoin, map as rxMap, Observable, of } from 'rxjs';
+import { AttributeTableService } from './attribute-table.service';
 import type { EventsKey } from 'ol/events';
 import { unByKey } from 'ol/Observable';
 import { environment } from '../../../../environments/environment';
@@ -110,7 +111,7 @@ export interface FeatureInfoFeature {
   attributes: Record<string, unknown>;
   /** stable WFS/WMS feature id (e.g. "wards.5"), when GeoServer supplies one */
   id?: string;
-  /** GeoJSON geometry as returned by GetFeatureInfo (map projection) */
+  /** GeoJSON geometry of the identified feature (map projection) */
   geometry?: Record<string, unknown> | null;
 }
 
@@ -374,6 +375,7 @@ export class MapService {
   private baseLayer: BaseLayer | null = null;
   private readonly managedLayers = new Map<string, ManagedLayer>();
   private readonly auth = inject(AuthService);
+  private readonly attributes = inject(AttributeTableService);
   private readonly rasterApi = inject(RasterService);
   /** Draw order of the data layers, top first. Rasters default to the
    *  bottom so they never hide vector data; the user can reorder. */
@@ -2977,39 +2979,31 @@ export class MapService {
     return forkJoin(queries).pipe(rxMap((results) => results.filter((result): result is FeatureInfoResult => result !== null && result.features.length > 0)));
   }
 
+  /** Identify on one layer: features within a few pixels of the click,
+   *  nearest first, read by the backend from PostGIS (honouring the layer's
+   *  active filter). Geometry comes back in the map projection, as the info
+   *  panel expects. A failing layer counts as "no features" so one bad layer
+   *  never breaks the whole click. */
   private queryOneLayer(entry: ManagedLayer, coordinate: number[], resolution: number, projectionCode: string): Observable<FeatureInfoResult | null> {
-    const url = entry.wms.getFeatureInfoUrl(coordinate, resolution, projectionCode, {
-      INFO_FORMAT: 'application/json',
-      FEATURE_COUNT: 10
-    });
-    if (!url) {
-      return of(null);
-    }
-
-    return new Observable<FeatureInfoResult | null>((subscriber) => {
-      fetch(url)
-        .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`))))
-        .then(
-          (body: {
-            features?: { id?: string; properties: Record<string, unknown>; geometry?: Record<string, unknown> | null }[];
-          }) => {
-            const features = (body.features ?? []).map((feature) => ({
-              attributes: feature.properties,
-              id: feature.id,
-              geometry: feature.geometry ?? null
-            }));
-            subscriber.next({ layer: entry.layer, features });
-            subscriber.complete();
-          }
-        )
-        .catch(() => {
-          // A single layer's GetFeatureInfo failing (GeoServer error,
-          // network issue) must not break the rest of the click — see
-          // Task 6 §29. It's simply treated as "no features" for this layer.
-          subscriber.next({ layer: entry.layer, features: [] });
-          subscriber.complete();
-        });
-    });
+    const lonLat = toLonLat(coordinate, projectionCode) as [number, number];
+    const toleranceM = getPointResolution(projectionCode, resolution, coordinate, 'm') * 6;
+    const cql = entry.wms.getParams()['CQL_FILTER'];
+    const format = new GeoJSON();
+    return this.attributes.fetchNear(entry.layer, lonLat, toleranceM, 10, typeof cql === 'string' ? cql : null).pipe(
+      rxMap((rows): FeatureInfoResult => ({
+        layer: entry.layer,
+        features: rows.map((row) => ({
+          attributes: row.values,
+          id: row.featureId,
+          geometry: row.geometry
+            ? (format.writeGeometryObject(
+                format.readGeometry(row.geometry, { dataProjection: 'EPSG:4326', featureProjection: projectionCode })
+              ) as unknown as Record<string, unknown>)
+            : null
+        }))
+      })),
+      catchError(() => of({ layer: entry.layer, features: [] }))
+    );
   }
 
   /** Brings the map in line with a reloaded layer list after init: layers
@@ -3332,17 +3326,15 @@ export class MapService {
     const format = new GeoJSON();
     let json: { features?: unknown[]; numberMatched?: number; totalFeatures?: number };
     if (kind === 'WFS') {
-      const params = new URLSearchParams({
-        service: 'WFS',
-        version: '2.0.0',
-        request: 'GetFeature',
-        typeNames: `${layer.geoserverWorkspace}:${layer.geoserverLayer}`,
-        outputFormat: 'application/json',
-        srsName: 'EPSG:4326',
-        count: String(max + 1)
+      // Raw features come from the backend (PostGIS, permission-checked),
+      // not GeoServer's WFS, which is closed to the browser.
+      const token = this.auth.getToken();
+      const res = await fetch(`${environment.apiUrl}/gis/layers/${layer.id}/records`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ limit: max + 1 })
       });
-      const res = await fetch(`${environment.geoserverUrl}/${layer.geoserverWorkspace}/ows?${params.toString()}`);
-      if (!res.ok) throw new Error(`WFS ${res.status}`);
+      if (!res.ok) throw new Error(`Records ${res.status}`);
       json = await res.json();
     } else {
       const token = this.auth.getToken();

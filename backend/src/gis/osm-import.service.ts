@@ -152,7 +152,7 @@ export class OsmImportService {
     if (!rows.length) throw new BadRequestException(`No ${preset.label.toLowerCase()} found in this area on OpenStreetMap.`);
 
     const tagColumns = [...new Map(preset.columns.filter((t) => TAG_KEY.test(t)).map((t) => [columnOf(t), t])).entries()].filter(
-      ([col]) => !['osm_id', 'osm_type', 'tags', 'geom', 'ogc_fid'].includes(col),
+      ([col]) => !['osm_id', 'osm_type', 'tags', 'geom', 'feat_id'].includes(col),
     );
     const output = await this.raster.prepareVectorOutput(appUser, dto.name);
     const table = output.table;
@@ -160,7 +160,7 @@ export class OsmImportService {
     const dim = { POINT: 1, LINE: 2, POLYGON: 3 }[dto.geometryType];
     await this.prisma.$executeRawUnsafe(
       `CREATE TABLE "${table}" (
-         ogc_fid SERIAL PRIMARY KEY,
+         feat_id SERIAL PRIMARY KEY,
          osm_type text,
          osm_id bigint,
          ${tagColumns.map(([col]) => `"${col}" text,`).join('\n')}

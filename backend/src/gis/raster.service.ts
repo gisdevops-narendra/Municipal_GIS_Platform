@@ -297,7 +297,7 @@ export class RasterService {
       WHERE table_schema = 'public' AND table_name = ${source.table}
       ORDER BY ordinal_position`;
     return rows
-      .filter((r) => r.type !== 'USER-DEFINED' && r.name !== 'ogc_fid')
+      .filter((r) => r.type !== 'USER-DEFINED' && r.name !== 'feat_id')
       .map((r) => ({ name: r.name, type: r.type, numeric: NUMERIC_TYPES.has(r.type) }));
   }
 

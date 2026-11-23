@@ -3,7 +3,7 @@ import type { GISLayerUpload } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiClientService } from '../gis-ai/ai-client.service';
 import { isSafeGeneratedTableName } from './layer-naming.util';
-import { ensureOgcFid, normalizeColumnNames } from './ensure-ogc-fid.util';
+import { ensureFeatId, normalizeColumnNames } from './ensure-feat-id.util';
 import type { ApplyUploadSchemaDto, UploadColumnChangeDto } from './dto/upload-schema.dto';
 
 /** Column types an uploader can choose. */
@@ -22,7 +22,7 @@ const SQL_TYPE: Record<ColumnKind, string> = {
 };
 
 /** Columns the import itself owns: never shown, renamed or retyped. */
-const SYSTEM_COLUMNS = new Set(['ogc_fid', 'geom', 'gis_workspace_id']);
+const SYSTEM_COLUMNS = new Set(['feat_id', 'geom', 'gis_workspace_id']);
 /** Names a column may not take: system columns and SQL words that break
  *  CQL filters / GeoServer attribute names. */
 const RESERVED_NAMES = new Set([
@@ -92,8 +92,8 @@ export class UploadSchemaService {
 
   async describe(upload: GISLayerUpload, srid: number) {
     const table = this.table(upload);
-    // Repairs tables imported before every import guaranteed an ogc_fid.
-    await ensureOgcFid(this.prisma, table);
+    // Repairs tables imported before every import guaranteed an feat_id.
+    await ensureFeatId(this.prisma, table);
     await normalizeColumnNames(this.prisma, table);
     const columns = await this.columns(table);
     const rows = await this.prisma.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM "${table}"`);
@@ -121,7 +121,7 @@ export class UploadSchemaService {
 
     const records = described.length
       ? await this.prisma.$queryRawUnsafe<Record<string, unknown>[]>(
-          `SELECT ${described.map((c) => `"${c.name}"::text AS "${c.name}"`).join(', ')} FROM "${table}" ORDER BY ogc_fid LIMIT ${PREVIEW_ROWS}`,
+          `SELECT ${described.map((c) => `"${c.name}"::text AS "${c.name}"`).join(', ')} FROM "${table}" ORDER BY feat_id LIMIT ${PREVIEW_ROWS}`,
         )
       : [];
 

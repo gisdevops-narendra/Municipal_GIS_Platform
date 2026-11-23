@@ -45,7 +45,7 @@ const MAX_IMPACT_ROWS = 20_000;
 const HISTORY_LIMIT = 200;
 
 /** Columns never shown as / written to feature attributes. */
-const INTERNAL_COLUMNS = new Set(['geom', 'ogc_fid', 'gis_workspace_id']);
+const INTERNAL_COLUMNS = new Set(['geom', 'feat_id', 'gis_workspace_id']);
 
 const DIMENSION: Record<GisGeometryType, number> = { POINT: 1, LINE: 2, POLYGON: 3 };
 const BY_DIMENSION: GisGeometryType[] = ['POINT', 'POINT', 'LINE', 'POLYGON'];
@@ -66,7 +66,7 @@ const BLANK_COLUMN_TYPE: Record<string, string> = {
   boolean: 'boolean',
 };
 /** Columns the platform manages itself. */
-const RESERVED_FIELDS = new Set(['geom', 'ogc_fid', 'fid', 'gis_workspace_id']);
+const RESERVED_FIELDS = new Set(['geom', 'feat_id', 'fid', 'gis_workspace_id']);
 
 export interface Column {
   name: string;
@@ -107,7 +107,7 @@ export class VectorToolsService {
 
   // ----- New layer (Draw & Mark) -----
 
-  /** Creates an empty, editable vector layer — `ogc_fid` key, the user's
+  /** Creates an empty, editable vector layer — `feat_id` key, the user's
    *  fields, a Multi* `geom` in the chosen CRS — and publishes it. */
   async createBlankLayer(appUser: AppUser, dto: CreateBlankLayerDto) {
     const names = new Set<string>();
@@ -131,7 +131,7 @@ export class VectorToolsService {
 
     await this.prisma.$executeRawUnsafe(
       `CREATE TABLE "${output.table}" (
-         ogc_fid SERIAL PRIMARY KEY,
+         feat_id SERIAL PRIMARY KEY,
          ${columns.map((c) => `${c},`).join('\n         ')}
          geom geometry(${MULTI_TYPE[dto.geometryType]}, ${srid})
        )`,
@@ -181,9 +181,9 @@ export class VectorToolsService {
       `WITH p AS (SELECT ST_SetSRID(ST_MakePoint($1, $2), 4326) AS g),
             z AS (SELECT ST_Transform(ST_Buffer(p.g::geography, $3)::geometry, ${srid}) AS env,
                          ST_Transform(p.g, ${srid}) AS pt FROM p)
-       SELECT t.ogc_fid AS id,
+       SELECT t.feat_id AS id,
               ST_AsGeoJSON(ST_Transform(t.geom, 4326))::json AS geometry,
-              to_jsonb(t) - 'geom' - 'ogc_fid' AS properties
+              to_jsonb(t) - 'geom' - 'feat_id' AS properties
          FROM "${source.table}" t, z
         WHERE t.geom && z.env AND ST_Intersects(t.geom, z.env)
         ORDER BY ST_Distance(t.geom, z.pt)
@@ -211,7 +211,7 @@ export class VectorToolsService {
       const [row] = await tx.$queryRawUnsafe<{ id: number }[]>(
         `INSERT INTO "${source.table}" (geom${names.map((n) => `, ${q(n)}`).join('')})
          VALUES (${geomExpr}${exprs.map((e) => `, ${e}`).join('')})
-         RETURNING ogc_fid AS id`,
+         RETURNING feat_id AS id`,
         JSON.stringify(geometry),
         ...params,
       );
@@ -257,7 +257,7 @@ export class VectorToolsService {
     return this.prisma.$transaction(async (tx) => {
       const before = await this.readFeature(tx, source.table, featureId);
       await tx.$executeRawUnsafe(
-        `UPDATE "${source.table}" SET ${sets.join(', ')} WHERE ogc_fid = $1`,
+        `UPDATE "${source.table}" SET ${sets.join(', ')} WHERE feat_id = $1`,
         ...params,
       );
       const after = await this.readFeature(tx, source.table, featureId);
@@ -271,7 +271,7 @@ export class VectorToolsService {
     const userName = await this.userName(appUser);
     await this.prisma.$transaction(async (tx) => {
       const before = await this.readFeature(tx, source.table, featureId);
-      await tx.$executeRawUnsafe(`DELETE FROM "${source.table}" WHERE ogc_fid = $1`, featureId);
+      await tx.$executeRawUnsafe(`DELETE FROM "${source.table}" WHERE feat_id = $1`, featureId);
       await this.recordHistory(tx, appUser, userName, layerId, featureId, 'DELETE', before, null);
     });
     await this.removeAttachments(appUser, layerId, featureId);
@@ -314,7 +314,7 @@ export class VectorToolsService {
     );
     await this.prisma.$executeRawUnsafe(`ALTER TABLE "${output.table}" DROP COLUMN g`);
     await this.prisma.$executeRawUnsafe(
-      `ALTER TABLE "${output.table}" ADD COLUMN ogc_fid SERIAL PRIMARY KEY`,
+      `ALTER TABLE "${output.table}" ADD COLUMN feat_id SERIAL PRIMARY KEY`,
     );
     const [{ n }] = await this.prisma.$queryRawUnsafe<{ n: number }[]>(
       `SELECT count(*)::int AS n FROM "${output.table}"`,
@@ -343,7 +343,7 @@ export class VectorToolsService {
     const keys = (
       await this.prisma.$queryRawUnsafe<{ column_name: string }[]>(
         `SELECT column_name FROM information_schema.columns
-          WHERE table_schema = 'public' AND table_name = $1 AND column_name = 'ogc_fid'`,
+          WHERE table_schema = 'public' AND table_name = $1 AND column_name = 'feat_id'`,
         a.table,
       )
     ).length;
@@ -352,14 +352,14 @@ export class VectorToolsService {
     const output = await this.raster.prepareVectorOutput(appUser, dto.name);
     const srid = this.workspaceSrid(output.workspace.defaultCrs);
     const ga = await this.geomIn('a', a.table, srid);
-    const cols = this.outputColumns(await this.columns(a.table), 'a', '', new Set(['geom', 'ogc_fid']));
+    const cols = this.outputColumns(await this.columns(a.table), 'a', '', new Set(['geom', 'feat_id']));
     await this.prisma.$executeRawUnsafe(
       `CREATE TABLE "${output.table}" AS
          SELECT ${this.list(cols)}ST_Multi(${ga})::geometry(${MULTI_TYPE[geometryType]}, ${srid}) AS geom
-           FROM ${a.from} a WHERE a.ogc_fid = ANY($1::int[]) ORDER BY a.ogc_fid`,
+           FROM ${a.from} a WHERE a.feat_id = ANY($1::int[]) ORDER BY a.feat_id`,
       [...new Set(dto.featureIds)],
     );
-    await this.prisma.$executeRawUnsafe(`ALTER TABLE "${output.table}" ADD COLUMN ogc_fid SERIAL PRIMARY KEY`);
+    await this.prisma.$executeRawUnsafe(`ALTER TABLE "${output.table}" ADD COLUMN feat_id SERIAL PRIMARY KEY`);
     const [{ n }] = await this.prisma.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM "${output.table}"`);
     if (n === 0) {
       await this.prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS "${output.table}"`);
@@ -381,7 +381,7 @@ export class VectorToolsService {
   ): Promise<{ select: string; geometryType: GisGeometryType; description: string }> {
     const aType = this.geometryTypeOf(a);
     const ga = await this.geomIn('a', a.table, srid);
-    const used = new Set<string>(['g', 'geom', 'ogc_fid']);
+    const used = new Set<string>(['g', 'geom', 'feat_id']);
     const aCols = this.outputColumns(await this.columns(a.table), 'a', '', used);
 
     switch (dto.operation) {
@@ -561,7 +561,7 @@ export class VectorToolsService {
         if (bType !== aType) throw new BadRequestException('Merge needs two layers of the same geometry type.');
         const gb = await this.geomIn('b', b!.table, srid);
         const bNames = new Set((await this.columns(b!.table)).map((c) => c.name));
-        const shared = (await this.columns(a.table)).filter((c) => bNames.has(c.name) && !['geom', 'ogc_fid'].includes(c.name));
+        const shared = (await this.columns(a.table)).filter((c) => bNames.has(c.name) && !['geom', 'feat_id'].includes(c.name));
         const cols = shared.map((c) => q(c.name));
         const pick = (alias: string) => shared.map((c) => `${alias}.${q(c.name)}::text AS ${q(c.name)}`).join(', ');
         return {
@@ -643,7 +643,7 @@ export class VectorToolsService {
                          ST_Transform(CASE WHEN $2::float8 > 0
                                            THEN ST_Buffer(s.g::geography, $2::float8)::geometry
                                            ELSE s.g END, ${srid}) AS zone FROM s)
-       SELECT to_jsonb(t) - 'geom' - 'ogc_fid' - 'gis_workspace_id' AS properties,
+       SELECT to_jsonb(t) - 'geom' - 'feat_id' - 'gis_workspace_id' AS properties,
               round(ST_Distance(ST_Transform(t.geom, 4326)::geography, z.g::geography)::numeric, 2)::float8 AS distance_m,
               ST_X(ST_Transform(ST_PointOnSurface(t.geom), 4326)) AS lon,
               ST_Y(ST_Transform(ST_PointOnSurface(t.geom), 4326)) AS lat
@@ -688,7 +688,7 @@ export class VectorToolsService {
         `SELECT ST_AsEWKT(p.geom) AS ewkt FROM (
            SELECT (ST_Dump(ST_CollectionExtract(ST_Split(${type === 'POLYGON' ? 'ST_MakeValid(t.geom)' : 't.geom'},
                    ST_Transform(ST_SetSRID(ST_GeomFromGeoJSON($2), 4326), ${srid})), ${DIMENSION[type]}))).geom
-             FROM "${source.table}" t WHERE t.ogc_fid = $1) p`,
+             FROM "${source.table}" t WHERE t.feat_id = $1) p`,
         featureId,
         JSON.stringify(line),
       );
@@ -696,7 +696,7 @@ export class VectorToolsService {
         throw new BadRequestException('Draw the line right across the feature so it splits into pieces.');
       }
       const geom = await this.geometryEwkt(source.table, '$2');
-      await tx.$executeRawUnsafe(`UPDATE "${source.table}" SET geom = ${geom} WHERE ogc_fid = $1`, featureId, parts[0].ewkt);
+      await tx.$executeRawUnsafe(`UPDATE "${source.table}" SET geom = ${geom} WHERE feat_id = $1`, featureId, parts[0].ewkt);
       const after = await this.readFeature(tx, source.table, featureId);
       await this.recordHistory(tx, appUser, userName, layerId, featureId, 'UPDATE', before, after);
       const cols = columns.map((c) => q(c.name));
@@ -704,8 +704,8 @@ export class VectorToolsService {
       for (const part of parts.slice(1)) {
         const [row] = await tx.$queryRawUnsafe<{ id: number }[]>(
           `INSERT INTO "${source.table}" (geom${cols.map((c) => `, ${c}`).join('')})
-           SELECT ${geom}${cols.map((c) => `, ${c}`).join('')} FROM "${source.table}" WHERE ogc_fid = $1
-           RETURNING ogc_fid AS id`,
+           SELECT ${geom}${cols.map((c) => `, ${c}`).join('')} FROM "${source.table}" WHERE feat_id = $1
+           RETURNING feat_id AS id`,
           featureId,
           part.ewkt,
         );
@@ -731,15 +731,15 @@ export class VectorToolsService {
       for (const id of ids.slice(1)) removed.push(await this.readFeature(tx, source.table, id));
       const [{ ewkt }] = await tx.$queryRawUnsafe<{ ewkt: string }[]>(
         `SELECT ST_AsEWKT(ST_CollectionExtract(ST_Union(${type === 'POLYGON' ? 'ST_MakeValid(geom)' : 'geom'}), ${DIMENSION[type]})) AS ewkt
-           FROM "${source.table}" WHERE ogc_fid = ANY($1::int[])`,
+           FROM "${source.table}" WHERE feat_id = ANY($1::int[])`,
         ids,
       );
       await tx.$executeRawUnsafe(
-        `UPDATE "${source.table}" SET geom = ${await this.geometryEwkt(source.table, '$2')} WHERE ogc_fid = $1`,
+        `UPDATE "${source.table}" SET geom = ${await this.geometryEwkt(source.table, '$2')} WHERE feat_id = $1`,
         keepId,
         ewkt,
       );
-      await tx.$executeRawUnsafe(`DELETE FROM "${source.table}" WHERE ogc_fid = ANY($1::int[])`, ids.slice(1));
+      await tx.$executeRawUnsafe(`DELETE FROM "${source.table}" WHERE feat_id = ANY($1::int[])`, ids.slice(1));
       const after = await this.readFeature(tx, source.table, keepId);
       await this.recordHistory(tx, appUser, userName, layerId, keepId, 'UPDATE', before, after);
       for (const feature of removed) {
@@ -883,6 +883,9 @@ export class VectorToolsService {
     const exprs: string[] = [];
     const params: unknown[] = [];
     for (const [key, value] of Object.entries(properties)) {
+      if (key === 'feat_id') {
+        throw new BadRequestException('feat_id is set automatically and can’t be changed.');
+      }
       const column = columns.find((c) => c.name === key);
       if (!column) throw new BadRequestException(`Unknown field "${key}".`);
       names.push(column.name);
@@ -1000,10 +1003,10 @@ export class VectorToolsService {
   readFeature(tx: Prisma.TransactionClient, table: string, featureId: number) {
     return tx
       .$queryRawUnsafe<EditableFeature[]>(
-        `SELECT t.ogc_fid AS id,
+        `SELECT t.feat_id AS id,
                 ST_AsGeoJSON(ST_Transform(t.geom, 4326))::json AS geometry,
-                to_jsonb(t) - 'geom' - 'ogc_fid' AS properties
-           FROM "${table}" t WHERE t.ogc_fid = $1`,
+                to_jsonb(t) - 'geom' - 'feat_id' AS properties
+           FROM "${table}" t WHERE t.feat_id = $1`,
         featureId,
       )
       .then((rows) => {

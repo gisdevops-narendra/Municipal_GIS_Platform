@@ -30,9 +30,9 @@ export class GroundwaterService {
     if (layer.geometryType !== 'POINT') throw new BadRequestException(`"${layer.name}" is not a point layer.`);
     if (labelField && !FIELD.test(labelField)) throw new BadRequestException('Invalid label field.');
     const wells = await this.prisma.$queryRawUnsafe<{ id: number; lon: number; lat: number; props: Record<string, unknown> }[]>(
-      `SELECT t.ogc_fid AS id, ST_X(p) AS lon, ST_Y(p) AS lat, to_jsonb(t) - 'geom' - 'gis_workspace_id' AS props
+      `SELECT t.feat_id AS id, ST_X(p) AS lon, ST_Y(p) AS lat, to_jsonb(t) - 'geom' - 'gis_workspace_id' AS props
          FROM (SELECT t.*, ST_Transform(ST_PointOnSurface(t.geom), 4326) AS p FROM ${from} t WHERE t.geom IS NOT NULL) t
-        ORDER BY t.ogc_fid LIMIT ${MAX_WELLS}`,
+        ORDER BY t.feat_id LIMIT ${MAX_WELLS}`,
     );
     const readings = await this.prisma.gISWellReading.findMany({
       where: { layerId },
@@ -99,7 +99,7 @@ export class GroundwaterService {
     if (!DATE.test(dto.date) || Number.isNaN(Date.parse(dto.date))) throw new BadRequestException('Use a date like 2026-11-17.');
     if (Date.parse(dto.date) > Date.now() + 86_400_000) throw new BadRequestException('The reading date is in the future.');
     const [exists] = await this.prisma.$queryRawUnsafe<{ ok: boolean }[]>(
-      `SELECT EXISTS (SELECT 1 FROM ${from} t WHERE t.ogc_fid = $1) AS ok`,
+      `SELECT EXISTS (SELECT 1 FROM ${from} t WHERE t.feat_id = $1) AS ok`,
       featureId,
     );
     if (!exists?.ok) throw new NotFoundException('Well not found.');
@@ -125,6 +125,7 @@ export class GroundwaterService {
   /** Bulk readings from a spreadsheet: rows matched to wells by `keyField`. */
   async import(appUser: AppUser, layerId: string, dto: WellImportDto) {
     const { from, table } = await this.gisLayers.vectorSource(appUser, layerId, 'edit');
+    if (dto.keyField === 'ogc_fid') dto.keyField = 'feat_id'; // name before feat_id
     if (!FIELD.test(dto.keyField)) throw new BadRequestException('Invalid key field.');
     const [has] = await this.prisma.$queryRawUnsafe<{ ok: boolean }[]>(
       `SELECT EXISTS (SELECT 1 FROM information_schema.columns
@@ -132,9 +133,9 @@ export class GroundwaterService {
       dto.keyField,
       table,
     );
-    if (!has?.ok && dto.keyField !== 'ogc_fid') throw new BadRequestException(`"${dto.keyField}" is not a field of this layer.`);
+    if (!has?.ok && dto.keyField !== 'feat_id') throw new BadRequestException(`"${dto.keyField}" is not a field of this layer.`);
     const keys = await this.prisma.$queryRawUnsafe<{ id: number; key: string }[]>(
-      `SELECT t.ogc_fid AS id, t."${dto.keyField}"::text AS key FROM ${from} t`,
+      `SELECT t.feat_id AS id, t."${dto.keyField}"::text AS key FROM ${from} t`,
     );
     const idOf = new Map(keys.map((k) => [String(k.key).trim().toLowerCase(), k.id]));
     const data: { layerId: string; featureId: number; readingDate: Date; depthM: number; createdById: string }[] = [];

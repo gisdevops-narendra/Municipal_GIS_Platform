@@ -29,7 +29,7 @@ export class HazardsService {
       const rows = await this.prisma.$queryRawUnsafe<{ id: number; props: Record<string, unknown>; d: number; total: number }[]>(
         `WITH a AS (SELECT ST_SetSRID(ST_GeomFromGeoJSON($1), 4326)::geography AS g),
               hit AS (
-                SELECT t.ogc_fid AS id, to_jsonb(t) - 'geom' - 'gis_workspace_id' AS props,
+                SELECT t.feat_id AS id, to_jsonb(t) - 'geom' - 'gis_workspace_id' AS props,
                        ST_Distance(ST_Transform(ST_PointOnSurface(t.geom), 4326)::geography, a.g) AS d
                   FROM ${from} t, a
                  WHERE t.geom IS NOT NULL

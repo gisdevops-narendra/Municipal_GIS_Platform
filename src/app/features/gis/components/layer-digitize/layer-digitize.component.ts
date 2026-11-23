@@ -47,7 +47,7 @@ const CRS_PRESETS = [
 ];
 const OTHER_CRS = 'other';
 const FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,62}$/;
-const RESERVED_FIELDS = new Set(['geom', 'ogc_fid', 'fid', 'gis_workspace_id']);
+const RESERVED_FIELDS = new Set(['geom', 'feat_id', 'fid', 'gis_workspace_id']);
 
 /**
  * Draw & Mark → Feature layers: a QGIS / ArcGIS-style digitizing workflow

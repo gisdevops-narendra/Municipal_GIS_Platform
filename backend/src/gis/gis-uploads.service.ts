@@ -25,7 +25,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import type { AppUser } from '../auth/types/app-user.type';
 import { GdalError, GdalService } from './gdal.service';
-import { ensureOgcFid, normalizeColumnNames } from './ensure-ogc-fid.util';
+import { ensureFeatId, normalizeColumnNames } from './ensure-feat-id.util';
 import {
   StorageService,
   UnsafeArchiveError,
@@ -885,7 +885,7 @@ export class GisUploadsService {
         connection,
       });
 
-      await ensureOgcFid(this.prisma, tableName);
+      await ensureFeatId(this.prisma, tableName);
       await normalizeColumnNames(this.prisma, tableName);
       // Numbers / dates / yes-no imported as text get their real type, so
       // the whole platform (table, styling, filters, AI) sees real values.

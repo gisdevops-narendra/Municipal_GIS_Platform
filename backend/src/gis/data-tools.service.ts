@@ -72,7 +72,7 @@ const CHANGE_LIMIT = 1000;
 
 const q = (ident: string) => `"${ident.replace(/"/g, '""')}"`;
 /** Columns GDAL / the platform own — never renamed, dropped or reported on. */
-const PROTECTED_COLUMNS = new Set(['ogc_fid', 'geom', 'gis_workspace_id', 'fid']);
+const PROTECTED_COLUMNS = new Set(['feat_id', 'geom', 'gis_workspace_id', 'fid']);
 const MAX_SPLIT_LAYERS = 30;
 
 export interface TopologyIssue {
@@ -112,7 +112,7 @@ export class DataToolsService {
 
     if (dto.preview) {
       const rows = await this.prisma.$queryRawUnsafe<{ id: number; value: unknown }[]>(
-        `SELECT t.ogc_fid AS id, (${sql})::text AS value FROM "${source.table}" t ORDER BY t.ogc_fid LIMIT 5`,
+        `SELECT t.feat_id AS id, (${sql})::text AS value FROM "${source.table}" t ORDER BY t.feat_id LIMIT 5`,
         ...params,
       );
       return { preview: rows };
@@ -288,8 +288,8 @@ export class DataToolsService {
         `CREATE TABLE "${output.table}" AS SELECT * FROM "${source.table}" t WHERE t.${q(column.name)}::text ${v === null ? 'IS NULL' : '= $1'}`,
         ...(v === null ? [] : [v]),
       );
-      await this.prisma.$executeRawUnsafe(`ALTER TABLE "${output.table}" DROP COLUMN IF EXISTS ogc_fid`);
-      await this.prisma.$executeRawUnsafe(`ALTER TABLE "${output.table}" ADD COLUMN ogc_fid SERIAL PRIMARY KEY`);
+      await this.prisma.$executeRawUnsafe(`ALTER TABLE "${output.table}" DROP COLUMN IF EXISTS feat_id`);
+      await this.prisma.$executeRawUnsafe(`ALTER TABLE "${output.table}" ADD COLUMN feat_id SERIAL PRIMARY KEY`);
       await this.raster.publishVectorTable(appUser, output, {
         name,
         geometryType: source.layer.geometryType ?? 'POLYGON',
@@ -323,8 +323,8 @@ export class DataToolsService {
       // $1 = prefix
       set: `${q(dto.field)} = $1 || lpad((n.rn + ${start - 1})::text, ${pad}, '0')`,
       params: [dto.prefix ?? ''],
-      from: `(SELECT ogc_fid, row_number() OVER (${partition}ORDER BY ogc_fid) AS rn FROM "${source.table}") n`,
-      where: 't.ogc_fid = n.ogc_fid',
+      from: `(SELECT feat_id, row_number() OVER (${partition}ORDER BY feat_id) AS rn FROM "${source.table}") n`,
+      where: 't.feat_id = n.feat_id',
     });
     return { field: dto.field, changed };
   }
@@ -379,7 +379,7 @@ export class DataToolsService {
     const notBlank = fields.map((f) => `${f} IS NOT NULL AND trim(${f}::text) <> ''`).join(' AND ');
     const groups = await this.prisma.$queryRawUnsafe<{ key: string; n: number; ids: number[] }[]>(
       `SELECT concat_ws(' · ', ${fields.map((f) => `${f}::text`).join(', ')}) AS key, count(*)::int AS n,
-              (array_agg(ogc_fid ORDER BY ogc_fid))[1:20] AS ids
+              (array_agg(feat_id ORDER BY feat_id))[1:20] AS ids
          FROM "${source.table}" WHERE ${notBlank}
         GROUP BY ${fields.join(', ')} HAVING count(*) > 1 ORDER BY count(*) DESC LIMIT 200`,
     );
@@ -437,9 +437,9 @@ export class DataToolsService {
       `WITH ins AS (
          INSERT INTO "${target.table}" (${[...cols, 'geom'].join(', ')})
          SELECT ${[...vals, `ST_Multi(ST_Transform(s.geom, ${srid}))`].join(', ')} FROM "${source.table}" s WHERE s.geom IS NOT NULL
-         RETURNING ogc_fid, to_jsonb("${target.table}".*) - 'geom' - 'ogc_fid' AS p)
+         RETURNING feat_id, to_jsonb("${target.table}".*) - 'geom' - 'feat_id' AS p)
        INSERT INTO gis_feature_history (id, layer_id, feature_id, action, old_data, new_data, user_id, user_name)
-       SELECT gen_random_uuid()::text, $1, ins.ogc_fid, 'INSERT'::"GisFeatureAction", NULL, jsonb_build_object('properties', ins.p), $2, $3 FROM ins`,
+       SELECT gen_random_uuid()::text, $1, ins.feat_id, 'INSERT'::"GisFeatureAction", NULL, jsonb_build_object('properties', ins.p), $2, $3 FROM ins`,
       layerId,
       appUser.id,
       userName,
@@ -563,7 +563,7 @@ export class DataToolsService {
 
     const output = await this.raster.prepareVectorOutput(appUser, dto.outputName);
     const srid = this.workspaceSrid(output.workspace.defaultCrs);
-    const used = new Set(['ogc_fid', 'geom', 'row_no', 'matched_value', 'match_score']);
+    const used = new Set(['feat_id', 'geom', 'row_no', 'matched_value', 'match_score']);
     const outCols = header.map((h, i) => ({ index: i, name: this.uniqueName(this.safeName(h), used) }));
     const matchedRows: { row: number; rec: string[]; value: string; score: number; lon: number; lat: number }[] = [];
     const unmatched: { row: number; address: string }[] = [];
@@ -588,7 +588,7 @@ export class DataToolsService {
          FROM jsonb_array_elements($1::jsonb) e`,
       JSON.stringify(matchedRows),
     );
-    await this.prisma.$executeRawUnsafe(`ALTER TABLE "${output.table}" ADD COLUMN ogc_fid SERIAL PRIMARY KEY`);
+    await this.prisma.$executeRawUnsafe(`ALTER TABLE "${output.table}" ADD COLUMN feat_id SERIAL PRIMARY KEY`);
     const layer = await this.raster.publishVectorTable(appUser, output, {
       name: dto.outputName,
       geometryType: 'POINT',
@@ -616,18 +616,18 @@ export class DataToolsService {
       rows.forEach((r) => issues.push({ check, featureIds: r.ids, detail: r.detail, geometry: r.geometry }));
     };
 
-    await add('empty', `SELECT ARRAY[a.ogc_fid] AS ids, 'Missing or empty geometry' AS detail, NULL::json AS geometry
+    await add('empty', `SELECT ARRAY[a.feat_id] AS ids, 'Missing or empty geometry' AS detail, NULL::json AS geometry
                           FROM ${t} a WHERE a.geom IS NULL OR ST_IsEmpty(a.geom)`);
-    await add('invalid', `SELECT ARRAY[a.ogc_fid] AS ids, ST_IsValidReason(a.geom) AS detail,
+    await add('invalid', `SELECT ARRAY[a.feat_id] AS ids, ST_IsValidReason(a.geom) AS detail,
                                  ${gj('coalesce((ST_IsValidDetail(a.geom)).location, ST_PointOnSurface(a.geom))')} AS geometry
                             FROM ${t} a WHERE a.geom IS NOT NULL AND NOT ST_IsEmpty(a.geom) AND NOT ST_IsValid(a.geom)`);
-    await add('duplicate', `SELECT ARRAY[a.ogc_fid, b.ogc_fid] AS ids, 'Identical geometry' AS detail, ${gj('a.geom')} AS geometry
-                              FROM ${t} a JOIN ${t} b ON a.ogc_fid < b.ogc_fid AND a.geom && b.geom AND a.geom = b.geom`);
+    await add('duplicate', `SELECT ARRAY[a.feat_id, b.feat_id] AS ids, 'Identical geometry' AS detail, ${gj('a.geom')} AS geometry
+                              FROM ${t} a JOIN ${t} b ON a.feat_id < b.feat_id AND a.geom && b.geom AND a.geom = b.geom`);
     if (type === 'POLYGON') {
-      await add('overlap', `SELECT ARRAY[a.ogc_fid, b.ogc_fid] AS ids,
+      await add('overlap', `SELECT ARRAY[a.feat_id, b.feat_id] AS ids,
                                    'Overlap of ' || round(ST_Area(ST_Transform(ST_Intersection(a.geom, b.geom), 4326)::geography)::numeric, 2) || ' m²' AS detail,
                                    ${gj('ST_Intersection(a.geom, b.geom)')} AS geometry
-                              FROM ${t} a JOIN ${t} b ON a.ogc_fid < b.ogc_fid AND a.geom && b.geom
+                              FROM ${t} a JOIN ${t} b ON a.feat_id < b.feat_id AND a.geom && b.geom
                              WHERE ST_IsValid(a.geom) AND ST_IsValid(b.geom) AND NOT (a.geom = b.geom)
                                AND ST_Relate(a.geom, b.geom, '2********')`);
       await add('gap', `SELECT ARRAY[]::int[] AS ids,
@@ -640,12 +640,12 @@ export class DataToolsService {
         dto.maxGapArea ?? 100);
     }
     if (type === 'LINE') {
-      await add('dangle', `WITH parts AS (SELECT a.ogc_fid, (ST_Dump(a.geom)).geom AS g FROM ${t} a),
-                               ends AS (SELECT ogc_fid, ST_StartPoint(g) AS p FROM parts
-                                        UNION ALL SELECT ogc_fid, ST_EndPoint(g) FROM parts)
-                          SELECT ARRAY[e.ogc_fid] AS ids, 'Dangling end (dead end or undershoot)' AS detail, ${gj('e.p')} AS geometry
+      await add('dangle', `WITH parts AS (SELECT a.feat_id, (ST_Dump(a.geom)).geom AS g FROM ${t} a),
+                               ends AS (SELECT feat_id, ST_StartPoint(g) AS p FROM parts
+                                        UNION ALL SELECT feat_id, ST_EndPoint(g) FROM parts)
+                          SELECT ARRAY[e.feat_id] AS ids, 'Dangling end (dead end or undershoot)' AS detail, ${gj('e.p')} AS geometry
                             FROM ends e
-                           WHERE NOT EXISTS (SELECT 1 FROM parts o WHERE o.ogc_fid <> e.ogc_fid AND ST_DWithin(o.g, e.p, ${tolerance}))`);
+                           WHERE NOT EXISTS (SELECT 1 FROM parts o WHERE o.feat_id <> e.feat_id AND ST_DWithin(o.g, e.p, ${tolerance}))`);
     }
 
     // Field rule violations.
@@ -671,7 +671,7 @@ export class DataToolsService {
         conditions.push(`${f} > $${params.length}::float8`);
       }
       if (!conditions.length) continue;
-      await add('rule', `SELECT ARRAY[a.ogc_fid] AS ids, ${this.literal(`${name}: `)} || coalesce(${f}::text, '∅') || ' breaks the field rule' AS detail,
+      await add('rule', `SELECT ARRAY[a.feat_id] AS ids, ${this.literal(`${name}: `)} || coalesce(${f}::text, '∅') || ' breaks the field rule' AS detail,
                                 ${gj('ST_PointOnSurface(a.geom)')} AS geometry
                            FROM ${t} a WHERE ${conditions.join(' OR ')}`, ...params);
     }
@@ -725,7 +725,7 @@ export class DataToolsService {
   ): string {
     const g = groupExpr ? `coalesce(${groupExpr}::text, '')` : `''`;
     return `WITH v AS (
-              SELECT a.ogc_fid AS id, (${expr})::float8 AS x, ${g} AS g, a.geom
+              SELECT a.feat_id AS id, (${expr})::float8 AS x, ${g} AS g, a.geom
                 FROM ${t} a WHERE (${expr}) IS NOT NULL AND a.geom IS NOT NULL),
             shape AS (
               SELECT count(*) >= 20 AND count(DISTINCT x) >= 20 AS enough,
@@ -764,7 +764,7 @@ export class DataToolsService {
    *  fields too. At most 50. */
   private nonPositiveSql(t: string, expr: string, label: string, gj: (expr: string) => string): string {
     return `WITH v AS (
-              SELECT a.ogc_fid AS id, (${expr})::float8 AS x, a.geom
+              SELECT a.feat_id AS id, (${expr})::float8 AS x, a.geom
                 FROM ${t} a WHERE (${expr}) IS NOT NULL AND a.geom IS NOT NULL),
             s AS (SELECT count(*) AS n, count(*) FILTER (WHERE x > 0) AS pos FROM v)
             SELECT * FROM (SELECT ARRAY[v.id] AS ids,
@@ -795,7 +795,7 @@ export class DataToolsService {
     const where =
       kind === 'empty'
         ? `t.geom IS NULL OR ST_IsEmpty(t.geom)`
-        : `EXISTS (SELECT 1 FROM "${source.table}" o WHERE o.ogc_fid < t.ogc_fid AND o.geom && t.geom AND o.geom = t.geom)`;
+        : `EXISTS (SELECT 1 FROM "${source.table}" o WHERE o.feat_id < t.feat_id AND o.geom && t.geom AND o.geom = t.geom)`;
     return { fixed: await this.bulkDelete(appUser, layerId, source.table, where) };
   }
 
@@ -863,8 +863,8 @@ export class DataToolsService {
     const snap = await this.findSnapshot(layerId, snapshotId);
     const current = await this.vectorTools.columns(source.table);
     const old = await this.vectorTools.columns(snap.postgisTable);
-    let key = 'ogc_fid';
-    if (keyField && keyField !== 'ogc_fid') {
+    let key = 'feat_id';
+    if (keyField && keyField !== 'feat_id') {
       if (!current.some((c) => c.name === keyField) || !old.some((c) => c.name === keyField)) {
         throw new BadRequestException(`"${keyField}" is not in both versions.`);
       }
@@ -881,7 +881,7 @@ export class DataToolsService {
     const textArray = (names: string[]) => `ARRAY[${names.map((n) => this.literal(n)).join(', ')}]::text[]`;
     const props = (alias: string) => {
       const extra = alias === 's' ? removedFields : addedFields;
-      return `(to_jsonb(${alias}) - 'geom' - 'ogc_fid'${extra.length ? ` - ${textArray(extra)}` : ''})`;
+      return `(to_jsonb(${alias}) - 'geom' - 'feat_id'${extra.length ? ` - ${textArray(extra)}` : ''})`;
     };
     const cur = `"${source.table}"`;
     const prev = `"${snap.postgisTable}"`;
@@ -934,7 +934,7 @@ export class DataToolsService {
     const snap = await this.findSnapshot(layerId, snapshotId);
     await this.snapshot(appUser, source, `Before restoring "${snap.name}"`);
     const current = new Set((await this.vectorTools.columns(source.table)).map((c) => c.name));
-    const shared = ['ogc_fid', 'geom', ...(await this.vectorTools.columns(snap.postgisTable)).map((c) => c.name).filter((n) => current.has(n))]
+    const shared = ['feat_id', 'geom', ...(await this.vectorTools.columns(snap.postgisTable)).map((c) => c.name).filter((n) => current.has(n))]
       .map(q)
       .join(', ');
     // A Projection change since the snapshot: the restored layer takes the
@@ -951,7 +951,7 @@ export class DataToolsService {
       ...realign,
       this.prisma.$executeRawUnsafe(`INSERT INTO "${source.table}" (${shared}) SELECT ${shared} FROM "${snap.postgisTable}"`),
       this.prisma.$executeRawUnsafe(
-        `SELECT setval(pg_get_serial_sequence('"${source.table}"', 'ogc_fid'), coalesce(max(ogc_fid), 1)) FROM "${source.table}"`,
+        `SELECT setval(pg_get_serial_sequence('"${source.table}"', 'feat_id'), coalesce(max(feat_id), 1)) FROM "${source.table}"`,
       ),
     ]);
     if (crsChanged && snapSrid) await this.declareCrs(source, snapSrid);
@@ -1024,12 +1024,12 @@ export class DataToolsService {
         await tx.$executeRawUnsafe(
           `CREATE TABLE "${output.table}" AS
              SELECT ${[...cols, `ST_Transform(a.geom, ${target.srid})::${typmod} AS geom`].join(', ')}
-               FROM ${source.from} a ORDER BY a.ogc_fid`,
+               FROM ${source.from} a ORDER BY a.feat_id`,
         );
         await this.assertSensible(tx, `"${output.table}"`, target);
       })
       .catch((e) => this.projectionError(e, target));
-    await this.prisma.$executeRawUnsafe(`ALTER TABLE "${output.table}" ADD COLUMN ogc_fid SERIAL PRIMARY KEY`);
+    await this.prisma.$executeRawUnsafe(`ALTER TABLE "${output.table}" ADD COLUMN feat_id SERIAL PRIMARY KEY`);
     const layer = await this.raster.publishVectorTable(appUser, output, {
       name,
       geometryType: source.layer.geometryType ?? 'POLYGON',
@@ -1073,7 +1073,7 @@ export class DataToolsService {
     if (!isSafeGeneratedTableName(source.table)) throw new BadRequestException('Only uploaded layers have versions.');
     const table = generateLayerTableName();
     await this.prisma.$executeRawUnsafe(`CREATE TABLE "${table}" AS SELECT * FROM "${source.table}"`);
-    await this.prisma.$executeRawUnsafe(`CREATE INDEX "${table}_fid_idx" ON "${table}" (ogc_fid)`);
+    await this.prisma.$executeRawUnsafe(`CREATE INDEX "${table}_fid_idx" ON "${table}" (feat_id)`);
     const [{ n }] = await this.prisma.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM "${table}"`);
     return this.prisma.gISLayerSnapshot.create({
       data: {
@@ -1111,12 +1111,12 @@ export class DataToolsService {
         .join(', ')})${opts.geometry ? `, 'geometry', ${alias}.g` : ''})`;
     const geo = `ST_AsGeoJSON(ST_Transform(t.geom, 4326))::jsonb`;
     return this.prisma.$executeRawUnsafe(
-      `WITH old AS (SELECT t.ogc_fid, to_jsonb(t) - 'geom' AS p, ${opts.geometry ? geo : 'NULL::jsonb'} AS g FROM "${table}" t),
+      `WITH old AS (SELECT t.feat_id, to_jsonb(t) - 'geom' AS p, ${opts.geometry ? geo : 'NULL::jsonb'} AS g FROM "${table}" t),
             upd AS (UPDATE "${table}" t SET ${opts.set} ${opts.from ? `FROM ${opts.from}` : ''} ${opts.where ? `WHERE ${opts.where}` : ''}
-                    RETURNING t.ogc_fid, to_jsonb(t) - 'geom' AS p, ${opts.geometry ? geo : 'NULL::jsonb'} AS g)
+                    RETURNING t.feat_id, to_jsonb(t) - 'geom' AS p, ${opts.geometry ? geo : 'NULL::jsonb'} AS g)
        INSERT INTO gis_feature_history (id, layer_id, feature_id, action, old_data, new_data, user_id, user_name)
-       SELECT gen_random_uuid()::text, $${n + 1}, upd.ogc_fid, 'UPDATE'::"GisFeatureAction", ${pick('old')}, ${pick('upd')}, $${n + 2}, $${n + 3}
-         FROM upd JOIN old USING (ogc_fid)
+       SELECT gen_random_uuid()::text, $${n + 1}, upd.feat_id, 'UPDATE'::"GisFeatureAction", ${pick('old')}, ${pick('upd')}, $${n + 2}, $${n + 3}
+         FROM upd JOIN old USING (feat_id)
         WHERE ${pick('old')} IS DISTINCT FROM ${pick('upd')}`,
       ...opts.params,
       layerId,
@@ -1128,10 +1128,10 @@ export class DataToolsService {
   private async bulkDelete(appUser: AppUser, layerId: string, table: string, where: string): Promise<number> {
     return this.prisma.$executeRawUnsafe(
       `WITH del AS (DELETE FROM "${table}" t WHERE ${where}
-                    RETURNING t.ogc_fid, to_jsonb(t) - 'geom' - 'ogc_fid' AS p,
+                    RETURNING t.feat_id, to_jsonb(t) - 'geom' - 'feat_id' AS p,
                               ST_AsGeoJSON(ST_Transform(t.geom, 4326))::jsonb AS g)
        INSERT INTO gis_feature_history (id, layer_id, feature_id, action, old_data, new_data, user_id, user_name)
-       SELECT gen_random_uuid()::text, $1, del.ogc_fid, 'DELETE'::"GisFeatureAction",
+       SELECT gen_random_uuid()::text, $1, del.feat_id, 'DELETE'::"GisFeatureAction",
               jsonb_build_object('properties', del.p, 'geometry', del.g), NULL, $2, $3
          FROM del`,
       layerId,

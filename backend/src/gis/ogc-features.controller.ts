@@ -89,11 +89,11 @@ export class OgcFeaturesController {
     const n = params.length;
     const [rows, matched] = await Promise.all([
       this.prisma.$queryRawUnsafe<{ id: number; geometry: unknown; properties: Record<string, unknown> }[]>(
-        `SELECT t.ogc_fid AS id,
+        `SELECT t.feat_id AS id,
                 ST_AsGeoJSON(ST_Transform(t.geom, 4326), 7)::json AS geometry,
-                to_jsonb(t) - 'geom' - 'ogc_fid' - 'gis_workspace_id' AS properties
+                to_jsonb(t) - 'geom' - 'gis_workspace_id' AS properties
            FROM ${from} t ${where}
-          ORDER BY t.ogc_fid
+          ORDER BY t.feat_id
           LIMIT $${n + 1} OFFSET $${n + 2}`,
         ...params,
         limit,
@@ -127,10 +127,10 @@ export class OgcFeaturesController {
     const fidNum = Number(fid);
     if (!Number.isInteger(fidNum)) throw new NotFoundException('No such feature.');
     const rows = await this.prisma.$queryRawUnsafe<{ id: number; geometry: unknown; properties: Record<string, unknown> }[]>(
-      `SELECT t.ogc_fid AS id,
+      `SELECT t.feat_id AS id,
               ST_AsGeoJSON(ST_Transform(t.geom, 4326), 7)::json AS geometry,
-              to_jsonb(t) - 'geom' - 'ogc_fid' - 'gis_workspace_id' AS properties
-         FROM ${from} t WHERE t.ogc_fid = $1`,
+              to_jsonb(t) - 'geom' - 'gis_workspace_id' AS properties
+         FROM ${from} t WHERE t.feat_id = $1`,
       fidNum,
     );
     if (!rows[0]) throw new NotFoundException('No such feature.');

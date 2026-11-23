@@ -40,7 +40,7 @@ const KIND_LABEL: Record<UploadColumnKind | 'other', string> = {
 };
 
 const RESERVED = new Set([
-  'ogc_fid', 'geom', 'gis_workspace_id', 'all', 'and', 'or', 'not', 'null', 'true', 'false', 'select', 'from',
+  'feat_id', 'geom', 'gis_workspace_id', 'all', 'and', 'or', 'not', 'null', 'true', 'false', 'select', 'from',
   'where', 'group', 'order', 'by', 'limit', 'offset', 'table', 'column', 'user', 'like', 'in', 'is', 'between',
   'case', 'when', 'then', 'else', 'end', 'as', 'on', 'join', 'union', 'create', 'drop', 'alter', 'insert',
   'update', 'delete',

@@ -1002,7 +1002,7 @@ export class FieldStatsService {
   private isInternalColumn(name: string, workspaceId: string | null): boolean {
     // GDAL's synthetic FID + the demo tables' tenant column are never
     // meaningful to style by.
-    if (name === 'ogc_fid' || name === 'fid') return true;
+    if (name === 'feat_id' || name === 'fid') return true;
     if (workspaceId && name === 'gis_workspace_id') return true;
     return false;
   }

@@ -983,8 +983,8 @@ export class GisQueryCompilerService {
 
   buildCql(target: LayerCatalogEntry, ids: (number | string)[]): string | null {
     if (ids.length === 0) return null;
-    // Numeric keys: filter on the key column with ranges ("ogc_fid BETWEEN
-    // 1 AND 450 OR ogc_fid IN (512,530)"). The feature-id form below costs
+    // Numeric keys: filter on the key column with ranges ("feat_id BETWEEN
+    // 1 AND 450 OR feat_id IN (512,530)"). The feature-id form below costs
     // ~16 characters per id, and 450 ids made the WFS/WMS GET URL ~8 KB —
     // over GeoServer's limit, so the Attribute Table and the map highlight
     // failed with "Could not reach the GIS server".
@@ -1179,7 +1179,7 @@ export class GisQueryCompilerService {
       .filter(
         (c) =>
           (c.kind === 'integer' || c.kind === 'number') &&
-          c.name !== 'ogc_fid' &&
+          c.name !== 'feat_id' &&
           c.name !== 'id',
       )
       .map((c) => c.name);

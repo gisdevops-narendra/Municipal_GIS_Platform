@@ -815,7 +815,7 @@ export class GisAiService {
     if (!multi) throw new BadRequestException('Only point, line and polygon results can be saved as a layer.');
     const output = await this.raster.prepareVectorOutput(appUser, dto.name);
     const srid = Number(String(output.workspace.defaultCrs ?? '').split(':').pop()) || 32643;
-    const skip = new Set(['ogc_fid', 'gis_workspace_id', 'geom', target.pkColumn.toLowerCase()]);
+    const skip = new Set(['feat_id', 'gis_workspace_id', 'geom', target.pkColumn.toLowerCase()]);
     const cols = target.columns
       .filter((c) => c.kind !== 'geometry' && !skip.has(c.name.toLowerCase()))
       .map((c) => `x."${c.name}"`);
@@ -825,7 +825,7 @@ export class GisAiService {
         `FROM "${target.table}" x WHERE x."${target.pkColumn}" IN (SELECT q.__id FROM (${compiled.sql}) q)`,
       ...compiled.params,
     );
-    await this.prisma.$executeRawUnsafe(`ALTER TABLE "${output.table}" ADD COLUMN ogc_fid SERIAL PRIMARY KEY`);
+    await this.prisma.$executeRawUnsafe(`ALTER TABLE "${output.table}" ADD COLUMN feat_id SERIAL PRIMARY KEY`);
     const [{ n }] = await this.prisma.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM "${output.table}"`);
     if (n === 0) {
       await this.prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS "${output.table}"`);

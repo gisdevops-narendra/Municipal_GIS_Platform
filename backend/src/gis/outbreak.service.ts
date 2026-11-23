@@ -71,7 +71,7 @@ export class OutbreakService {
     const minCases = dto.minCases ?? 3;
 
     const cases = `cases AS (
-        SELECT t.ogc_fid AS id, ${dateExpr} AS d, ST_Transform(ST_PointOnSurface(t.geom), 3857) AS g
+        SELECT t.feat_id AS id, ${dateExpr} AS d, ST_Transform(ST_PointOnSurface(t.geom), 3857) AS g
           FROM ${from} t
          WHERE ${where} AND ${dateExpr} BETWEEN ${pFrom} AND ${pTo})`;
 
@@ -167,7 +167,7 @@ export class OutbreakService {
     const rows = await this.prisma.$queryRawUnsafe<{ id: number; label: string | null; pop: number | null; n: number; geometry: unknown }[]>(
       `WITH c AS (SELECT ST_Transform(ST_PointOnSurface(t.geom), 4326) AS p FROM ${from} t
                    WHERE ${where} AND ${dateExpr} BETWEEN ${pFrom} AND ${pTo})
-       SELECT a.ogc_fid AS id, ${label ? `a."${label}"::text` : 'NULL'} AS label,
+       SELECT a.feat_id AS id, ${label ? `a."${label}"::text` : 'NULL'} AS label,
               ${pop ? `NULLIF(a."${pop}"::text, '')::float8` : 'NULL'} AS pop,
               (SELECT count(*)::int FROM c WHERE ST_Intersects(ST_Transform(a.geom, 4326), c.p)) AS n,
               ST_AsGeoJSON(ST_SimplifyPreserveTopology(ST_Transform(a.geom, 4326), 0.0002), 6)::json AS geometry
@@ -200,7 +200,7 @@ export class OutbreakService {
     const output = await this.raster.prepareVectorOutput(appUser, name);
     await this.prisma.$executeRawUnsafe(
       `CREATE TABLE "${output.table}" (
-         ogc_fid SERIAL PRIMARY KEY, cluster int, cases int, recent_cases int, active boolean,
+         feat_id SERIAL PRIMARY KEY, cluster int, cases int, recent_cases int, active boolean,
          first_case date, last_case date, geom geometry(MultiPolygon, 4326))`,
     );
     try {

@@ -817,7 +817,7 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
 
   /** Identifier columns are never edited. */
   isEditableField(field: AttributeField): boolean {
-    return field.type !== 'id' && field.name !== 'ogc_fid' && field.name !== 'fid';
+    return field.type !== 'id' && field.name !== 'feat_id' && field.name !== 'fid';
   }
 
   /** The value to show: an unsaved edit wins over the loaded value. */

@@ -1,6 +1,6 @@
-import { HttpClient, HttpParams } from '@angular/common/http';
+import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable, catchError, map, of, switchMap } from 'rxjs';
+import { Observable, map, of } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import { GisLayer } from '../../../core/models/gis-layer.model';
 import {
@@ -25,27 +25,40 @@ interface WfsFeatureCollection {
   numberMatched?: number;
   totalFeatures?: number;
   numberReturned?: number;
+  geometryField?: string;
+}
+
+/** Body of POST /api/gis/layers/:id/records (see the backend's
+ *  LayerRecordsService). */
+export interface RecordsQuery {
+  filter?: string | null;
+  featureIds?: string[];
+  limit?: number;
+  offset?: number;
+  sortField?: string;
+  sortDir?: 'asc' | 'desc';
+  near?: [number, number];
+  geometry?: boolean;
+  properties?: boolean;
+  count?: boolean;
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?)?/;
 const ID_FIELD = /^(id|fid|gid|objectid|feature_id)$|_id$/i;
 
 /**
- * Reads real attribute data for a published GIS layer straight from
- * GeoServer's public WFS endpoint (which serves it live from PostGIS).
+ * Reads real attribute data for a published GIS layer from the backend
+ * (POST /api/gis/layers/:id/records), which checks the user may view the
+ * layer and reads it straight from PostGIS — never GeoServer's WFS.
  *
  * All heavy lifting is server-side so the table stays fast on large layers:
- * paging via `count`/`startIndex`, ordering via `sortBy`, text search via a
- * CQL `ILIKE` filter, and the matched-row total from `numberMatched`.
+ * paging (limit/offset), ordering, the ECQL filter (translated to SQL by the
+ * backend) and the matched-row total (`numberMatched`). Results keep the
+ * GeoJSON / WFS shape (feature ids "<layer>.<fid>").
  *
  * `providedIn: 'root'` — stateless apart from a per-layer field cache; the
  * OpenLayers map instance stays in the component-scoped `MapService`.
  */
-/** WFS DescribeFeatureType (JSON): the layer's properties and types. */
-interface WfsDescribe {
-  featureTypes?: { properties?: { name: string; type?: string }[] }[];
-}
-
 @Injectable({ providedIn: 'root' })
 export class AttributeTableService {
   private readonly http = inject(HttpClient);
@@ -68,52 +81,19 @@ export class AttributeTableService {
   }
 
   /** Field + geometry metadata for a layer, inferred from a sample of real
-   *  rows (GeoServer's cached schema is not reliable here). Cached, so the
-   *  Query Builder and Attribute Table share one describe call per layer. */
+   *  rows. Cached, so the Query Builder and Attribute Table share one call
+   *  per layer. */
   loadMetadata(layer: GisLayer): Observable<{ fields: AttributeField[]; geometryField: string }> {
     const cachedFields = this.fieldCache.get(layer.id);
     if (cachedFields && cachedFields.length > 0) {
       return of({ fields: cachedFields, geometryField: this.getGeometryField(layer.id) });
     }
-    const url = `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wfs`;
-    const typeName = `${layer.geoserverWorkspace}:${layer.geoserverLayer}`;
-    const sample = (propertyNames: string[] | null) => {
-      let params = new HttpParams()
-        .set('service', 'WFS')
-        .set('version', '2.0.0')
-        .set('request', 'GetFeature')
-        .set('typeNames', typeName)
-        .set('outputFormat', 'application/json')
-        .set('srsName', 'EPSG:4326')
-        .set('count', '100');
-      // Attributes only: geometry is what makes this slow on big polygons.
-      if (propertyNames?.length) params = params.set('propertyName', propertyNames.join(','));
-      return this.http.get<WfsFeatureCollection>(url, { params }).pipe(
-        map((collection) => {
-          const fields = this.resolveFields(layer.id, collection.features ?? []);
-          return { fields, geometryField: this.getGeometryField(layer.id) };
-        })
-      );
-    };
-    const describe = new HttpParams()
-      .set('service', 'WFS')
-      .set('version', '2.0.0')
-      .set('request', 'DescribeFeatureType')
-      .set('typeNames', typeName)
-      .set('outputFormat', 'application/json');
-
-    // The field list (tiny) names the geometry field; then 100 sample rows
-    // without geometry give the values the field types are inferred from.
-    return this.http.get<WfsDescribe>(url, { params: describe }).pipe(
-      switchMap((d) => {
-        const props = d?.featureTypes?.[0]?.properties ?? [];
-        const geometry = props.find((p) => String(p.type ?? '').startsWith('gml:'));
-        const attributes = props.filter((p) => !String(p.type ?? '').startsWith('gml:')).map((p) => p.name);
-        if (!geometry || !attributes.length) return sample(null);
-        this.geometryFieldCache.set(layer.id, geometry.name);
-        return sample(attributes);
-      }),
-      catchError(() => sample(null))
+    // 100 sample rows without geometry (what makes this slow on big polygons).
+    return this.records(layer, { limit: 100, geometry: false, count: false }).pipe(
+      map((collection) => {
+        const fields = this.resolveFields(layer.id, collection.features ?? []);
+        return { fields, geometryField: this.getGeometryField(layer.id) };
+      })
     );
   }
 
@@ -122,34 +102,14 @@ export class AttributeTableService {
     query: AttributeQuery,
     options: { baseFilter?: string | null; featureIds?: string[] | null } = {}
   ): Observable<AttributePage> {
-    const url = `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wfs`;
-    const typeName = `${layer.geoserverWorkspace}:${layer.geoserverLayer}`;
-
-    let params = new HttpParams()
-      .set('service', 'WFS')
-      .set('version', '2.0.0')
-      .set('request', 'GetFeature')
-      .set('typeNames', typeName)
-      .set('outputFormat', 'application/json')
-      .set('srsName', 'EPSG:4326')
-      .set('count', String(query.pageSize))
-      .set('startIndex', String(query.page * query.pageSize));
-
-    if (query.sortField) {
-      // WFS 2.0: "<field> ASC|DESC" (space-separated). HttpParams encodes the
-      // space; a literal "+" would be read as part of the property name.
-      params = params.set('sortBy', `${query.sortField} ${query.sortDir === 'desc' ? 'DESC' : 'ASC'}`);
-    }
-
-    const cql = combineCql(
-      options.featureIds ? featureIdFilter(options.featureIds) : null,
-      this.recordFilter(layer.id, query.search, options.baseFilter)
-    );
-    if (cql) {
-      params = params.set('cql_filter', cql);
-    }
-
-    return this.wfs(url, params).pipe(map((collection) => this.toPage(layer.id, collection)));
+    return this.records(layer, {
+      filter: this.recordFilter(layer.id, query.search, options.baseFilter),
+      featureIds: options.featureIds ?? undefined,
+      limit: query.pageSize,
+      offset: query.page * query.pageSize,
+      sortField: query.sortField || undefined,
+      sortDir: query.sortField ? (query.sortDir === 'desc' ? 'desc' : 'asc') : undefined
+    }).pipe(map((collection) => this.toPage(layer.id, collection)));
   }
 
   /** The CQL for the records the table currently lists: the locked query
@@ -166,19 +126,7 @@ export class AttributeTableService {
     cql: string | null,
     limit: number
   ): Observable<{ rows: AttributeRow[]; total: number }> {
-    const url = `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wfs`;
-    let params = new HttpParams()
-      .set('service', 'WFS')
-      .set('version', '2.0.0')
-      .set('request', 'GetFeature')
-      .set('typeNames', `${layer.geoserverWorkspace}:${layer.geoserverLayer}`)
-      .set('outputFormat', 'application/json')
-      .set('srsName', 'EPSG:4326')
-      .set('propertyName', geometryField)
-      .set('count', String(limit));
-    if (cql) params = params.set('cql_filter', cql);
-
-    return this.wfs(url, params).pipe(
+    return this.records(layer, { filter: cql, limit, properties: false }).pipe(
       map((collection) => {
         const rows = (collection.features ?? [])
           .filter((feature): feature is WfsFeature & { id: string } => typeof feature.id === 'string')
@@ -188,15 +136,29 @@ export class AttributeTableService {
     );
   }
 
-  /** GET, or a form POST when the query is too long for a URL (a filter
-   *  listing many selected feature ids). GeoServer reads both alike. */
-  private wfs(url: string, params: HttpParams): Observable<WfsFeatureCollection> {
-    const body = params.toString();
-    return body.length > 1800
-      ? this.http.post<WfsFeatureCollection>(url, body, {
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-        })
-      : this.http.get<WfsFeatureCollection>(url, { params });
+  /** Map identify: up to `limit` features within `toleranceM` metres of a
+   *  clicked [lon, lat], nearest first, honouring the layer's own filter. */
+  fetchNear(
+    layer: GisLayer,
+    lonLat: [number, number],
+    toleranceM: number,
+    limit: number,
+    baseFilter?: string | null
+  ): Observable<AttributeRow[]> {
+    const point = `DWITHIN("geom", SRID=4326;POINT(${lonLat[0]} ${lonLat[1]}), ${Math.max(toleranceM, 0.5)}, meters)`;
+    return this.records(layer, { filter: combineCql(baseFilter, point), near: lonLat, limit, count: false }).pipe(
+      map((collection) =>
+        (collection.features ?? [])
+          .filter((feature): feature is WfsFeature & { id: string } => typeof feature.id === 'string')
+          .map((feature) => ({ featureId: feature.id, values: feature.properties ?? {}, geometry: feature.geometry ?? null }))
+      )
+    );
+  }
+
+  /** The one place layer data is requested from the backend. */
+  records(layer: GisLayer, query: RecordsQuery): Observable<WfsFeatureCollection> {
+    const body: RecordsQuery = { ...query, filter: query.filter?.trim() ? query.filter : undefined };
+    return this.http.post<WfsFeatureCollection>(`${environment.apiUrl}/gis/layers/${layer.id}/records`, body);
   }
 
   /** Selection Tool: features of `layer` intersecting a drawn shape
@@ -218,17 +180,7 @@ export class AttributeTableService {
     if (featureIds.length === 0) {
       return of([]);
     }
-    const url = `${environment.geoserverUrl}/${layer.geoserverWorkspace}/wfs`;
-    const params = new HttpParams()
-      .set('service', 'WFS')
-      .set('version', '2.0.0')
-      .set('request', 'GetFeature')
-      .set('typeNames', `${layer.geoserverWorkspace}:${layer.geoserverLayer}`)
-      .set('outputFormat', 'application/json')
-      .set('srsName', 'EPSG:4326')
-      .set('featureID', featureIds.join(','));
-
-    return this.wfs(url, params).pipe(
+    return this.records(layer, { featureIds, limit: featureIds.length, count: false }).pipe(
       map((collection) =>
         (collection.features ?? [])
           .filter((feature): feature is WfsFeature & { id: string } => typeof feature.id === 'string')
@@ -296,7 +248,8 @@ export class AttributeTableService {
       const values = present.filter((value) => value !== null && value !== undefined && value !== '');
       return {
         name,
-        label: this.humanize(name),
+        // feat_id keeps its exact name — it's how users refer to a feature.
+        label: name === 'feat_id' ? 'feat_id' : this.humanize(name),
         type: this.inferType(name, values),
         nullable: present.some((value) => value === null || value === undefined)
       };
@@ -378,9 +331,11 @@ export class AttributeTableService {
   }
 }
 
-/** ECQL feature-id filter: `IN ('roads.1', 'roads.7')`. */
+/** Filter on features' `feat_id` (accepts "roads.7" or "7"):
+ *  `"feat_id" IN (1, 7)` — works in the backend and in GeoServer alike. */
 export function featureIdFilter(ids: string[]): string {
-  return `IN (${ids.map((id) => `'${id.replace(/'/g, "''")}'`).join(', ')})`;
+  const nums = ids.map((id) => Number(String(id).split('.').pop())).filter((n) => Number.isSafeInteger(n));
+  return nums.length ? `"feat_id" IN (${nums.join(', ')})` : 'EXCLUDE';
 }
 
 /** AND-combines two optional CQL fragments. */

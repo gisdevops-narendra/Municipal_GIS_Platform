@@ -169,7 +169,7 @@ export class GdalService {
       '-lco',
       'GEOMETRY_NAME=geom',
       // Let GDAL create/manage its own synthetic primary key (the default
-      // `ogc_fid`). We deliberately do NOT force `-lco FID=id`: real-world
+      // `feat_id`). We deliberately do NOT force `-lco FID=id`: real-world
       // municipal shapefiles very often carry their own attribute column
       // named `id` (of String/Real type), and forcing the target FID column
       // to `id` makes ogr2ogr try to populate the FID from that column and

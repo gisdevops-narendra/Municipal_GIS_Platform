@@ -83,7 +83,8 @@ const TEXTISH = new Set([
   'uuid',
   'citext',
 ]);
-const INTERNAL_COLUMNS = new Set(['ogc_fid', 'fid', 'gis_workspace_id']);
+// feat_id is NOT internal: users see it and may filter on it ("feature 42").
+const INTERNAL_COLUMNS = new Set(['fid', 'gis_workspace_id']);
 const MATCHES_PER_COLUMN = 15;
 const DISTINCT_PER_COLUMN = 5000;
 /** Above this many rows a full DISTINCT per text column is too slow (a
@@ -230,7 +231,7 @@ export class LayerCatalogService {
         geoserverLayer: row.geoserverLayer,
         table,
         geomColumn: described.geomColumn,
-        pkColumn: isDemo ? 'id' : 'ogc_fid',
+        pkColumn: isDemo ? 'id' : 'feat_id',
         srid: described.srid,
         isDemo,
         workspaceId: workspace.id,
@@ -523,7 +524,7 @@ export class LayerCatalogService {
       const entry: CatalogColumn = {
         name: col.column_name,
         dataType: col.data_type,
-        kind: col.column_name === 'ogc_fid' ? 'id' : kind,
+        kind: col.column_name === 'feat_id' ? 'id' : kind,
         sampleValues: [],
       };
       if (kind === 'text' && !INTERNAL_COLUMNS.has(col.column_name)) {

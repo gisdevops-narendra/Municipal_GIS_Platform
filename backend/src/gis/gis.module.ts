@@ -43,6 +43,8 @@ import { ExternalDbController } from './external-db.controller';
 import { ExternalDbService } from './external-db.service';
 import { TileArchiveService } from './tile-archive.service';
 import { OgcFeaturesController } from './ogc-features.controller';
+import { LayerRecordsController } from './layer-records.controller';
+import { LayerRecordsService } from './layer-records.service';
 import { LocationController } from './location.controller';
 import { LocationService } from './location.service';
 import { ShareLinksController } from './share-links.controller';
@@ -64,6 +66,7 @@ import { AirStationsService } from './air-stations.service';
   imports: [AuthModule, AiClientModule],
   controllers: [
     OgcFeaturesController,
+    LayerRecordsController,
     GisWorkspaceController,
     GisLayersController,
     GisUploadsController,
@@ -82,6 +85,7 @@ import { AirStationsService } from './air-stations.service';
     PlanningToolsController,
   ],
   providers: [
+    LayerRecordsService,
     GisWorkspaceService,
     GisLayersService,
     GeoServerService,

@@ -604,7 +604,7 @@
         }
         @if (comparison(); as c) {
           <p class="bo__result">
-            Since “{{ c.snapshot.name }}” (matched by {{ c.key === 'ogc_fid' ? 'feature id' : c.key }}):
+            Since “{{ c.snapshot.name }}” (matched by {{ c.key === 'feat_id' ? 'feature id' : c.key }}):
             <span class="dt__added">{{ c.added.count }} added</span>,
             <span class="dt__removed">{{ c.removed.count }} removed</span>,
             <span class="dt__modified">{{ c.modified.count }} modified</span>.

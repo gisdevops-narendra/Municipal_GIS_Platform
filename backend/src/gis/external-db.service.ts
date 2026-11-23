@@ -196,7 +196,7 @@ export class ExternalDbService {
       if (asCsv) args.push('-lco', 'GEOMETRY=NONE');
       // Don't carry the source primary key over as the GeoJSON feature id:
       // the PostGIS load would then name its FID column after it (e.g. "id")
-      // instead of the "ogc_fid" the rest of the platform relies on.
+      // instead of the "feat_id" the rest of the platform relies on.
       else args.push('-unsetFid', '-lco', 'COORDINATE_PRECISION=7');
       // Streamed to disk and handed over as a file (see import()): national
       // datasets run to many GB, far beyond what fits in memory.

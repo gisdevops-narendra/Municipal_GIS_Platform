@@ -149,7 +149,7 @@ const STATUS: Record<Status, { label: string; color: string }> = {
             <p class="px__hint">Columns: well id, date (YYYY-MM-DD), depth in metres — with a header row.</p>
             <label class="px__field"><span class="px__label">Well id matches layer field</span>
               <select class="px__native-select" [ngModel]="keyField()" (ngModelChange)="keyField.set($event)">
-                <option value="ogc_fid">Feature id (ogc_fid)</option>
+                <option value="feat_id">Feature id (feat_id)</option>
                 @for (f of fields(); track f.name) { <option [value]="f.name">{{ f.name }}</option> }
               </select></label>
             <input type="file" accept=".csv,text/csv" (change)="readCsv($event)" />
@@ -198,7 +198,7 @@ export class GroundwaterComponent {
   readonly newDate = signal(this.today);
   readonly newDepth = signal<number | string | null>(null);
   readonly newNote = signal('');
-  readonly keyField = signal('ogc_fid');
+  readonly keyField = signal('feat_id');
   readonly csvRows = signal<{ key: string; date: string; depthM: number }[]>([]);
 
   readonly visibleWells = computed(() => {

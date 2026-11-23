@@ -217,7 +217,7 @@ export class WellReadingDto {
 }
 
 export class WellImportDto {
-  /** Well-layer field the file's well ids match ('ogc_fid' = feature id). */
+  /** Well-layer field the file's well ids match ('feat_id' = feature id). */
   @IsString()
   @MaxLength(63)
   keyField!: string;

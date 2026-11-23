@@ -24,9 +24,9 @@ describe('FieldStatsService', () => {
   }
 
   describe('attributes', () => {
-    it('classifies column types and hides ogc_fid / geometry / tenant column', async () => {
+    it('classifies column types and hides feat_id / geometry / tenant column', async () => {
       columns([
-        { column_name: 'ogc_fid', data_type: 'integer' },
+        { column_name: 'feat_id', data_type: 'integer' },
         {
           column_name: 'geom',
           data_type: 'USER-DEFINED',

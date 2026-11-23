@@ -27,7 +27,7 @@ export interface UploadReviewReport {
 
 const WEIGHT: Record<ReviewSeverity, number> = { high: 40, medium: 15, low: 5, info: 0 };
 /** Columns GDAL / the platform add — not part of the user's schema. */
-const SYSTEM_COLUMNS = new Set(['ogc_fid', 'geom', 'gis_workspace_id', 'fid', 'id']);
+const SYSTEM_COLUMNS = new Set(['feat_id', 'geom', 'gis_workspace_id', 'fid', 'id']);
 
 type Bbox = [number, number, number, number];
 type Column = { name: string; type: string };
@@ -123,7 +123,7 @@ export class UploadReviewService {
     const [dup] = await this.prisma.$queryRawUnsafe<{ n: number }[]>(
       `SELECT count(*)::int AS n FROM (
          SELECT 1 FROM "${table}" a JOIN "${table}" b
-           ON a.ogc_fid < b.ogc_fid AND a.geom && b.geom AND a.geom = b.geom
+           ON a.feat_id < b.feat_id AND a.geom && b.geom AND a.geom = b.geom
          LIMIT 10000) d`,
     );
     return {

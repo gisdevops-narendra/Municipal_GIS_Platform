@@ -8,7 +8,7 @@ import { BadRequestException } from '@nestjs/common';
  *   12.5, 'text'                   literals (strings become bind params)
  *   + - * / ( )   ||               arithmetic, text concatenation
  *   $area $length $perimeter       geodesic m² / m (from the geometry)
- *   $x $y $id                      lon / lat of a point on the feature, ogc_fid
+ *   $x $y $id                      lon / lat of a point on the feature, feat_id
  *   round(x[, digits]) abs ceil floor sqrt upper lower trim
  *   coalesce(a, b, …) concat(a, b, …) substr(text, start[, len]) nullif(a, b)
  *
@@ -29,7 +29,7 @@ const VARIABLES: Record<string, string> = {
   perimeter: `ST_Perimeter(${GEOG})`,
   x: `ST_X(ST_Transform(ST_PointOnSurface(t.geom), 4326))`,
   y: `ST_Y(ST_Transform(ST_PointOnSurface(t.geom), 4326))`,
-  id: `t.ogc_fid`,
+  id: `t.feat_id`,
 };
 
 /** name → [min args, max args, SQL builder]. */

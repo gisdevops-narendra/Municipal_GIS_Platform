@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideHttpClient } from '@angular/common/http';
-import { AttributeTableService } from './attribute-table.service';
+import { AttributeTableService, featureIdFilter } from './attribute-table.service';
 import { GisLayer } from '../../../core/models/gis-layer.model';
 import { DEFAULT_ATTRIBUTE_QUERY } from '../models/attribute-table.model';
 import { environment } from '../../../../environments/environment';
@@ -72,17 +72,16 @@ describe('AttributeTableService', () => {
 
   afterEach(() => httpMock.verify());
 
-  it('paginates, sorts and requests EPSG:4326 geometry from WFS', () => {
+  const RECORDS = `${environment.apiUrl}/gis/layers/${LAYER.id}/records`;
+  const isRecords = (r: { url: string; method: string }) => r.url === RECORDS && r.method === 'POST';
+
+  it('pages and sorts through the backend records endpoint (not GeoServer)', () => {
     service
       .fetchPage(LAYER, { ...DEFAULT_ATTRIBUTE_QUERY, page: 2, pageSize: 25, sortField: 'name', sortDir: 'desc' })
       .subscribe();
 
-    const req = httpMock.expectOne((r) => r.url === `${environment.geoserverUrl}/demo_city/wfs`);
-    expect(req.request.params.get('typeNames')).toBe('demo_city:wards');
-    expect(req.request.params.get('count')).toBe('25');
-    expect(req.request.params.get('startIndex')).toBe('50');
-    expect(req.request.params.get('srsName')).toBe('EPSG:4326');
-    expect(req.request.params.get('sortBy')).toBe('name DESC');
+    const req = httpMock.expectOne(isRecords);
+    expect(req.request.body).toEqual(jasmine.objectContaining({ limit: 25, offset: 50, sortField: 'name', sortDir: 'desc' }));
     req.flush(WFS_PAGE);
   });
 
@@ -95,7 +94,7 @@ describe('AttributeTableService', () => {
       expect(page.fields.map((f) => f.name)).not.toContain('gis_workspace_id');
       done();
     });
-    httpMock.expectOne((r) => r.url.endsWith('/wfs')).flush(WFS_PAGE);
+    httpMock.expectOne(isRecords).flush(WFS_PAGE);
   });
 
   it('infers field types from values', (done) => {
@@ -110,17 +109,17 @@ describe('AttributeTableService', () => {
       expect(byName['active'].type).toBe('boolean');
       done();
     });
-    httpMock.expectOne((r) => r.url.endsWith('/wfs')).flush(WFS_PAGE);
+    httpMock.expectOne(isRecords).flush(WFS_PAGE);
   });
 
   it('builds a quoted CQL filter over text and numeric columns for a search term', () => {
     // prime the field cache
     service.fetchPage(LAYER, DEFAULT_ATTRIBUTE_QUERY).subscribe();
-    httpMock.expectOne((r) => r.url.endsWith('/wfs')).flush(WFS_PAGE);
+    httpMock.expectOne(isRecords).flush(WFS_PAGE);
 
     service.fetchPage(LAYER, { ...DEFAULT_ATTRIBUTE_QUERY, search: '2' }).subscribe();
-    const req = httpMock.expectOne((r) => r.params.has('cql_filter'));
-    const cql = req.request.params.get('cql_filter') ?? '';
+    const req = httpMock.expectOne((r) => isRecords(r) && !!r.body?.filter);
+    const cql: string = req.request.body.filter;
     expect(cql).toContain(`"name" ILIKE '%2%'`);
     expect(cql).toContain(`"id" = 2`);
     expect(cql).toContain(`"ward_number" = 2`);
@@ -132,8 +131,12 @@ describe('AttributeTableService', () => {
       expect(rows.map((r) => r.featureId)).toEqual(['wards.5', 'wards.6']);
       done();
     });
-    const req = httpMock.expectOne((r) => r.params.get('featureID') === 'wards.5,wards.6');
-    expect(req.request.params.get('srsName')).toBe('EPSG:4326');
+    const req = httpMock.expectOne(isRecords);
+    expect(req.request.body.featureIds).toEqual(['wards.5', 'wards.6']);
     req.flush(WFS_PAGE);
+  });
+
+  it('featureIdFilter filters on feat_id numbers', () => {
+    expect(featureIdFilter(['wards.5', '7'])).toBe('"feat_id" IN (5, 7)');
   });
 });

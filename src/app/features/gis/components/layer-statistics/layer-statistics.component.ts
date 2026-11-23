@@ -800,7 +800,7 @@ function exact(value: number): string {
 /** Identifier columns (objectid, fid, valve_id …) — counting or averaging
  *  them says nothing, so they are never the default field. */
 export function isIdLike(name: string): boolean {
-  return /(^|_)(id|fid|gid|gisid|ogc_fid|objectid|uuid)$/i.test(name) || /^object_?id$/i.test(name);
+  return /(^|_)(id|fid|gid|gisid|feat_id|objectid|uuid)$/i.test(name) || /^object_?id$/i.test(name);
 }
 
 /** Rounds an axis maximum up to a clean 1 / 2 / 5 × 10ⁿ step. */
