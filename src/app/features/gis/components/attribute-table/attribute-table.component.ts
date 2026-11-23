@@ -302,6 +302,7 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
       this.hiddenFields.set(new Set());
       this.fields.set(this.service.getFields(filter.layerId) || []);
       this.geomCache.clear();
+    this.geomPending.clear();
       this.lastClickedIndex = -1;
       this.applySelection(new Set());
     }
@@ -367,6 +368,7 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
     this.showSelectedOnly.set(false);
     this.fields.set((layerId && this.service.getFields(layerId)) || []);
     this.geomCache.clear();
+    this.geomPending.clear();
     this.lastClickedIndex = -1;
     // Emits too, so Report Generation drops the previous layer's selection.
     this.applySelection(new Set());
@@ -421,9 +423,8 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
         if (page.fields.length > 0) {
           this.fields.set(page.fields);
         }
-        for (const row of page.rows) {
-          this.geomCache.set(row.featureId, row.geometry);
-        }
+        // Pages are attributes only — geometry is fetched by id when a tool
+        // (zoom, highlight, buffer …) actually needs it.
         this.loading.set(false);
       },
       error: (err: HttpErrorResponse) => {
@@ -675,26 +676,35 @@ export class AttributeTableComponent implements OnChanges, OnDestroy {
     });
   }
 
+  /** Geometry requests in flight, per feature id — a click that both
+   *  highlights and zooms shares one request instead of sending two. */
+  private readonly geomPending = new Map<string, Promise<void>>();
+
   /** Ensures every id has a cached geometry (fetching the missing ones by
-   *  id via WFS), then runs `apply` with the full geometry list. */
+   *  id from the backend — table pages carry attributes only), then runs
+   *  `apply` with the full geometry list. */
   private withGeometries(ids: string[], apply: (geometries: (GeoJsonGeometry | null)[]) => void): void {
-    const missing = ids.filter((id) => !this.geomCache.has(id));
     const layer = this.activeLayer();
     const run = () => apply(ids.map((id) => this.geomCache.get(id) ?? null));
-
-    if (missing.length === 0 || !layer) {
+    const toFetch = ids.filter((id) => !this.geomCache.has(id) && !this.geomPending.has(id));
+    if (toFetch.length && layer) {
+      const request = new Promise<void>((resolve) => {
+        this.service.fetchByIds(layer, toFetch).subscribe({
+          next: (rows) => {
+            for (const row of rows) this.geomCache.set(row.featureId, row.geometry);
+            resolve();
+          },
+          error: () => resolve()
+        });
+      }).finally(() => toFetch.forEach((id) => this.geomPending.delete(id)));
+      toFetch.forEach((id) => this.geomPending.set(id, request));
+    }
+    const waiting = [...new Set(ids.map((id) => this.geomPending.get(id)).filter((p): p is Promise<void> => !!p))];
+    if (waiting.length === 0) {
       run();
       return;
     }
-    this.service.fetchByIds(layer, missing).subscribe({
-      next: (rows) => {
-        for (const row of rows) {
-          this.geomCache.set(row.featureId, row.geometry);
-        }
-        run();
-      },
-      error: () => run()
-    });
+    void Promise.all(waiting).then(run);
   }
 
   private syncFromMapClick(): void {

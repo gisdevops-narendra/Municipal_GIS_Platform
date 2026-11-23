@@ -107,6 +107,8 @@ export class AttributeTableService {
       featureIds: options.featureIds ?? undefined,
       limit: query.pageSize,
       offset: query.page * query.pageSize,
+      // Attributes only: geometry is requested by id when a tool needs it.
+      geometry: false,
       sortField: query.sortField || undefined,
       sortDir: query.sortField ? (query.sortDir === 'desc' ? 'desc' : 'asc') : undefined
     }).pipe(map((collection) => this.toPage(layer.id, collection)));
