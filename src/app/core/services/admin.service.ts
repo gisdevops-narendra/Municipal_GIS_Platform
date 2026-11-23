@@ -65,6 +65,53 @@ export class AdminService {
     return this.http.get<AdminStats>(`${this.base}/stats`);
   }
 
+  // ----- sessions -----
+  sessions(): Observable<ActiveSession[]> {
+    return this.http.get<ActiveSession[]>(`${this.base}/sessions`);
+  }
+
+  endSession(id: string): Observable<unknown> {
+    return this.http.delete(`${this.base}/sessions/${encodeURIComponent(id)}`);
+  }
+
+  signOutUser(userId: string): Observable<unknown> {
+    return this.http.post(`${this.base}/users/${userId}/sign-out`, {});
+  }
+
+  // ----- backups -----
+  backups(): Observable<BackupList> {
+    return this.http.get<BackupList>(`${this.base}/backups`);
+  }
+
+  backupNow(): Observable<BackupRequest> {
+    return this.http.post<BackupRequest>(`${this.base}/backups`, {});
+  }
+
+  verifyBackup(stamp: string): Observable<{ ok: boolean; message: string }> {
+    return this.http.post<{ ok: boolean; message: string }>(`${this.base}/backups/${stamp}/verify`, {});
+  }
+
+  restore(stamp: string, parts: string[], dryRun: boolean, confirm: string): Observable<BackupRequest> {
+    return this.http.post<BackupRequest>(`${this.base}/backups/${stamp}/restore`, { parts, dryRun, confirm });
+  }
+
+  backupFile(stamp: string, file: string): Observable<Blob> {
+    return this.http.get(`${this.base}/backups/${stamp}/files/${file}`, { responseType: 'blob' });
+  }
+
+  // ----- storage -----
+  storage(): Observable<StorageReport> {
+    return this.http.get<StorageReport>(`${this.base}/storage`);
+  }
+
+  setRetention(r: RetentionSettings): Observable<RetentionSettings> {
+    return this.http.put<RetentionSettings>(`${this.base}/storage/retention`, r);
+  }
+
+  cleanup(): Observable<CleanupResult> {
+    return this.http.post<CleanupResult>(`${this.base}/storage/cleanup`, {});
+  }
+
   accounts(q: string, page: number, pageSize = 25): Observable<Page<AdminAccount>> {
     let params = new HttpParams().set('page', page).set('pageSize', pageSize);
     if (q) params = params.set('q', q);
@@ -88,4 +135,69 @@ export class AdminService {
     for (const [k, v] of Object.entries(filter)) if (v) params = params.set(k, v);
     return this.http.get<Page<AuditEntry>>(`${this.base}/audit`, { params });
   }
+}
+
+export interface ActiveSession {
+  id: string;
+  userId: string;
+  name: string;
+  email: string;
+  account: string | null;
+  ip: string;
+  startedAt: string;
+  lastAccessAt: string;
+  apps: string[];
+  current: boolean;
+}
+
+export interface BackupInfo {
+  stamp: string;
+  takenAt: string;
+  files: { name: string; bytes: number }[];
+  totalBytes: number;
+  parts: { db: boolean; geoserver: boolean; storage: boolean; keycloak: boolean };
+  commit: string | null;
+  accounts: number | null;
+}
+
+export interface BackupRequest {
+  id: string;
+  action: 'backup' | 'restore';
+  stamp?: string;
+  parts?: string;
+  dryRun?: boolean;
+  requestedAt: string;
+  requestedBy: string;
+  state: 'queued' | 'running' | 'done' | 'failed';
+  message: string | null;
+  updatedAt?: string;
+}
+
+export interface BackupList {
+  backups: BackupInfo[];
+  inProgress: boolean;
+  requests: BackupRequest[];
+}
+
+export interface RetentionSettings {
+  tempDays: number;
+  georefDays: number;
+  cacheDays: number;
+  publishedOriginalsDays: number;
+  auditDays: number;
+}
+
+export interface CleanupResult {
+  at: string;
+  by: string;
+  freedBytes: number;
+  removed: { temp: number; georef: number; cache: number; originals: number; auditRows: number };
+}
+
+export interface StorageReport {
+  categories: Record<string, { bytes: number; files: number }>;
+  database: { bytes: number; largestTables: { table: string; layer: string | null; bytes: number }[] };
+  backups: { bytes: number; files: number };
+  retention: RetentionSettings;
+  lastCleanup: CleanupResult | null;
 }

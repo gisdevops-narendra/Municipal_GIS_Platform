@@ -19,6 +19,8 @@ export interface KeycloakJwtPayload {
   aud?: string | string[];
   iss: string;
   exp: number;
+  /** Keycloak session id of this sign-in. */
+  sid?: string;
 }
 
 /**

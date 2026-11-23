@@ -1,3 +1,4 @@
+import { FormsModule } from '@angular/forms';
 import { Component, HostListener, computed, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe, JsonPipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
@@ -8,9 +9,9 @@ import { CurrentUserService } from '../../core/services/current-user.service';
 import { SettingsDialogService } from '../../core/services/settings-dialog.service';
 import { SettingsService } from '../../core/services/settings.service';
 import { ThemeService } from '../../core/theme/theme.service';
-import { AdminAccount, AdminService, AdminStats, AdminUser, AuditEntry } from '../../core/services/admin.service';
+import { ActiveSession, AdminAccount, AdminService, AdminStats, AdminUser, AuditEntry, BackupList, RetentionSettings, StorageReport } from '../../core/services/admin.service';
 
-type View = 'overview' | 'accounts' | 'activity';
+type View = 'overview' | 'accounts' | 'activity' | 'sessions' | 'backups' | 'storage';
 type StatusFilter = 'all' | 'active' | 'disabled' | 'near-limit';
 const MB = 1024 * 1024;
 
@@ -36,6 +37,15 @@ const ACTIONS: Record<string, ActionMeta> = {
   'admin.granted': { label: 'Admin granted', icon: 'pi-shield', tone: 'warn' },
   'admin.revoked': { label: 'Admin revoked', icon: 'pi-shield', tone: 'info' },
   'backup.completed': { label: 'Backup completed', icon: 'pi-save', tone: 'ok' },
+  'backup.requested': { label: 'Backup requested', icon: 'pi-save', tone: 'info' },
+  'backup.restored': { label: 'Backup restored', icon: 'pi-history', tone: 'warn' },
+  'restore.requested': { label: 'Restore requested', icon: 'pi-history', tone: 'warn' },
+  'restore.dry_run_requested': { label: 'Restore test requested', icon: 'pi-history', tone: 'info' },
+  'restore.failed': { label: 'Restore failed', icon: 'pi-history', tone: 'bad' },
+  'session.ended': { label: 'Session ended', icon: 'pi-sign-out', tone: 'warn' },
+  'session.user_signed_out': { label: 'User signed out everywhere', icon: 'pi-sign-out', tone: 'warn' },
+  'storage.cleanup': { label: 'Storage cleaned up', icon: 'pi-trash', tone: 'info' },
+  'storage.retention_changed': { label: 'Retention changed', icon: 'pi-sliders-h', tone: 'info' },
   'backup.failed': { label: 'Backup failed', icon: 'pi-save', tone: 'bad' },
   'system.geoserver_restarted': { label: 'GeoServer restarted', icon: 'pi-replay', tone: 'warn' },
   'system.geoserver_restart_failed': { label: 'GeoServer restart failed', icon: 'pi-replay', tone: 'bad' },
@@ -51,7 +61,7 @@ const ACTIONS: Record<string, ActionMeta> = {
 @Component({
   selector: 'app-admin',
   standalone: true,
-  imports: [ButtonModule, DatePipe, DecimalPipe, JsonPipe],
+  imports: [ButtonModule, DatePipe, DecimalPipe, JsonPipe, FormsModule],
   templateUrl: './admin.component.html',
   styleUrl: './admin.component.scss',
 })
@@ -143,9 +153,275 @@ export class AdminComponent {
   go(view: View): void {
     this.view.set(view);
     this.navOpen.set(false);
+    clearTimeout(this.backupPoll);
     if (view === 'overview') this.loadOverview();
     else if (view === 'accounts') this.loadAccounts();
+    else if (view === 'sessions') this.loadSessions();
+    else if (view === 'backups') this.loadBackups();
+    else if (view === 'storage') this.loadStorage();
     else this.loadAudit();
+  }
+
+  // ===== sessions =====
+  readonly sessionList = signal<ActiveSession[]>([]);
+  readonly sessionsLoading = signal(false);
+  readonly sessionQuery = signal('');
+  readonly filteredSessions = computed(() => {
+    const q = this.sessionQuery().trim().toLowerCase();
+    return q ? this.sessionList().filter((s) => `${s.name} ${s.email} ${s.account ?? ''} ${s.ip}`.toLowerCase().includes(q)) : this.sessionList();
+  });
+  readonly signedInUsers = computed(() => new Set(this.sessionList().map((s) => s.userId)).size);
+
+  loadSessions(): void {
+    this.sessionsLoading.set(true);
+    this.api.sessions().subscribe({
+      next: (list) => {
+        this.sessionList.set(list);
+        this.sessionsLoading.set(false);
+      },
+      error: () => {
+        this.sessionsLoading.set(false);
+        this.notify.error('Could not load the active sessions.');
+      }
+    });
+  }
+
+  endSession(s: ActiveSession): void {
+    this.notify.confirm({
+      header: s.current ? 'Sign out this browser?' : `End ${s.name}'s session?`,
+      message: s.current ? 'This is your own current session — you will be signed out.' : `The browser at ${s.ip.replace('::ffff:', '')} is signed out at its next request.`,
+      confirmLabel: 'End session',
+      destructive: true,
+      accept: () =>
+        this.api.endSession(s.id).subscribe({
+          next: () => (s.current ? this.logout() : this.loadSessions()),
+          error: () => this.notify.error('The session could not be ended.')
+        })
+    });
+  }
+
+  signOutEverywhere(s: ActiveSession): void {
+    this.notify.confirm({
+      header: `Sign ${s.name} out everywhere?`,
+      message: 'Every browser and device of this person is signed out.',
+      confirmLabel: 'Sign out everywhere',
+      destructive: true,
+      accept: () =>
+        this.api.signOutUser(s.userId).subscribe({
+          next: () => (s.current ? this.logout() : this.loadSessions()),
+          error: () => this.notify.error('Could not sign this person out.')
+        })
+    });
+  }
+
+  ago(iso: string): string {
+    const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return `${m} min ago`;
+    const h = Math.round(m / 60);
+    return h < 24 ? `${h} h ago` : `${Math.round(h / 24)} d ago`;
+  }
+
+  // ===== backups =====
+  readonly backupList = signal<BackupList | null>(null);
+  readonly backupsLoading = signal(false);
+  readonly verifying = signal<string | null>(null);
+  readonly restoreTarget = signal<string | null>(null);
+  restoreParts: Record<'db' | 'geoserver' | 'storage' | 'keycloak', boolean> = { db: true, geoserver: true, storage: true, keycloak: true };
+  restoreConfirm = '';
+  private backupPoll: ReturnType<typeof setTimeout> | undefined;
+
+  loadBackups(): void {
+    this.backupsLoading.set(true);
+    clearTimeout(this.backupPoll);
+    this.api.backups().subscribe({
+      next: (b) => {
+        this.backupList.set(b);
+        this.backupsLoading.set(false);
+        // Keep the page live while a request is queued / running.
+        if (this.view() === 'backups' && (b.inProgress || b.requests.some((r) => r.state === 'queued' || r.state === 'running'))) {
+          this.backupPoll = setTimeout(() => this.loadBackups(), 5000);
+        }
+      },
+      error: () => {
+        this.backupsLoading.set(false);
+        // A restore restarts the backend — keep trying while it comes back.
+        if (this.view() === 'backups') this.backupPoll = setTimeout(() => this.loadBackups(), 8000);
+      }
+    });
+  }
+
+  backupNow(): void {
+    this.api.backupNow().subscribe({
+      next: () => {
+        this.notify.success('A full backup has started on the server. It takes a few minutes.', 'Backup');
+        this.loadBackups();
+      },
+      error: (err) => this.notify.error(err?.error?.message ?? 'The backup could not be started.', 'Backup')
+    });
+  }
+
+  verifyBackup(stamp: string): void {
+    this.verifying.set(stamp);
+    this.api.verifyBackup(stamp).subscribe({
+      next: (r) => {
+        this.verifying.set(null);
+        r.ok ? this.notify.success(r.message, `Backup ${stamp}`) : this.notify.error(r.message, `Backup ${stamp} is damaged`);
+      },
+      error: () => {
+        this.verifying.set(null);
+        this.notify.error('The check could not run.');
+      }
+    });
+  }
+
+  downloadBackupFile(stamp: string, file: string): void {
+    this.api.backupFile(stamp, file).subscribe({
+      next: (blob) => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `municipal-gis-${stamp}-${file}`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      },
+      error: () => this.notify.error('The file could not be downloaded.')
+    });
+  }
+
+  openRestore(stamp: string): void {
+    this.restoreTarget.set(stamp);
+    this.restoreParts = { db: true, geoserver: true, storage: true, keycloak: true };
+    this.restoreConfirm = '';
+  }
+
+  chosenParts(): string[] {
+    return (Object.keys(this.restoreParts) as (keyof typeof this.restoreParts)[]).filter((k) => this.restoreParts[k]);
+  }
+
+  startRestore(dryRun: boolean): void {
+    const stamp = this.restoreTarget();
+    if (!stamp) return;
+    this.api.restore(stamp, this.chosenParts(), dryRun, this.restoreConfirm.trim()).subscribe({
+      next: () => {
+        this.restoreTarget.set(null);
+        this.notify.success(
+          dryRun
+            ? 'Test run queued — it checks the backup and lists every step without changing anything.'
+            : 'Restore queued. A safety backup of the current state is taken first; the platform is briefly unavailable while it restores.',
+          dryRun ? 'Restore test' : 'Restore'
+        );
+        this.loadBackups();
+      },
+      error: (err) => this.notify.error(err?.error?.message ?? 'The restore could not be started.', 'Restore')
+    });
+  }
+
+  readonly downloadMenu = signal<string | null>(null);
+  readonly backupsTotal = computed(() => (this.backupList()?.backups ?? []).reduce((t, b) => t + b.totalBytes, 0));
+
+  /** The parts worth downloading (checksums / manifest stay internal). */
+  downloadable(b: { files: { name: string; bytes: number }[] }) {
+    return b.files.filter((f) => ['db.dump', 'geoserver-data.tar.gz', 'storage.tar', 'keycloak-users.json'].includes(f.name));
+  }
+
+  /** "Today", "Yesterday", "3 days ago", or the date. */
+  relDay(iso: string): string {
+    const d = new Date(iso);
+    const start = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const days = Math.round((start(new Date()) - start(d)) / 86400000);
+    if (days === 0) return 'Today';
+    if (days === 1) return 'Yesterday';
+    if (days < 7) return `${days} days ago`;
+    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  }
+
+  /** The nightly run at 02:30 local time. */
+  nextBackupLabel(): string {
+    const now = new Date();
+    const next = new Date(now);
+    next.setHours(2, 30, 0, 0);
+    if (next <= now) next.setDate(next.getDate() + 1);
+    return next.getDate() === now.getDate() ? 'Tonight, 02:30' : 'Tomorrow, 02:30';
+  }
+
+  fileLabel(name: string): string {
+    return ({ 'db.dump': 'Database', 'geoserver-data.tar.gz': 'Map server settings', 'storage.tar': 'Uploaded files', 'keycloak-realm.json': 'Login settings', 'keycloak-users.json': 'User list', SHA256SUMS: 'Checksums', 'manifest.txt': 'Manifest' } as Record<string, string>)[name] ?? name;
+  }
+
+  // ===== storage =====
+  readonly storageReport = signal<StorageReport | null>(null);
+  readonly storageLoading = signal(false);
+  readonly cleaning = signal(false);
+  retention: RetentionSettings = { tempDays: 1, georefDays: 0, cacheDays: 0, publishedOriginalsDays: 0, auditDays: 0 };
+  readonly storageRows = computed(() => {
+    const r = this.storageReport();
+    if (!r) return [];
+    const label: Record<string, string> = {
+      uploads: 'Original upload files',
+      rasters: 'Rasters',
+      tiles: 'Vector tile archives',
+      georef: 'Georeferencer scans',
+      cache: 'Imagery download cache',
+      temp: 'Temporary files'
+    };
+    const rows = Object.entries(r.categories).map(([k, v]) => ({ key: k, label: label[k] ?? k, ...v }));
+    rows.push({ key: 'db', label: 'Database (layers, accounts)', bytes: r.database.bytes, files: 0 });
+    rows.push({ key: 'backups', label: 'Backups', bytes: r.backups.bytes, files: r.backups.files });
+    const max = Math.max(1, ...rows.map((x) => x.bytes));
+    return rows.sort((a, b) => b.bytes - a.bytes).map((x) => ({ ...x, pct: (100 * x.bytes) / max }));
+  });
+
+  loadStorage(): void {
+    this.storageLoading.set(true);
+    this.api.storage().subscribe({
+      next: (r) => {
+        this.storageReport.set(r);
+        this.retention = { ...r.retention };
+        this.storageLoading.set(false);
+      },
+      error: () => {
+        this.storageLoading.set(false);
+        this.notify.error('Could not load the storage report.');
+      }
+    });
+  }
+
+  saveRetention(): void {
+    this.api.setRetention(this.retention).subscribe({
+      next: (r) => {
+        this.retention = { ...r };
+        this.notify.success('Retention settings saved. The daily cleanup uses them from now on.', 'Storage');
+      },
+      error: (err) => this.notify.error(err?.error?.message?.toString() ?? 'The settings could not be saved.', 'Storage')
+    });
+  }
+
+  runCleanup(): void {
+    this.notify.confirm({
+      header: 'Clean up now?',
+      message: 'Deletes what the retention settings allow (temporary files, and anything else you set a period for).',
+      confirmLabel: 'Clean up',
+      accept: () => {
+        this.cleaning.set(true);
+        this.api.cleanup().subscribe({
+          next: (r) => {
+            this.cleaning.set(false);
+            this.notify.success(`Freed ${this.bytes(r.freedBytes)}.`, 'Storage cleanup');
+            this.loadStorage();
+          },
+          error: (err) => {
+            this.cleaning.set(false);
+            this.notify.error(err?.error?.message ?? 'The cleanup failed.', 'Storage cleanup');
+          }
+        });
+      }
+    });
+  }
+
+  bytes(n: number): string {
+    if (n >= 1073741824) return `${(n / 1073741824).toFixed(1)} GB`;
+    if (n >= 1048576) return `${(n / 1048576).toFixed(0)} MB`;
+    return `${Math.max(0, Math.round(n / 1024))} KB`;
   }
 
   @HostListener('document:keydown.escape')

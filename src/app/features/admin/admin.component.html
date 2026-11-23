@@ -29,6 +29,15 @@
       <button type="button" class="ac__nav-item" [class.is-active]="view() === 'activity'" (click)="go('activity')">
         <i class="pi pi-history" aria-hidden="true"></i> Activity
       </button>
+      <button type="button" class="ac__nav-item" [class.is-active]="view() === 'sessions'" (click)="go('sessions')">
+        <i class="pi pi-desktop" aria-hidden="true"></i> Sessions
+      </button>
+      <button type="button" class="ac__nav-item" [class.is-active]="view() === 'backups'" (click)="go('backups')">
+        <i class="pi pi-save" aria-hidden="true"></i> Backups
+      </button>
+      <button type="button" class="ac__nav-item" [class.is-active]="view() === 'storage'" (click)="go('storage')">
+        <i class="pi pi-database" aria-hidden="true"></i> Storage
+      </button>
     </nav>
 
     <div class="ac__me">
@@ -274,6 +283,249 @@
           <span class="muted">Page {{ auditPage() }} of {{ auditPages() }}</span>
           <button type="button" class="ac__icon-btn" [disabled]="auditPage() >= auditPages()" (click)="auditGo(auditPage() + 1)" aria-label="Next page"><i class="pi pi-chevron-right"></i></button>
         </div>
+      }
+    }
+
+    <!-- ---------- sessions ---------- -->
+    @if (view() === 'sessions') {
+      <header class="ac__head">
+        <div>
+          <h1 class="ac__title">Active sessions</h1>
+          <p class="ac__sub">Who is signed in right now, from where — end a session if a device is lost or someone has left.</p>
+        </div>
+        <button type="button" class="ac__btn" (click)="loadSessions()"><i class="pi pi-refresh" aria-hidden="true"></i> Refresh</button>
+      </header>
+      <div class="ac__toolbar">
+        <span class="ac__search">
+          <i class="pi pi-search" aria-hidden="true"></i>
+          <input type="search" placeholder="Search name, email, account or IP" [value]="sessionQuery()" (input)="sessionQuery.set($any($event.target).value)" aria-label="Search sessions" />
+        </span>
+        <span class="muted">{{ sessionList().length }} session{{ sessionList().length === 1 ? '' : 's' }} · {{ signedInUsers() }} {{ signedInUsers() === 1 ? 'person' : 'people' }}</span>
+      </div>
+      <div class="ac__card ac__card--flush">
+        <table class="ac__table">
+          <thead>
+            <tr><th>Person</th><th class="hide-sm">Account</th><th>IP address</th><th class="hide-sm">Signed in</th><th>Last active</th><th class="actions"><span class="sr-only">Actions</span></th></tr>
+          </thead>
+          <tbody>
+            @for (s of filteredSessions(); track s.id) {
+              <tr>
+                <td>
+                  <div class="ac__who">
+                    <span class="ac__avatar">{{ initials(s.name, s.email) }}</span>
+                    <span class="ac__who-text">
+                      <span class="ac__who-name">{{ s.name }} @if (s.current) { <span class="ac__tag">You — this browser</span> }</span>
+                      <span class="ac__who-email">{{ s.email }}</span>
+                    </span>
+                  </div>
+                </td>
+                <td class="hide-sm">{{ s.account ?? '—' }}</td>
+                <td><code>{{ s.ip.replace('::ffff:', '') }}</code></td>
+                <td class="hide-sm">{{ s.startedAt | date: 'd MMM, HH:mm' }}</td>
+                <td>{{ ago(s.lastAccessAt) }}</td>
+                <td class="actions">
+                  <button type="button" class="ac__btn ac__btn--sm" (click)="endSession(s)">End session</button>
+                  <button type="button" class="ac__btn ac__btn--sm ac__btn--danger" (click)="signOutEverywhere(s)">Sign out everywhere</button>
+                </td>
+              </tr>
+            } @empty {
+              <tr><td colspan="6" class="ac__empty">{{ sessionsLoading() ? 'Loading…' : 'No one is signed in.' }}</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+
+    <!-- ---------- backups ---------- -->
+    @if (view() === 'backups') {
+      <header class="ac__head">
+        <div>
+          <h1 class="ac__title">Backups</h1>
+          <p class="ac__sub">Full backups (database, GeoServer, uploaded files, logins) run every night at 02:30; the newest 7 are kept.</p>
+        </div>
+        <button type="button" class="ac__btn ac__btn--primary" (click)="backupNow()" [disabled]="backupList()?.inProgress">
+          <i class="pi pi-save" aria-hidden="true"></i> Back up now
+        </button>
+      </header>
+
+      @if (backupList(); as bl) {
+        @if (bl.requests.length) {
+          <div class="ac__card ac__reqs">
+            <span class="ac__card-head">Recent requests</span>
+            @for (r of bl.requests.slice(0, 5); track r.id) {
+              <div class="ac__req">
+                <span class="ac__pill" [attr.data-tone]="r.state === 'done' ? 'ok' : r.state === 'failed' ? 'bad' : 'warn'"><i></i>{{ r.state }}</span>
+                <span>
+                  <b>{{ r.action === 'backup' ? 'Backup' : (r.dryRun ? 'Restore test of ' : 'Restore of ') + r.stamp }}</b>
+                  @if (r.parts && r.action === 'restore') { ({{ r.parts }}) }
+                  <span class="muted"> · {{ r.requestedBy }} · {{ r.requestedAt | date: 'd MMM, HH:mm' }}</span>
+                </span>
+                @if (r.message && r.state !== 'queued') {
+                  <details class="ac__req-log"><summary>Log</summary><pre>{{ r.message }}</pre></details>
+                }
+              </div>
+            }
+          </div>
+        }
+
+        <div class="bk__summary">
+          <div class="bk__stat">
+            <span class="bk__stat-label">Last backup</span>
+            <span class="bk__stat-value">{{ bl.backups[0] ? relDay(bl.backups[0].takenAt) : 'None yet' }}</span>
+            @if (bl.backups[0]; as b) { <span class="bk__stat-sub">{{ b.takenAt | date: 'HH:mm' }} · {{ bytes(b.totalBytes) }}</span> }
+          </div>
+          <div class="bk__stat">
+            <span class="bk__stat-label">Next backup</span>
+            <span class="bk__stat-value">{{ nextBackupLabel() }}</span>
+            <span class="bk__stat-sub">Automatic, every night</span>
+          </div>
+          <div class="bk__stat">
+            <span class="bk__stat-label">Backups kept</span>
+            <span class="bk__stat-value">{{ bl.backups.length }} <small>of 7</small></span>
+            <span class="bk__stat-sub">Older ones are removed</span>
+          </div>
+          <div class="bk__stat">
+            <span class="bk__stat-label">Space used</span>
+            <span class="bk__stat-value">{{ bytes(backupsTotal()) }}</span>
+            <span class="bk__stat-sub">All backups together</span>
+          </div>
+        </div>
+
+        <div class="bk__list">
+          @for (b of bl.backups; track b.stamp; let first = $first) {
+            <div class="bk__row" [title]="'Backup ' + b.stamp + (b.commit ? ' · code ' + b.commit : '')">
+              <span class="bk__icon" [class.bk__icon--latest]="first"><i class="pi pi-database" aria-hidden="true"></i></span>
+              <span class="bk__when">
+                <b>{{ relDay(b.takenAt) }}, {{ b.takenAt | date: 'HH:mm' }}</b>
+                <span>{{ b.takenAt | date: 'EEE d MMM y' }}@if (first) { <span class="ac__tag">Latest</span> }</span>
+              </span>
+              <span class="bk__parts">
+                <span [class.is-on]="b.parts.db"><i class="pi" [class.pi-check]="b.parts.db" [class.pi-minus]="!b.parts.db"></i> Database</span>
+                <span [class.is-on]="b.parts.geoserver"><i class="pi" [class.pi-check]="b.parts.geoserver" [class.pi-minus]="!b.parts.geoserver"></i> Map server</span>
+                <span [class.is-on]="b.parts.storage"><i class="pi" [class.pi-check]="b.parts.storage" [class.pi-minus]="!b.parts.storage"></i> Files</span>
+                <span [class.is-on]="b.parts.keycloak"><i class="pi" [class.pi-check]="b.parts.keycloak" [class.pi-minus]="!b.parts.keycloak"></i> Logins</span>
+              </span>
+              <span class="bk__size">{{ bytes(b.totalBytes) }}</span>
+              <span class="bk__actions">
+                <span class="bk__menu-wrap">
+                  <button type="button" class="ac__btn ac__btn--sm" (click)="downloadMenu.set(downloadMenu() === b.stamp ? null : b.stamp)" [attr.aria-expanded]="downloadMenu() === b.stamp">
+                    <i class="pi pi-download" aria-hidden="true"></i> Download <i class="pi pi-angle-down" aria-hidden="true"></i>
+                  </button>
+                  @if (downloadMenu() === b.stamp) {
+                    <div class="bk__menu-backdrop" (click)="downloadMenu.set(null)" aria-hidden="true"></div>
+                    <div class="bk__menu" role="menu">
+                      @for (f of downloadable(b); track f.name) {
+                        <button type="button" role="menuitem" (click)="downloadMenu.set(null); downloadBackupFile(b.stamp, f.name)">
+                          {{ fileLabel(f.name) }} <span class="muted">{{ bytes(f.bytes) }}</span>
+                        </button>
+                      }
+                    </div>
+                  }
+                </span>
+                <button type="button" class="ac__btn ac__btn--sm" [disabled]="verifying() === b.stamp" (click)="verifyBackup(b.stamp)">
+                  <i class="pi" [class.pi-shield]="verifying() !== b.stamp" [class.pi-spinner]="verifying() === b.stamp" [class.pi-spin]="verifying() === b.stamp" aria-hidden="true"></i>
+                  {{ verifying() === b.stamp ? 'Checking…' : 'Verify' }}
+                </button>
+                <button type="button" class="ac__btn ac__btn--sm ac__btn--danger" (click)="openRestore(b.stamp)">
+                  <i class="pi pi-history" aria-hidden="true"></i> Restore
+                </button>
+              </span>
+            </div>
+          } @empty {
+            <p class="ac__empty">{{ backupsLoading() ? 'Loading…' : 'No backups yet — click “Back up now”.' }}</p>
+          }
+        </div>
+        @if (bl.inProgress) { <p class="muted"><i class="pi pi-spin pi-spinner"></i> A backup is being written right now…</p> }
+      } @else {
+        <p class="muted">{{ backupsLoading() ? 'Loading…' : 'Backups could not be loaded — the server may be restarting.' }}</p>
+      }
+
+      @if (restoreTarget(); as stamp) {
+        <div class="ac__drawer-backdrop" (click)="restoreTarget.set(null)" aria-hidden="true"></div>
+        <aside class="ac__drawer" role="dialog" aria-modal="true" aria-label="Restore backup">
+          <header class="ac__drawer-head">
+            <span class="ac__drawer-who">
+              <span class="ac__drawer-name">Restore backup {{ stamp }}</span>
+              <span class="ac__drawer-email">Replaces the current data with this backup</span>
+            </span>
+            <button type="button" class="ac__icon-btn" aria-label="Close" (click)="restoreTarget.set(null)"><i class="pi pi-times"></i></button>
+          </header>
+          <div class="ac__drawer-body">
+            <p class="ac__warn"><i class="pi pi-exclamation-triangle"></i>
+              Everything changed since this backup in the parts you choose is lost. A safety backup of the current state is taken
+              automatically first, so a mistake can be undone by restoring that one. The platform is unavailable for a few minutes.
+            </p>
+            <span class="ac__card-head">What to restore</span>
+            <label class="ac__check"><input type="checkbox" [(ngModel)]="restoreParts.db" /> <b>Database</b> — accounts, layers, layer data, settings</label>
+            <label class="ac__check"><input type="checkbox" [(ngModel)]="restoreParts.geoserver" /> <b>GeoServer</b> — published layer settings and styles</label>
+            <label class="ac__check"><input type="checkbox" [(ngModel)]="restoreParts.storage" /> <b>Uploaded files</b> — originals, rasters, scans</label>
+            <label class="ac__check"><input type="checkbox" [(ngModel)]="restoreParts.keycloak" /> <b>Logins</b> — users and passwords</label>
+            <p class="muted">Restore the database, GeoServer and files together unless you are sure — they belong to each other.</p>
+            <label class="ac__field">
+              <span>Type <b>{{ stamp }}</b> to confirm a real restore</span>
+              <input type="text" [(ngModel)]="restoreConfirm" [placeholder]="stamp" />
+            </label>
+          </div>
+          <footer class="ac__drawer-foot">
+            <button type="button" class="ac__btn" [disabled]="!chosenParts().length" (click)="startRestore(true)">Test run (changes nothing)</button>
+            <button type="button" class="ac__btn ac__btn--danger" [disabled]="!chosenParts().length || restoreConfirm.trim() !== stamp" (click)="startRestore(false)">Restore</button>
+          </footer>
+        </aside>
+      }
+    }
+
+    <!-- ---------- storage ---------- -->
+    @if (view() === 'storage') {
+      <header class="ac__head">
+        <div>
+          <h1 class="ac__title">Storage &amp; retention</h1>
+          <p class="ac__sub">Where the disk space goes, and how long temporary and old data is kept.</p>
+        </div>
+        <button type="button" class="ac__btn" (click)="loadStorage()"><i class="pi pi-refresh" aria-hidden="true"></i> Refresh</button>
+      </header>
+
+      @if (storageReport(); as r) {
+        <div class="ac__card">
+          <span class="ac__card-head">Disk use</span>
+          <div class="ac__bars">
+            @for (row of storageRows(); track row.key) {
+              <div class="ac__bar-row">
+                <span class="ac__bar-name">{{ row.label }}</span>
+                <span class="ac__bar-track"><span [style.width.%]="row.pct"></span></span>
+                <span class="ac__bar-value">{{ bytes(row.bytes) }}</span>
+              </div>
+            }
+          </div>
+          <span class="ac__card-head ac__card-head--gap">Largest database tables</span>
+          @for (t of r.database.largestTables; track t.table) {
+            <div class="ac__kv"><span>{{ t.layer ?? t.table }}</span><b>{{ bytes(t.bytes) }}</b></div>
+          }
+        </div>
+
+        <div class="ac__card">
+          <span class="ac__card-head">Retention — the daily cleanup deletes</span>
+          <div class="ac__ret">
+            <label>Temporary / scratch files older than <input type="number" min="1" max="365" [(ngModel)]="retention.tempDays" /> days</label>
+            <label>Georeferencer scans not opened for <input type="number" min="0" [(ngModel)]="retention.georefDays" /> days</label>
+            <label>Imagery download cache older than <input type="number" min="0" [(ngModel)]="retention.cacheDays" /> days</label>
+            <label>Original files of published uploads older than <input type="number" min="0" [(ngModel)]="retention.publishedOriginalsDays" /> days</label>
+            <label>Activity-log entries older than <input type="number" min="0" [(ngModel)]="retention.auditDays" /> days</label>
+          </div>
+          <p class="muted">0 = keep forever (the default for everything except temporary files). Published layer data lives in the database, so deleting
+            an upload's original file does not affect the layer — but it can no longer be downloaded as the original file.</p>
+          <div class="ac__ret-actions">
+            <button type="button" class="ac__btn ac__btn--primary" (click)="saveRetention()">Save settings</button>
+            <button type="button" class="ac__btn" [disabled]="cleaning()" (click)="runCleanup()">
+              <i class="pi" [class.pi-trash]="!cleaning()" [class.pi-spinner]="cleaning()" [class.pi-spin]="cleaning()" aria-hidden="true"></i>
+              {{ cleaning() ? 'Cleaning…' : 'Clean up now' }}
+            </button>
+            @if (r.lastCleanup; as c) {
+              <span class="muted">Last cleanup {{ c.at | date: 'd MMM, HH:mm' }} by {{ c.by }} — freed {{ bytes(c.freedBytes) }}</span>
+            }
+          </div>
+        </div>
+      } @else {
+        <p class="muted">{{ storageLoading() ? 'Measuring disk use…' : 'The storage report could not be loaded.' }}</p>
       }
     }
   </main>

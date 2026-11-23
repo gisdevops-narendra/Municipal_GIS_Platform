@@ -305,6 +305,10 @@ services:
       # them out of the host-owned bind mount above, rather than leaving
       # root-owned files under ./backend/storage.
       - backend-storage:/app/storage
+      # Admin → Backups: lists backups/auto and writes backup / restore
+      # requests to backups/requests (run on the host by
+      # scripts/backup-runner.sh — see scripts/install-backup-runner.sh).
+      - ./backups:/backups
     depends_on:
       postgres:
         condition: service_healthy

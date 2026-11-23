@@ -172,6 +172,28 @@ export class KeycloakAdminService {
     }
   }
 
+  /** Active sign-in sessions of a user (browser logins). */
+  async listUserSessions(keycloakUserId: string): Promise<KeycloakSession[]> {
+    const token = await this.getAdminAccessToken();
+    const res = await fetch(`${this.keycloakUrl}/admin/realms/${this.realm}/users/${keycloakUserId}/sessions`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return [];
+    return (await res.json()) as KeycloakSession[];
+  }
+
+  /** Ends one sign-in session (that browser is signed out). */
+  async deleteSession(sessionId: string): Promise<void> {
+    const token = await this.getAdminAccessToken();
+    const res = await fetch(`${this.keycloakUrl}/admin/realms/${this.realm}/sessions/${encodeURIComponent(sessionId)}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok && res.status !== 404) {
+      throw new BadGatewayException('The identity provider refused to end that session.');
+    }
+  }
+
   /** Changes a user's email (and username, which is the email). The new
    *  address starts unverified: Keycloak asks for verification at the next
    *  sign-in. Throws ConflictException if another account already uses it. */
@@ -276,4 +298,17 @@ export class KeycloakAdminService {
     const data = (await response.json()) as { access_token: string };
     return data.access_token;
   }
+}
+
+/** A Keycloak user session (admin REST representation). */
+export interface KeycloakSession {
+  id: string;
+  username: string;
+  userId: string;
+  ipAddress: string;
+  /** epoch ms */
+  start: number;
+  lastAccess: number;
+  /** client UUID → client id */
+  clients: Record<string, string>;
 }
