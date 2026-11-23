@@ -262,6 +262,38 @@ export class GeoServerService {
     };
   }
 
+  // ----- Admin console helpers -----
+
+  /** Reloads the catalog from the data directory. */
+  async reloadCatalog(): Promise<void> {
+    const res = await this.request('/rest/reload', { method: 'POST' }, 120_000);
+    if (!res.ok) throw new Error(`GeoServer reload failed (${res.status})`);
+  }
+
+  /** Empties the whole tile cache (tiles rebuild on demand). */
+  async truncateAllTiles(): Promise<void> {
+    const res = await this.request(
+      '/gwc/rest/masstruncate',
+      { method: 'POST', headers: { 'Content-Type': 'text/xml' }, body: '<truncateAll></truncateAll>' },
+      120_000,
+    );
+    if (!res.ok) throw new Error(`Clearing the tile cache failed (${res.status})`);
+  }
+
+  /** Every published layer as "workspace:name". */
+  async listAllLayers(): Promise<string[]> {
+    const res = await this.request('/rest/layers.json', { method: 'GET' }, 30_000);
+    if (!res.ok) return [];
+    const body = (await res.json()) as { layers?: { layer?: { name: string }[] } | '' };
+    return (typeof body.layers === 'object' && body.layers?.layer ? body.layers.layer : []).map((l) => l.name);
+  }
+
+  /** Removes one layer (and its feature type / coverage) by "ws:name". */
+  async deleteLayerByName(qualified: string): Promise<void> {
+    const res = await this.request(`/rest/layers/${encodeURIComponent(qualified)}?recurse=true`, { method: 'DELETE' }, 60_000);
+    if (!res.ok && res.status !== 404) throw new Error(`GeoServer refused to delete ${qualified} (${res.status})`);
+  }
+
   async checkHealth(): Promise<GeoServerHealth> {
     try {
       const response = await this.request(

@@ -1,6 +1,6 @@
 /* ================= Admin console ================= */
 
-:host {
+app-admin {
   --ac-ok: #16a34a;
   --ac-warn: #d97706;
   --ac-bad: #dc2626;
@@ -71,17 +71,25 @@
 .ac__nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
+  flex: 1;
+  min-height: 0;
+  margin: 0 -4px;
+  padding: 0 4px 8px;
+  /* Many sections: the menu scrolls, the user card stays at the bottom. */
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .ac__nav-item {
   display: flex;
   align-items: center;
-  gap: 11px;
-  height: 38px;
-  padding: 0 12px;
+  flex-shrink: 0;
+  gap: 10px;
+  height: 34px;
+  padding: 0 10px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 8px;
   background: transparent;
   color: var(--color-ink-700);
   font: inherit;
@@ -308,7 +316,7 @@
 /* ---------- KPIs ---------- */
 .ac__kpis {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 14px;
   margin-bottom: 16px;
 }
@@ -1675,4 +1683,39 @@
       justify-content: flex-start;
     }
   }
+}
+
+/* Sidebar group headings (People / System / Data / Settings). */
+.ac__nav-group {
+  display: block;
+  flex-shrink: 0;
+  margin: 12px 10px 3px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-300, var(--color-ink-500));
+}
+
+.ac__side .ac__me {
+  flex-shrink: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-line);
+}
+
+.ac__input {
+  height: 34px;
+  min-width: 240px;
+  padding: 0 10px;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-ink-900);
+  font: inherit;
+}
+
+.ac__field textarea,
+.ac__field input,
+.ac__field select {
+  font: inherit;
 }

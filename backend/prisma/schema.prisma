@@ -410,6 +410,8 @@ model User {
   /// account storage limits / disables accounts. Granted with
   /// scripts/set-platform-admin.ts (or PLATFORM_ADMIN_EMAILS).
   isPlatformAdmin Boolean   @default(false) @map("is_platform_admin")
+  /// Last authenticated request (updated at most every few minutes).
+  lastSeenAt      DateTime? @map("last_seen_at")
   status         UserStatus @default(ACTIVE)
   /// User.id of the MUNICIPALITY_OWNER who created this user (self-registered
   /// owners have no creator). Plain audit field, not a Prisma relation.
@@ -802,4 +804,33 @@ model AuditLog {
   @@index([accountId, createdAt])
   @@index([action])
   @@map("audit_logs")
+}
+
+/// Platform-wide settings (branding, announcement, maintenance, modules,
+/// email …) edited in the Admin console; one JSON value per key.
+model PlatformSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("platform_settings")
+}
+
+/// One row per user per day they used the app (Admin → Analytics).
+model UserActivityDay {
+  day    DateTime @db.Date
+  userId String   @map("user_id")
+
+  @@id([day, userId])
+  @@map("user_activity_days")
+}
+
+/// How often each tool was opened per day (Admin → Analytics).
+model ToolUsageDay {
+  day   DateTime @db.Date
+  tool  String
+  count Int      @default(0)
+
+  @@id([day, tool])
+  @@map("tool_usage_days")
 }

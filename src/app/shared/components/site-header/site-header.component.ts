@@ -1,3 +1,4 @@
+import { PlatformService } from '../../../core/services/platform.service';
 import { Component, HostListener, Input, computed, effect, inject, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { NgTemplateOutlet } from '@angular/common';
@@ -28,6 +29,7 @@ export interface NavItem {
   styleUrl: './site-header.component.scss'
 })
 export class SiteHeaderComponent {
+  readonly platform = inject(PlatformService);
   /** Hides the account / nav area on screens that already are the login or
    *  registration flow, to avoid redundant navigation. */
   @Input() showActions = true;

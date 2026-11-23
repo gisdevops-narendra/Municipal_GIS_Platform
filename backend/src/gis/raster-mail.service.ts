@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { PlatformSettingsService } from '../platform/platform-settings.service';
 import { ConfigService } from '@nestjs/config';
 import { Socket, connect } from 'net';
 
@@ -12,12 +13,15 @@ import { Socket, connect } from 'net';
 @Injectable()
 export class RasterMailService {
   private readonly logger = new Logger(RasterMailService.name);
-  private readonly host: string | undefined;
-  private readonly port: number;
-  private readonly from: string;
+  private host: string | undefined;
+  private port: number;
+  private from: string;
   readonly appUrl: string;
 
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    @Optional() private readonly platformSettings?: PlatformSettingsService,
+  ) {
     this.host =
       config.get<string>('SMTP_HOST') ?? (config.get<string>('NODE_ENV') === 'production' ? undefined : 'mailpit');
     this.port = Number(config.get<string>('SMTP_PORT') ?? 1025);
@@ -25,7 +29,15 @@ export class RasterMailService {
     this.appUrl = config.get<string>('APP_PUBLIC_URL') ?? 'http://localhost:4200';
   }
 
+  /** Uses Admin → Email settings when saved, else the SMTP_* environment. */
   async send(to: string, subject: string, text: string): Promise<boolean> {
+    const email = await this.platformSettings?.get('email').catch(() => null);
+    const saved = email && email.host && email.host !== 'mailpit' ? email : null;
+    if (saved) {
+      this.host = saved.host;
+      this.port = saved.port;
+      this.from = saved.from;
+    }
     if (!this.host) return false;
     const message = [
       `From: Municipal GIS <${this.from}>`,

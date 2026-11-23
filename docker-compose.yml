@@ -309,6 +309,8 @@ services:
       # requests to backups/requests (run on the host by
       # scripts/backup-runner.sh — see scripts/install-backup-runner.sh).
       - ./backups:/backups
+      # Admin → Logs reads GeoServer's log file (read-only).
+      - geoserver-data:/geoserver-data:ro
     depends_on:
       postgres:
         condition: service_healthy

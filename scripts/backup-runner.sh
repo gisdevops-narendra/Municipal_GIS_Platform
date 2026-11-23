@@ -31,6 +31,8 @@ for req in "$REQ"/*.json; do
   out="$(mktemp)"
   if [ "$action" = backup ]; then
     bash scripts/backup.sh >"$out" 2>&1 && ok=1 || ok=0
+  elif [ "$action" = restart-geoserver ]; then
+    { echo "Restarting GeoServer"; docker restart municipal-gis-geoserver; } >"$out" 2>&1 && ok=1 || ok=0
   elif [ "$action" = restore ]; then
     read -r stamp parts dry < <(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d.get("stamp",""),d.get("parts","db,geoserver,storage,keycloak"),"1" if d.get("dryRun") else "0")' "$req")
     args=("$stamp" --parts "$parts")

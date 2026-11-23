@@ -172,6 +172,69 @@ export class KeycloakAdminService {
     }
   }
 
+  private async adminFetch(path: string, init: RequestInit = {}): Promise<Response> {
+    const token = await this.getAdminAccessToken();
+    return fetch(`${this.keycloakUrl}/admin/realms/${this.realm}${path}`, {
+      ...init,
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) },
+    });
+  }
+
+  /** Keycloak user representation (email verified, enabled, required actions). */
+  async getUser(keycloakUserId: string): Promise<{ emailVerified?: boolean; enabled?: boolean; requiredActions?: string[]; createdTimestamp?: number } | null> {
+    const res = await this.adminFetch(`/users/${keycloakUserId}`);
+    return res.ok ? ((await res.json()) as { emailVerified?: boolean }) : null;
+  }
+
+  async updateName(keycloakUserId: string, fullName: string): Promise<void> {
+    const [firstName, ...rest] = fullName.trim().split(/\s+/);
+    const res = await this.adminFetch(`/users/${keycloakUserId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ firstName, lastName: rest.join(' ') || firstName }),
+    });
+    if (!res.ok) throw new BadGatewayException('The identity provider refused the name change.');
+  }
+
+  /** Emails the user a link to do `actions` (e.g. UPDATE_PASSWORD, VERIFY_EMAIL). */
+  async executeActionsEmail(keycloakUserId: string, actions: string[], lifespanSeconds = 7 * 24 * 3600): Promise<void> {
+    const res = await this.adminFetch(`/users/${keycloakUserId}/execute-actions-email?lifespan=${lifespanSeconds}`, {
+      method: 'PUT',
+      body: JSON.stringify(actions),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new BadGatewayException(/smtp|mail/i.test(body) ? 'The email could not be sent — check Admin → Email.' : 'The identity provider could not send the email.');
+    }
+  }
+
+  /** Realm settings (needs the realm-management manage-realm role). */
+  async getRealm(): Promise<Record<string, unknown> | null> {
+    const res = await this.adminFetch('');
+    return res.ok ? ((await res.json()) as Record<string, unknown>) : null;
+  }
+
+  async updateRealm(changes: Record<string, unknown>): Promise<void> {
+    const res = await this.adminFetch('', { method: 'PUT', body: JSON.stringify(changes) });
+    if (res.status === 403) {
+      throw new BadGatewayException('The backend is not allowed to change Keycloak realm settings yet (its service account needs the manage-realm role).');
+    }
+    if (!res.ok) throw new BadGatewayException(`Keycloak refused the change (${res.status}).`);
+  }
+
+  /** Users with a required action (e.g. everyone must set up two-factor). */
+  async addRequiredActionToAll(action: string): Promise<number> {
+    const res = await this.adminFetch('/users?max=100000&briefRepresentation=false');
+    if (!res.ok) return 0;
+    const users = (await res.json()) as { id: string; username: string; requiredActions?: string[] }[];
+    let n = 0;
+    for (const u of users) {
+      if (u.username.startsWith('service-account-') || u.requiredActions?.includes(action)) continue;
+      const put = await this.adminFetch(`/users/${u.id}`, { method: 'PUT', body: JSON.stringify({ requiredActions: [...(u.requiredActions ?? []), action] }) });
+      if (put.ok) n++;
+    }
+    return n;
+  }
+
   /** Active sign-in sessions of a user (browser logins). */
   async listUserSessions(keycloakUserId: string): Promise<KeycloakSession[]> {
     const token = await this.getAdminAccessToken();

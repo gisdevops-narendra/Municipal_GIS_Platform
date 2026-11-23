@@ -9,12 +9,13 @@
   <nav class="gis-ws__bar" aria-label="GIS tools">
     @if (openMenu()) { <div class="gis-ws__bar-backdrop" (click)="closeMenu()" aria-hidden="true"></div> }
 
-    <a routerLink="/" class="gis-ws__brand" aria-label="Municipal GIS Platform — home" pTooltip="Home" tooltipPosition="bottom">
+    <a routerLink="/" class="gis-ws__brand" [attr.aria-label]="platform.branding().platformName + ' — home'" [pTooltip]="platform.branding().platformName" tooltipPosition="bottom">
+      @if (platform.logoUrl(); as logo) { <img class="gis-ws__brand-logo" [src]="logo" alt="" /> } @else {
       <svg width="16" height="16" viewBox="0 0 22 22" fill="none" aria-hidden="true">
         <path d="M11 1L20.5 6.5V15.5L11 21L1.5 15.5V6.5L11 1Z" stroke="currentColor" stroke-width="1.6" />
         <path d="M11 1V21" stroke="currentColor" stroke-width="1.1" stroke-dasharray="1.6 2.2" />
         <path d="M1.5 6.5L20.5 15.5" stroke="currentColor" stroke-width="1.1" stroke-dasharray="1.6 2.2" />
-      </svg>
+      </svg> }
     </a>
 
     <button type="button" class="gis-ws__bar-btn gis-ws__bar-upload" aria-label="Upload Data" pTooltip="Upload GIS data" tooltipPosition="bottom" (click)="openUpload()">

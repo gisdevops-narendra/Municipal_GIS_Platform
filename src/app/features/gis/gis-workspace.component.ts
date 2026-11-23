@@ -1,3 +1,4 @@
+import { PlatformService } from '../../core/services/platform.service';
 import { AnalysisReportComponent } from './components/analysis-report/analysis-report.component';
 import { NotificationService } from '../../core/services/notification.service';
 import { RasterService } from './services/raster.service';
@@ -471,7 +472,12 @@ export class GisWorkspaceComponent {
   // no Module Access to (see hasModuleAccess) never appear on the rail.
 
   // ----- rail menus -----
-  private readonly visibleToolList = computed(() => TOOLS.filter((t) => t.available && this.hasModuleAccess(t)));
+  // Tools switched off in Admin → Modules (for everyone or this account) are hidden.
+  readonly platform = inject(PlatformService);
+  private readonly visibleToolList = computed(() => {
+    const off = this.platform.disabledTools();
+    return TOOLS.filter((t) => t.available && this.hasModuleAccess(t) && !off.has(t.id));
+  });
   readonly primaryTools = computed(() =>
     PRIMARY_TOOL_IDS.map((id) => this.visibleToolList().find((t) => t.id === id)).filter((t): t is WsTool => !!t)
   );
@@ -805,6 +811,7 @@ export class GisWorkspaceComponent {
   });
 
   constructor() {
+    this.platform.loadMyModules();
     // Add Service: outside layers saved in this browser come back, and
     // every change is saved again. WFS goes via the API proxy when CORS
     // blocks it.
@@ -994,6 +1001,7 @@ export class GisWorkspaceComponent {
   // ----- dock actions -----
   activateTool(tool: WsTool): void {
     this.rememberRecent(tool.id);
+    this.platform.trackTool(tool.id);
     if (tool.id === 'layers' && this.layersDock() === 'right') {
       this.rightOpen.update((v) => !v);
       this.refreshMapSize();

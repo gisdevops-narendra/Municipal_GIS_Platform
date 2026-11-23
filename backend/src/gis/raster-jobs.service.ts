@@ -266,6 +266,28 @@ export class RasterJobsService implements OnModuleInit, OnModuleDestroy {
       .map((j) => this.view(j));
   }
 
+  /** Admin → Jobs: every queued / running job of every account. */
+  adminList() {
+    return [...this.jobs.values()]
+      .filter((j) => j.status === 'queued' || j.status === 'running')
+      .map((j) => ({ ...this.view(j), userId: j.userId, municipalityId: j.municipalityId }));
+  }
+
+  /** Admin → Jobs: cancel any job. */
+  adminCancel(id: string) {
+    const job = this.jobs.get(id);
+    if (!job) throw new NotFoundException('Job not found.');
+    if (job.status === 'queued') {
+      this.queue.splice(this.queue.indexOf(job), 1);
+      this.finish(job, 'cancelled', null, null);
+    } else if (job.status === 'running') {
+      if (!job.cancellable) throw new ConflictException('The result is already being published — it can no longer be cancelled.');
+      job.abort.abort();
+      job.stage = 'Cancelling…';
+    }
+    return this.view(job);
+  }
+
   cancel(appUser: AppUser, id: string) {
     const job = this.owned(appUser, id);
     if (job.status === 'queued') {

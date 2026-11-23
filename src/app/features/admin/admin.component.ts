@@ -1,5 +1,15 @@
 import { FormsModule } from '@angular/forms';
-import { Component, HostListener, computed, inject, signal } from '@angular/core';
+import { AdminUsersComponent } from './sections/users-section.component';
+import { AdminHealthComponent, AdminIntegrityComponent, AdminJobsComponent, AdminLogsComponent } from './sections/system-sections.component';
+import {
+  AdminAnalyticsComponent,
+  AdminBrandingComponent,
+  AdminEmailComponent,
+  AdminModulesComponent,
+  AdminNoticesComponent,
+  AdminSecurityComponent
+} from './sections/settings-sections.component';
+import { Component, HostListener, ViewEncapsulation, computed, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe, JsonPipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
 import { ButtonModule } from 'primeng/button';
@@ -11,7 +21,9 @@ import { SettingsService } from '../../core/services/settings.service';
 import { ThemeService } from '../../core/theme/theme.service';
 import { ActiveSession, AdminAccount, AdminService, AdminStats, AdminUser, AuditEntry, BackupList, RetentionSettings, StorageReport } from '../../core/services/admin.service';
 
-type View = 'overview' | 'accounts' | 'activity' | 'sessions' | 'backups' | 'storage';
+type View =
+  | 'overview' | 'accounts' | 'activity' | 'sessions' | 'backups' | 'storage'
+  | 'users' | 'health' | 'jobs' | 'logs' | 'security' | 'email' | 'branding' | 'notices' | 'modules' | 'analytics' | 'integrity';
 type StatusFilter = 'all' | 'active' | 'disabled' | 'near-limit';
 const MB = 1024 * 1024;
 
@@ -61,7 +73,13 @@ const ACTIONS: Record<string, ActionMeta> = {
 @Component({
   selector: 'app-admin',
   standalone: true,
-  imports: [ButtonModule, DatePipe, DecimalPipe, JsonPipe, FormsModule],
+  imports: [
+    ButtonModule, DatePipe, DecimalPipe, JsonPipe, FormsModule,
+    AdminUsersComponent, AdminHealthComponent, AdminJobsComponent, AdminLogsComponent, AdminIntegrityComponent,
+    AdminSecurityComponent, AdminEmailComponent, AdminBrandingComponent, AdminNoticesComponent, AdminModulesComponent, AdminAnalyticsComponent
+  ],
+  // Admin styles (all prefixed "ac__") are shared with the section components.
+  encapsulation: ViewEncapsulation.None,
   templateUrl: './admin.component.html',
   styleUrl: './admin.component.scss',
 })
@@ -159,7 +177,7 @@ export class AdminComponent {
     else if (view === 'sessions') this.loadSessions();
     else if (view === 'backups') this.loadBackups();
     else if (view === 'storage') this.loadStorage();
-    else this.loadAudit();
+    else if (view === 'activity') this.loadAudit();
   }
 
   // ===== sessions =====

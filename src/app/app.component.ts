@@ -1,3 +1,4 @@
+import { PlatformBannerComponent } from './shared/components/platform-banner/platform-banner.component';
 import { Component, computed, effect, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { Toast } from 'primeng/toast';
@@ -23,7 +24,7 @@ import { SettingsDialogComponent } from './features/settings/settings-dialog.com
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Toast, ConfirmDialog, Dialog, SettingsDialogComponent],
+  imports: [PlatformBannerComponent, RouterOutlet, Toast, ConfirmDialog, Dialog, SettingsDialogComponent],
   templateUrl: './app.component.html',
   styleUrl: './app.component.scss'
 })

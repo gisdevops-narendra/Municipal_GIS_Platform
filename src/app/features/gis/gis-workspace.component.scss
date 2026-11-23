@@ -1747,3 +1747,10 @@
     gap: 0;
   }
 }
+
+/* Uploaded logo (Admin → Branding) in the toolbar brand button. */
+.gis-ws__brand-logo {
+  max-width: 28px;
+  max-height: 28px;
+  object-fit: contain;
+}

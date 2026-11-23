@@ -4,7 +4,9 @@
   <div class="page-container auth-shell__inner">
     <div class="auth-card survey-panel">
       <span class="eyebrow">Sign in</span>
-      <h1 class="auth-card__heading">Sign in to your Municipal GIS</h1>
+      @if (platform.logoUrl(); as logo) { <img class="auth-card__logo" [src]="logo" alt="" /> }
+      <h1 class="auth-card__heading">Sign in to {{ platform.branding().platformName }}</h1>
+      @if (platform.branding().loginMessage) { <p class="auth-card__notice">{{ platform.branding().loginMessage }}</p> }
       <p class="auth-card__lede">
         You'll sign in on the secure sign-in page. Enter your email below to
         continue, or leave it blank.

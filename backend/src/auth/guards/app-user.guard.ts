@@ -1,12 +1,7 @@
-import {
-  ExecutionContext,
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { ExecutionContext, ForbiddenException, Injectable, NotFoundException, UnauthorizedException, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { CanActivate } from '@nestjs/common';
 import type { Request } from 'express';
+import { PlatformSettingsService } from '../../platform/platform-settings.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { KeycloakJwtPayload } from '../strategies/keycloak-jwt.strategy';
 import type { AppUser } from '../types/app-user.type';
@@ -32,7 +27,9 @@ export interface RequestWithAppUser extends Request {
  */
 @Injectable()
 export class AppUserGuard implements CanActivate {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService,
+    @Optional() private readonly platformSettings?: PlatformSettingsService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<RequestWithAppUser>();
@@ -56,6 +53,14 @@ export class AppUserGuard implements CanActivate {
       throw new ForbiddenException('This account has been deactivated.');
     }
 
+    // Maintenance mode (Admin → Announcements): only platform admins in.
+    if (this.platformSettings && !isPlatformAdmin(user)) {
+      const maintenance = await this.platformSettings.get('maintenance').catch(() => null);
+      if (maintenance?.enabled) throw new ServiceUnavailableException(maintenance.message || 'The platform is under maintenance.');
+    }
+
+    this.trackActivity(user.id);
+
     // Admin accounts are for platform administration only — no map
     // workspace, so every map / GIS endpoint is off limits to them.
     const path = (request as { originalUrl?: string; url?: string }).originalUrl ?? request.url ?? '';
@@ -75,5 +80,30 @@ export class AppUserGuard implements CanActivate {
     };
 
     return true;
+  }
+
+  /** Last sign-in (≤ every 5 min) and one activity row per user per day,
+   *  for Admin → Users / Analytics. Fire-and-forget. */
+  private readonly seen = new Map<string, number>();
+  private readonly activeToday = new Set<string>();
+  private today = '';
+
+  private trackActivity(userId: string): void {
+    const now = Date.now();
+    if (now - (this.seen.get(userId) ?? 0) > 5 * 60_000) {
+      this.seen.set(userId, now);
+      void this.prisma.user.update({ where: { id: userId }, data: { lastSeenAt: new Date(now) } }).catch(() => undefined);
+    }
+    const day = new Date(now).toISOString().slice(0, 10);
+    if (day !== this.today) {
+      this.today = day;
+      this.activeToday.clear();
+    }
+    if (!this.activeToday.has(userId)) {
+      this.activeToday.add(userId);
+      void this.prisma.userActivityDay
+        .upsert({ where: { day_userId: { day: new Date(day), userId } }, create: { day: new Date(day), userId }, update: {} })
+        .catch(() => undefined);
+    }
   }
 }

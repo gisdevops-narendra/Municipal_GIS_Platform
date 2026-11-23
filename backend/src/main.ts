@@ -1,3 +1,4 @@
+import { BufferedLogger } from './platform/log-buffer';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -12,7 +13,8 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 };
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // BufferedLogger keeps recent warnings / errors for Admin → Logs.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { logger: new BufferedLogger() });
   // Default is 100 KB; pasted SLD styles (PUT layers/:id/style/sld) can be
   // a few MB.
   app.useBodyParser('json', { limit: '6mb' });

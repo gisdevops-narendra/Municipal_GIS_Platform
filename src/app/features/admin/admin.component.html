@@ -22,21 +22,58 @@
       <button type="button" class="ac__nav-item" [class.is-active]="view() === 'overview'" (click)="go('overview')">
         <i class="pi pi-th-large" aria-hidden="true"></i> Overview
       </button>
-      <button type="button" class="ac__nav-item" [class.is-active]="view() === 'accounts'" (click)="go('accounts')">
-        <i class="pi pi-users" aria-hidden="true"></i> Accounts
-        @if (stats(); as s) { <span class="ac__nav-count">{{ s.accounts }}</span> }
+      <button type="button" class="ac__nav-item" [class.is-active]="view() === 'analytics'" (click)="go('analytics')">
+        <i class="pi pi-chart-line" aria-hidden="true"></i> Analytics
       </button>
       <button type="button" class="ac__nav-item" [class.is-active]="view() === 'activity'" (click)="go('activity')">
         <i class="pi pi-history" aria-hidden="true"></i> Activity
       </button>
+      <span class="ac__nav-group">People</span>
+      <button type="button" class="ac__nav-item" [class.is-active]="view() === 'accounts'" (click)="go('accounts')">
+        <i class="pi pi-briefcase" aria-hidden="true"></i> Accounts
+        @if (stats(); as s) { <span class="ac__nav-count">{{ s.accounts }}</span> }
+      </button>
+      <button type="button" class="ac__nav-item" [class.is-active]="view() === 'users'" (click)="go('users')">
+        <i class="pi pi-users" aria-hidden="true"></i> Users
+      </button>
       <button type="button" class="ac__nav-item" [class.is-active]="view() === 'sessions'" (click)="go('sessions')">
         <i class="pi pi-desktop" aria-hidden="true"></i> Sessions
       </button>
+      <span class="ac__nav-group">System</span>
+      <button type="button" class="ac__nav-item" [class.is-active]="view() === 'health'" (click)="go('health')">
+        <i class="pi pi-heart" aria-hidden="true"></i> Health
+      </button>
+      <button type="button" class="ac__nav-item" [class.is-active]="view() === 'jobs'" (click)="go('jobs')">
+        <i class="pi pi-cog" aria-hidden="true"></i> Jobs
+      </button>
+      <button type="button" class="ac__nav-item" [class.is-active]="view() === 'logs'" (click)="go('logs')">
+        <i class="pi pi-list" aria-hidden="true"></i> Logs
+      </button>
+      <button type="button" class="ac__nav-item" [class.is-active]="view() === 'integrity'" (click)="go('integrity')">
+        <i class="pi pi-check-square" aria-hidden="true"></i> Data check
+      </button>
+      <span class="ac__nav-group">Data</span>
       <button type="button" class="ac__nav-item" [class.is-active]="view() === 'backups'" (click)="go('backups')">
         <i class="pi pi-save" aria-hidden="true"></i> Backups
       </button>
       <button type="button" class="ac__nav-item" [class.is-active]="view() === 'storage'" (click)="go('storage')">
         <i class="pi pi-database" aria-hidden="true"></i> Storage
+      </button>
+      <span class="ac__nav-group">Settings</span>
+      <button type="button" class="ac__nav-item" [class.is-active]="view() === 'security'" (click)="go('security')">
+        <i class="pi pi-shield" aria-hidden="true"></i> Security
+      </button>
+      <button type="button" class="ac__nav-item" [class.is-active]="view() === 'email'" (click)="go('email')">
+        <i class="pi pi-envelope" aria-hidden="true"></i> Email
+      </button>
+      <button type="button" class="ac__nav-item" [class.is-active]="view() === 'branding'" (click)="go('branding')">
+        <i class="pi pi-palette" aria-hidden="true"></i> Branding
+      </button>
+      <button type="button" class="ac__nav-item" [class.is-active]="view() === 'notices'" (click)="go('notices')">
+        <i class="pi pi-megaphone" aria-hidden="true"></i> Announcements
+      </button>
+      <button type="button" class="ac__nav-item" [class.is-active]="view() === 'modules'" (click)="go('modules')">
+        <i class="pi pi-th-large" aria-hidden="true"></i> Modules
       </button>
     </nav>
 
@@ -284,6 +321,20 @@
           <button type="button" class="ac__icon-btn" [disabled]="auditPage() >= auditPages()" (click)="auditGo(auditPage() + 1)" aria-label="Next page"><i class="pi pi-chevron-right"></i></button>
         </div>
       }
+    }
+
+    @switch (view()) {
+      @case ('users') { <app-admin-users /> }
+      @case ('health') { <app-admin-health /> }
+      @case ('jobs') { <app-admin-jobs /> }
+      @case ('logs') { <app-admin-logs /> }
+      @case ('integrity') { <app-admin-integrity /> }
+      @case ('security') { <app-admin-security /> }
+      @case ('email') { <app-admin-email /> }
+      @case ('branding') { <app-admin-branding /> }
+      @case ('notices') { <app-admin-notices /> }
+      @case ('modules') { <app-admin-modules /> }
+      @case ('analytics') { <app-admin-analytics /> }
     }
 
     <!-- ---------- sessions ---------- -->

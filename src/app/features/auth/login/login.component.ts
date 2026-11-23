@@ -1,3 +1,4 @@
+import { PlatformService } from '../../../core/services/platform.service';
 import { Component, OnInit, inject } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
@@ -31,6 +32,7 @@ import { AuthService } from '../../../core/services/auth.service';
   styleUrl: './login.component.scss'
 })
 export class LoginComponent implements OnInit {
+  readonly platform = inject(PlatformService);
   private readonly fb = inject(FormBuilder);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
