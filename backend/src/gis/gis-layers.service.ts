@@ -27,6 +27,13 @@ import type {
   LayerStyleSpecDto,
 } from './dto/layer-style.dto';
 import { CrsService } from './crs.service';
+import { GdalService } from './gdal.service';
+import { cqlToSql, type CqlColumn } from './cql-to-sql';
+import { FEAT_ID } from './ensure-feat-id.util';
+import AdmZip from 'adm-zip';
+import { mkdtemp, readdir, readFile } from 'fs/promises';
+import * as os from 'os';
+import { randomUUID } from 'crypto';
 import { TileArchiveService, type ArchiveSource } from './tile-archive.service';
 import { RENDER_MODES_BY_TYPE, type RenderMode } from './dto/render-mode.dto';
 
@@ -50,16 +57,6 @@ export type LayerExportFormat = keyof typeof LAYER_EXPORT_FORMATS;
  *  one child module per format (seed-modules.ts). */
 export const EXPORT_DATA_MODULE_ID = 226;
 export const EXPORT_FILTER_MODULE_ID = 1035;
-
-/** A selection (feature keys) as this layer's own WFS feature ids —
- *  built here, so featureID can never name another feature type. */
-export function selectionFeatureIds(geoserverLayer: string, fids: number[]): string[] {
-  const unique = [...new Set(fids)];
-  if (unique.length === 0) {
-    throw new BadRequestException('Select at least one feature.');
-  }
-  return unique.map((fid) => `${geoserverLayer}.${fid}`);
-}
 
 /** Module Access catalog id for the Heatmap & Clusters tool. */
 export const HEATMAP_MODULE_ID = 1036;
@@ -141,6 +138,7 @@ export class GisLayersService {
     @Optional() private readonly uploadSchema?: UploadSchemaService,
     @Optional() private readonly audit?: AuditService,
     @Optional() private readonly tileArchive?: TileArchiveService,
+    @Optional() private readonly gdal?: GdalService,
   ) {
     // A raster archive holds the styled rendering: restyle -> rebuild.
     this.geoServer.onStyleChanged?.((workspace, geoserverLayer) => {
@@ -287,19 +285,16 @@ export class GisLayersService {
     return this.toResponse(layer, appUser.municipalityId);
   }
 
-  /** Task 8 §3/§9: server-side export, gated by EXPORT permission — the
-   *  backend fetches the GeoJSON from GeoServer's WFS itself and streams
-   *  it back, rather than handing the client a GeoServer URL to fetch
-   *  directly (which would bypass our own authorization check entirely,
-   *  since GeoServer's OGC endpoints are public/anonymous by this
-   *  platform's architecture — see docs/backend.md §23's "Known
-   *  limitation"). */
+  /** Layer export, gated by the EXPORT permission. Read straight from the
+   *  layer's PostGIS table (never GeoServer): the matching rows are copied
+   *  into a short-lived staging table — filter values bound as parameters —
+   *  which GDAL writes out as GeoJSON / CSV / Shapefile / KML. */
   async exportLayer(
     appUser: AppUser,
     layerId: string,
     format: LayerExportFormat = 'geojson',
     filter?: { field: string; op: string; value: string },
-    /** Export selected: feature keys of this layer (filter is ignored). */
+    /** Export selected: feat_ids of this layer (filter is ignored). */
     featureIds?: number[],
     /** Output CRS — any supported EPSG code; default the layer's own. */
     crs?: string,
@@ -313,38 +308,91 @@ export class GisLayersService {
         'You do not have permission to export this layer.',
       );
     }
-    const ids = featureIds
-      ? selectionFeatureIds(layer.geoserverLayer, featureIds)
-      : undefined;
-    if (ids) filter = undefined;
-    const base = layer.code.toLowerCase() + (ids ? '_selected' : '');
+    if (featureIds) {
+      featureIds = [...new Set(featureIds)];
+      if (featureIds.length === 0) throw new BadRequestException('Select at least one feature.');
+      filter = undefined;
+    }
+    const base = layer.code.toLowerCase() + (featureIds ? '_selected' : '');
     const cqlFilter = filter
       ? await this.exportFilterCql(layer, filter)
       : undefined;
-    const srsName = crs
-      ? (await this.crs?.require(crs, 'Export CRS'))?.code ?? crs.toUpperCase()
-      : undefined;
-    if (format === 'geojson') {
-      const geojson = await this.geoServer.getFeaturesAsGeoJson(
-        layer.geoserverWorkspace,
-        layer.geoserverLayer,
-        { cqlFilter, featureIds: ids, srsName },
-      );
-      return {
-        filename: `${base}.geojson`,
-        body: geojson,
-        contentType: 'application/geo+json',
-      };
-    }
     const spec: { outputFormat: string; extension: string; srsName?: string } =
       LAYER_EXPORT_FORMATS[format];
-    const { body, contentType } = await this.geoServer.getFeaturesInFormat(
-      layer.geoserverWorkspace,
-      layer.geoserverLayer,
-      spec.outputFormat,
-      { srsName: spec.srsName ?? srsName, cqlFilter, featureIds: ids },
-    );
-    return { filename: `${base}.${spec.extension}`, body, contentType };
+    const targetSrs = spec.srsName ??
+      (crs ? (await this.crs?.require(crs, 'Export CRS'))?.code ?? crs.toUpperCase() : undefined);
+
+    const { table, workspaceId } = this.styleSource(layer);
+    if (!table || layer.layerType !== 'VECTOR') {
+      throw new BadRequestException('Only vector layers can be exported.');
+    }
+    if (!this.gdal) throw new BadRequestException('Export is not available.');
+    const from =
+      workspaceId && /^[0-9a-f-]{36}$/.test(workspaceId)
+        ? `(SELECT * FROM "${table}" WHERE gis_workspace_id = '${workspaceId}')`
+        : `"${table}"`;
+
+    // WHERE clause: the export filter (translated + parameterised) or the
+    // selected feat_ids.
+    const params: unknown[] = [];
+    let where = '';
+    if (cqlFilter) {
+      const [cols, srid] = await Promise.all([
+        this.prisma.$queryRawUnsafe<{ column_name: string; data_type: string }[]>(
+          `SELECT column_name, data_type FROM information_schema.columns
+            WHERE table_schema = current_schema() AND table_name = $1`,
+          table,
+        ),
+        this.prisma.$queryRawUnsafe<{ srid: number }[]>(`SELECT Find_SRID(current_schema()::text, $1, 'geom') AS srid`, table),
+      ]);
+      const columns = new Map<string, CqlColumn>(cols.filter((c) => c.column_name !== 'geom').map((c) => [c.column_name, { type: c.data_type }]));
+      const f = cqlToSql(cqlFilter, { columns, geometryColumn: 'geom', srid: srid[0]?.srid || 4326, fidColumn: FEAT_ID, alias: 't' });
+      where = `WHERE ${f.sql}`;
+      params.push(...f.params);
+    } else if (featureIds) {
+      params.push(featureIds);
+      where = `WHERE t."${FEAT_ID}" = ANY($1::bigint[])`;
+    }
+
+    const staging = `export_${randomUUID().replace(/-/g, '')}`;
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'export-'));
+    try {
+      await this.prisma.$executeRawUnsafe(
+        `CREATE UNLOGGED TABLE "${staging}" AS
+           SELECT t.* FROM ${from} t ${where} ORDER BY t."${FEAT_ID}"`,
+        ...params,
+      );
+      // Internal tenant column — not part of the user's data.
+      await this.prisma.$executeRawUnsafe(`ALTER TABLE "${staging}" DROP COLUMN IF EXISTS gis_workspace_id`);
+
+      const driver = ({ geojson: 'GeoJSON', csv: 'CSV', shapefile: 'ESRI Shapefile', kml: 'KML' } as const)[format];
+      const out = path.join(dir, format === 'shapefile' ? 'shp' : `${base}.${spec.extension}`);
+      await this.gdal.exportTable({
+        connection: {
+          host: this.config.getOrThrow<string>('POSTGIS_HOST'),
+          port: this.config.getOrThrow<string>('POSTGIS_PORT'),
+          database: this.config.getOrThrow<string>('POSTGIS_DATABASE'),
+          user: this.config.getOrThrow<string>('POSTGIS_USER'),
+          password: this.config.getOrThrow<string>('POSTGIS_PASSWORD'),
+        },
+        table: staging,
+        driver,
+        outPath: out,
+        layerName: base,
+        targetSrs,
+      });
+
+      if (format === 'shapefile') {
+        const zip = new AdmZip();
+        for (const name of await readdir(out)) zip.addLocalFile(path.join(out, name));
+        return { filename: `${base}.zip`, body: zip.toBuffer(), contentType: 'application/zip' };
+      }
+      const contentType = { geojson: 'application/geo+json', csv: 'text/csv; charset=utf-8', kml: 'application/vnd.google-earth.kml+xml' }[format];
+      return { filename: `${base}.${spec.extension}`, body: await readFile(out), contentType };
+    } finally {
+      await this.prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS "${staging}"`).catch(() => undefined);
+      await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 
   /** "Export with filter": ECQL built here from a known field, a whitelisted
@@ -390,7 +438,7 @@ export class GisLayersService {
       case '<':
         return `${f} < ${lit}`;
       case 'contains':
-        return `strToLowerCase(${f}) LIKE '%${value.toLowerCase().replace(/'/g, "''").replace(/%/g, '')}%'`;
+        return `${f} ILIKE '%${value.replace(/'/g, "''").replace(/[%_]/g, '')}%'`;
       case 'empty':
         return `${f} IS NULL`;
       case 'notempty':

@@ -1,6 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { GeoServerService } from './geoserver.service';
 import { GisAuthorizationService } from './gis-authorization.service';
 import { AiClientService } from '../gis-ai/ai-client.service';
 import { FuzzySearchService } from './fuzzy-search.service';
@@ -38,18 +37,7 @@ export interface SearchFeatureMatch {
  *  unnecessarily", "keep the map responsive"). Layer-name matching itself
  *  is unbounded (cheap, in-memory over metadata only). */
 const MAX_LAYERS_SEARCHED_FOR_FEATURES = 40;
-/** Matches per layer — GeoServer filters server-side, so these are hits. */
-const MAX_FEATURES_FETCHED_PER_LAYER = 10;
-/** Text fields matched per layer (ILIKE OR-chain kept bounded). */
-const MAX_SEARCH_ATTRIBUTES = 12;
-/** Text fields nobody searches by (ids, codes, flags, measures) — skipped
- *  so the ILIKE scan stays fast on large layers. Name-like fields first. */
-const NON_SEARCH_ATTRIBUTE =
-  /(^|_)(id|fid|gid|uid|code|cd|status|sta|year|area|length|leng|shape|summer|month)(_|$)|^objectid|code$|_\d+$/i;
-/** Text attributes per GeoServer layer; reset when the schema may change. */
-const ATTRIBUTE_CACHE_MS = 10 * 60 * 1000;
 const MAX_FEATURE_MATCHES_RETURNED = 25;
-const SEARCH_TIMEOUT_MS = 8000;
 /** Shorter queries embed to noise ("ro", "wa"). */
 const MIN_SEMANTIC_QUERY = 3;
 const MAX_LAYER_MATCHES = 15;
@@ -65,15 +53,8 @@ const MAX_LAYER_MATCHES = 15;
  */
 @Injectable()
 export class GisDashboardService {
-  private readonly logger = new Logger(GisDashboardService.name);
-  private readonly attributeCache = new Map<
-    string,
-    { at: number; names: Promise<string[]> }
-  >();
-
   constructor(
     private readonly prisma: PrismaService,
-    private readonly geoServer: GeoServerService,
     private readonly gisAuth: GisAuthorizationService,
     private readonly ai: AiClientService,
     private readonly fuzzySearch: FuzzySearchService,
@@ -135,20 +116,17 @@ export class GisDashboardService {
       .filter((l) => l.layerType === 'VECTOR')
       .slice(0, MAX_LAYERS_SEARCHED_FOR_FEATURES);
 
-    // Uploaded layers: fuzzy, ranked search in PostGIS (pg_trgm). Any layer
-    // without its own table falls back to GeoServer's substring filter.
+    // Feature values: fuzzy, ranked search straight in PostGIS (pg_trgm).
+    // Every vector layer has its own table (uploads, external databases and
+    // analysis outputs are all stored there) — GeoServer is never asked.
     const tableLayers = searchableLayers.filter(
       (l): l is typeof l & { postgisTable: string } => !!l.postgisTable,
     );
-    const otherLayers = searchableLayers.filter((l) => !l.postgisTable);
 
     // Semantic hits run alongside the feature search; the AI service being
     // down just means name matches only (searchLayers never throws).
-    const [fuzzyResults, featureResults, semanticHits] = await Promise.all([
+    const [fuzzyResults, semanticHits] = await Promise.all([
       this.fuzzySearch.search(tableLayers, query, MAX_FEATURE_MATCHES_RETURNED),
-      Promise.all(
-        otherLayers.map((layer) => this.searchLayerFeatures(layer, q)),
-      ),
       q.length >= MIN_SEMANTIC_QUERY
         ? this.ai.searchLayers(appUser.municipalityId, query.trim())
         : Promise.resolve([]),
@@ -162,105 +140,9 @@ export class GisDashboardService {
       layerMatches.push(toMatch(layer, 'semantic', hit.field));
     }
 
-    const features: SearchFeatureMatch[] = [
-      ...fuzzyResults.map(({ score: _score, ...hit }) => hit),
-      ...featureResults.flat(),
-    ].slice(0, MAX_FEATURE_MATCHES_RETURNED);
+    const features: SearchFeatureMatch[] = fuzzyResults
+      .map(({ score: _score, ...hit }) => hit)
+      .slice(0, MAX_FEATURE_MATCHES_RETURNED);
     return { layers: layerMatches, features };
-  }
-
-  /** A layer's text attributes (cached briefly; failures are not cached). */
-  private searchAttributes(layer: {
-    geoserverWorkspace: string;
-    geoserverLayer: string;
-  }): Promise<string[]> {
-    const key = `${layer.geoserverWorkspace}:${layer.geoserverLayer}`;
-    const hit = this.attributeCache.get(key);
-    if (hit && Date.now() - hit.at < ATTRIBUTE_CACHE_MS) return hit.names;
-    const names = this.geoServer
-      .stringAttributes(layer.geoserverWorkspace, layer.geoserverLayer, SEARCH_TIMEOUT_MS)
-      .then((all) => {
-        const useful = all.filter((name) => !NON_SEARCH_ATTRIBUTE.test(name));
-        return (useful.length ? useful : all)
-          .sort((a, b) => Number(!/name/i.test(a)) - Number(!/name/i.test(b)))
-          .slice(0, MAX_SEARCH_ATTRIBUTES);
-      });
-    names.catch(() => this.attributeCache.delete(key));
-    this.attributeCache.set(key, { at: Date.now(), names });
-    return names;
-  }
-
-  private async searchLayerFeatures(
-    layer: {
-      id: string;
-      name: string;
-      code: string;
-      geoserverWorkspace: string;
-      geoserverLayer: string;
-    },
-    query: string,
-  ): Promise<SearchFeatureMatch[]> {
-    try {
-      // Filter in GeoServer (ILIKE over every text field) so a match
-      // anywhere in the layer is found — not just in its first N rows.
-      const attributes = await this.searchAttributes(layer);
-      if (!attributes.length) return [];
-      const pattern = `'%${query.replace(/[%_\\]/g, '').replace(/'/g, "''")}%'`;
-      const cqlFilter = attributes
-        .map((a) => `"${a.replace(/"/g, '""')}" ILIKE ${pattern}`)
-        .join(' OR ');
-      const geojson = await this.geoServer.getFeaturesAsGeoJson(
-        layer.geoserverWorkspace,
-        layer.geoserverLayer,
-        {
-          maxFeatures: MAX_FEATURES_FETCHED_PER_LAYER,
-          timeoutMs: SEARCH_TIMEOUT_MS,
-          cqlFilter,
-          // Bbox must be EPSG:4326 to match GisLayer.bbox's own
-          // convention and MapService.zoomToBbox4326 on the frontend —
-          // never assume GeoServer's native/storage CRS.
-          srsName: 'EPSG:4326',
-        },
-      );
-      const parsed = JSON.parse(geojson) as {
-        features?: {
-          properties?: Record<string, unknown>;
-          geometry?: Record<string, unknown> | null;
-          bbox?: [number, number, number, number];
-        }[];
-      };
-      const matches: SearchFeatureMatch[] = [];
-      for (const feature of parsed.features ?? []) {
-        const properties = feature.properties ?? {};
-        const matchesQuery = Object.values(properties).some((value) => {
-          if (value == null) return false;
-          const text =
-            typeof value === 'string' ||
-            typeof value === 'number' ||
-            typeof value === 'boolean'
-              ? String(value)
-              : JSON.stringify(value);
-          return text.toLowerCase().includes(query);
-        });
-        if (matchesQuery) {
-          matches.push({
-            layerId: layer.id,
-            layerName: layer.name,
-            layerCode: layer.code,
-            attributes: properties,
-            bbox: feature.bbox ?? null,
-            geometry: feature.geometry ?? null,
-          });
-        }
-      }
-      return matches;
-    } catch (error) {
-      // A single layer failing to search (GeoServer hiccup, timeout) must
-      // never fail the whole search — same tolerance as GetFeatureInfo.
-      this.logger.warn(
-        `Search failed for layer "${layer.code}": ${(error as Error).message}`,
-      );
-      return [];
-    }
   }
 }

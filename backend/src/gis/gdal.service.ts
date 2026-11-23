@@ -209,6 +209,27 @@ export class GdalService {
     await this.run('ogr2ogr', args, minutes * 60_000);
   }
 
+  /** Writes one PostGIS table to a file with ogr2ogr (layer export):
+   *  GeoJSON, CSV (geometry as WKT), KML or an ESRI Shapefile set. Returns
+   *  the written path (a directory for shapefiles). */
+  async exportTable(params: {
+    connection: PostgisConnectionParams;
+    table: string;
+    driver: 'GeoJSON' | 'CSV' | 'KML' | 'ESRI Shapefile';
+    outPath: string;
+    layerName: string;
+    targetSrs?: string;
+  }): Promise<void> {
+    const args = ['-f', params.driver, params.outPath, this.buildPgConnectionString(params.connection), params.table];
+    args.push('-nln', params.layerName);
+    if (params.targetSrs) args.push('-t_srs', params.targetSrs);
+    if (params.driver === 'CSV') args.push('-lco', 'GEOMETRY=AS_WKT');
+    if (params.driver === 'GeoJSON') args.push('-lco', 'COORDINATE_PRECISION=7', '-lco', 'WRITE_BBOX=YES');
+    if (params.driver === 'ESRI Shapefile') args.push('-lco', 'ENCODING=UTF-8');
+    const minutes = Number(process.env.GIS_IMPORT_TIMEOUT_MINUTES) || 120;
+    await this.run('ogr2ogr', args, minutes * 60_000);
+  }
+
   private async run(
     command: 'ogrinfo' | 'ogr2ogr' | 'gdalsrsinfo',
     args: string[],

@@ -2,7 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import { LayerReportService } from './layer-report.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { GisLayersService } from './gis-layers.service';
-import type { GeoServerService } from './geoserver.service';
+import type { LayerRecordsService } from './layer-records.service';
 import type { AppUser } from '../auth/types/app-user.type';
 
 const OWNER: AppUser = {
@@ -37,10 +37,8 @@ function build(
       ],
     }),
   };
-  const geoServer = {
-    getFeatureCollection: jest
-      .fn()
-      .mockResolvedValue({ features, numberMatched }),
+  const records = {
+    query: jest.fn().mockResolvedValue({ features, numberMatched }),
   };
   const prisma = {
     user: {
@@ -53,19 +51,19 @@ function build(
   const service = new LayerReportService(
     prisma as unknown as PrismaService,
     gisLayers as unknown as GisLayersService,
-    geoServer as unknown as GeoServerService,
+    records as unknown as LayerRecordsService,
   );
-  return { service, geoServer, gisLayers };
+  return { service, records, gisLayers };
 }
 
 const ROWS = [
-  { id: 'valves.1', properties: { valve_id: 'VLV-1', valve_dia: 100 } },
-  { id: 'valves.2', properties: { valve_id: 'VLV-2', valve_dia: 150 } },
+  { id: 'valves.1', properties: { feat_id: 1, valve_id: 'VLV-1', valve_dia: 100, secret_note: 'x' } },
+  { id: 'valves.2', properties: { feat_id: 2, valve_id: 'VLV-2', valve_dia: 150, secret_note: 'y' } },
 ];
 
 describe('LayerReportService', () => {
   it('builds a PDF for the whole layer with only the requested columns', async () => {
-    const { service, geoServer } = build(ROWS);
+    const { service, records } = build(ROWS);
 
     const result = await service.buildReport(OWNER, 'layer-1', {
       fields: ['valve_id', 'valve_dia'],
@@ -74,20 +72,16 @@ describe('LayerReportService', () => {
 
     expect(result.body.subarray(0, 5).toString()).toBe('%PDF-');
     expect(result.filename).toMatch(/^valves-report-\d{8}\.pdf$/);
-    expect(geoServer.getFeatureCollection).toHaveBeenCalledWith(
-      'somnath_municipality',
-      'valves',
-      expect.objectContaining({
-        propertyNames: ['valve_id', 'valve_dia'],
-        cqlFilter: undefined,
-        featureIds: undefined,
-        count: 5000,
-      }),
+    // Read from the database (records), never GeoServer.
+    expect(records.query).toHaveBeenCalledWith(
+      OWNER,
+      'layer-1',
+      expect.objectContaining({ filter: undefined, featureIds: undefined, limit: 5000, geometry: false }),
     );
   });
 
   it('rejects a column that is not an attribute of the layer', async () => {
-    const { service, geoServer } = build(ROWS);
+    const { service, records } = build(ROWS);
 
     await expect(
       service.buildReport(OWNER, 'layer-1', {
@@ -95,43 +89,37 @@ describe('LayerReportService', () => {
         scope: 'layer',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
-    expect(geoServer.getFeatureCollection).not.toHaveBeenCalled();
+    expect(records.query).not.toHaveBeenCalled();
   });
 
-  it('passes a safe query filter through and refuses a cross-layer one', async () => {
-    const { service, geoServer } = build(ROWS);
+  it('passes the query filter to the database records query', async () => {
+    const { service, records } = build(ROWS);
 
     await service.buildReport(OWNER, 'layer-1', {
       fields: ['valve_id'],
       scope: 'query',
       cqlFilter: `"valve_dia" > 100`,
     });
-    expect(geoServer.getFeatureCollection).toHaveBeenCalledWith(
-      'somnath_municipality',
-      'valves',
-      expect.objectContaining({ cqlFilter: `"valve_dia" > 100` }),
+    // (unsafe / unknown filters are refused by the CQL→SQL translator —
+    //  see cql-to-sql.spec.ts)
+    expect(records.query).toHaveBeenCalledWith(
+      OWNER,
+      'layer-1',
+      expect.objectContaining({ filter: `"valve_dia" > 100` }),
     );
-
-    await expect(
-      service.buildReport(OWNER, 'layer-1', {
-        fields: ['valve_id'],
-        scope: 'query',
-        cqlFilter: `"a" = querySingle('ws:secret', 'name', 'INCLUDE')`,
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it("only accepts selected ids that belong to this layer's feature type", async () => {
-    const { service, geoServer } = build(ROWS);
+    const { service, records } = build(ROWS);
 
     await service.buildReport(OWNER, 'layer-1', {
       fields: ['valve_id'],
       scope: 'selection',
       featureIds: ['valves.1', 'valves.2'],
     });
-    expect(geoServer.getFeatureCollection).toHaveBeenCalledWith(
-      'somnath_municipality',
-      'valves',
+    expect(records.query).toHaveBeenCalledWith(
+      OWNER,
+      'layer-1',
       expect.objectContaining({ featureIds: ['valves.1', 'valves.2'] }),
     );
 

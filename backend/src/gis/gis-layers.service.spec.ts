@@ -1,5 +1,6 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import * as fs from 'fs/promises';
 import { GisLayersService } from './gis-layers.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { GeoServerService } from './geoserver.service';
@@ -314,119 +315,117 @@ describe('GisLayersService', () => {
     });
   });
 
-  describe('exportLayer (Task 8 EXPORT permission)', () => {
-    it('403s when the caller lacks EXPORT permission', async () => {
-      prisma.gISWorkspace.findUnique.mockResolvedValue({ id: 'ws-a' });
-      prisma.gISLayer.findFirst.mockResolvedValue({
-        id: 'layer-1',
-        code: 'ROADS',
-        geoserverWorkspace: 'somnath_municipality',
-        geoserverLayer: 'roads',
-        ownershipType: 'DEPARTMENT',
-      });
-      gisAuth.canExport.mockResolvedValue(false);
+  describe('exportLayer (from PostGIS, EXPORT permission)', () => {
+    const TABLE = `layer_${'b'.repeat(32)}`;
+    const roads = {
+      id: 'layer-1',
+      code: 'ROADS',
+      layerType: 'VECTOR',
+      geoserverWorkspace: 'somnath_municipality',
+      geoserverLayer: 'roads',
+      ownershipType: 'DEPARTMENT',
+      postgisTable: TABLE,
+    };
+    let gdal: { exportTable: jest.Mock };
+    let sql: string[];
+    let exporter: GisLayersService;
 
-      await expect(
-        service.exportLayer(appUser('muni-a'), 'layer-1'),
-      ).rejects.toBeInstanceOf(ForbiddenException);
-      expect(geoServer.getFeaturesAsGeoJson).not.toHaveBeenCalled();
+    beforeEach(() => {
+      sql = [];
+      prisma.gISWorkspace.findUnique.mockResolvedValue({ id: 'ws-a' });
+      prisma.gISLayer.findFirst.mockResolvedValue(roads);
+      const db = prisma as unknown as Record<string, jest.Mock>;
+      db.$executeRawUnsafe = jest.fn((q: string) => {
+        sql.push(q);
+        return Promise.resolve(0);
+      });
+      db.$queryRawUnsafe = jest.fn((q: string) =>
+        Promise.resolve(
+          q.includes('Find_SRID')
+            ? [{ srid: 32643 }]
+            : [
+                { column_name: 'feat_id', data_type: 'integer' },
+                { column_name: 'name', data_type: 'character varying' },
+                { column_name: 'geom', data_type: 'USER-DEFINED' },
+              ],
+        ),
+      );
+      // Fake GDAL: writes a file (or a shapefile set) where asked.
+      gdal = {
+        exportTable: jest.fn(async (p: { outPath: string; driver: string }) => {
+          if (p.driver === 'ESRI Shapefile') {
+            await fs.mkdir(p.outPath, { recursive: true });
+            for (const ext of ['shp', 'dbf', 'shx', 'prj']) await fs.writeFile(`${p.outPath}/roads.${ext}`, ext);
+          } else {
+            await fs.writeFile(p.outPath, p.driver === 'KML' ? '<kml/>' : '{"type":"FeatureCollection","features":[]}');
+          }
+        }),
+      };
+      exporter = new GisLayersService(
+        prisma as unknown as PrismaService,
+        geoServer as unknown as GeoServerService,
+        gisAuth as unknown as GisAuthorizationService,
+        { get: jest.fn(), getOrThrow: jest.fn().mockReturnValue('x') } as unknown as ConfigService,
+        storage as unknown as StorageService,
+        styleService as never,
+        fieldStats as never,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        gdal as never,
+      );
     });
 
-    it('fetches GeoJSON from GeoServer server-side when authorized', async () => {
-      prisma.gISWorkspace.findUnique.mockResolvedValue({ id: 'ws-a' });
-      prisma.gISLayer.findFirst.mockResolvedValue({
-        id: 'layer-1',
-        code: 'ROADS',
-        geoserverWorkspace: 'somnath_municipality',
-        geoserverLayer: 'roads',
-        ownershipType: 'DEPARTMENT',
-      });
+    it('403s when the caller lacks EXPORT permission', async () => {
+      gisAuth.canExport.mockResolvedValue(false);
+      await expect(exporter.exportLayer(appUser('muni-a'), 'layer-1')).rejects.toBeInstanceOf(ForbiddenException);
+      expect(gdal.exportTable).not.toHaveBeenCalled();
+    });
+
+    it('exports GeoJSON from the layer table (never GeoServer) and drops the staging table', async () => {
       gisAuth.canExport.mockResolvedValue(true);
-      geoServer.getFeaturesAsGeoJson.mockResolvedValue(
-        '{"type":"FeatureCollection","features":[]}',
-      );
+      const result = await exporter.exportLayer(appUser('muni-a'), 'layer-1');
 
-      const result = await service.exportLayer(appUser('muni-a'), 'layer-1');
-
-      expect(geoServer.getFeaturesAsGeoJson).toHaveBeenCalledWith(
-        'somnath_municipality',
-        'roads',
-        { cqlFilter: undefined, featureIds: undefined, srsName: undefined },
-      );
+      expect(geoServer.getFeaturesAsGeoJson).not.toHaveBeenCalled();
+      expect(sql[0]).toContain(`FROM "${TABLE}" t`);
+      expect(gdal.exportTable).toHaveBeenCalledWith(expect.objectContaining({ driver: 'GeoJSON', layerName: 'roads' }));
+      expect(sql.some((q) => q.startsWith('DROP TABLE IF EXISTS "export_'))).toBe(true);
       expect(result.filename).toBe('roads.geojson');
       expect(result.contentType).toBe('application/geo+json');
     });
 
-    it('streams a GeoServer-native format (zipped shapefile) when requested', async () => {
-      prisma.gISWorkspace.findUnique.mockResolvedValue({ id: 'ws-a' });
-      prisma.gISLayer.findFirst.mockResolvedValue({
-        id: 'layer-1',
-        code: 'ROADS',
-        geoserverWorkspace: 'somnath_municipality',
-        geoserverLayer: 'roads',
-        ownershipType: 'DEPARTMENT',
-      });
+    it('zips a shapefile set', async () => {
       gisAuth.canExport.mockResolvedValue(true);
-      const zip = Buffer.from('PK');
-      geoServer.getFeaturesInFormat.mockResolvedValue({
-        body: zip,
-        contentType: 'application/zip',
-      });
-
-      const result = await service.exportLayer(
-        appUser('muni-a'),
-        'layer-1',
-        'shapefile',
-      );
-
-      expect(geoServer.getFeaturesInFormat).toHaveBeenCalledWith(
-        'somnath_municipality',
-        'roads',
-        'SHAPE-ZIP',
-        { srsName: undefined },
-      );
-      expect(geoServer.getFeaturesAsGeoJson).not.toHaveBeenCalled();
-      expect(result).toEqual({
-        filename: 'roads.zip',
-        body: zip,
-        contentType: 'application/zip',
-      });
+      const result = await exporter.exportLayer(appUser('muni-a'), 'layer-1', 'shapefile');
+      expect(result.filename).toBe('roads.zip');
+      expect(result.contentType).toBe('application/zip');
+      expect((result.body as Buffer).subarray(0, 2).toString()).toBe('PK');
     });
 
-    it('requests KML in EPSG:4326 and still enforces EXPORT first', async () => {
-      prisma.gISWorkspace.findUnique.mockResolvedValue({ id: 'ws-a' });
-      prisma.gISLayer.findFirst.mockResolvedValue({
-        id: 'layer-1',
-        code: 'ROADS',
-        geoserverWorkspace: 'somnath_municipality',
-        geoserverLayer: 'roads',
-        ownershipType: 'DEPARTMENT',
-      });
-      gisAuth.canExport.mockResolvedValue(false);
-
-      await expect(
-        service.exportLayer(appUser('muni-a'), 'layer-1', 'kml'),
-      ).rejects.toBeInstanceOf(ForbiddenException);
-      expect(geoServer.getFeaturesInFormat).not.toHaveBeenCalled();
-
+    it('writes KML in EPSG:4326', async () => {
       gisAuth.canExport.mockResolvedValue(true);
-      geoServer.getFeaturesInFormat.mockResolvedValue({
-        body: Buffer.from('<kml/>'),
-        contentType: 'application/vnd.google-earth.kml+xml',
-      });
-      const result = await service.exportLayer(
-        appUser('muni-a'),
-        'layer-1',
-        'kml',
-      );
-
-      expect(geoServer.getFeaturesInFormat).toHaveBeenCalledWith(
-        'somnath_municipality',
-        'roads',
-        'KML',
-        { srsName: 'EPSG:4326' },
-      );
+      const result = await exporter.exportLayer(appUser('muni-a'), 'layer-1', 'kml');
+      expect(gdal.exportTable).toHaveBeenCalledWith(expect.objectContaining({ driver: 'KML', targetSrs: 'EPSG:4326' }));
       expect(result.filename).toBe('roads.kml');
+    });
+
+    it('exports only the selected feat_ids, bound as a parameter', async () => {
+      gisAuth.canExport.mockResolvedValue(true);
+      const db = prisma as unknown as Record<string, jest.Mock>;
+      const result = await exporter.exportLayer(appUser('muni-a'), 'layer-1', 'geojson', undefined, [3, 7, 3]);
+      expect(sql[0]).toContain('t."feat_id" = ANY($1::bigint[])');
+      expect(db.$executeRawUnsafe.mock.calls[0][1]).toEqual([3, 7]);
+      expect(result.filename).toBe('roads_selected.geojson');
+    });
+
+    it('turns "export with filter" into parameterised SQL', async () => {
+      gisAuth.canExport.mockResolvedValue(true);
+      const db = prisma as unknown as Record<string, jest.Mock>;
+      await exporter.exportLayer(appUser('muni-a'), 'layer-1', 'csv', { field: 'name', op: 'contains', value: "O'Brien" });
+      expect(sql[0]).toContain('t."name"::text ILIKE $1');
+      expect(db.$executeRawUnsafe.mock.calls[0][1]).toBe("%O'Brien%");
     });
   });
 

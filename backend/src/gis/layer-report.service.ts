@@ -8,8 +8,7 @@ import type {
 import { PrismaService } from '../prisma/prisma.service';
 import type { AppUser } from '../auth/types/app-user.type';
 import { GisLayersService } from './gis-layers.service';
-import { GeoServerService } from './geoserver.service';
-import { assertSafeCql } from './cql-guard';
+import { LayerRecordsService } from './layer-records.service';
 import { LayerReportDto, REPORT_MAX_ROWS } from './dto/layer-report.dto';
 import type { AttributeInfo } from './field-stats.service';
 
@@ -44,9 +43,9 @@ interface FieldStat {
 /**
  * Report Generation — a layer data report as a PDF: title, details (layer,
  * department, scope, row count), per-field summary statistics, and the
- * feature table. Data comes from GeoServer server-side for the requested
- * columns only; the caller needs VIEW on the layer, a client filter must
- * pass assertSafeCql, and selected ids must belong to the layer.
+ * feature table. Data is read straight from the layer's PostGIS table (via
+ * LayerRecordsService: VIEW permission checked, the query filter translated
+ * to parameterised SQL); selected ids must belong to the layer.
  */
 @Injectable()
 export class LayerReportService {
@@ -55,7 +54,7 @@ export class LayerReportService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly gisLayers: GisLayersService,
-    private readonly geoServer: GeoServerService,
+    private readonly records: LayerRecordsService,
   ) {}
 
   async buildReport(
@@ -70,18 +69,16 @@ export class LayerReportService {
     const fields = this.resolveFields(dto.fields, attributes);
     const scope = this.resolveScope(dto, layer.geoserverLayer);
 
-    const { features, numberMatched } =
-      await this.geoServer.getFeatureCollection(
-        layer.geoserverWorkspace,
-        layer.geoserverLayer,
-        {
-          propertyNames: fields.map((f) => f.name),
-          cqlFilter: scope.cqlFilter,
-          featureIds: scope.featureIds,
-          count: REPORT_MAX_ROWS,
-        },
-      );
-    const rows = features.map((f) => f.properties ?? {});
+    const { features, numberMatched } = await this.records.query(appUser, layerId, {
+      filter: scope.cqlFilter,
+      featureIds: scope.featureIds,
+      limit: REPORT_MAX_ROWS,
+      geometry: false,
+    });
+    const wanted = fields.map((f) => f.name);
+    const rows = features.map((f) =>
+      Object.fromEntries(wanted.map((name) => [name, (f.properties as Record<string, unknown>)[name] ?? null])),
+    );
 
     const [user, municipality] = await Promise.all([
       this.prisma.user.findUnique({
@@ -128,6 +125,11 @@ export class LayerReportService {
     attributes: AttributeInfo[],
   ): AttributeInfo[] {
     const byName = new Map(attributes.map((a) => [a.name, a]));
+    // feat_id is left out of the styling/statistics attribute list but is a
+    // normal, visible column in a report.
+    if (!byName.has('feat_id')) {
+      byName.set('feat_id', { name: 'feat_id', type: 'integer', kind: 'number' } as AttributeInfo);
+    }
     const fields = [...new Set(requested)].map((name) => {
       const field = byName.get(name);
       if (!field) {
@@ -149,7 +151,6 @@ export class LayerReportService {
       if (!cql) {
         throw new BadRequestException('A query report needs a filter.');
       }
-      assertSafeCql(cql);
       return {
         label: `Filtered — ${dto.scopeLabel?.trim() || 'current query'}`,
         cqlFilter: cql,
@@ -160,8 +161,7 @@ export class LayerReportService {
       if (ids.length === 0) {
         throw new BadRequestException('Select at least one feature.');
       }
-      // WFS featureID can name ANY feature type ("other.5") — only this
-      // layer's own ids are accepted.
+      // Only this layer's own ids ("<layer>.<feat_id>") are accepted.
       const prefix = `${geoserverLayer}.`;
       if (ids.some((id) => !id.startsWith(prefix) || !/^[\w.-]+$/.test(id))) {
         throw new BadRequestException(

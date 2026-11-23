@@ -1,6 +1,5 @@
 import { GisDashboardService } from './gis-dashboard.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { GeoServerService } from './geoserver.service';
 import { GisAuthorizationService } from './gis-authorization.service';
 import { AiClientService } from '../gis-ai/ai-client.service';
 import { FuzzySearchService } from './fuzzy-search.service';
@@ -34,7 +33,6 @@ describe('GisDashboardService', () => {
     ai = { searchLayers: jest.fn().mockResolvedValue([]) };
     service = new GisDashboardService(
       prisma as unknown as PrismaService,
-      {} as GeoServerService,
       gisAuth as unknown as GisAuthorizationService,
       ai as unknown as AiClientService,
       fuzzy,
@@ -61,9 +59,6 @@ describe('GisDashboardService', () => {
       gisAuth.filterViewable.mockResolvedValue([storm, drains]);
       service = new GisDashboardService(
         prisma as unknown as PrismaService,
-        {
-          getFeaturesAsGeoJson: jest.fn().mockResolvedValue('{"features":[]}'),
-        } as unknown as GeoServerService,
         gisAuth as unknown as GisAuthorizationService,
         ai as unknown as AiClientService,
         fuzzy,
