@@ -1337,11 +1337,37 @@ export class MapService {
   /** Applies (or clears with `null`) an ECQL filter on a layer's WMS render
    *  — GeoServer only paints matching features. */
   setLayerCqlFilter(layerId: string, cql: string | null): void {
+    this.queryCql.set(layerId, cql && cql.trim().length > 0 ? cql : null);
+    this.applyCql(layerId);
+  }
+
+  /** Query filters (Query Builder, Attribute Table …) per layer. */
+  private readonly queryCql = new Map<string, string | null>();
+  /** Legend classes switched off per layer (entry indexes), QGIS-style. */
+  readonly legendHidden = signal<Record<string, number[]>>({});
+  private readonly legendCql = new Map<string, string | null>();
+
+  /** Shows / hides legend classes of a layer: the hidden rules' filters
+   *  become part of the layer's CQL filter. */
+  setLegendHidden(layerId: string, entries: { filter?: string | null }[], hidden: number[]): void {
+    const set = [...new Set(hidden)].filter((i) => i >= 0 && i < entries.length && !!entries[i].filter).sort((a, b) => a - b);
+    this.legendHidden.update((m) => {
+      const next = { ...m };
+      if (set.length) next[layerId] = set;
+      else delete next[layerId];
+      return next;
+    });
+    this.legendCql.set(layerId, legendFilterCql(entries, set));
+    this.applyCql(layerId);
+  }
+
+  private applyCql(layerId: string): void {
     const entry = this.managedLayers.get(layerId);
     const source = entry?.wms;
     if (!entry || !source) return;
     const params = { ...source.getParams() };
-    const wanted = cql && cql.trim().length > 0 ? cql : null;
+    const parts = [this.queryCql.get(layerId), this.legendCql.get(layerId)].filter((c): c is string => !!c);
+    const wanted = parts.length === 0 ? null : parts.length === 1 ? parts[0] : parts.map((c) => `(${c})`).join(' AND ');
     if ((params['CQL_FILTER'] ?? null) === wanted) return;
     if (wanted) {
       params['CQL_FILTER'] = wanted;
@@ -1385,6 +1411,8 @@ export class MapService {
 
   refreshLayerStyle(layerId: string): void {
     this.demCache.delete(layerId); // a new ramp can make it (not) a DEM
+    // The legend classes change with the style — show them all again.
+    if (this.legendCql.get(layerId)) this.setLegendHidden(layerId, [], []);
     const entry = this.managedLayers.get(layerId);
     if (entry) {
       entry.wms.updateParams({ _style: Date.now() });
@@ -4116,4 +4144,22 @@ function sameView(a: NavHistoryEntry, b: NavHistoryEntry): boolean {
     Math.abs(a.zoom - b.zoom) < 1e-3 &&
     Math.abs(a.rotation - b.rotation) < 1e-4
   );
+}
+
+/** CQL that keeps only the legend classes still switched on. Rule filters
+ *  come from GeoServer's JSON legend as "[ECQL]"; an else-rule ("ELSE")
+ *  matches what no other rule does. */
+export function legendFilterCql(entries: { filter?: string | null }[], hidden: number[]): string | null {
+  if (!hidden.length) return null;
+  const clean = (f: string) => f.trim().replace(/^\[\s*/, '').replace(/\s*\]$/, '');
+  const rules = entries.map((e) => (e.filter && e.filter !== 'ELSE' ? `(${clean(e.filter)})` : null));
+  const hide = hidden.map((i) => rules[i]).filter((f): f is string => !!f);
+  const elseHidden = hidden.some((i) => entries[i]?.filter === 'ELSE');
+  const parts: string[] = [];
+  if (hide.length) parts.push(`NOT (${hide.join(' OR ')})`);
+  if (elseHidden) {
+    const all = rules.filter((f): f is string => !!f);
+    parts.push(all.length ? `(${all.join(' OR ')})` : 'EXCLUDE');
+  }
+  return parts.join(' AND ') || null;
 }

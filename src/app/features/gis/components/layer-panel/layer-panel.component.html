@@ -109,7 +109,8 @@
             </ul>
           } @else {
             @if (lg) {
-              <app-layer-legend [model]="lg" />
+              <app-layer-legend [model]="lg" [toggleable]="true" [hidden]="mapService.legendHidden()[layer.id] ?? []"
+                                (toggleEntry)="toggleLegendEntry(layer.id, lg, $event)" (setAll)="setAllLegendEntries(layer.id, lg, $event)" />
             } @else if (lg === null && !info) {
               <span class="layer-panel__legend-empty">No legend available for this layer.</span>
             } @else if (lg === undefined) {

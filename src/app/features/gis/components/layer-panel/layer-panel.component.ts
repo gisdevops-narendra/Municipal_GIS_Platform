@@ -363,6 +363,18 @@ export class LayerPanelComponent implements OnChanges {
     return this.visibility()[layerId] ?? false;
   }
 
+  /** Legend class switch (QGIS-style): hides / shows that class on the map. */
+  toggleLegendEntry(layerId: string, model: LegendModel, index: number): void {
+    const hidden = this.mapService.legendHidden()[layerId] ?? [];
+    const next = hidden.includes(index) ? hidden.filter((i) => i !== index) : [...hidden, index];
+    this.mapService.setLegendHidden(layerId, model.entries, next);
+  }
+
+  setAllLegendEntries(layerId: string, model: LegendModel, show: boolean): void {
+    const all = model.entries.map((e, i) => (e.filter ? i : -1)).filter((i) => i >= 0);
+    this.mapService.setLegendHidden(layerId, model.entries, show ? [] : all);
+  }
+
   toggleVisible(layerId: string): void {
     this.mapService.setLayerVisibility(layerId, !this.isVisible(layerId));
   }
