@@ -359,6 +359,58 @@
   font-size: 11px;
 }
 
+/* Pin a menu tool to the top bar (shown on hover, always when pinned). */
+.gis-ws__pin {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  flex-shrink: 0;
+  border-radius: 6px;
+  color: var(--color-ink-500);
+  opacity: 0;
+  transition: opacity 0.12s ease, background 0.12s ease;
+
+  .pi {
+    font-size: 11px;
+    transform: rotate(45deg);
+  }
+
+  &:hover,
+  &:focus-visible {
+    background: color-mix(in srgb, var(--color-primary-600) 12%, transparent);
+    color: var(--color-primary-600);
+    outline: none;
+  }
+
+  &.is-pinned {
+    opacity: 1;
+    color: var(--color-primary-600);
+
+    .pi {
+      transform: none;
+    }
+  }
+}
+
+.gis-ws__dropdown-item:hover .gis-ws__pin,
+.gis-ws__dropdown-item:focus-visible .gis-ws__pin {
+  opacity: 1;
+}
+
+.gis-ws__dropdown-check + .gis-ws__pin {
+  margin-left: 4px;
+}
+
+/* Pinned quick tools sit with Layers / Table. */
+.gis-ws__bar-btn--pinned span {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .gis-ws__dropdown-empty {
   margin: 8px 10px;
   font-size: 12.5px;

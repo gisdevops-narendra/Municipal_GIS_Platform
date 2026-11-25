@@ -66,6 +66,8 @@ import { AddServiceComponent, loadSavedExternalLayers, saveExternalLayers } from
 import { WhatsHereComponent } from './components/platform-extras/whats-here.component';
 import { SqlConsoleComponent } from './components/sql-console/sql-console.component';
 import { SqlConsoleStore } from './components/sql-console/sql-console.store';
+import { AuthService } from '../../core/services/auth.service';
+import { userScopedKey } from './services/user-scoped-storage';
 import { SqlResultsComponent } from './components/sql-console/sql-results.component';
 import { ShareMapComponent } from './components/platform-extras/share-map.component';
 import { IntegrationsComponent } from './components/platform-extras/integrations.component';
@@ -245,6 +247,11 @@ const SUB_TOOLS: SubTool[] = [
 
 /** Shown directly on the rail — everything else lives in group menus. */
 const PRIMARY_TOOL_IDS = ['layers', 'attributes'];
+/** Quick buttons after Table: the user pins any menu tool there. */
+const DEFAULT_PINNED_TOOLS: string[] = [];
+/** Recently used tools shown as quick buttons after the pinned ones. */
+const RECENT_QUICK_TOOLS = 2;
+const MAX_PINNED_TOOLS = 6;
 
 /** moduleId values are Module Access catalog ids (see
  *  backend/prisma/seed-modules.ts) — Layer Switcher=1, Query Module=2,
@@ -491,6 +498,64 @@ export class GisWorkspaceComponent {
   readonly primaryTools = computed(() =>
     PRIMARY_TOOL_IDS.map((id) => this.visibleToolList().find((t) => t.id === id)).filter((t): t is WsTool => !!t)
   );
+
+  // ----- pinned quick tools (top bar, after Table) -----
+  private readonly pinAuth = inject(AuthService);
+  private pinKey(): string {
+    return userScopedKey('gis.pinnedTools', 'all', this.pinAuth.user()?.id);
+  }
+  readonly pinnedToolIds = signal<string[]>(this.readPins());
+  /** Quick buttons after Table: pinned tools, then the last tools used
+   *  from any menu (so whatever was opened last is one click away). */
+  readonly pinnedTools = computed(() => {
+    const visible = this.visibleToolList();
+    const pinned = this.pinnedToolIds()
+      .filter((id) => !PRIMARY_TOOL_IDS.includes(id))
+      .map((id) => visible.find((t) => t.id === id))
+      .filter((t): t is WsTool => !!t);
+    const recent = this.recentToolIds()
+      .filter((id) => !PRIMARY_TOOL_IDS.includes(id) && !pinned.some((t) => t.id === id))
+      .map((id) => visible.find((t) => t.id === id))
+      .filter((t): t is WsTool => !!t)
+      .slice(0, RECENT_QUICK_TOOLS);
+    return [...pinned, ...recent];
+  });
+
+  private readPins(): string[] {
+    try {
+      const raw = localStorage.getItem(this.pinKey());
+      const v = raw ? JSON.parse(raw) : DEFAULT_PINNED_TOOLS;
+      return Array.isArray(v) ? v.filter((x) => typeof x === 'string').slice(0, MAX_PINNED_TOOLS) : [...DEFAULT_PINNED_TOOLS];
+    } catch {
+      return [...DEFAULT_PINNED_TOOLS];
+    }
+  }
+
+  isPinned(tool: WsTool): boolean {
+    return this.pinnedToolIds().includes(tool.id);
+  }
+
+  /** Pin / unpin a menu tool as a quick button in the top bar. */
+  togglePin(tool: WsTool, event: Event): void {
+    event.stopPropagation();
+    event.preventDefault();
+    const pins = this.pinnedToolIds();
+    let next: string[];
+    if (pins.includes(tool.id)) {
+      next = pins.filter((id) => id !== tool.id);
+    } else if (pins.length >= MAX_PINNED_TOOLS) {
+      this.notify.warn(`Up to ${MAX_PINNED_TOOLS} quick tools — unpin one first.`);
+      return;
+    } else {
+      next = [...pins, tool.id];
+    }
+    this.pinnedToolIds.set(next);
+    try {
+      localStorage.setItem(this.pinKey(), JSON.stringify(next));
+    } catch {
+      /* storage full / disabled */
+    }
+  }
   readonly menuGroups = computed(() =>
     GROUP_ORDER.map((g) => ({
       ...g,
