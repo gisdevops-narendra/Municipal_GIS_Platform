@@ -24,6 +24,7 @@ export const SWITCHABLE_TOOLS: SwitchableTool[] = [
       { id: 'm:50', label: 'Attribute Query' },
       { id: 'm:16', label: 'Spatial Query' },
     ] },
+  { id: 'sql', label: 'SQL Console', group: 'Analysis' },
   { id: 'measure', label: 'Measure', group: 'Analysis' },
   { id: 'buffer', label: 'Buffer & Overlay', group: 'Analysis' },
   { id: 'geoprocessing', label: 'Geoprocessing', group: 'Analysis', children: [

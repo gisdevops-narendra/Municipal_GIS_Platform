@@ -1896,6 +1896,54 @@ export class MapService {
     this.queryLayer?.getSource()?.clear();
   }
 
+  private sqlResultLayer: VectorLayer | null = null;
+
+  /** SQL Console "Style map": result shapes coloured per row, with an
+   *  optional label (EPSG:4326 GeoJSON geometries). */
+  setStyledResult(items: { geometry: Record<string, unknown> | null; color: string; label?: string }[]): void {
+    if (!this.sqlResultLayer) {
+      this.sqlResultLayer = new VectorLayer({
+        source: new VectorSource(),
+        zIndex: 9996,
+        // Overlapping labels are dropped instead of piling up.
+        declutter: true,
+        properties: { analysisOverlay: true },
+        style: (feature) => {
+          const color = (feature.get('color') as string) ?? '#2563eb';
+          const label = feature.get('label') as string | undefined;
+          return new Style({
+            stroke: new Stroke({ color: 'rgba(255, 255, 255, 0.9)', width: 1.2 }),
+            fill: new Fill({ color: color + '9e' }),
+            image: new CircleStyle({ radius: 6, fill: new Fill({ color }), stroke: new Stroke({ color: '#ffffff', width: 1.5 }) }),
+            text: label
+              ? new TextStyle({
+                  text: label,
+                  font: '600 12px system-ui, sans-serif',
+                  fill: new Fill({ color: '#111827' }),
+                  stroke: new Stroke({ color: '#ffffff', width: 3 }),
+                  overflow: false
+                })
+              : undefined
+          });
+        }
+      });
+      this.map?.addLayer(this.sqlResultLayer);
+    }
+    const source = this.sqlResultLayer.getSource() as VectorSource;
+    source.clear();
+    for (const item of items) {
+      const feature = this.toMapFeature(item.geometry);
+      if (!feature) continue;
+      feature.set('color', item.color);
+      if (item.label) feature.set('label', item.label);
+      source.addFeature(feature);
+    }
+  }
+
+  clearStyledResult(): void {
+    this.sqlResultLayer?.getSource()?.clear();
+  }
+
   /** Lets the user draw one geometry for a spatial query. Emits the drawn
    *  shape as GeoJSON (EPSG:4326) and keeps it on screen; complete /
    *  `cancelDraw` / `clearDraw` remove it. */

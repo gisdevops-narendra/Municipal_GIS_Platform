@@ -605,6 +605,7 @@ const TOOL_META: Record<string, { icon: string; desc: string }> = {
   hazards: { icon: 'pi pi-exclamation-triangle', desc: 'Earthquake, flood and other hazard alerts.' },
   sensors: { icon: 'pi pi-wifi', desc: 'Live IoT sensor readings.' },
   tourism: { icon: 'pi pi-ticket', desc: 'Points of interest for visitors.' },
+  sql: { icon: 'pi pi-code', desc: 'Read-only SQL queries over the layers a user can view.' },
   'buildings-3d': { icon: 'pi pi-box', desc: 'Extruded 3D building view.' },
   query: { icon: 'pi pi-filter', desc: 'Select features by attribute or location.' },
   measure: { icon: 'pi pi-arrows-h', desc: 'Measure distances and areas.' },

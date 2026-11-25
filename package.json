@@ -18,6 +18,7 @@
     "@angular/platform-browser": "^19.2.0",
     "@angular/platform-browser-dynamic": "^19.2.0",
     "@angular/router": "^19.2.0",
+    "@codemirror/lang-sql": "^6.10.0",
     "@codemirror/lang-xml": "^6.1.0",
     "@codemirror/theme-one-dark": "^6.1.2",
     "@primeuix/themes": "^3.0.0",
@@ -31,6 +32,7 @@
     "primeng": "^19.1.4",
     "proj4": "^2.22.0",
     "rxjs": "~7.8.0",
+    "sql-formatter": "^15.10.0",
     "tslib": "^2.3.0",
     "zone.js": "~0.15.0"
   },

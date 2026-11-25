@@ -1,0 +1,241 @@
+<div class="sq" [class.sq--bench]="store.workbench()">
+  @if (store.workbench()) {
+    <header class="sq__benchbar">
+      <span class="sq__benchtitle"><i class="pi pi-code" aria-hidden="true"></i> SQL Workbench</span>
+      <span class="sq__muted">Read-only · your layers only</span>
+      <button type="button" class="sq__ghost" (click)="store.workbench.set(false)" pTooltip="Back to the map (Esc)" tooltipPosition="bottom">
+        <i class="pi pi-window-minimize" aria-hidden="true"></i><span>Back to map</span>
+      </button>
+    </header>
+  }
+
+  <!-- ===== library: layers / saved / examples / history ===== -->
+  <aside class="sq__lib">
+    <nav class="sq__libtabs" role="tablist">
+      @for (l of libraries; track l.id) {
+        <button type="button" role="tab" class="sq__libtab" [class.is-on]="library() === l.id" [attr.aria-selected]="library() === l.id"
+                (click)="library.set(l.id)" [pTooltip]="l.label" tooltipPosition="top">
+          <i [class]="l.icon" aria-hidden="true"></i><span>{{ l.label }}</span>
+          @if (l.id === 'layers' && store.tables().length) { <em>{{ store.tables().length }}</em> }
+          @if (l.id === 'saved' && store.saved().length) { <em>{{ store.saved().length }}</em> }
+        </button>
+      }
+    </nav>
+
+    <div class="sq__libbody">
+      @switch (library()) {
+        @case ('layers') {
+          <label class="sq__search">
+            <i class="pi pi-search" aria-hidden="true"></i>
+            <input type="search" placeholder="Find a layer or field…" [ngModel]="layerQuery()" (ngModelChange)="layerQuery.set($event)" aria-label="Find a layer or field" />
+          </label>
+          @if (store.tablesError(); as e) {
+            <p class="sq__err">{{ e }}</p>
+          } @else if (store.tablesLoading() && !store.tables().length) {
+            <p class="sq__muted sq__pad">Loading layers…</p>
+          } @else if (!filteredTables().length) {
+            <p class="sq__muted sq__pad">No layer matches.</p>
+          }
+          <ul class="sq__tables">
+            @for (t of filteredTables(); track t.alias) {
+              <li [class.is-open]="expanded() === t.alias">
+                <div class="sq__trow">
+                  <button type="button" class="sq__tmain" (click)="expanded.set(expanded() === t.alias ? null : t.alias)"
+                          [attr.aria-expanded]="expanded() === t.alias">
+                    <span class="sq__gicon" [class]="'sq__gicon sq__gicon--' + geomClass(t)"><i [class]="geomIcon(t)" aria-hidden="true"></i></span>
+                    <span class="sq__tnames">
+                      <code>{{ t.alias }}</code>
+                      @if (t.alias !== t.name.toLowerCase()) { <small>{{ t.name }}</small> }
+                    </span>
+                    <span class="sq__tcount">{{ t.fields.length }}</span>
+                    <i class="pi pi-chevron-down sq__chev" aria-hidden="true"></i>
+                  </button>
+                  <button type="button" class="sq__ins" pTooltip="Insert into the query" tooltipPosition="left" [attr.aria-label]="'Insert ' + t.alias" (click)="insert(t.alias)">
+                    <i class="pi pi-plus" aria-hidden="true"></i>
+                  </button>
+                </div>
+                @if (expanded() === t.alias) {
+                  <ul class="sq__fields">
+                    @for (f of t.fields; track f.name) {
+                      <li>
+                        <button type="button" (click)="insert(f.name)" [title]="'Insert ' + f.name">
+                          <span class="sq__fname">{{ f.name }}</span>
+                          <span class="sq__chip" [class]="'sq__chip sq__chip--' + typeClass(f.type)">{{ shortType(f.type) }}</span>
+                        </button>
+                      </li>
+                    }
+                  </ul>
+                }
+              </li>
+            }
+          </ul>
+        }
+
+        @case ('saved') {
+          @if (!store.saved().length) {
+            <div class="sq__emptylib"><i class="pi pi-star"></i><span>Save a query with <b>Save</b> to reuse it later or share it with your team.</span></div>
+          }
+          @if (mySaved().length) {
+            <h4 class="sq__libh">My queries</h4>
+            <ul class="sq__cards">
+              @for (q of mySaved(); track q.id) {
+                <li>
+                  <button type="button" class="sq__card" (click)="store.openSaved(q)">
+                    <span class="sq__cardtop">
+                      <b>{{ q.name }}</b>
+                      @if (q.shared) { <span class="sq__badge" title="Shared with your team"><i class="pi pi-users"></i></span> }
+                      <span class="sq__cardx" role="button" tabindex="0" aria-label="Delete saved query" (click)="removeSaved(q, $event)" (keydown.enter)="removeSaved(q, $event)"><i class="pi pi-trash"></i></span>
+                    </span>
+                    @if (q.description) { <span class="sq__carddesc">{{ q.description }}</span> }
+                    <code>{{ oneLine(q.sql) }}</code>
+                    <small class="sq__muted">{{ ago(q.updatedAt) }}</small>
+                  </button>
+                </li>
+              }
+            </ul>
+          }
+          @if (teamSaved().length) {
+            <h4 class="sq__libh">Shared by the team</h4>
+            <ul class="sq__cards">
+              @for (q of teamSaved(); track q.id) {
+                <li>
+                  <button type="button" class="sq__card" (click)="store.openSaved(q)">
+                    <span class="sq__cardtop"><b>{{ q.name }}</b><span class="sq__badge"><i class="pi pi-users"></i></span></span>
+                    @if (q.description) { <span class="sq__carddesc">{{ q.description }}</span> }
+                    <code>{{ oneLine(q.sql) }}</code>
+                  </button>
+                </li>
+              }
+            </ul>
+          }
+        }
+
+        @case ('examples') {
+          <ul class="sq__cards">
+            @for (ex of examples(); track ex.label) {
+              <li>
+                <button type="button" class="sq__card" (click)="use(ex.sql, ex.label)">
+                  <span class="sq__cardtop"><b>{{ ex.label }}</b><span class="sq__muted">{{ ex.hint }}</span></span>
+                  <code>{{ oneLine(ex.sql) }}</code>
+                </button>
+              </li>
+            } @empty {
+              <p class="sq__muted sq__pad">Examples appear once your layers have loaded.</p>
+            }
+          </ul>
+        }
+
+        @case ('history') {
+          <ul class="sq__cards">
+            @for (h of store.history(); track $index) {
+              <li><button type="button" class="sq__card sq__card--mono" (click)="use(h)"><code>{{ oneLine(h) }}</code></button></li>
+            } @empty {
+              <div class="sq__emptylib"><i class="pi pi-history"></i><span>Queries you run appear here.</span></div>
+            }
+          </ul>
+        }
+      }
+    </div>
+  </aside>
+
+  <!-- ===== editor ===== -->
+  <section class="sq__main">
+    <div class="sq__toolbar">
+      <button pButton type="button" class="p-button-sm sq__run" icon="pi pi-play" label="Run" [loading]="!!store.active()?.running"
+              [disabled]="!store.active()?.sql?.trim()" (click)="store.run()" pTooltip="Run (Ctrl + Enter)" tooltipPosition="bottom"></button>
+      <button type="button" class="sq__tool" [disabled]="!store.active()?.sql?.trim() || store.active()?.running" (click)="store.explain()"
+              pTooltip="Explain — how the query will run, without running it" tooltipPosition="bottom">
+        <i class="pi pi-sitemap" aria-hidden="true"></i><span>Explain</span>
+      </button>
+      <button type="button" class="sq__tool" [disabled]="!store.active()?.sql?.trim()" (click)="format()" pTooltip="Format (Shift + Alt + F)" tooltipPosition="bottom">
+        <i class="pi pi-align-left" aria-hidden="true"></i><span>Format</span>
+      </button>
+      <button type="button" class="sq__tool" [disabled]="!store.active()?.sql?.trim()" (click)="openSaveDialog()" pTooltip="Save this query" tooltipPosition="bottom">
+        <i class="pi" [class.pi-star]="!store.active()?.savedId" [class.pi-star-fill]="!!store.active()?.savedId" aria-hidden="true"></i><span>Save</span>
+      </button>
+      <span class="sq__spacer"></span>
+      <label class="sq__limit" pTooltip="Most rows to bring back" tooltipPosition="bottom">
+        <i class="pi pi-list" aria-hidden="true"></i>
+        <select [ngModel]="store.limit()" (ngModelChange)="store.limit.set(+$event)" aria-label="Maximum rows">
+          <option [ngValue]="100">100</option>
+          <option [ngValue]="1000">1,000</option>
+          <option [ngValue]="5000">5,000</option>
+        </select>
+      </label>
+      @if (!store.workbench()) {
+        <button type="button" class="sq__tool sq__tool--icon" (click)="store.workbench.set(true)" pTooltip="Open the full-screen workbench" tooltipPosition="bottom" aria-label="Workbench">
+          <i class="pi pi-window-maximize" aria-hidden="true"></i>
+        </button>
+      }
+    </div>
+
+    <div class="sq__tabs" role="tablist">
+      @for (t of store.tabs(); track t.id) {
+        <div class="sq__tab" role="tab" [class.is-on]="t.id === store.active()?.id" [attr.aria-selected]="t.id === store.active()?.id"
+             (click)="store.select(t.id)" (dblclick)="$any(titleEl).focus()">
+          @if (t.running) { <i class="pi pi-spin pi-spinner sq__tabstate" aria-hidden="true"></i> }
+          @else if (t.error) { <i class="pi pi-circle-fill sq__tabstate sq__tabstate--err" aria-hidden="true"></i> }
+          @else if (t.savedId) { <i class="pi pi-star-fill sq__tabstate sq__tabstate--saved" aria-hidden="true"></i> }
+          <span #titleEl class="sq__tabtitle" contenteditable="plaintext-only" spellcheck="false" [textContent]="t.title"
+                (blur)="renameTab(t.id, $any($event.target).textContent)" (keydown.enter)="$event.preventDefault(); $any($event.target).blur()"></span>
+          <button type="button" class="sq__tabx" aria-label="Close tab" (click)="$event.stopPropagation(); store.closeTab(t.id)"><i class="pi pi-times"></i></button>
+        </div>
+      }
+      <button type="button" class="sq__tabnew" aria-label="New query tab" pTooltip="New query" tooltipPosition="bottom" (click)="store.newTab()"><i class="pi pi-plus"></i></button>
+    </div>
+
+    @if (store.active(); as tab) {
+      <app-sql-editor class="sq__editor" [value]="tab.sql" [tables]="store.tables()" [error]="tab.error"
+                      (valueChange)="onSqlChange($event)" (run)="store.run()" (formatRequest)="format()" />
+
+      @if (params().length) {
+        <div class="sq__params">
+          <span class="sq__paramsh"><i class="pi pi-sliders-h" aria-hidden="true"></i> Parameters</span>
+          @for (p of params(); track p) {
+            <label class="sq__param">
+              <code>:{{ p }}</code>
+              <input type="text" [ngModel]="tab.params[p] ?? ''" (ngModelChange)="setParam(p, $event)" [placeholder]="'value for ' + p" (keydown.control.enter)="store.run()" />
+            </label>
+          }
+        </div>
+      }
+
+      @if (!store.workbench()) {
+        <div class="sq__status" [class.sq__status--err]="!!tab.error">
+          @if (tab.running) {
+            <span><i class="pi pi-spin pi-spinner"></i> Running…</span>
+          } @else if (tab.error) {
+            <span class="sq__statusmsg"><i class="pi pi-exclamation-circle"></i> {{ tab.error.message }}</span>
+          } @else if (tab.result) {
+            <span><i class="pi pi-check-circle sq__ok"></i> <b>{{ tab.result.rows.length | number }}</b>{{ tab.result.truncated ? '+' : '' }} rows · {{ tab.result.ms | number }} ms</span>
+            <button type="button" class="sq__link" (click)="showResults()">Show results <i class="pi pi-arrow-down"></i></button>
+          } @else {
+            <span class="sq__muted"><i class="pi pi-lock"></i> Read-only · type to get layer, field and ST_ function suggestions</span>
+          }
+        </div>
+      }
+    }
+  </section>
+
+  @if (store.workbench()) {
+    <section class="sq__benchresults">
+      <app-sql-results />
+    </section>
+  }
+</div>
+
+<p-dialog [visible]="saveOpen()" (visibleChange)="saveOpen.set($event)" header="Save query" [modal]="true" [style]="{ width: '440px' }"
+          [draggable]="false" appendTo="body">
+  <div class="sq__dlg">
+    <label>Name<input type="text" maxlength="80" [(ngModel)]="saveName" placeholder="e.g. Wards larger than 10 km²" /></label>
+    <label>Description <small>(optional)</small><textarea rows="2" maxlength="500" [(ngModel)]="saveDesc"></textarea></label>
+    <label class="sq__check"><input type="checkbox" [(ngModel)]="saveShared" /> Share with my team <small>— everyone in this account can open and run it</small></label>
+  </div>
+  <ng-template #footer>
+    @if (store.active()?.savedId) {
+      <button pButton type="button" class="p-button-text" label="Save as new" [disabled]="!saveName.trim()" (click)="saveQuery(true)"></button>
+    }
+    <button pButton type="button" class="p-button-text" label="Cancel" (click)="saveOpen.set(false)"></button>
+    <button pButton type="button" icon="pi pi-check" label="Save" [loading]="saving()" [disabled]="!saveName.trim()" (click)="saveQuery()"></button>
+  </ng-template>
+</p-dialog>

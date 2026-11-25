@@ -64,6 +64,9 @@ import { PrintLayoutComponent } from './components/print-layout/print-layout.com
 import { ExportDataComponent } from './components/export-data/export-data.component';
 import { AddServiceComponent, loadSavedExternalLayers, saveExternalLayers } from './components/platform-extras/add-service.component';
 import { WhatsHereComponent } from './components/platform-extras/whats-here.component';
+import { SqlConsoleComponent } from './components/sql-console/sql-console.component';
+import { SqlConsoleStore } from './components/sql-console/sql-console.store';
+import { SqlResultsComponent } from './components/sql-console/sql-results.component';
 import { ShareMapComponent } from './components/platform-extras/share-map.component';
 import { IntegrationsComponent } from './components/platform-extras/integrations.component';
 import { PlatformExtrasService } from './services/platform-extras.service';
@@ -126,6 +129,8 @@ export interface WsTool {
   /** Role needed beyond module access: 'manager' = Owner or Department
    *  Head (e.g. making data public), 'owner' = Municipality Owner. */
   minRole?: 'manager' | 'owner';
+  /** Opened by another tool only (never listed in menus / search). */
+  hidden?: boolean;
 }
 
 type WsToolGroup = 'data' | 'explore' | 'analysis' | 'output' | 'admin';
@@ -165,6 +170,7 @@ const TOOL_INFO: Record<string, { hint: string; section?: string; keywords?: str
   tourism: { hint: 'Attractions, trails and city guide', section: 'Places' },
   'buildings-3d': { hint: 'Extruded buildings on the 3D globe', section: 'Places' },
   query: { hint: 'Filter features by attributes', section: 'Measure & query' },
+  sql: { hint: 'Run read-only SQL over your layers', section: 'Measure & query', keywords: 'select postgis query database' },
   measure: { hint: 'Distance, area and coordinates', section: 'Measure & query' },
   statistics: { hint: 'Summaries and charts of any field', section: 'Measure & query' },
   heatmap: { hint: 'Density heatmaps and clusters', section: 'Measure & query' },
@@ -264,6 +270,8 @@ const TOOLS: WsTool[] = [
   { id: 'whats-here', label: "What's Here", icon: 'pi pi-map-marker', group: 'explore', dock: 'left', available: true },
   { id: 'bookmarks', label: 'Bookmarks', icon: 'pi pi-bookmark', group: 'explore', dock: 'left', available: true, moduleId: 4 },
   { id: 'query', label: 'Query Builder', icon: 'pi pi-filter', group: 'analysis', dock: 'left', available: true, anyModuleIds: [50, 16] },
+  { id: 'sql', label: 'SQL Console', icon: 'pi pi-code', group: 'analysis', dock: 'left', available: true },
+  { id: 'sql-results', label: 'Query Results', icon: 'pi pi-table', group: 'analysis', dock: 'bottom', available: true, hidden: true },
   { id: 'measure', label: 'Measure', icon: 'pi pi-arrows-h', group: 'analysis', dock: 'left', available: true, moduleId: 11 },
   { id: 'buffer', label: 'Buffer & Overlay', icon: 'pi pi-circle', group: 'analysis', dock: 'left', available: true, moduleId: 6 },
   { id: 'geoprocessing', label: 'Geoprocessing', icon: 'pi pi-cog', group: 'analysis', dock: 'left', available: true, moduleId: GEOPROCESSING_MODULE_ID },
@@ -324,6 +332,8 @@ const TOOLS: WsTool[] = [
     ExportDataComponent,
     AddServiceComponent,
     WhatsHereComponent,
+    SqlConsoleComponent,
+    SqlResultsComponent,
     ShareMapComponent,
     IntegrationsComponent,
     NetworkPlanningComponent,
@@ -349,7 +359,7 @@ const TOOLS: WsTool[] = [
   // One OpenLayers Map per visit, shared by the map surface and every dock
   // panel — see MapService's own doc comment for why this is a
   // component-level provider, not root.
-  providers: [MapService],
+  providers: [MapService, SqlConsoleStore],
   templateUrl: './gis-workspace.component.html',
   styleUrl: './gis-workspace.component.scss'
 })
@@ -476,7 +486,7 @@ export class GisWorkspaceComponent {
   readonly platform = inject(PlatformService);
   private readonly visibleToolList = computed(() => {
     const off = this.platform.disabledTools();
-    return TOOLS.filter((t) => t.available && this.hasModuleAccess(t) && !off.has(t.id));
+    return TOOLS.filter((t) => t.available && !t.hidden && this.hasModuleAccess(t) && !off.has(t.id));
   });
   readonly primaryTools = computed(() =>
     PRIMARY_TOOL_IDS.map((id) => this.visibleToolList().find((t) => t.id === id)).filter((t): t is WsTool => !!t)
@@ -810,7 +820,22 @@ export class GisWorkspaceComponent {
     displayCrs: ['', [Validators.required, Validators.pattern(CRS_PATTERN)]]
   });
 
+  private readonly sqlStore = inject(SqlConsoleStore);
+
   constructor() {
+    // SQL Console: results open in the bottom dock (unless the workbench shows them).
+    let sqlShown = 0;
+    effect(() => {
+      const n = this.sqlStore.showResults();
+      if (n === sqlShown) return;
+      sqlShown = n;
+      if (this.sqlStore.workbench()) return;
+      this.bottomTool.set('sql-results');
+      this.bottomMinimized.set(false);
+      this.rememberOpened(this.openedBottomTools, 'sql-results');
+      this.refreshMapSize();
+    });
+    this.sqlStore.layerCreated.pipe(takeUntilDestroyed()).subscribe((layer) => this.onLayerCreated(layer));
     this.platform.loadMyModules();
     // Add Service: outside layers saved in this browser come back, and
     // every change is saved again. WFS goes via the API proxy when CORS

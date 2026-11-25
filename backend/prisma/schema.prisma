@@ -171,6 +171,7 @@ model Municipality {
   uploads      GISLayerUpload[]
   shareLinks   GISShareLink[]
   savedMaps    GISSavedMap[]
+  savedQueries GISSavedQuery[]
   apiKeys      ApiKey[]
   webhooks     Webhook[]
 
@@ -683,6 +684,23 @@ model GISSavedMap {
 
   @@index([municipalityId])
   @@map("gis_saved_maps")
+}
+
+model GISSavedQuery {
+  id             String   @id @default(uuid())
+  municipalityId String   @map("municipality_id")
+  createdById    String   @map("created_by")
+  name           String
+  description    String?
+  sql            String
+  shared         Boolean  @default(false)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  municipality Municipality @relation(fields: [municipalityId], references: [id], onDelete: Cascade)
+
+  @@index([municipalityId])
+  @@map("gis_saved_queries")
 }
 
 model GISShareLink {

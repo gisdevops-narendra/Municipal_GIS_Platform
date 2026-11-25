@@ -409,6 +409,10 @@
           />
         }
 
+        @if (openedLeftTools().has('sql') && layersReady()) {
+          <app-sql-console [class.gis-ws__panel--hidden]="leftTool() !== 'sql'" />
+        }
+
         @if (openedLeftTools().has('buffer') && layersReady()) {
           <app-buffer-overlay [openSub]="subRequest()"
             [class.gis-ws__panel--hidden]="leftTool() !== 'buffer'"
@@ -796,6 +800,9 @@
             [allowedModuleIds]="myModuleIds()"
             (layerCreated)="onLayerCreated($event)"
           />
+        }
+        @if (openedBottomTools().has('sql-results')) {
+          <app-sql-results [class.gis-ws__panel--hidden]="bottomTool() !== 'sql-results'" />
         }
         @if (openedBottomTools().has('statistics') && layersReady()) {
           <app-layer-statistics

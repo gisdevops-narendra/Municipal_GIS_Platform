@@ -48,6 +48,8 @@ import { TileArchiveService } from './tile-archive.service';
 import { OgcFeaturesController } from './ogc-features.controller';
 import { LayerRecordsController } from './layer-records.controller';
 import { LayerRecordsService } from './layer-records.service';
+import { SqlConsoleController } from './sql-console.controller';
+import { SqlConsoleService } from './sql-console.service';
 import { LocationController } from './location.controller';
 import { LocationService } from './location.service';
 import { ShareLinksController } from './share-links.controller';
@@ -70,6 +72,7 @@ import { AirStationsService } from './air-stations.service';
   controllers: [
     OgcFeaturesController,
     LayerRecordsController,
+    SqlConsoleController,
     GisWorkspaceController,
     GisLayersController,
     GisUploadsController,
@@ -91,6 +94,7 @@ import { AirStationsService } from './air-stations.service';
   ],
   providers: [
     LayerRecordsService,
+    SqlConsoleService,
     GisWorkspaceService,
     GisLayersService,
     GeoServerService,
