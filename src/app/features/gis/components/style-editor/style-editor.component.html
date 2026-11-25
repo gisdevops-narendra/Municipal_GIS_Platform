@@ -265,34 +265,32 @@
       }
 
       @if (geometry === 'polygon' || (geometry === 'point' && !usesIcon)) {
-        <div class="se__grid2">
-          <label class="se__field">
-            <span class="se__label">Fill</span>
+        <div class="se__field">
+          <span class="se__label">Fill</span>
+          <div class="se__colorrow">
             <p-colorPicker [ngModel]="hex(s.symbol.fillColor ?? '#128077')" (ngModelChange)="patchSymbol({ fillColor: $event })" appendTo="body" />
-          </label>
-          <label class="se__field">
-            <span class="se__label">Fill opacity ({{ ((s.symbol.fillOpacity ?? 1) * 100) | number:'1.0-0' }}%)</span>
-            <p-slider [ngModel]="s.symbol.fillOpacity ?? 1" (ngModelChange)="patchSymbol({ fillOpacity: $event })" [min]="0" [max]="1" [step]="0.05" />
-          </label>
+            <p-slider class="se__slider" [ngModel]="s.symbol.fillOpacity ?? 1" (ngModelChange)="patchSymbol({ fillOpacity: $event })" [min]="0" [max]="1" [step]="0.05"
+              ariaLabel="Fill opacity" />
+            <span class="se__pct" title="Opacity">{{ ((s.symbol.fillOpacity ?? 1) * 100) | number:'1.0-0' }}%</span>
+          </div>
         </div>
       }
 
       @if (geometry !== 'raster' && !(geometry === 'point' && usesIcon)) {
-        <div class="se__grid2">
-          <label class="se__field">
-            <span class="se__label">{{ geometry === 'line' ? 'Line colour' : 'Outline' }}</span>
+        <div class="se__field">
+          <span class="se__label">{{ geometry === 'line' ? 'Line' : 'Outline' }}</span>
+          <div class="se__colorrow">
             <p-colorPicker [ngModel]="hex(s.symbol.strokeColor ?? '#0b4f4a')" (ngModelChange)="patchSymbol({ strokeColor: $event })" appendTo="body" />
-          </label>
-          <label class="se__field">
-            <span class="se__label">{{ geometry === 'line' ? 'Line width' : 'Outline width' }}</span>
-            <p-inputNumber class="se__ctl" [ngModel]="s.symbol.strokeWidth ?? 1" (ngModelChange)="patchSymbol({ strokeWidth: $event })"
-              [min]="0" [max]="40" [minFractionDigits]="0" [maxFractionDigits]="1" [showButtons]="true" />
-          </label>
+            <p-slider class="se__slider" [ngModel]="s.symbol.strokeOpacity ?? 1" (ngModelChange)="patchSymbol({ strokeOpacity: $event })" [min]="0" [max]="1" [step]="0.05"
+              [ariaLabel]="(geometry === 'line' ? 'Line' : 'Outline') + ' opacity'" />
+            <span class="se__pct" title="Opacity">{{ ((s.symbol.strokeOpacity ?? 1) * 100) | number:'1.0-0' }}%</span>
+          </div>
         </div>
 
-        <label class="se__field">
-          <span class="se__label">{{ geometry === 'line' ? 'Line' : 'Outline' }} opacity ({{ ((s.symbol.strokeOpacity ?? 1) * 100) | number:'1.0-0' }}%)</span>
-          <p-slider [ngModel]="s.symbol.strokeOpacity ?? 1" (ngModelChange)="patchSymbol({ strokeOpacity: $event })" [min]="0" [max]="1" [step]="0.05" />
+        <label class="se__inline">
+          <span class="se__label">{{ geometry === 'line' ? 'Line width' : 'Outline width' }} <small>px</small></span>
+          <p-inputNumber class="se__ctl se__ctl--sm" [ngModel]="s.symbol.strokeWidth ?? 1" (ngModelChange)="patchSymbol({ strokeWidth: $event })"
+            [min]="0" [max]="40" [minFractionDigits]="0" [maxFractionDigits]="1" [showButtons]="true" />
         </label>
       }
 
@@ -417,8 +415,9 @@
             @for (color of s.graduate.ramp; track $index) {
               <li class="se__class">
                 <p-colorPicker [ngModel]="hex(color)" (ngModelChange)="setBreakColor($index, $event)" appendTo="body" />
-                <span class="se__class-value mono">
-                  {{ s.graduate!.breaks[$index] | number:'1.0-2' }} – {{ s.graduate!.breaks[$index + 1] | number:'1.0-2' }}
+                <span class="se__class-value"
+                  [title]="(s.graduate!.breaks[$index] | number:'1.0-2') + ' – ' + (s.graduate!.breaks[$index + 1] | number:'1.0-2')">
+                  {{ compact(s.graduate!.breaks[$index]) }} – {{ compact(s.graduate!.breaks[$index + 1]) }}
                 </span>
               </li>
             }
@@ -429,49 +428,84 @@
 
     <!-- ============ labels ============ -->
     @if (geometry !== 'raster') {
-      <section class="se__card">
-        <label class="se__check se__card-title-check">
-          <p-checkbox [binary]="true" [ngModel]="!!s.labels?.enabled" (ngModelChange)="toggleLabels($event)" />
-          <span>Labels</span>
-        </label>
+      <section class="se__card se__lbl" [class.is-on]="!!s.labels?.enabled">
+        <div class="se__lbl-head">
+          <span class="se__card-title"><i class="pi pi-tag" aria-hidden="true"></i> Labels</span>
+          <input type="checkbox" role="switch" class="se__switch" [checked]="!!s.labels?.enabled"
+            (change)="toggleLabels($any($event.target).checked)" aria-label="Show labels" />
+        </div>
+
         @if (s.labels?.enabled) {
+          @let lb = s.labels!;
+          <div class="se__lbl-preview" aria-hidden="true">
+            <span
+              [style.font-family]="previewFont(lb.font)"
+              [style.font-size.px]="lb.size"
+              [style.color]="hex(lb.color)"
+              [style.-webkit-text-stroke]="lb.haloWidth ? (lb.haloWidth * 2) + 'px ' + hex(lb.haloColor) : null"
+              [style.transform]="'rotate(' + (-lb.rotation) + 'deg) translate(' + (lb.offsetX || 0) + 'px,' + (-(lb.offsetY || 0)) + 'px)'"
+            >{{ previewText() }}</span>
+          </div>
+
           <label class="se__field">
-            <span class="se__label">Label field</span>
-            <p-select class="se__ctl" [options]="labelFields()" optionLabel="label" optionValue="value"
-              [ngModel]="s.labels!.field" (ngModelChange)="patchLabel({ field: $event })" appendTo="body" />
+            <span class="se__label">Text from field</span>
+            <p-select class="se__ctl" [options]="labelFields()" optionLabel="label" optionValue="value" [filter]="labelFields().length > 8"
+              filterBy="label" [ngModel]="lb.field" (ngModelChange)="patchLabel({ field: $event })" placeholder="Choose a field" appendTo="body" />
           </label>
+
           <div class="se__grid2">
             <label class="se__field">
               <span class="se__label">Font</span>
               <p-select class="se__ctl" [options]="fonts" optionLabel="label" optionValue="value"
-                [ngModel]="s.labels!.font" (ngModelChange)="patchLabel({ font: $event })" appendTo="body" />
+                [ngModel]="lb.font" (ngModelChange)="patchLabel({ font: $event })" appendTo="body" />
             </label>
             <label class="se__field">
-              <span class="se__label">Size</span>
-              <p-inputNumber class="se__ctl" [ngModel]="s.labels!.size" (ngModelChange)="patchLabel({ size: $event })"
-                [min]="6" [max]="72" [showButtons]="true" />
+              <span class="se__label">Size <small>px</small></span>
+              <p-inputNumber class="se__ctl" [ngModel]="lb.size" (ngModelChange)="patchLabel({ size: $event })"
+                [min]="6" [max]="72" [showButtons]="true" ariaLabel="Label size" />
             </label>
           </div>
-          <div class="se__grid2">
-            <label class="se__field">
-              <span class="se__label">Colour</span>
-              <p-colorPicker [ngModel]="hex(s.labels!.color)" (ngModelChange)="patchLabel({ color: $event })" appendTo="body" />
-            </label>
-            <label class="se__field">
-              <span class="se__label">Halo</span>
-              <p-colorPicker [ngModel]="hex(s.labels!.haloColor)" (ngModelChange)="patchLabel({ haloColor: $event })" appendTo="body" />
-            </label>
+
+          <div class="se__field">
+            <span class="se__label">Text colour</span>
+            <div class="se__colorrow">
+              <p-colorPicker [ngModel]="hex(lb.color)" (ngModelChange)="patchLabel({ color: $event })" appendTo="body" />
+              <code class="se__hex">{{ hex(lb.color) }}</code>
+            </div>
           </div>
-          <div class="se__grid2">
-            <label class="se__field">
-              <span class="se__label">Halo width</span>
-              <p-inputNumber class="se__ctl" [ngModel]="s.labels!.haloWidth" (ngModelChange)="patchLabel({ haloWidth: $event })"
-                [min]="0" [max]="10" [minFractionDigits]="0" [maxFractionDigits]="1" [showButtons]="true" />
-            </label>
-            <label class="se__field">
-              <span class="se__label">Rotation ({{ s.labels!.rotation }}°)</span>
-              <p-slider [ngModel]="s.labels!.rotation" (ngModelChange)="patchLabel({ rotation: $event })" [min]="-180" [max]="180" />
-            </label>
+
+          <div class="se__field">
+            <span class="se__label">Halo <small>outline that keeps text readable on any background</small></span>
+            <div class="se__colorrow">
+              <p-colorPicker [ngModel]="hex(lb.haloColor)" (ngModelChange)="patchLabel({ haloColor: $event })" appendTo="body" />
+              <p-slider class="se__slider" [ngModel]="lb.haloWidth" (ngModelChange)="patchLabel({ haloWidth: $event })" [min]="0" [max]="6" [step]="0.5"
+                ariaLabel="Halo width" />
+              <span class="se__pct">{{ lb.haloWidth | number:'1.0-1' }} px</span>
+            </div>
+          </div>
+
+          <div class="se__field">
+            <span class="se__label">Rotation</span>
+            <div class="se__colorrow">
+              <p-slider class="se__slider" [ngModel]="lb.rotation" (ngModelChange)="patchLabel({ rotation: $event })" [min]="-180" [max]="180"
+                ariaLabel="Label rotation" />
+              <span class="se__pct">{{ lb.rotation }}°</span>
+              @if (lb.rotation) {
+                <button type="button" class="se__mini" title="Reset rotation" aria-label="Reset rotation" (click)="patchLabel({ rotation: 0 })">
+                  <i class="pi pi-undo" aria-hidden="true"></i>
+                </button>
+              }
+            </div>
+          </div>
+
+          <div class="se__zoom">
+            <span class="se__label">Offset</span>
+            <span class="se__axis">X</span>
+            <p-inputNumber class="se__ctl se__ctl--sm" [ngModel]="lb.offsetX" (ngModelChange)="patchLabel({ offsetX: $event ?? 0 })"
+              [min]="-100" [max]="100" [showButtons]="true" ariaLabel="Label offset X" />
+            <span class="se__axis">Y</span>
+            <p-inputNumber class="se__ctl se__ctl--sm" [ngModel]="lb.offsetY" (ngModelChange)="patchLabel({ offsetY: $event ?? 0 })"
+              [min]="-100" [max]="100" [showButtons]="true" ariaLabel="Label offset Y" />
           </div>
         }
       </section>
@@ -481,15 +515,13 @@
     @if (geometry !== 'raster') {
       <section class="se__card">
         <h3 class="se__card-title">Visible zoom range</h3>
-        <div class="se__grid2">
-          <label class="se__field">
-            <span class="se__label">From zoom</span>
-            <p-inputNumber class="se__ctl" [ngModel]="5" (ngModelChange)="patchScaleZoom('min', $event)" [min]="0" [max]="22" [showButtons]="true" />
-          </label>
-          <label class="se__field">
-            <span class="se__label">To zoom</span>
-            <p-inputNumber class="se__ctl" [ngModel]="22" (ngModelChange)="patchScaleZoom('max', $event)" [min]="0" [max]="22" [showButtons]="true" />
-          </label>
+        <div class="se__zoom">
+          <span class="se__label">From</span>
+          <p-inputNumber class="se__ctl se__ctl--sm" [ngModel]="5" (ngModelChange)="patchScaleZoom('min', $event)" [min]="0" [max]="22" [showButtons]="true"
+            ariaLabel="From zoom" />
+          <span class="se__label">to</span>
+          <p-inputNumber class="se__ctl se__ctl--sm" [ngModel]="22" (ngModelChange)="patchScaleZoom('max', $event)" [min]="0" [max]="22" [showButtons]="true"
+            ariaLabel="To zoom" />
         </div>
         @if (s.scale) {
           <button type="button" class="se__link" (click)="clearScale()">Always visible</button>

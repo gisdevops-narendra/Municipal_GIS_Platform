@@ -1027,6 +1027,27 @@ export class StyleEditorComponent implements OnInit, OnDestroy {
   }
 
   /** p-colorPicker (hex format) yields "rrggbb" without the leading #. */
+  /** CSS font for the label preview (SLD font names → browser fonts). */
+  previewFont(font: string | undefined): string {
+    if (font === 'Serif') return 'Georgia, "Times New Roman", serif';
+    if (font === 'Monospaced') return 'ui-monospace, Menlo, Consolas, monospace';
+    return 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+  }
+
+  /** Sample text for the label preview: a category value when there is one. */
+  previewText(): string {
+    const s = this.spec();
+    const first = s.categorize?.categories?.[0];
+    if (first && s.categorize?.field === s.labels?.field) return String(first.label || first.value);
+    return s.labels?.field ? `${s.labels.field} label` : 'Label';
+  }
+
+  /** 27684959.69 → "27.68M" for class ranges (full value on hover). */
+  compact(n: number | null | undefined): string {
+    if (n === null || n === undefined || !Number.isFinite(n)) return '—';
+    return new Intl.NumberFormat(undefined, { notation: Math.abs(n) >= 10000 ? 'compact' : 'standard', maximumFractionDigits: 2 }).format(n);
+  }
+
   hex(value: string): string {
     if (!value) return value;
     return value.startsWith('#') ? value : `#${value}`;

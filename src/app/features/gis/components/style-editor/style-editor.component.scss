@@ -13,25 +13,25 @@
 /* ---------- segmented mode ---------- */
 .se__seg {
   display: flex;
-  gap: 3px;
+  gap: 2px;
   padding: 3px;
-  border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-ink-900) 6%, transparent);
 }
 
 .se__seg-btn {
   flex: 1;
-  padding: 7px 6px;
+  height: 30px;
+  padding: 0 8px;
   border: none;
-  border-radius: calc(var(--radius-md) - 3px);
+  border-radius: 8px;
   background: transparent;
   font: inherit;
-  font-size: 11.5px;
+  font-size: 12.5px;
   font-weight: 500;
   color: var(--color-ink-500);
   cursor: pointer;
-  transition: color 0.12s ease, background-color 0.12s ease;
+  transition: color 0.12s ease, background-color 0.12s ease, box-shadow 0.12s ease;
 
   &:hover {
     color: var(--color-ink-900);
@@ -39,7 +39,8 @@
 
   &.is-active {
     background: var(--color-surface);
-    color: var(--color-ink-900);
+    color: var(--color-primary-600);
+    font-weight: 600;
     box-shadow: 0 1px 3px rgb(15 23 42 / 12%);
   }
 }
@@ -48,37 +49,31 @@
 .se__card {
   display: flex;
   flex-direction: column;
-  gap: 9px;
-  padding: 11px;
+  gap: 12px;
+  padding: 14px;
   border: 1px solid var(--color-line);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-alt);
+  border-radius: 12px;
+  background: var(--color-surface);
 }
 
 .se__card-title {
   margin: 0;
-  font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--color-ink-500);
+  color: var(--color-ink-900);
 }
 
 .se__card-title-check {
-  font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--color-ink-500);
+  color: var(--color-ink-900) !important;
 }
 
 /* ---------- fields ---------- */
 .se__grid2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 12px;
   align-items: end;
 }
 
@@ -90,11 +85,71 @@
 }
 
 .se__label {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--color-ink-500);
+
+  small {
+    font-size: 11px;
+    opacity: 0.8;
+  }
+}
+
+/* colour swatch + opacity slider + value on one row */
+.se__colorrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.se__slider {
+  flex: 1;
+  min-width: 0;
+}
+
+.se__pct {
+  width: 38px;
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-700, var(--color-ink-900));
+}
+
+/* label on the left, small control on the right */
+.se__inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.se__zoom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.se__ctl--sm {
+  width: 104px;
+  flex: 0 0 104px;
+}
+
+/* PrimeNG 19: <p-inputNumber> itself is the .p-inputnumber box. */
+p-inputnumber.se__ctl--sm,
+.se__ctl--sm ::ng-deep .p-inputnumber {
+  display: inline-flex !important;
+  width: 104px !important;
+  align-self: flex-start;
+}
+
+.se__ctl--sm ::ng-deep .p-inputnumber-input {
+  width: 100% !important;
+  min-width: 0;
+}
+
+.se__inline .se__label,
+.se__zoom .se__label {
+  white-space: nowrap;
 }
 
 .se__ctl.p-select,
@@ -105,15 +160,68 @@
   width: 100%;
 }
 
+/* PrimeNG 19: the <p-select> element itself is the .p-select box. */
+p-select.se__ctl,
 .se__ctl ::ng-deep .p-select {
-  height: 30px;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 34px;
+  border-radius: 8px;
+  border-color: var(--color-line);
+  background: var(--color-surface);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+p-select.se__ctl:hover {
+  border-color: color-mix(in srgb, var(--color-ink-500) 60%, var(--color-line));
+}
+
+p-select.se__ctl.p-focus {
+  border-color: var(--color-primary-600);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary-600) 18%, transparent);
+}
+
+p-select.se__ctl ::ng-deep .p-select-label {
+  flex: 1;
+  min-width: 0;
+  padding: 0 10px;
+  font-size: 12.5px;
+  line-height: 34px;
+  color: var(--color-ink-900);
+}
+
+p-select.se__ctl ::ng-deep .p-select-label.p-placeholder {
+  color: var(--color-ink-500);
+}
+
+p-select.se__ctl ::ng-deep .p-select-dropdown {
+  width: 32px;
+  color: var(--color-ink-500);
+}
+
+p-select.se__ctl ::ng-deep .p-select-dropdown .p-icon,
+p-select.se__ctl ::ng-deep .p-select-dropdown svg {
+  width: 11px;
+  height: 11px;
+}
+
+.se__ctl ::ng-deep .p-inputnumber-input {
+  height: 32px;
+  padding: 0 8px;
+  font-size: 12.5px;
+  border-radius: 8px 0 0 8px;
+}
+
+.se__ctl--sm ::ng-deep .p-inputnumber-input {
+  text-align: center;
 }
 
 .se__ctl ::ng-deep .p-select-label {
   display: flex;
   align-items: center;
-  padding: 0 8px;
-  font-size: 12px;
+  padding: 0 10px;
+  font-size: 12.5px;
 }
 
 /* ---------- classes list ---------- */
@@ -123,32 +231,45 @@
 
 .se__classes {
   list-style: none;
-  margin: 4px 0 0;
-  padding: 0;
+  margin: 0;
+  padding: 4px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-height: 200px;
+  gap: 2px;
+  max-height: 240px;
   overflow-y: auto;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
 }
 
 .se__class {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
+  padding: 3px 6px;
+  border-radius: 7px;
+
+  &:hover {
+    background: color-mix(in srgb, var(--color-ink-900) 4%, transparent);
+  }
+
+  ::ng-deep .p-colorpicker .p-colorpicker-preview {
+    width: 22px !important;
+    height: 22px !important;
+    border-radius: 6px;
+    box-shadow: none;
+  }
 }
 
 .se__class-value {
-  font-size: 11.5px;
-  color: var(--color-ink-700);
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-900);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-
-  &.mono {
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-  }
 }
 
 .se__check {
@@ -454,9 +575,17 @@
 }
 
 .se__actions {
+  position: sticky;
+  /* the panel body has 14px padding — pin to its real bottom edge */
+  bottom: -14px;
+  z-index: 2;
   display: flex;
-  gap: 8px;
-  padding-top: 2px;
+  align-items: center;
+  gap: 6px;
+  margin: 0 -14px -14px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--color-line);
+  background: var(--color-surface);
 }
 
 .se__apply {
@@ -465,9 +594,12 @@
 
 /* the PrimeNG colour picker preview box, sized to the panel */
 .se ::ng-deep .p-colorpicker-preview {
-  width: 34px;
-  height: 30px;
-  border-radius: var(--radius-sm);
+  width: 36px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--color-ink-900) 15%, transparent);
+  box-shadow: inset 0 0 0 2px var(--color-surface);
+  cursor: pointer;
 }
 
 .se__tabs {
@@ -513,4 +645,138 @@
 
 :host ::ng-deep .se__sld-note {
   margin-bottom: 0.75rem;
+}
+
+/* ---------- labels ---------- */
+.se__lbl-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+
+  .se__card-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+
+    .pi {
+      font-size: 12px;
+      color: var(--color-ink-500);
+    }
+  }
+}
+
+.se__lbl.is-on .se__lbl-head .pi {
+  color: var(--color-primary-600);
+}
+
+.se__switch {
+  appearance: none;
+  position: relative;
+  flex-shrink: 0;
+  width: 38px;
+  height: 22px;
+  margin: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-ink-500) 35%, transparent);
+  cursor: pointer;
+  transition: background 0.15s;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 25%);
+    transition: transform 0.15s;
+  }
+
+  &:checked {
+    background: var(--color-primary-600);
+  }
+
+  &:checked::after {
+    transform: translateX(16px);
+  }
+
+  &:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-primary-600) 45%, transparent);
+    outline-offset: 2px;
+  }
+}
+
+/* a strip of "map" behind the sample text */
+.se__lbl-preview {
+  display: grid;
+  place-items: center;
+  height: 76px;
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg, rgb(120 170 140 / 35%) 0 30%, transparent 30%),
+    linear-gradient(45deg, transparent 0 62%, rgb(110 150 210 / 30%) 62%),
+    repeating-linear-gradient(90deg, rgb(0 0 0 / 3%) 0 1px, transparent 1px 22px),
+    repeating-linear-gradient(0deg, rgb(0 0 0 / 3%) 0 1px, transparent 1px 22px),
+    #efe9df;
+
+  span {
+    max-width: 92%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-weight: 600;
+    line-height: 1.2;
+    paint-order: stroke fill;
+  }
+}
+
+.se__lbl-font {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 104px;
+  align-items: end;
+  gap: 12px;
+}
+
+.se__field--grow {
+  flex: 1;
+}
+
+.se__hex {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-ink-700, var(--color-ink-900));
+  text-transform: uppercase;
+}
+
+.se__axis {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-ink-500);
+}
+
+.se__mini {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-ink-500);
+  cursor: pointer;
+
+  .pi {
+    font-size: 10px;
+  }
+
+  &:hover {
+    background: color-mix(in srgb, var(--color-ink-900) 6%, transparent);
+    color: var(--color-ink-900);
+  }
 }
