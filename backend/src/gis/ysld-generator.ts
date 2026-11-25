@@ -274,27 +274,40 @@ export class YsldGenerator {
     return lines.join('\n');
   }
 
+  /**
+   * YSLD text symbolizer. Every value GeoServer's JSON legend reads is
+   * written out explicitly — font style / weight / size, rotation, offset,
+   * halo radius — because the YSLD parser leaves unset ones null and
+   * GetLegendGraphic&format=application/json then throws a
+   * NullPointerException (the layer loses its legend). Placement keys are
+   * flat on the symbolizer (`placement: point`, `anchor`, `displacement`,
+   * `rotation` / `offset`): a nested `placement:` map is silently ignored.
+   * Covered by scripts/style-selftest (every style option through GeoServer).
+   */
   private textSymbolizer(l: LabelSpecDto): string {
+    const num = (v: unknown, fallback: number) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
     const lines = [
       '- text:',
       `    label: \${${this.q(l.field)}}`,
       `    fill-color: ${this.quote(l.color)}`,
       `    font-family: ${this.quote(substituteFont(l.font))}`,
-      `    font-size: ${l.size}`,
+      `    font-size: ${num(l.size, 12)}`,
+      `    font-style: normal`,
+      `    font-weight: normal`,
     ];
-    if (l.haloWidth > 0) {
+    if (num(l.haloWidth, 0) > 0) {
       lines.push('    halo:');
       lines.push(`      fill-color: ${this.quote(l.haloColor)}`);
-      lines.push(`      radius: ${l.haloWidth}`);
+      lines.push(`      radius: ${num(l.haloWidth, 1)}`);
     }
-    lines.push('    placement:');
-    lines.push(`      type: ${l.placement}`);
-    if (l.placement === 'point') {
-      lines.push('      anchor: [0.5, 0.5]');
-      lines.push(`      displacement: [${l.offsetX}, ${l.offsetY}]`);
-      lines.push(`      rotation: ${l.rotation}`);
+    if (l.placement === 'line') {
+      lines.push('    placement: line');
+      lines.push(`    offset: ${num(l.offsetY, 0)}`);
     } else {
-      lines.push(`      offset: ${l.offsetY}`);
+      lines.push('    placement: point');
+      lines.push('    anchor: [0.5, 0.5]');
+      lines.push(`    displacement: [${num(l.offsetX, 0)}, ${num(l.offsetY, 0)}]`);
+      lines.push(`    rotation: ${num(l.rotation, 0)}`);
     }
     return lines.join('\n');
   }

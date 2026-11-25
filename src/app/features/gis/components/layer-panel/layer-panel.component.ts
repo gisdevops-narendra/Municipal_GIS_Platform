@@ -402,8 +402,16 @@ export class LayerPanelComponent implements OnChanges {
     untracked(() => {
       this.legendLoading.clear();
       this.legends.set(new Map());
+      this.legendImageFailed.set(new Set());
     });
   });
+
+  /** Layers whose PNG fallback legend failed too. */
+  readonly legendImageFailed = signal<ReadonlySet<string>>(new Set());
+
+  markLegendImageFailed(layerId: string): void {
+    this.legendImageFailed.update((s) => new Set(s).add(layerId));
+  }
 
   legend(layer: GisLayer): LegendModel | null | undefined {
     const map = this.legends();

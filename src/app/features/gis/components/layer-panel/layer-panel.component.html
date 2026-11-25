@@ -112,7 +112,13 @@
               <app-layer-legend [model]="lg" [toggleable]="true" [hidden]="mapService.legendHidden()[layer.id] ?? []"
                                 (toggleEntry)="toggleLegendEntry(layer.id, lg, $event)" (setAll)="setAllLegendEntries(layer.id, lg, $event)" />
             } @else if (lg === null && !info) {
-              <span class="layer-panel__legend-empty">No legend available for this layer.</span>
+              <!-- Safety net: GeoServer's own PNG legend when its JSON legend fails. -->
+              @if (!legendImageFailed().has(layer.id)) {
+                <img class="layer-panel__legend-img" [src]="mapService.legendGraphicUrl(layer, mapService.styleChanged() || undefined)"
+                     [alt]="'Legend of ' + layer.name" (error)="markLegendImageFailed(layer.id)" />
+              } @else {
+                <span class="layer-panel__legend-empty">No legend available for this layer.</span>
+              }
             } @else if (lg === undefined) {
               <span class="layer-panel__legend-empty">Loading legend…</span>
             }
