@@ -5,7 +5,6 @@ import { NgTemplateOutlet } from '@angular/common';
 import { CdkDrag, CdkDragDrop, CdkDropList } from '@angular/cdk/drag-drop';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
-import { CheckboxModule, CheckboxChangeEvent } from 'primeng/checkbox';
 import { SelectModule } from 'primeng/select';
 import { TooltipModule } from 'primeng/tooltip';
 import { DialogModule } from 'primeng/dialog';
@@ -41,7 +40,7 @@ import { RenderFormatInfo, formatInfo, formatsFor, recommendedFormat } from '../
 @Component({
   selector: 'app-layer-panel',
   standalone: true,
-  imports: [DatePipe, DecimalPipe, NgTemplateOutlet, CdkDropList, CdkDrag, LegendSwatchComponent, LayerLegendComponent, FormsModule, ButtonModule, CheckboxModule, DialogModule, MenuModule, SelectModule, TooltipModule],
+  imports: [DatePipe, DecimalPipe, NgTemplateOutlet, CdkDropList, CdkDrag, LegendSwatchComponent, LayerLegendComponent, FormsModule, ButtonModule, DialogModule, MenuModule, SelectModule, TooltipModule],
   templateUrl: './layer-panel.component.html',
   styleUrl: './layer-panel.component.scss'
 })
@@ -364,8 +363,8 @@ export class LayerPanelComponent implements OnChanges {
     return this.visibility()[layerId] ?? false;
   }
 
-  onToggle(layerId: string, event: CheckboxChangeEvent): void {
-    this.mapService.setLayerVisibility(layerId, !!event.checked);
+  toggleVisible(layerId: string): void {
+    this.mapService.setLayerVisibility(layerId, !this.isVisible(layerId));
   }
 
   anyVisible(list: GisLayer[]): boolean {

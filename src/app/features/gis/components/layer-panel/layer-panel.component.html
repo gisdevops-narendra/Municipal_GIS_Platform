@@ -2,7 +2,9 @@
 
   <!-- One row template for every group, so they cannot drift apart. -->
   <ng-template #row let-layer>
-    <div class="layer-panel__item" [class.layer-panel__item--highlight]="layer.id === highlightLayerId">
+    @let shown = isVisible(layer.id);
+    <div class="layer-panel__item" [class.layer-panel__item--highlight]="layer.id === highlightLayerId"
+         [class.layer-panel__item--hidden]="!shown" [class.layer-panel__item--open]="isLegendOpen(layer.id)">
       <button
         type="button"
         class="layer-panel__expand"
@@ -13,12 +15,17 @@
       >
         <i class="pi pi-chevron-right" aria-hidden="true"></i>
       </button>
-      <p-checkbox
-        [inputId]="'layer-' + layer.id"
-        [binary]="true"
-        [ngModel]="isVisible(layer.id)"
-        (onChange)="onToggle(layer.id, $event)"
-      ></p-checkbox>
+      <button
+        type="button"
+        class="layer-panel__eye"
+        [id]="'layer-' + layer.id"
+        role="switch"
+        [attr.aria-checked]="shown"
+        [attr.aria-label]="(shown ? 'Hide ' : 'Show ') + layer.name"
+        (click)="toggleVisible(layer.id)"
+      >
+        <i class="pi" [class.pi-eye]="shown" [class.pi-eye-slash]="!shown" aria-hidden="true"></i>
+      </button>
       @let lg = legend(layer);
       <span class="layer-panel__symbol" aria-hidden="true">
         @if (lg?.entries?.length) {
@@ -44,10 +51,10 @@
       } @else {
         <label [for]="'layer-' + layer.id" class="layer-panel__label" [title]="layer.description || layer.name">
           {{ layer.name }}
-          @if (countLabel(layer.id); as n) {
-            <span class="layer-panel__count" [title]="(featureCounts()[layer.id]?.estimate ? 'About ' : '') + (featureCounts()[layer.id]?.count | number) + ' features'">{{ n }}</span>
-          }
         </label>
+        @if (countLabel(layer.id); as n) {
+          <span class="layer-panel__count" [title]="(featureCounts()[layer.id]?.estimate ? 'About ' : '') + (featureCounts()[layer.id]?.count | number) + ' features'">{{ n }}</span>
+        }
       }
       <!-- Zoom stays one click away; everything else lives in the More menu. -->
       <span class="layer-panel__actions">
@@ -80,9 +87,10 @@
       @if (isLegendOpen(layer.id)) {
         <div class="layer-panel__legend">
           @let opacity = mapService.layerOpacity()[layer.id] ?? 1;
-          <label class="layer-panel__opacity">
-            <span>Opacity</span>
-            <input type="range" min="0" max="100" step="5" [value]="opacity * 100"
+          <label class="layer-panel__opacity" title="Opacity">
+            <i class="pi pi-sliders-h" aria-hidden="true"></i>
+            <input type="range" class="layer-panel__range" min="0" max="100" step="5" [value]="opacity * 100"
+                   [style.--fill]="opacity * 100 + '%'"
                    [attr.aria-label]="'Opacity of ' + layer.name"
                    (input)="mapService.setLayerOpacity(layer.id, +$any($event.target).value / 100)" />
             <span class="layer-panel__opacity-value">{{ (opacity * 100).toFixed(0) }}%</span>
@@ -154,7 +162,7 @@
     @if (canonicalLayers.length > 0) {
       <div class="layer-panel__group">
         <div class="layer-panel__group-head">
-          <h3 class="layer-panel__group-title">Uploaded Layers</h3>
+          <h3 class="layer-panel__group-title">Uploaded Layers<span class="layer-panel__group-count">{{ canonicalLayers.length }}</span></h3>
           <button type="button" class="layer-panel__group-toggle" (click)="toggleGroup(canonicalLayers)">
             {{ anyVisible(canonicalLayers) ? 'Hide all' : 'Show all' }}
           </button>
@@ -173,7 +181,7 @@
     @if (drawnLayers.length > 0) {
       <div class="layer-panel__group">
         <div class="layer-panel__group-head">
-          <h3 class="layer-panel__group-title">Drawn Layers</h3>
+          <h3 class="layer-panel__group-title">Drawn Layers<span class="layer-panel__group-count">{{ drawnLayers.length }}</span></h3>
           <button type="button" class="layer-panel__group-toggle" (click)="toggleGroup(drawnLayers)">
             {{ anyVisible(drawnLayers) ? 'Hide all' : 'Show all' }}
           </button>
@@ -192,7 +200,7 @@
     @if (aiLayers.length > 0) {
       <div class="layer-panel__group">
         <div class="layer-panel__group-head">
-          <h3 class="layer-panel__group-title">AI Assistant</h3>
+          <h3 class="layer-panel__group-title">AI Assistant<span class="layer-panel__group-count">{{ aiLayers.length }}</span></h3>
           <button type="button" class="layer-panel__group-toggle" (click)="toggleGroup(aiLayers)">
             {{ anyVisible(aiLayers) ? 'Hide all' : 'Show all' }}
           </button>
@@ -211,7 +219,7 @@
     @if (rasterAnalysisLayers.length > 0) {
       <div class="layer-panel__group">
         <div class="layer-panel__group-head">
-          <h3 class="layer-panel__group-title">Raster Analysis</h3>
+          <h3 class="layer-panel__group-title">Raster Analysis<span class="layer-panel__group-count">{{ rasterAnalysisLayers.length }}</span></h3>
           <button type="button" class="layer-panel__group-toggle" (click)="toggleGroup(rasterAnalysisLayers)">
             {{ anyVisible(rasterAnalysisLayers) ? 'Hide all' : 'Show all' }}
           </button>
