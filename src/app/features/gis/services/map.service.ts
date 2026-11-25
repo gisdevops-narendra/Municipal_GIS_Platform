@@ -1148,6 +1148,8 @@ export class MapService {
     this.selectionWmsLayerId = null;
     this.queryLayer = null;
     this.analysisLayer = null;
+    this.sqlResultLayer = null;
+    this.sqlPickFeature = null;
     this.densityLayer = null;
     this.densitySource = null;
     this.drawLayer = null;
@@ -1970,6 +1972,41 @@ export class MapService {
 
   clearStyledResult(): void {
     this.sqlResultLayer?.getSource()?.clear();
+  }
+
+  private sqlPickFeature: Feature | null = null;
+  private sqlPickStyles: Style[] | null = null;
+
+  /** SQL Console: the one result row picked in the table, drawn in a bright
+   *  selection style (EPSG:4326 GeoJSON; null clears it). It goes into the
+   *  query-highlight layer — added last, so it paints over the other
+   *  results — with its own per-feature style. */
+  setSqlPicked(geometry: Record<string, unknown> | null): void {
+    const source = this.ensureQuerySource();
+    if (this.sqlPickFeature && source.hasFeature(this.sqlPickFeature)) source.removeFeature(this.sqlPickFeature);
+    this.sqlPickFeature = null;
+    const feature = this.toMapFeature(geometry);
+    if (!feature) return;
+    if (!this.sqlPickStyles) {
+      const orange = '#f97316';
+      this.sqlPickStyles = [
+        new Style({ stroke: new Stroke({ color: 'rgba(255, 255, 255, 0.95)', width: 7 }), zIndex: 10 }),
+        new Style({
+          zIndex: 11,
+          stroke: new Stroke({ color: orange, width: 3.5 }),
+          fill: new Fill({ color: 'rgba(249, 115, 22, 0.28)' }),
+          image: new CircleStyle({
+            radius: 9,
+            fill: new Fill({ color: 'rgba(249, 115, 22, 0.35)' }),
+            stroke: new Stroke({ color: orange, width: 3 })
+          })
+        })
+      ];
+    }
+    const styles = this.sqlPickStyles;
+    feature.setStyle(() => styles);
+    source.addFeature(feature);
+    this.sqlPickFeature = feature;
   }
 
   /** Lets the user draw one geometry for a spatial query. Emits the drawn

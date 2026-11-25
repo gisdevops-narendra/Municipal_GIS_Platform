@@ -238,6 +238,7 @@ export class SqlConsoleStore {
   drawOnMap(): void {
     const r = this.active()?.result;
     this.mapService.clearStyledResult();
+    this.mapService.setSqlPicked(null);
     if (!r?.geometryColumn) {
       this.mapService.clearQueryHighlight();
       return;
@@ -262,6 +263,15 @@ export class SqlConsoleStore {
   clearMap(): void {
     this.mapService.clearQueryHighlight();
     this.mapService.clearStyledResult();
+    this.mapService.setSqlPicked(null);
+  }
+
+  /** Marks one result row on the map (null clears) and zooms to it. */
+  pickRow(index: number | null): void {
+    const r = this.active()?.result;
+    const geom = index !== null && r?.geometryColumn ? (r.rows[index]?.[r.geometryColumn] as Record<string, unknown> | null) : null;
+    this.mapService.setSqlPicked(geom ?? null);
+    if (geom) this.mapService.zoomToGeometries([geom]);
   }
 
   zoomToResult(index?: number): void {
