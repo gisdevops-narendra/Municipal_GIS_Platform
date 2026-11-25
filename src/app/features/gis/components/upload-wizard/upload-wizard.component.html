@@ -115,7 +115,7 @@
       }
 
       <div class="upload-wizard__field">
-        <label class="field-label" for="wiz-target-crs">Store layer in <span class="upload-wizard__optional">(optional)</span></label>
+        <label class="field-label" for="wiz-target-crs">Target projection <span class="upload-wizard__optional">(optional)</span></label>
         <app-crs-picker inputId="wiz-target-crs" formControlName="targetCrs" />
         <div class="field-hint">
           The data's own projection is detected automatically and the data is reprojected into this CRS{{ workspaceCrs() ? ' — workspace default ' + workspaceCrs() : '' }}.

@@ -81,7 +81,7 @@ const MODULE_STYLES = `
   .md__nav-empty { padding: 24px 12px; text-align: center; font-size: 13px; color: var(--color-ink-500); }
 
   .md__detail { border: 1px solid var(--color-line); border-radius: 14px; background: var(--color-surface); overflow: hidden; }
-  .md__detail { position: sticky; top: 16px; }
+  .md__main { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
   .md__hero { display: flex; align-items: center; gap: 16px; padding: 20px 24px; border-bottom: 1px solid var(--color-line); }
   .md__hero-ico { width: 48px; height: 48px; flex-shrink: 0; border-radius: 12px; display: grid; place-items: center; font-size: 20px;
     background: color-mix(in srgb, var(--color-primary-600) 12%, transparent); color: var(--color-primary-600); }
@@ -133,8 +133,8 @@ const MODULE_STYLES = `
   .md__switch--lg::after { width: 20px; height: 20px; }
   .md__switch--lg:checked::after { transform: translateX(20px); }
 
-  .md__savebar { position: sticky; bottom: 16px; z-index: 5; display: flex; align-items: center; gap: 12px; margin-top: 20px; padding: 12px 16px 12px 20px;
-    border: 1px solid var(--color-line); border-radius: 14px; background: var(--color-surface); box-shadow: 0 10px 30px rgba(0,0,0,.18); }
+  .md__savebar { display: flex; align-items: center; gap: 12px; padding: 12px 16px 12px 20px;
+    border: 1px solid var(--color-line); border-radius: 14px; background: var(--color-surface); box-shadow: 0 6px 18px rgba(0,0,0,.08); }
   .md__savebar span { flex: 1; font-size: 13.5px; color: var(--color-ink-900); }
   .md__savebar span::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 10px; border-radius: 50%; background: #d97706; vertical-align: 1px; }
 `;
@@ -680,6 +680,7 @@ const TOOL_META: Record<string, { icon: string; desc: string }> = {
           </div>
         </nav>
 
+        <div class="md__main">
         @if (selected(); as t) {
           @let on = isOn(t.id);
           @let kids = t.children ?? [];
@@ -733,15 +734,15 @@ const TOOL_META: Record<string, { icon: string; desc: string }> = {
             </div>
           </section>
         }
-      </div>
-
-      @if (dirty()) {
-        <div class="md__savebar">
-          <span>You have unsaved changes</span>
-          <button type="button" class="ac__btn" (click)="discard()">Discard</button>
-          <button type="button" class="ac__btn ac__btn--primary" (click)="save()">Save changes</button>
+        @if (dirty()) {
+          <div class="md__savebar">
+            <span>You have unsaved changes</span>
+            <button type="button" class="ac__btn" (click)="discard()">Discard</button>
+            <button type="button" class="ac__btn ac__btn--primary" (click)="save()">Save changes</button>
+          </div>
+        }
         </div>
-      }
+      </div>
     } @else {
       <p class="muted">Loading…</p>
     }
@@ -757,6 +758,7 @@ export class AdminModulesComponent implements OnInit {
   readonly version = signal(0);
   readonly dirty = signal(false);
   private saved = '';
+  private savedRaw = '';
 
   readonly navGroups = computed(() => {
     const tools = this.cfg()?.tools ?? [];
@@ -791,7 +793,8 @@ export class AdminModulesComponent implements OnInit {
   }
 
   private load(c: ModulesConfig): void {
-    this.saved = JSON.stringify(c.switches);
+    this.saved = this.snapshot(c.switches);
+    this.savedRaw = JSON.stringify(c.switches);
     this.cfg.set(c);
     this.dirty.set(false);
     this.version.update((v) => v + 1);
@@ -820,11 +823,23 @@ export class AdminModulesComponent implements OnInit {
     return out;
   }
 
-  private offList(): string[] {
+  /** Off-list for the current scope; `create` adds a missing per-account list (only when editing). */
+  private offList(create = false): string[] {
     const c = this.cfg();
     if (!c) return [];
     const scope = this.scope();
-    return scope ? (c.switches.perAccount[scope] ??= []) : c.switches.global;
+    if (!scope) return c.switches.global;
+    if (create) return (c.switches.perAccount[scope] ??= []);
+    return c.switches.perAccount[scope] ?? [];
+  }
+
+  /** Order-independent form of the switches, ignoring empty per-account lists. */
+  private snapshot(sw: ModulesConfig['switches']): string {
+    const per = Object.entries(sw.perAccount ?? {})
+      .filter(([, l]) => l?.length)
+      .map(([k, l]) => [k, [...l].sort()] as const)
+      .sort(([a], [b]) => a.localeCompare(b));
+    return JSON.stringify({ global: [...sw.global].sort(), per });
   }
 
   /** Switched off for everyone while editing one account. */
@@ -858,12 +873,12 @@ export class AdminModulesComponent implements OnInit {
   }
 
   toggle(id: string, on: boolean): void {
-    const list = this.offList();
+    const list = this.offList(true);
     const i = list.indexOf(id);
     if (on && i >= 0) list.splice(i, 1);
     if (!on && i < 0) list.push(id);
     this.version.update((v) => v + 1);
-    this.dirty.set(JSON.stringify(this.cfg()!.switches) !== this.saved);
+    this.dirty.set(this.snapshot(this.cfg()!.switches) !== this.saved);
   }
 
   setAll(items: { id: string }[], on: boolean): void {
@@ -872,7 +887,7 @@ export class AdminModulesComponent implements OnInit {
 
   discard(): void {
     const c = this.cfg();
-    if (c) this.load({ ...c, switches: JSON.parse(this.saved) });
+    if (c) this.load({ ...c, switches: JSON.parse(this.savedRaw) });
   }
 
   save(): void {
