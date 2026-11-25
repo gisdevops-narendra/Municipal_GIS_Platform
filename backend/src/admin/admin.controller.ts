@@ -166,7 +166,7 @@ export class AdminController {
   @Post('branding/logo')
   @UseInterceptors(
     FileInterceptor('file', {
-      limits: { fileSize: 2 * 1024 * 1024 },
+      limits: { fileSize: 5 * 1024 * 1024 },
       storage: diskStorage({
         destination: (_req, _file, cb) => {
           const dir = `${process.env.GIS_UPLOAD_STORAGE_DIR ?? './storage/uploads'}/tmp-uploads`;

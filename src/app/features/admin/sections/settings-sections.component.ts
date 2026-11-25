@@ -139,6 +139,26 @@ const MODULE_STYLES = `
   .md__savebar span::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 10px; border-radius: 50%; background: #d97706; vertical-align: 1px; }
 `;
 
+/** Scales a raster logo down to at most 800 × 400 px (PNG keeps transparency);
+ *  SVGs and already-small images are returned as they are. */
+async function shrinkLogo(file: File): Promise<File> {
+  if (file.type === 'image/svg+xml' || /\.svg$/i.test(file.name)) return file;
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, 800 / bmp.width, 400 / bmp.height);
+  if (scale === 1 && file.size <= 1024 * 1024) {
+    bmp.close();
+    return file;
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bmp.width * scale));
+  canvas.height = Math.max(1, Math.round(bmp.height * scale));
+  canvas.getContext('2d')!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  bmp.close();
+  const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
+  if (!blob) throw new Error('encode failed');
+  return new File([blob], file.name.replace(/\.[^.]+$/, '') + '.png', { type: 'image/png' });
+}
+
 // =============================== Security ===============================
 
 @Component({
@@ -407,7 +427,7 @@ export class AdminEmailComponent implements OnInit {
         <input type="file" accept=".png,.svg,.jpg,.jpeg,.webp" (change)="upload($event)" />
         @if (b.hasLogo) { <button type="button" class="ac__btn ac__btn--danger" (click)="removeLogo()">Remove logo</button> }
       </div>
-      <p class="muted">PNG, SVG, JPEG or WEBP under 1 MB. A wide logo about 160 × 44 px looks best.</p>
+      <p class="muted">PNG, SVG, JPEG or WEBP. Large images are resized automatically. A wide logo about 160 × 44 px looks best.</p>
       <div class="st__preview">
         @if (b.hasLogo) { <img [src]="logoUrl()" alt="Logo preview" /> }
         @else if (b.primaryColor) { <span class="st__swatch" [style.background]="b.primaryColor"></span> }
@@ -445,9 +465,22 @@ export class AdminBrandingComponent implements OnInit {
     });
   }
 
-  upload(event: Event): void {
-    const file = (event.target as HTMLInputElement).files?.[0];
-    if (!file) return;
+  async upload(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const picked = input.files?.[0];
+    input.value = '';
+    if (!picked) return;
+    let file: File;
+    try {
+      file = await shrinkLogo(picked);
+    } catch {
+      this.notify.error('This image could not be read. Use a PNG, SVG, JPEG or WEBP file.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      this.notify.error('The logo must be under 5 MB.');
+      return;
+    }
     this.api.uploadLogo(file).subscribe({
       next: (b) => {
         this.b = b;

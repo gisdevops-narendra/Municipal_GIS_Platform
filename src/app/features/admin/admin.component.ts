@@ -353,15 +353,6 @@ export class AdminComponent {
     return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   }
 
-  /** The nightly run at 02:30 local time. */
-  nextBackupLabel(): string {
-    const now = new Date();
-    const next = new Date(now);
-    next.setHours(2, 30, 0, 0);
-    if (next <= now) next.setDate(next.getDate() + 1);
-    return next.getDate() === now.getDate() ? 'Tonight, 02:30' : 'Tomorrow, 02:30';
-  }
-
   fileLabel(name: string): string {
     return ({ 'db.dump': 'Database', 'geoserver-data.tar.gz': 'Map server settings', 'storage.tar': 'Uploaded files', 'keycloak-realm.json': 'Login settings', 'keycloak-users.json': 'User list', SHA256SUMS: 'Checksums', 'manifest.txt': 'Manifest' } as Record<string, string>)[name] ?? name;
   }

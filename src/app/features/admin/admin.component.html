@@ -392,7 +392,7 @@
       <header class="ac__head">
         <div>
           <h1 class="ac__title">Backups</h1>
-          <p class="ac__sub">Full backups (database, GeoServer, uploaded files, logins) run every night at 02:30; the newest 7 are kept.</p>
+          <p class="ac__sub">Full backups (database, GeoServer, uploaded files, logins), taken when you click “Back up now”.</p>
         </div>
         <button type="button" class="ac__btn ac__btn--primary" (click)="backupNow()" [disabled]="backupList()?.inProgress">
           <i class="pi pi-save" aria-hidden="true"></i> Back up now
@@ -426,14 +426,9 @@
             @if (bl.backups[0]; as b) { <span class="bk__stat-sub">{{ b.takenAt | date: 'HH:mm' }} · {{ bytes(b.totalBytes) }}</span> }
           </div>
           <div class="bk__stat">
-            <span class="bk__stat-label">Next backup</span>
-            <span class="bk__stat-value">{{ nextBackupLabel() }}</span>
-            <span class="bk__stat-sub">Automatic, every night</span>
-          </div>
-          <div class="bk__stat">
-            <span class="bk__stat-label">Backups kept</span>
-            <span class="bk__stat-value">{{ bl.backups.length }} <small>of 7</small></span>
-            <span class="bk__stat-sub">Older ones are removed</span>
+            <span class="bk__stat-label">Backups</span>
+            <span class="bk__stat-value">{{ bl.backups.length }}</span>
+            <span class="bk__stat-sub">Taken manually — nothing is deleted automatically</span>
           </div>
           <div class="bk__stat">
             <span class="bk__stat-label">Space used</span>

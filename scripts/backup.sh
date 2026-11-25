@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# backup.sh — full backup of the Municipal GIS Platform, run nightly by the
-# systemd user timer `municipal-gis-backup.timer` (see scripts/install-backup-timer.sh).
+# backup.sh — full backup of the Municipal GIS Platform, taken on demand
+# (Admin → Backups → "Back up now", or by hand). Nothing is deleted
+# automatically: remove old backups yourself when they are no longer needed.
 #
 #   scripts/backup.sh            take a backup now
-#   KEEP=10 scripts/backup.sh    keep the 10 newest backups (default 7)
 #
 # Writes backups/auto/<YYYYMMDD-HHMMSS>/ containing:
 #   db.dump               PostgreSQL database (pg_dump -Fc): all accounts, layers, tables
@@ -19,7 +19,6 @@
 set -Eeuo pipefail
 cd "$(dirname "$0")/.."
 
-KEEP="${KEEP:-7}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 ROOT="backups/auto"
 DEST="$ROOT/$STAMP"
@@ -50,7 +49,7 @@ fail() {
 }
 trap 'fail $LINENO' ERR
 
-log "Backup $STAMP starting (keep $KEEP)"
+log "Backup $STAMP starting"
 mkdir -p "$PART"
 
 log "1/4 database"
@@ -87,10 +86,5 @@ SIZE="$(du -sh "$DEST" | cut -f1)"
 log "Backup $STAMP complete: $DEST ($SIZE)"
 record_audit backup.completed "{\"stamp\": \"$STAMP\", \"size\": \"$SIZE\"}"
 
-# Retention: keep the newest $KEEP complete backups; drop failed partials.
+# Drop leftovers of failed runs (complete backups are never removed).
 rm -rf "$ROOT"/*.partial
-mapfile -t OLD < <(ls -1d "$ROOT"/2* 2>/dev/null | sort -r | tail -n +"$((KEEP + 1))")
-for dir in "${OLD[@]}"; do
-  log "Removing old backup $dir"
-  rm -rf "$dir"
-done

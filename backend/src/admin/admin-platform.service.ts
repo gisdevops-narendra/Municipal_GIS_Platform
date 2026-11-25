@@ -246,24 +246,12 @@ export class AdminPlatformService {
     const recentUsers = await this.prisma.user.findMany({ where: { id: { in: [...new Set(recent.map((r) => r.userId))] } }, select: { id: true, email: true } });
     const recentEmails = new Map(recentUsers.map((u) => [u.id, u.email]));
 
-    const backupsDir = path.resolve(this.config.get<string>('BACKUPS_DIR', '/backups'));
-    const stamps = (await fsp.readdir(path.join(backupsDir, 'auto')).catch(() => [] as string[])).filter((n) => /^\d{8}-\d{6}$/.test(n)).sort();
-    const lastStamp = stamps[stamps.length - 1];
-    const lastBackupFailed = await this.prisma.auditLog.findFirst({ where: { action: { in: ['backup.completed', 'backup.failed'] } }, orderBy: { createdAt: 'desc' } });
     const lastCleanup = JSON.parse(await fsp.readFile(path.join(path.dirname(path.resolve(this.config.get<string>('GIS_UPLOAD_STORAGE_DIR', './storage/uploads'))), '_system', 'last-cleanup.json'), 'utf8').catch(() => 'null')) as { at: string; freedBytes: number } | null;
     const lastRestart = await this.prisma.auditLog.findFirst({ where: { action: 'system.geoserver_restarted' }, orderBy: { createdAt: 'desc' } });
-    const next = (h: number, m: number) => {
-      const d = new Date();
-      d.setHours(h, m, 0, 0);
-      if (d <= new Date()) d.setDate(d.getDate() + 1);
-      return d.toISOString();
-    };
-    const stampIso = (s?: string) => (s ? `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}T${s.slice(9, 11)}:${s.slice(11, 13)}:${s.slice(13, 15)}` : null);
     return {
       running: running.map((j) => ({ ...j, userEmail: emails.get(j.userId) ?? null })),
       recent: recent.map((r) => ({ ...r, userEmail: recentEmails.get(r.userId) ?? null })),
       schedules: [
-        { name: 'Nightly backup', when: 'Every night at 02:30', lastRun: stampIso(lastStamp), lastResult: lastBackupFailed?.action === 'backup.failed' ? 'failed' : lastStamp ? 'ok' : null, nextRun: next(2, 30) },
         { name: 'Storage cleanup', when: 'Daily', lastRun: lastCleanup?.at ?? null, lastResult: lastCleanup ? 'ok' : null, nextRun: null },
         { name: 'GeoServer watchdog', when: 'Every minute — restarts a hung GeoServer', lastRun: null, lastResult: lastRestart ? `last restart ${lastRestart.createdAt.toISOString()}` : 'no restarts', nextRun: null },
       ],
@@ -450,7 +438,7 @@ export class AdminPlatformService {
     const ext = path.extname(file.originalname).toLowerCase();
     try {
       if (!['.png', '.svg', '.jpg', '.jpeg', '.webp'].includes(ext)) throw new BadRequestException('Use a PNG, SVG, JPEG or WEBP image.');
-      if (file.size > 1024 * 1024) throw new BadRequestException('The logo must be under 1 MB.');
+      if (file.size > 5 * 1024 * 1024) throw new BadRequestException('The logo must be under 5 MB.');
       const dir = LOGO_DIR();
       await fsp.mkdir(dir, { recursive: true });
       for (const f of await fsp.readdir(dir)) if (/^logo\./.test(f)) await fsp.rm(path.join(dir, f), { force: true });

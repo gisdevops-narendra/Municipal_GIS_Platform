@@ -89,10 +89,9 @@ log "Verifying checksums"
 ( cd "$SRC" && sha256sum -c --quiet SHA256SUMS )
 has keycloak && [ ! -d "$SRC/keycloak-h2" ] && { log "The backup has no keycloak-h2 folder"; exit 1; }
 
-# 2. Safety backup of the current state (KEEP high: nothing is pruned, so
-#    the backup being restored can never be deleted by it).
+# 2. Safety backup of the current state.
 log "Taking a safety backup of the current state first"
-run "KEEP=1000 bash scripts/backup.sh"
+run "bash scripts/backup.sh"
 
 # 3. Stop what the chosen parts need stopped.
 WANT=()

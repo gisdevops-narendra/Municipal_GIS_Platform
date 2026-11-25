@@ -46,5 +46,5 @@ testem.log
 Thumbs.db
 backups/
 
-# Runtime logs (dev server, nightly backup)
+# Runtime logs (dev server, backups)
 logs/
