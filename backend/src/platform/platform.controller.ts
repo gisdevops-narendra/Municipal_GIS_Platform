@@ -8,6 +8,7 @@ import { CurrentAppUser } from '../auth/decorators/current-app-user.decorator';
 import type { AppUser } from '../auth/types/app-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { PlatformSettingsService } from './platform-settings.service';
+import { expandSwitchedOff } from './module-catalog';
 
 export class UsageDto {
   @IsArray()
@@ -54,7 +55,7 @@ export class PlatformController {
   @Get('modules/me')
   async myModules(@CurrentAppUser() me: AppUser) {
     const m = await this.settings.get('modules');
-    return { disabled: [...new Set([...(m.global ?? []), ...(m.perAccount?.[me.municipalityId] ?? [])])] };
+    return { disabled: expandSwitchedOff([...(m.global ?? []), ...(m.perAccount?.[me.municipalityId] ?? [])]) };
   }
 
   /** Tool-open counts for Admin → Analytics (batched by the browser). */

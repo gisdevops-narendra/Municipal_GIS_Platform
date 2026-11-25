@@ -16,36 +16,11 @@ import { PlatformSettingsService, type Announcement, type Branding, type EmailSe
 import { LOG_BUFFER } from '../platform/log-buffer';
 import { LOGO_DIR } from '../platform/platform.controller';
 import type { AppUser } from '../auth/types/app-user.type';
+import { SWITCHABLE_TOOLS } from '../platform/module-catalog';
 
 const DAY = 86_400_000;
 
 /** Tool ids the Modules screen can switch off (workspace tool ids). */
-export const SWITCHABLE_TOOLS: { id: string; label: string; group: string }[] = [
-  { id: 'assistant', label: 'AI Assistant', group: 'Explore' },
-  { id: 'raster', label: 'Raster Analysis', group: 'Analysis' },
-  { id: 'advanced', label: 'Advanced Tools (routing, tracing)', group: 'Analysis' },
-  { id: 'network-planning', label: 'Network Planning', group: 'Analysis' },
-  { id: 'geoprocessing', label: 'Geoprocessing', group: 'Analysis' },
-  { id: 'buffer', label: 'Buffer & Overlay', group: 'Analysis' },
-  { id: 'data', label: 'Data Tools', group: 'Analysis' },
-  { id: 'statistics', label: 'Statistics', group: 'Analysis' },
-  { id: 'heatmap', label: 'Heatmap & Clusters', group: 'Analysis' },
-  { id: 'weather', label: 'Weather', group: 'Explore' },
-  { id: 'air-stations', label: 'Air Quality Stations', group: 'Explore' },
-  { id: 'hazards', label: 'Hazard Alerts', group: 'Explore' },
-  { id: 'sensors', label: 'Live Sensors', group: 'Explore' },
-  { id: 'tourism', label: 'Tourism', group: 'Explore' },
-  { id: 'buildings-3d', label: '3D Buildings', group: 'Explore' },
-  { id: 'groundwater', label: 'Groundwater', group: 'Planning' },
-  { id: 'outbreak', label: 'Disease Outbreaks', group: 'Planning' },
-  { id: 'ev-charging', label: 'EV Charging', group: 'Planning' },
-  { id: 'osm-import', label: 'OSM Download', group: 'Data' },
-  { id: 'add-service', label: 'Add Service', group: 'Data' },
-  { id: 'share', label: 'Share Map', group: 'Output' },
-  { id: 'integrations', label: 'API & Webhooks', group: 'Output' },
-  { id: 'export', label: 'Export Data', group: 'Output' },
-  { id: 'print', label: 'Print Layout', group: 'Output' },
-];
 
 /**
  * Admin console: Users, Health, Jobs, Logs, Security, Email, Branding,
@@ -520,7 +495,7 @@ export class AdminPlatformService {
   }
 
   async setModules(me: AppUser, dto: ModuleSwitches, ip: string | null) {
-    const known = new Set(SWITCHABLE_TOOLS.map((t) => t.id));
+    const known = new Set(SWITCHABLE_TOOLS.flatMap((t) => [t.id, ...(t.children ?? []).map((c) => c.id)]));
     const clean: ModuleSwitches = {
       global: [...new Set(dto.global.filter((t) => known.has(t)))],
       perAccount: Object.fromEntries(Object.entries(dto.perAccount ?? {}).map(([k, v]) => [k, [...new Set(v.filter((t) => known.has(t)))]]).filter(([, v]) => (v as string[]).length)),

@@ -1715,7 +1715,59 @@ app-admin {
 }
 
 .ac__field textarea,
-.ac__field input,
+.ac__field input:not([type='checkbox']):not([type='radio']):not([type='color']),
 .ac__field select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  background: var(--color-surface);
+  color: var(--color-ink-900);
   font: inherit;
+  font-size: 13.5px;
+  font-weight: 400;
+  color-scheme: light dark;
+  transition: border-color 0.15s, box-shadow 0.15s;
+
+  &::placeholder {
+    color: var(--color-ink-500);
+  }
+
+  &:focus {
+    outline: none;
+    border-color: var(--color-primary-600);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary-600) 25%, transparent);
+  }
+}
+
+.ac__field textarea {
+  min-height: 72px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.ac__field select {
+  cursor: pointer;
+}
+
+.ac__card > .ac__field,
+.ac__card > .st__form {
+  margin-top: 14px;
+}
+
+.ac__card + .ac__card {
+  margin-top: 16px;
+}
+
+span.ac__card-head {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-ink-900);
+}
+
+.ac__card > p.muted {
+  margin: 0 0 4px;
+  font-size: 13px;
 }

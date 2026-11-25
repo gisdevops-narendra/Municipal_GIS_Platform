@@ -25,7 +25,7 @@ import { SiteHeaderComponent } from '../../shared/components/site-header/site-he
 import { GisWorkspaceService } from '../../core/services/gis-workspace.service';
 import { GisLayersService } from '../../core/services/gis-layers.service';
 import { CurrentUserService } from '../../core/services/current-user.service';
-import { ALL_MODULES } from '../../core/utils/all-modules';
+import { modulesExcept } from '../../core/utils/all-modules';
 import { GisWorkspace } from '../../core/models/gis-workspace.model';
 import { GisLayer, GisRenderMode } from '../../core/models/gis-layer.model';
 import { formatInfo } from './services/render-formats';
@@ -263,7 +263,7 @@ const TOOLS: WsTool[] = [
   { id: 'buildings-3d', label: '3D Buildings', icon: 'pi pi-box', group: 'explore', dock: 'left', available: true },
   { id: 'whats-here', label: "What's Here", icon: 'pi pi-map-marker', group: 'explore', dock: 'left', available: true },
   { id: 'bookmarks', label: 'Bookmarks', icon: 'pi pi-bookmark', group: 'explore', dock: 'left', available: true, moduleId: 4 },
-  { id: 'query', label: 'Query Builder', icon: 'pi pi-filter', group: 'analysis', dock: 'left', available: true, moduleId: 2 },
+  { id: 'query', label: 'Query Builder', icon: 'pi pi-filter', group: 'analysis', dock: 'left', available: true, anyModuleIds: [50, 16] },
   { id: 'measure', label: 'Measure', icon: 'pi pi-arrows-h', group: 'analysis', dock: 'left', available: true, moduleId: 11 },
   { id: 'buffer', label: 'Buffer & Overlay', icon: 'pi pi-circle', group: 'analysis', dock: 'left', available: true, moduleId: 6 },
   { id: 'geoprocessing', label: 'Geoprocessing', icon: 'pi pi-cog', group: 'analysis', dock: 'left', available: true, moduleId: GEOPROCESSING_MODULE_ID },
@@ -280,7 +280,7 @@ const TOOLS: WsTool[] = [
   { id: 'statistics', label: 'Statistics', icon: 'pi pi-chart-bar', group: 'analysis', dock: 'bottom', available: true, anyModuleIds: [ANALYTICS_MODULE_ID, DATA_VISUALISATION_MODULE_ID] },
   { id: 'print', label: 'Print Layout', icon: 'pi pi-print', group: 'output', dock: 'left', available: true, moduleId: 3 },
   { id: 'reports', label: 'Reports', icon: 'pi pi-file', group: 'output', dock: 'left', available: true, moduleId: 251 },
-  { id: 'export', label: 'Export Data', icon: 'pi pi-download', group: 'output', dock: 'left', available: true, moduleId: 226 },
+  { id: 'export', label: 'Export Data', icon: 'pi pi-download', group: 'output', dock: 'left', available: true, anyModuleIds: [231, 227, 228, 230] },
   { id: 'share', label: 'Share Map', icon: 'pi pi-share-alt', group: 'output', dock: 'left', available: true, minRole: 'manager' },
   { id: 'storage', label: 'Storage', icon: 'pi pi-database', group: 'admin', dock: 'left', available: true, minRole: 'manager' },
   { id: 'integrations', label: 'API & Webhooks', icon: 'pi pi-key', group: 'admin', dock: 'left', available: true, minRole: 'owner' },
@@ -441,7 +441,7 @@ export class GisWorkspaceComponent {
    *  moduleId (see WsTool) is never gated. Never used to gate anything
    *  the backend doesn't independently re-check itself (each tool's own
    *  API calls are authorized server-side regardless of the rail).  */
-  readonly myModuleIds = signal<ReadonlySet<number>>(ALL_MODULES);
+  readonly myModuleIds = computed<ReadonlySet<number>>(() => modulesExcept(this.platform.disabledTools()));
 
   /** Layer Styling module — whether the Layers panel offers the style
    *  editor at all (saving a style is still MANAGE-checked server-side). */

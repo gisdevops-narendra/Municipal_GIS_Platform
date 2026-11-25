@@ -13,7 +13,7 @@ export const GEOCODE_MODULE_ID = 1013;
 export const TOPOLOGY_MODULE_ID = 1014;
 export const FIELD_RULES_MODULE_ID = 1015;
 export const VERSIONS_MODULE_ID = 1016;
-export const DATA_TOOL_MODULE_IDS = [1011, 1012, 1013, 1014, 1015, 1016, 1028];
+export const DATA_TOOL_MODULE_IDS = [1011, 1012, 1013, 1014, 1015, 1016, 1017, 1018, 1019, 1020, 1021, 1022, 1023, 1024, 1025, 1026, 1027, 1028];
 
 export type NewFieldType = 'text' | 'double precision' | 'integer' | 'date' | 'boolean';
 

@@ -406,8 +406,15 @@ export interface ModuleSwitches {
   perAccount: Record<string, string[]>;
 }
 
+export interface ModuleTool {
+  id: string;
+  label: string;
+  group: string;
+  children?: { id: string; label: string; section?: string }[];
+}
+
 export interface ModulesConfig {
-  tools: { id: string; label: string; group: string }[];
+  tools: ModuleTool[];
   switches: ModuleSwitches;
   accounts: { id: string; name: string }[];
 }

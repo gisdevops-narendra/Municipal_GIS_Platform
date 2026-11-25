@@ -9,6 +9,7 @@ import {
   EmailSettings,
   Maintenance,
   ModulesConfig,
+  ModuleTool,
   SecurityReport,
   SecuritySettings
 } from '../../../core/services/admin.service';
@@ -37,6 +38,105 @@ const FORM_STYLES = `
   .st__kpi { padding: 14px 16px; border: 1px solid var(--color-line); border-radius: 12px; background: var(--color-surface); }
   .st__kpi b { display: block; font-size: 22px; }
   .st__kpi span { font-size: 12px; color: var(--color-ink-500); }
+`;
+
+const MODULE_STYLES = `
+  :host { display: block; }
+  .md__stats { display: grid; grid-template-columns: minmax(260px, 1.3fr) repeat(3, minmax(170px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  @media (max-width: 1100px) { .md__stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .md__stat { display: flex; align-items: center; gap: 14px; padding: 12px 16px; min-height: 72px; box-sizing: border-box; border: 1px solid var(--color-line); border-radius: 14px; background: var(--color-surface); }
+  .md__stat-ico { width: 40px; height: 40px; flex-shrink: 0; border-radius: 10px; display: grid; place-items: center; font-size: 16px;
+    background: color-mix(in srgb, var(--color-primary-600) 12%, transparent); color: var(--color-primary-600); }
+  .md__stat-ico--warn { background: color-mix(in srgb, #d97706 14%, transparent); color: #d97706; }
+  .md__stat b { display: block; font-size: 20px; line-height: 1.2; color: var(--color-ink-900); }
+  .md__stat span { font-size: 12px; color: var(--color-ink-500); }
+  .md__scope { flex-direction: column; align-items: stretch; justify-content: center; gap: 6px; }
+  .md__scope label { text-align: left; font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--color-ink-500); }
+  .md__scope select { width: 100%; }
+
+  .md__layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 20px; align-items: start; }
+  @media (max-width: 1000px) { .md__layout { grid-template-columns: 1fr; } }
+
+  .md__nav { position: sticky; top: 16px; display: flex; flex-direction: column; max-height: calc(100vh - 32px);
+    border: 1px solid var(--color-line); border-radius: 14px; background: var(--color-surface); overflow: hidden; }
+  .md__nav-top { padding: 12px; border-bottom: 1px solid var(--color-line); }
+  .md__search { width: 100%; box-sizing: border-box; height: 36px; padding: 0 12px 0 32px; border: 1px solid var(--color-line); border-radius: 9px;
+    background: var(--color-surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' stroke='%23888' stroke-width='2'%3E%3Ccircle cx='6' cy='6' r='5'/%3E%3Cpath d='m10 10 3 3'/%3E%3C/svg%3E") no-repeat 11px center;
+    color: var(--color-ink-900); font: inherit; font-size: 13px; }
+  .md__search:focus { outline: none; border-color: var(--color-primary-600); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary-600) 22%, transparent); }
+  .md__nav-list { overflow-y: auto; padding: 4px 8px 10px; scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--color-ink-500) 40%, transparent) transparent; }
+  .md__nav-group { margin: 12px 8px 4px; font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--color-ink-500); }
+  .md__nav-item { position: relative; width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 12px; border: 0; border-radius: 8px; background: none; outline: none;
+    color: var(--color-ink-900); font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
+  .md__nav-item:hover { background: color-mix(in srgb, var(--color-ink-900) 5%, transparent); }
+  .md__nav-item:focus-visible { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--color-primary-600) 50%, transparent); }
+  .md__nav-item--on { background: color-mix(in srgb, var(--color-primary-600) 11%, transparent); color: var(--color-primary-600); font-weight: 600; }
+  .md__nav-item--on::before { content: ''; position: absolute; left: 0; top: 7px; bottom: 7px; width: 3px; border-radius: 3px; background: var(--color-primary-600); }
+  .md__nav-count { font-size: 11.5px; font-weight: 500; color: var(--color-ink-500); font-variant-numeric: tabular-nums; }
+  .md__nav-item i { width: 18px; text-align: center; font-size: 14px; opacity: .85; }
+  .md__nav-item .md__nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .md__dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: #16a34a; }
+  .md__dot--part { background: #d97706; }
+  .md__dot--off { background: color-mix(in srgb, var(--color-ink-500) 60%, transparent); }
+  .md__nav-empty { padding: 24px 12px; text-align: center; font-size: 13px; color: var(--color-ink-500); }
+
+  .md__detail { border: 1px solid var(--color-line); border-radius: 14px; background: var(--color-surface); overflow: hidden; }
+  .md__detail { position: sticky; top: 16px; }
+  .md__hero { display: flex; align-items: center; gap: 16px; padding: 20px 24px; border-bottom: 1px solid var(--color-line); }
+  .md__hero-ico { width: 48px; height: 48px; flex-shrink: 0; border-radius: 12px; display: grid; place-items: center; font-size: 20px;
+    background: color-mix(in srgb, var(--color-primary-600) 12%, transparent); color: var(--color-primary-600); }
+  .md__hero-ico--off { background: color-mix(in srgb, var(--color-ink-500) 14%, transparent); color: var(--color-ink-500); }
+  .md__hero-text { flex: 1; min-width: 0; }
+  .md__crumb { font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--color-ink-500); }
+  .md__hero h2 { margin: 2px 0 4px; font-size: 19px; font-weight: 600; color: var(--color-ink-900); }
+  .md__hero p { margin: 0; font-size: 13px; color: var(--color-ink-500); }
+  .md__state { display: flex; align-items: center; gap: 12px; padding-left: 16px; }
+  .md__badge { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    background: color-mix(in srgb, #16a34a 14%, transparent); color: #15803d; }
+  .md__badge--part { background: color-mix(in srgb, #d97706 15%, transparent); color: #b45309; }
+  .md__badge--off { background: color-mix(in srgb, var(--color-ink-500) 15%, transparent); color: var(--color-ink-700); }
+  .md__note { display: flex; gap: 10px; align-items: center; margin: 16px 24px 0; padding: 10px 14px; border-radius: 10px; font-size: 13px;
+    background: color-mix(in srgb, #d97706 10%, transparent); color: #b45309; }
+
+  .md__body { padding: 8px 24px 24px; }
+  .md__feat-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 16px 0 4px; }
+  .md__feat-head h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--color-ink-900); }
+  .md__feat-head span { font-size: 12.5px; color: var(--color-ink-500); margin-left: 8px; font-weight: 400; }
+  .md__actions { display: flex; gap: 4px; }
+  .md__link { background: none; border: 1px solid var(--color-line); padding: 0 10px; height: 28px; border-radius: 8px; font: inherit; font-size: 12.5px;
+    color: var(--color-ink-700); cursor: pointer; }
+  .md__link:hover:not(:disabled) { border-color: var(--color-primary-600); color: var(--color-primary-600); }
+  .md__link:disabled { opacity: .45; cursor: default; }
+  .md__section { margin-top: 12px; border: 1px solid var(--color-line); border-radius: 12px; overflow: hidden; }
+  .md__section-head { display: flex; align-items: center; justify-content: space-between; padding: 9px 14px; font-size: 12px; font-weight: 600;
+    letter-spacing: .04em; text-transform: uppercase; color: var(--color-ink-500); background: color-mix(in srgb, var(--color-ink-900) 3%, transparent);
+    border-bottom: 1px solid var(--color-line); }
+  .md__section-head small { font-weight: 500; letter-spacing: 0; text-transform: none; }
+  .md__rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); margin: 0 -1px -1px 0; }
+  .md__frow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 14px; font-size: 13.5px; color: var(--color-ink-900);
+    background: var(--color-surface); box-shadow: inset -1px -1px 0 var(--color-line); cursor: pointer; }
+  .md__frow:hover { background: color-mix(in srgb, var(--color-primary-600) 5%, var(--color-surface)); }
+  .md__frow--off { color: var(--color-ink-500); }
+  .md__frow--locked { cursor: not-allowed; }
+  .md__empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 40px 24px; text-align: center; color: var(--color-ink-500); font-size: 13px; }
+  .md__empty i { font-size: 22px; opacity: .6; }
+
+  .md__switch { appearance: none; flex-shrink: 0; position: relative; width: 36px; height: 20px; margin: 0; border-radius: 999px;
+    background: color-mix(in srgb, var(--color-ink-500) 40%, transparent); cursor: pointer; transition: background .15s; }
+  .md__switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+    background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s; }
+  .md__switch:checked { background: var(--color-primary-600); }
+  .md__switch:checked::after { transform: translateX(16px); }
+  .md__switch:disabled { opacity: .4; cursor: not-allowed; }
+  .md__switch:focus-visible { outline: 2px solid var(--color-primary-600); outline-offset: 2px; }
+  .md__switch--lg { width: 44px; height: 24px; }
+  .md__switch--lg::after { width: 20px; height: 20px; }
+  .md__switch--lg:checked::after { transform: translateX(20px); }
+
+  .md__savebar { position: sticky; bottom: 16px; z-index: 5; display: flex; align-items: center; gap: 12px; margin-top: 20px; padding: 12px 16px 12px 20px;
+    border: 1px solid var(--color-line); border-radius: 14px; background: var(--color-surface); box-shadow: 0 10px 30px rgba(0,0,0,.18); }
+  .md__savebar span { flex: 1; font-size: 13.5px; color: var(--color-ink-900); }
+  .md__savebar span::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 10px; border-radius: 50%; background: #d97706; vertical-align: 1px; }
 `;
 
 // =============================== Security ===============================
@@ -458,38 +558,155 @@ export class AdminNoticesComponent implements OnInit {
 
 // =============================== Modules ===============================
 
+interface ModuleSection { name: string; items: { id: string; label: string }[] }
+
+/** Icon and one-line description per tool (falls back to a generic icon). */
+const TOOL_META: Record<string, { icon: string; desc: string }> = {
+  'map-controls': { icon: 'pi pi-map', desc: 'Basic map behaviour: panning, basemaps, click-to-identify, search and layer styling.' },
+  assistant: { icon: 'pi pi-comments', desc: 'Ask questions about map data in plain language.' },
+  attributes: { icon: 'pi pi-table', desc: 'Browse and edit the attribute table of a layer.' },
+  'whats-here': { icon: 'pi pi-map-marker', desc: 'Everything at a clicked location across all layers.' },
+  bookmarks: { icon: 'pi pi-bookmark', desc: 'Save and jump back to map views.' },
+  weather: { icon: 'pi pi-cloud', desc: 'Current weather and forecast on the map.' },
+  'air-stations': { icon: 'pi pi-chart-scatter', desc: 'Live air quality readings from monitoring stations.' },
+  hazards: { icon: 'pi pi-exclamation-triangle', desc: 'Earthquake, flood and other hazard alerts.' },
+  sensors: { icon: 'pi pi-wifi', desc: 'Live IoT sensor readings.' },
+  tourism: { icon: 'pi pi-ticket', desc: 'Points of interest for visitors.' },
+  'buildings-3d': { icon: 'pi pi-box', desc: 'Extruded 3D building view.' },
+  query: { icon: 'pi pi-filter', desc: 'Select features by attribute or location.' },
+  measure: { icon: 'pi pi-arrows-h', desc: 'Measure distances and areas.' },
+  buffer: { icon: 'pi pi-circle', desc: 'Buffer zones and overlays.' },
+  geoprocessing: { icon: 'pi pi-cog', desc: 'Overlay, proximity, geometry and summary operations on layers.' },
+  data: { icon: 'pi pi-database', desc: 'Field, data-quality, import and history tools for vector layers.' },
+  sketch: { icon: 'pi pi-pencil', desc: 'Draw shapes, place markers and edit features.' },
+  advanced: { icon: 'pi pi-directions', desc: 'Routing, nearest facility, tracing and service areas on a network.' },
+  'network-planning': { icon: 'pi pi-sitemap', desc: 'Plan and analyse network coverage.' },
+  raster: { icon: 'pi pi-images', desc: 'Raster data, terrain, imagery analysis and decision support.' },
+  heatmap: { icon: 'pi pi-sun', desc: 'Heatmaps and point clusters.' },
+  statistics: { icon: 'pi pi-chart-bar', desc: 'Statistics and charts of layer fields.' },
+  groundwater: { icon: 'pi pi-filter-fill', desc: 'Groundwater levels and well readings.' },
+  outbreak: { icon: 'pi pi-exclamation-circle', desc: 'Track and map disease outbreaks.' },
+  'ev-charging': { icon: 'pi pi-bolt', desc: 'EV charging site planning.' },
+  'osm-import': { icon: 'pi pi-cloud-download', desc: 'Download OpenStreetMap data as layers.' },
+  'add-service': { icon: 'pi pi-globe', desc: 'Add external WMS / WFS / XYZ services.' },
+  catalog: { icon: 'pi pi-book', desc: 'Browse every dataset available to the account.' },
+  print: { icon: 'pi pi-print', desc: 'Print-ready map layouts (PDF / PNG).' },
+  reports: { icon: 'pi pi-file', desc: 'Generated reports.' },
+  export: { icon: 'pi pi-download', desc: 'Download layers in common GIS formats.' },
+  share: { icon: 'pi pi-share-alt', desc: 'Share a map by link.' },
+  integrations: { icon: 'pi pi-key', desc: 'API keys and webhooks for other systems.' },
+  storage: { icon: 'pi pi-server', desc: 'Storage used by the account.' },
+  workspace: { icon: 'pi pi-briefcase', desc: 'Workspace information and settings.' }
+};
+
 @Component({
   selector: 'app-admin-modules',
   standalone: true,
   imports: [FormsModule],
-  styles: FORM_STYLES,
+  styles: [FORM_STYLES, MODULE_STYLES],
   template: `
     <header class="ac__head">
       <div>
         <h1 class="ac__title">Modules</h1>
-        <p class="ac__sub">Switch tools off for everyone, or for one account. Switched-off tools disappear from the map.</p>
+        <p class="ac__sub">Control which map tools and features are available — for everyone, or for a single account.</p>
       </div>
-      <button type="button" class="ac__btn ac__btn--primary" [disabled]="!cfg()" (click)="save()">Save</button>
     </header>
     @if (cfg(); as c) {
-      <div class="ac__toolbar">
-        <select class="ac__select" [ngModel]="scope()" (ngModelChange)="scope.set($event)" aria-label="Who">
-          <option value="">Everyone</option>
-          @for (a of c.accounts; track a.id) { <option [value]="a.id">Account: {{ a.name }}</option> }
-        </select>
-        <span class="muted">{{ offCount() }} tool{{ offCount() === 1 ? '' : 's' }} switched off {{ scope() ? 'for this account' : 'for everyone' }}</span>
+      <div class="md__stats">
+        <div class="md__stat md__scope">
+          <label for="md-scope">Applies to</label>
+          <select id="md-scope" class="ac__select" [ngModel]="scope()" (ngModelChange)="scope.set($event)">
+            <option value="">Everyone</option>
+            @for (a of c.accounts; track a.id) { <option [value]="a.id">{{ a.name }}</option> }
+          </select>
+        </div>
+        <div class="md__stat"><span class="md__stat-ico"><i class="pi pi-th-large"></i></span><div><b>{{ totals().toolsOn }} / {{ totals().tools }}</b><span>Tools enabled</span></div></div>
+        <div class="md__stat"><span class="md__stat-ico"><i class="pi pi-list-check"></i></span><div><b>{{ totals().featsOn }} / {{ totals().feats }}</b><span>Features enabled</span></div></div>
+        <div class="md__stat"><span class="md__stat-ico md__stat-ico--warn"><i class="pi pi-eye-slash"></i></span><div><b>{{ totals().off }}</b><span>Switched off</span></div></div>
       </div>
-      @for (g of groups(); track g.name) {
-        <div class="ac__card">
-          <span class="ac__card-head">{{ g.name }}</span>
-          <div class="st__tools">
-            @for (t of g.tools; track t.id) {
-              <label class="ac__check">
-                <input type="checkbox" [checked]="isOn(t.id)" [disabled]="!!scope() && globalOff(t.id)" (change)="toggle(t.id, $any($event.target).checked)" />
-                {{ t.label }} @if (!!scope() && globalOff(t.id)) { <span class="muted">(off for everyone)</span> }
-              </label>
+
+      <div class="md__layout">
+        <nav class="md__nav" aria-label="Tools">
+          <div class="md__nav-top">
+            <input class="md__search" type="search" placeholder="Search tools and features" [ngModel]="query()" (ngModelChange)="query.set($event)" aria-label="Search" />
+          </div>
+          <div class="md__nav-list">
+            @for (g of navGroups(); track g.name) {
+              <div class="md__nav-group">{{ g.name }}</div>
+              @for (t of g.tools; track t.id) {
+                <button type="button" class="md__nav-item" [class.md__nav-item--on]="t === selected()" (click)="selectedId.set(t.id)">
+                  <i [class]="icon(t.id)"></i>
+                  <span class="md__nav-label">{{ t.label }}</span>
+                  @if (t.children?.length) { <span class="md__nav-count">{{ isOn(t.id) ? featsOn(t) : 0 }}/{{ t.children!.length }}</span> }
+                  <span class="md__dot" [class.md__dot--part]="status(t) === 'part'" [class.md__dot--off]="status(t) === 'off'" [attr.title]="statusText(t)"></span>
+                </button>
+              }
+            } @empty {
+              <div class="md__nav-empty">Nothing matches “{{ query() }}”.</div>
             }
           </div>
+        </nav>
+
+        @if (selected(); as t) {
+          @let on = isOn(t.id);
+          @let kids = t.children ?? [];
+          <section class="md__detail">
+            <div class="md__hero">
+              <span class="md__hero-ico" [class.md__hero-ico--off]="!on"><i [class]="icon(t.id)"></i></span>
+              <div class="md__hero-text">
+                <div class="md__crumb">{{ t.group }}</div>
+                <h2>{{ t.label }}</h2>
+                <p>{{ desc(t.id) }}</p>
+              </div>
+              <div class="md__state">
+                <span class="md__badge" [class.md__badge--part]="status(t) === 'part'" [class.md__badge--off]="status(t) === 'off'">{{ statusText(t) }}</span>
+                <input type="checkbox" class="md__switch md__switch--lg" role="switch" [attr.aria-label]="'Enable ' + t.label"
+                  [checked]="on" [disabled]="locked(t.id)" (change)="toggle(t.id, $any($event.target).checked)" />
+              </div>
+            </div>
+            @if (locked(t.id)) {
+              <div class="md__note"><i class="pi pi-lock"></i> Switched off for everyone. Change it under “Everyone” to manage it per account.</div>
+            } @else if (!on) {
+              <div class="md__note"><i class="pi pi-eye-slash"></i> Hidden from the map{{ scope() ? ' for this account' : '' }}. Turn the tool on to manage its features.</div>
+            }
+            <div class="md__body">
+              @if (kids.length) {
+                <div class="md__feat-head">
+                  <h3>Features<span>{{ featsOn(t) }} of {{ kids.length }} enabled</span></h3>
+                  <div class="md__actions">
+                    <button type="button" class="md__link" [disabled]="!on" (click)="setAll(kids, true)">Enable all</button>
+                    <button type="button" class="md__link" [disabled]="!on" (click)="setAll(kids, false)">Disable all</button>
+                  </div>
+                </div>
+                @for (sec of sections(t); track sec.name) {
+                  <div class="md__section">
+                    @if (sec.name) {
+                      <div class="md__section-head">{{ sec.name }}<small>{{ countOn(sec.items) }} / {{ sec.items.length }}</small></div>
+                    }
+                    <div class="md__rows">
+                      @for (k of sec.items; track k.id) {
+                        <label class="md__frow" [class.md__frow--off]="!on || !isOn(k.id)" [class.md__frow--locked]="!on || locked(k.id)">
+                          <span>{{ k.label }}</span>
+                          <input type="checkbox" class="md__switch" role="switch" [checked]="on && isOn(k.id)" [disabled]="!on || locked(k.id)"
+                            (change)="toggle(k.id, $any($event.target).checked)" />
+                        </label>
+                      }
+                    </div>
+                  </div>
+                }
+              } @else {
+                <div class="md__empty"><i class="pi pi-check-circle"></i>This tool has no separate features — the switch above turns the whole tool on or off.</div>
+              }
+            </div>
+          </section>
+        }
+      </div>
+
+      @if (dirty()) {
+        <div class="md__savebar">
+          <span>You have unsaved changes</span>
+          <button type="button" class="ac__btn" (click)="discard()">Discard</button>
+          <button type="button" class="ac__btn ac__btn--primary" (click)="save()">Save changes</button>
         </div>
       }
     } @else {
@@ -502,20 +719,72 @@ export class AdminModulesComponent implements OnInit {
   private readonly notify = inject(NotificationService);
   readonly cfg = signal<ModulesConfig | null>(null);
   readonly scope = signal('');
+  readonly query = signal('');
+  readonly selectedId = signal('');
   readonly version = signal(0);
-  readonly groups = computed(() => {
-    const c = this.cfg();
-    if (!c) return [];
-    const names = [...new Set(c.tools.map((t) => t.group))];
-    return names.map((name) => ({ name, tools: c.tools.filter((t) => t.group === name) }));
+  readonly dirty = signal(false);
+  private saved = '';
+
+  readonly navGroups = computed(() => {
+    const tools = this.cfg()?.tools ?? [];
+    const q = this.query().trim().toLowerCase();
+    const match = (t: ModuleTool) =>
+      !q || t.label.toLowerCase().includes(q) || t.group.toLowerCase().includes(q) || (t.children ?? []).some((k) => k.label.toLowerCase().includes(q));
+    return [...new Set(tools.map((t) => t.group))]
+      .map((name) => ({ name, tools: tools.filter((t) => t.group === name && match(t)) }))
+      .filter((g) => g.tools.length);
   });
-  readonly offCount = computed(() => {
+
+  readonly selected = computed(() => {
+    const visible = this.navGroups().flatMap((g) => g.tools);
+    return visible.find((t) => t.id === this.selectedId()) ?? visible[0] ?? null;
+  });
+
+  readonly totals = computed(() => {
     this.version();
-    return this.offList().length;
+    const tools = this.cfg()?.tools ?? [];
+    let feats = 0;
+    let featsOn = 0;
+    for (const t of tools) {
+      feats += t.children?.length ?? 0;
+      if (this.isOn(t.id)) featsOn += this.featsOn(t);
+    }
+    const toolsOn = tools.filter((t) => this.isOn(t.id)).length;
+    return { tools: tools.length, toolsOn, feats, featsOn, off: tools.length - toolsOn + (feats - featsOn) };
   });
 
   ngOnInit(): void {
-    this.api.modules().subscribe({ next: (c) => this.cfg.set(c) });
+    this.api.modules().subscribe({ next: (c) => this.load(c) });
+  }
+
+  private load(c: ModulesConfig): void {
+    this.saved = JSON.stringify(c.switches);
+    this.cfg.set(c);
+    this.dirty.set(false);
+    this.version.update((v) => v + 1);
+  }
+
+  icon(id: string): string {
+    return TOOL_META[id]?.icon ?? 'pi pi-wrench';
+  }
+
+  desc(id: string): string {
+    return TOOL_META[id]?.desc ?? '';
+  }
+
+  /** Features of a tool by section; a search narrows them unless it matches the tool itself. */
+  sections(t: ModuleTool): ModuleSection[] {
+    const q = this.query().trim().toLowerCase();
+    const all = !q || t.label.toLowerCase().includes(q) || t.group.toLowerCase().includes(q);
+    const out: ModuleSection[] = [];
+    for (const k of t.children ?? []) {
+      if (!all && !k.label.toLowerCase().includes(q)) continue;
+      const name = k.section ?? '';
+      let sec = out.find((x) => x.name === name);
+      if (!sec) out.push((sec = { name, items: [] }));
+      sec.items.push(k);
+    }
+    return out;
   }
 
   private offList(): string[] {
@@ -525,13 +794,34 @@ export class AdminModulesComponent implements OnInit {
     return scope ? (c.switches.perAccount[scope] ??= []) : c.switches.global;
   }
 
-  globalOff(id: string): boolean {
-    return !!this.cfg()?.switches.global.includes(id);
+  /** Switched off for everyone while editing one account. */
+  locked(id: string): boolean {
+    return !!this.scope() && !!this.cfg()?.switches.global.includes(id);
   }
 
   isOn(id: string): boolean {
     this.version();
-    return !this.offList().includes(id) && !(this.scope() && this.globalOff(id));
+    return !this.offList().includes(id) && !this.locked(id);
+  }
+
+  featsOn(t: ModuleTool): number {
+    return this.countOn(t.children ?? []);
+  }
+
+  countOn(items: { id: string }[]): number {
+    this.version();
+    return items.filter((k) => this.isOn(k.id)).length;
+  }
+
+  status(t: ModuleTool): 'on' | 'part' | 'off' {
+    if (!this.isOn(t.id)) return 'off';
+    const n = t.children?.length ?? 0;
+    return n && this.featsOn(t) < n ? 'part' : 'on';
+  }
+
+  statusText(t: ModuleTool): string {
+    const st = this.status(t);
+    return st === 'off' ? 'Disabled' : st === 'part' ? 'Partially enabled' : 'Enabled';
   }
 
   toggle(id: string, on: boolean): void {
@@ -540,6 +830,16 @@ export class AdminModulesComponent implements OnInit {
     if (on && i >= 0) list.splice(i, 1);
     if (!on && i < 0) list.push(id);
     this.version.update((v) => v + 1);
+    this.dirty.set(JSON.stringify(this.cfg()!.switches) !== this.saved);
+  }
+
+  setAll(items: { id: string }[], on: boolean): void {
+    for (const k of items) if (!this.locked(k.id)) this.toggle(k.id, on);
+  }
+
+  discard(): void {
+    const c = this.cfg();
+    if (c) this.load({ ...c, switches: JSON.parse(this.saved) });
   }
 
   save(): void {
@@ -547,7 +847,7 @@ export class AdminModulesComponent implements OnInit {
     if (!c) return;
     this.api.setModules(c.switches).subscribe({
       next: (s) => {
-        this.cfg.set({ ...c, switches: s });
+        this.load({ ...c, switches: s });
         this.notify.success('Saved — users see the change after reloading the map.');
       },
       error: (err) => this.notify.error(errorText(err, 'Could not save.'))
