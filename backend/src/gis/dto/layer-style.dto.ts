@@ -13,6 +13,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateBy,
   ValidateNested,
 } from 'class-validator';
 
@@ -132,6 +133,13 @@ export class SymbolSpecDto {
 
 export class CategoryDto {
   /** Attribute value this category matches. String or number. */
+  @ValidateBy({
+    name: 'isStringOrNumber',
+    validator: {
+      validate: (v: unknown) => (typeof v === 'string' && v.length <= 500) || (typeof v === 'number' && Number.isFinite(v)),
+      defaultMessage: () => 'category value must be text or a number',
+    },
+  })
   value!: string | number;
 
   @IsOptional()
